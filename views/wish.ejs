@@ -132,6 +132,51 @@
             50% { transform: scale(1.1); }
         }
 
+        /* 飘屏样式 */
+        .danmaku-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 8888;
+            overflow: hidden;
+        }
+
+        .danmaku-message {
+            position: absolute;
+            white-space: nowrap;
+            font-size: 16px;
+            font-weight: bold;
+            color: #FFD700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            background: linear-gradient(45deg, rgba(255,215,0,0.2), rgba(255,165,0,0.2));
+            border: 2px solid rgba(255,215,0,0.6);
+            padding: 8px 16px;
+            border-radius: 20px;
+            animation: danmaku-slide 6s linear;
+            pointer-events: none;
+            backdrop-filter: blur(2px);
+        }
+
+        @keyframes danmaku-slide {
+            0% {
+                transform: translateX(100vw);
+                opacity: 0;
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            100% {
+                transform: translateX(-200px);
+                opacity: 0;
+            }
+        }
+
         @media (max-width: 768px) {
             .modal-content {
                 font-size: 2.5rem;
@@ -140,6 +185,11 @@
             .wish-button {
                 padding: 15px 30px;
                 font-size: 16px;
+            }
+
+            .danmaku-message {
+                font-size: 14px;
+                padding: 6px 12px;
             }
         }
     </style>
@@ -190,6 +240,9 @@
             <p>• 每次成功后重置个人进度计数</p>
         </div>
     </div>
+
+    <!-- 飘屏容器 -->
+    <div id="danmaku-container" class="danmaku-container"></div>
 
     <!-- 全屏弹窗 -->
     <div id="fullscreenModal" class="fullscreen-modal">
@@ -295,10 +348,77 @@
         // 初始化显示
         updateDisplay();
         
+        // 飘屏管理器
+        class DanmakuManager {
+            constructor() {
+                this.container = document.getElementById('danmaku-container');
+                this.usedLanes = new Set(); // 避免重叠
+                this.maxLanes = Math.floor((window.innerHeight - 200) / 50);
+            }
+            
+            addMessage(data) {
+                const message = document.createElement('div');
+                message.className = 'danmaku-message';
+                message.textContent = data.content;
+                
+                // 随机选择不重叠的轨道
+                const lane = this.getAvailableLane();
+                message.style.top = `${lane * 50 + 100}px`;
+                
+                this.container.appendChild(message);
+                
+                // 6秒后移除
+                setTimeout(() => {
+                    if (message.parentNode) {
+                        message.parentNode.removeChild(message);
+                    }
+                    this.usedLanes.delete(lane);
+                }, 6000);
+                
+                this.usedLanes.add(lane);
+            }
+            
+            getAvailableLane() {
+                for (let i = 0; i < this.maxLanes; i++) {
+                    if (!this.usedLanes.has(i)) {
+                        return i;
+                    }
+                }
+                // 如果没有空闲轨道，随机选择一个
+                return Math.floor(Math.random() * this.maxLanes);
+            }
+        }
+        
+        const danmakuManager = new DanmakuManager();
+        
+        // WebSocket连接
+        const socket = io();
+        
+        // 监听新飘屏消息
+        socket.on('new_danmaku', (data) => {
+            danmakuManager.addMessage(data);
+        });
+        
+        // 接收历史消息
+        socket.on('recent_messages', (messages) => {
+            // 显示最近的3条成功消息
+            messages.slice(0, 3).forEach((msg, index) => {
+                setTimeout(() => {
+                    danmakuManager.addMessage(msg);
+                }, index * 1000);
+            });
+        });
+        
+        // 初始化显示
+        updateDisplay();
+        
         // 点击弹窗关闭
         document.getElementById('fullscreenModal').addEventListener('click', function() {
             this.style.display = 'none';
         });
     </script>
+    
+    <!-- Socket.io客户端 -->
+    <script src="/socket.io/socket.io.js"></script>
 </body>
 </html>

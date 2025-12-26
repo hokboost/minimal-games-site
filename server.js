@@ -3,6 +3,8 @@ const path = require('path');
 const session = require('express-session');
 const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
+const http = require('http');
+const { Server } = require('socket.io');
 
 // 导入本地游戏数据和逻辑
 const questions = require('./data/questions');
@@ -12,6 +14,14 @@ const GameLogic = require('./data/gameLogic');
 const security = require('./middleware/security');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
 const PORT = process.env.PORT || 3000;
 
 // 视图引擎设置
@@ -79,6 +89,70 @@ function generateUsername() {
 
 // 存储用户会话数据 (简单内存存储)
 const userSessions = new Map();
+
+// 飘屏系统
+class DanmakuSystem {
+    constructor() {
+        this.recentMessages = []; // 内存存储最近的消息
+        this.maxMessages = 50;    // 最多存储50条
+    }
+    
+    addMessage(username, type, isWin) {
+        // 固定成功祝福消息
+        const content = `🎉 恭喜 ${username} 祈愿成功！`;
+        
+        
+        const message = {
+            username,
+            type: isWin ? 'success' : 'fail',
+            content,
+            timestamp: Date.now()
+        };
+        
+        // 添加到内存
+        this.recentMessages.unshift(message);
+        if (this.recentMessages.length > this.maxMessages) {
+            this.recentMessages = this.recentMessages.slice(0, this.maxMessages);
+        }
+        
+        // 广播给所有在线用户
+        io.emit('new_danmaku', message);
+        
+        return message;
+    }
+    
+    getRecentMessages(limit = 20) {
+        return this.recentMessages.slice(0, limit);
+    }
+}
+
+const danmaku = new DanmakuSystem();
+
+// WebSocket连接管理
+const connectedUsers = new Set();
+
+io.on('connection', (socket) => {
+    console.log('用户连接:', socket.id);
+    connectedUsers.add(socket.id);
+    
+    // 发送最近的飘屏消息给新连接的用户
+    const recentMessages = danmaku.getRecentMessages(10);
+    socket.emit('recent_messages', recentMessages);
+    
+    socket.on('disconnect', () => {
+        connectedUsers.delete(socket.id);
+        console.log('用户断开:', socket.id);
+    });
+});
+
+// 全局广播函数
+function broadcastDanmaku(username, type, isWin) {
+    // 只在成功时飘屏
+    if (isWin) {
+        return danmaku.addMessage(username, type, isWin);
+    }
+    return null;
+}
 
 // 创建题目ID索引，提升查找性能
 const questionMap = new Map(questions.map(q => [q.id, q]));
@@ -336,12 +410,19 @@ app.post('/api/wish',
     security.csrfProtection,
     (req, res) => {
     try {
-        const { currentCount = 0 } = req.body;
+        const { currentCount = 0, username } = req.body;
         const result = GameLogic.wish.makeWish(currentCount);
+        
+        // 触发飘屏广播
+        if (username) {
+            broadcastDanmaku(username, 'wish', result.isWin);
+        }
+        
         res.json({
             success: true,
             isWin: result.isWin,
-            guaranteed: result.guaranteed
+            guaranteed: result.guaranteed,
+            globalRate: result.globalRate
         });
     } catch (error) {
         console.error('Wish error:', error);
@@ -442,8 +523,9 @@ app.use((err, req, res, next) => {
     res.status(500).redirect('/');
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`🎮 游戏服务器运行在端口 ${PORT}`);
     console.log(`📚 题库包含 ${questions.length} 道题目`);
     console.log(`🌐 访问 http://localhost:${PORT} 开始游戏`);
+    console.log(`🚀 WebSocket飘屏系统已启动`);
 });

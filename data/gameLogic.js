@@ -284,83 +284,115 @@ class GameLogic {
         }
     };
 
-    // Wish 幸运祈愿游戏逻辑 - 真实商业模式
+    // Wish 幸运祈愿游戏逻辑 - 精确1.6%中奖率
     static wish = {
         // 全局统计数据（模拟服务器端统计）
         globalStats: {
             totalAttempts: 0,
             totalWins: 0,
+            guaranteedWins: 0, // 保底中奖次数
             recentWins: 0,
             recentAttempts: 0,
+            cumulativeError: 0.0, // 累积误差
             lastResetTime: Date.now()
         },
 
-        // 获取当前真实概率（基于综合统计调整）
+        // 获取当前真实概率（精确控制到1.6%）
         getCurrentWinRate(currentCount = 0) {
-            const targetRate = 0.016; // 目标1.6%
-            const maxDeviation = 0.008; // 最大偏差0.8%
+            const targetRate = 0.016; // 精确目标1.6%
             
             // 如果达到保底，必中
             if (currentCount >= 147) {
                 return 1.0;
             }
             
-            // 计算当前综合中奖率
-            const currentGlobalRate = this.globalStats.totalAttempts > 0 ? 
-                this.globalStats.totalWins / this.globalStats.totalAttempts : 0;
+            // 计算不包含保底的实际中奖率
+            const normalWins = this.globalStats.totalWins - this.globalStats.guaranteedWins;
+            const currentRate = this.globalStats.totalAttempts > 0 ? 
+                normalWins / this.globalStats.totalAttempts : 0;
             
-            // 基础概率根据当前偏离情况调整
-            let adjustedRate = targetRate;
+            // PID控制器式精确调整
+            const error = targetRate - currentRate;
+            this.globalStats.cumulativeError += error;
             
-            if (currentGlobalRate < targetRate) {
-                // 当前中奖率偏低，提高概率
-                const deficit = targetRate - currentGlobalRate;
-                adjustedRate = Math.min(targetRate + deficit * 2, targetRate + maxDeviation);
-            } else if (currentGlobalRate > targetRate) {
-                // 当前中奖率偏高，降低概率
-                const excess = currentGlobalRate - targetRate;
-                adjustedRate = Math.max(targetRate - excess * 1.5, targetRate - maxDeviation);
+            // 限制累积误差防止过度调整
+            this.globalStats.cumulativeError = Math.max(-0.05, Math.min(0.05, this.globalStats.cumulativeError));
+            
+            // 精确调整算法
+            const Kp = 1.0;  // 比例系数
+            const Ki = 0.3;  // 积分系数
+            const adjustment = Kp * error + Ki * this.globalStats.cumulativeError;
+            
+            let adjustedRate = targetRate + adjustment;
+            
+            // 保底机制补偿：考虑保底对整体概率的影响
+            const guaranteeImpact = this.calculateGuaranteeImpact();
+            adjustedRate -= guaranteeImpact;
+            
+            // 渐进式保底：最后20次温和提升
+            if (currentCount >= 127) {
+                const gentleBoost = (currentCount - 127) / 20 * 0.01; // 最后20次提升1%
+                adjustedRate += gentleBoost;
             }
             
-            // 保底机制：越接近147次，概率逐渐增加
-            if (currentCount >= 100) {
-                const guaranteeBoost = (currentCount - 100) / 47 * 0.05; // 最后47次逐渐提升5%
-                adjustedRate += guaranteeBoost;
+            // 连击保护：温和降低而非急剧下降
+            if (this.globalStats.recentWins >= 2 && this.globalStats.recentAttempts <= 8) {
+                adjustedRate *= 0.7; // 降低到70%
             }
             
-            // 连击保护：防止连续中奖
-            if (this.globalStats.recentWins >= 3 && this.globalStats.recentAttempts <= 10) {
-                adjustedRate *= 0.3; // 大幅降低概率
-            }
+            // 精确限制范围
+            return Math.min(Math.max(adjustedRate, 0.002), 0.04); // 限制在0.2%-4%范围
+        },
+
+        // 计算保底机制对整体概率的影响
+        calculateGuaranteeImpact() {
+            if (this.globalStats.totalAttempts === 0) return 0;
             
-            return Math.min(Math.max(adjustedRate, 0.001), 0.8); // 限制在0.1%-80%范围
+            // 估算保底机制额外贡献的中奖率
+            const guaranteeContribution = this.globalStats.guaranteedWins / this.globalStats.totalAttempts;
+            
+            // 理论上每148次有1次保底 = 0.676%额外概率
+            const theoreticalGuaranteeRate = 1 / 148;
+            
+            // 返回实际保底影响，用于从基础概率中扣除
+            return Math.min(guaranteeContribution, theoreticalGuaranteeRate);
         },
 
         // 更新统计数据
-        updateStats(isWin) {
+        updateStats(isWin, isGuaranteed = false) {
             this.globalStats.totalAttempts++;
             this.globalStats.recentAttempts++;
             
             if (isWin) {
                 this.globalStats.totalWins++;
                 this.globalStats.recentWins++;
+                
+                if (isGuaranteed) {
+                    this.globalStats.guaranteedWins++;
+                }
             }
             
-            // 每100次重置短期统计
-            if (this.globalStats.recentAttempts >= 100) {
+            // 每50次重置短期统计
+            if (this.globalStats.recentAttempts >= 50) {
                 this.globalStats.recentAttempts = 0;
                 this.globalStats.recentWins = 0;
             }
             
-            // 每10000次重置全局统计（防止数据过于庞大）
-            if (this.globalStats.totalAttempts >= 10000) {
-                this.globalStats.totalAttempts = Math.floor(this.globalStats.totalAttempts * 0.9);
-                this.globalStats.totalWins = Math.floor(this.globalStats.totalWins * 0.9);
+            // 长期数据管理：保持统计精确性
+            if (this.globalStats.totalAttempts >= 20000) {
+                // 保持最近10000次的数据，丢弃更早的
+                const keepRatio = 0.5;
+                this.globalStats.totalAttempts = Math.floor(this.globalStats.totalAttempts * keepRatio);
+                this.globalStats.totalWins = Math.floor(this.globalStats.totalWins * keepRatio);
+                this.globalStats.guaranteedWins = Math.floor(this.globalStats.guaranteedWins * keepRatio);
+                this.globalStats.cumulativeError *= keepRatio; // 误差也按比例缩放
             }
         },
 
         // 主要祈愿逻辑
         makeWish(currentCount = 0) {
+            const isGuaranteed = currentCount >= 147;
+            
             // 获取当前动态概率
             const winRate = this.getCurrentWinRate(currentCount);
             
@@ -369,21 +401,26 @@ class GameLogic {
             const randomValue = randomBytes.readUInt32BE(0) / 0xFFFFFFFF;
             
             const isWin = randomValue < winRate;
-            const guaranteed = currentCount >= 147;
             
             // 更新统计
-            this.updateStats(isWin);
+            this.updateStats(isWin, isGuaranteed && isWin);
+            
+            // 计算精确的全服中奖率
+            const exactGlobalRate = this.globalStats.totalAttempts > 0 ? 
+                (this.globalStats.totalWins / this.globalStats.totalAttempts) : 0.016;
             
             return {
                 isWin,
-                guaranteed,
+                guaranteed: isGuaranteed,
                 actualRate: winRate,
-                globalRate: this.globalStats.totalAttempts > 0 ? 
-                    (this.globalStats.totalWins / this.globalStats.totalAttempts) : 0,
+                globalRate: exactGlobalRate,
                 debug: {
                     randomValue,
                     winRate,
                     currentCount,
+                    normalWins: this.globalStats.totalWins - this.globalStats.guaranteedWins,
+                    guaranteedWins: this.globalStats.guaranteedWins,
+                    cumulativeError: this.globalStats.cumulativeError,
                     globalStats: { ...this.globalStats }
                 }
             };
