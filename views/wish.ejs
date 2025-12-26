@@ -160,6 +160,7 @@
             backdrop-filter: blur(2px);
         }
 
+
         @keyframes danmaku-slide {
             0% {
                 transform: translateX(100vw);
@@ -207,6 +208,7 @@
         </div>
         
         <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
+        <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="margin-left: 20px; background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
         
         <div class="wish-stats">
             <h3>📊 祈愿统计</h3>
@@ -280,6 +282,7 @@
             localStorage.setItem('wishData_' + username, JSON.stringify(wishData));
         }
         
+
         function showModal(isSuccess) {
             const modal = document.getElementById('fullscreenModal');
             const content = document.getElementById('modalContent');
@@ -294,8 +297,11 @@
             
             modal.style.display = 'flex';
             
+            // 3秒后自动关闭，点击可提前关闭
             setTimeout(() => {
-                modal.style.display = 'none';
+                if (modal.style.display === 'flex') {
+                    modal.style.display = 'none';
+                }
             }, 3000);
         }
         
@@ -392,27 +398,114 @@
         const danmakuManager = new DanmakuManager();
         
         // WebSocket连接
-        const socket = io();
+        let socket;
         
-        // 监听新飘屏消息
-        socket.on('new_danmaku', (data) => {
-            danmakuManager.addMessage(data);
-        });
-        
-        // 接收历史消息
-        socket.on('recent_messages', (messages) => {
-            // 显示最近的3条成功消息
-            messages.slice(0, 3).forEach((msg, index) => {
-                setTimeout(() => {
-                    danmakuManager.addMessage(msg);
-                }, index * 1000);
+        function initSocket() {
+            console.log('初始化Socket连接...');
+            socket = io();
+            
+            socket.on('connect', () => {
+                console.log('Socket连接成功！');
             });
+            
+            socket.on('disconnect', () => {
+                console.log('Socket连接断开');
+            });
+            
+            // 监听新飘屏消息
+            socket.on('new_danmaku', (data) => {
+                console.log('收到飘屏消息:', data);
+                danmakuManager.addMessage(data);
+            });
+            
+            // 接收历史消息
+            socket.on('recent_messages', (messages) => {
+                console.log('收到历史消息:', messages);
+                // 显示最近的3条成功消息
+                messages.slice(0, 3).forEach((msg, index) => {
+                    setTimeout(() => {
+                        danmakuManager.addMessage(msg);
+                    }, index * 1000);
+                });
+            });
+        }
+        
+        // 页面加载完成后初始化Socket
+        document.addEventListener('DOMContentLoaded', function() {
+            initSocket();
         });
         
         // 初始化显示
         updateDisplay();
         
-        // 点击弹窗关闭
+        // 祈愿十次功能
+        async function makeWishTen() {
+            const button = document.getElementById('wishTenButton');
+            const singleButton = document.getElementById('wishButton');
+            
+            button.disabled = true;
+            singleButton.disabled = true;
+            button.textContent = '祈愿中...';
+            
+            let successCount = 0;
+            
+            for (let i = 0; i < 10; i++) {
+                try {
+                    const response = await fetch('/api/wish', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': csrfToken
+                        },
+                        body: JSON.stringify({ 
+                            username,
+                            currentCount: wishData.current
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        wishData.total++;
+                        
+                        if (result.isWin) {
+                            successCount++;
+                            wishData.success++;
+                            wishData.current = 0;
+                        } else {
+                            wishData.current++;
+                        }
+                        
+                        updateDisplay(result);
+                    }
+                    
+                    // 每次祈愿间隔500ms，避免太快
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                } catch (error) {
+                    console.error('祈愿失败:', error);
+                }
+            }
+            
+            saveWishData();
+            
+            // 显示十连结果
+            const modal = document.getElementById('fullscreenModal');
+            const content = document.getElementById('modalContent');
+            content.textContent = `十连祈愿完成！成功 ${successCount} 次`;
+            content.className = successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
+            modal.style.display = 'flex';
+            
+            setTimeout(() => {
+                modal.style.display = 'none';
+            }, 3000);
+            
+            button.disabled = false;
+            singleButton.disabled = false;
+            button.textContent = '🙏 祈愿十次';
+        }
+
+        // 点击弹窗直接关闭
         document.getElementById('fullscreenModal').addEventListener('click', function() {
             this.style.display = 'none';
         });
@@ -420,5 +513,14 @@
     
     <!-- Socket.io客户端 -->
     <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // 调试：检查Socket连接
+        console.log('正在连接WebSocket...');
+        
+        // 确保在页面加载完成后再初始化Socket
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('页面加载完成，初始化Socket...');
+        });
+    </script>
 </body>
 </html>

@@ -143,6 +143,7 @@ io.on('connection', (socket) => {
         connectedUsers.delete(socket.id);
         console.log('用户断开:', socket.id);
     });
+    
 });
 
 // 全局广播函数
