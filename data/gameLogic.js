@@ -283,6 +283,112 @@ class GameLogic {
             };
         }
     };
+
+    // Wish 幸运祈愿游戏逻辑 - 真实商业模式
+    static wish = {
+        // 全局统计数据（模拟服务器端统计）
+        globalStats: {
+            totalAttempts: 0,
+            totalWins: 0,
+            recentWins: 0,
+            recentAttempts: 0,
+            lastResetTime: Date.now()
+        },
+
+        // 获取当前真实概率（基于综合统计调整）
+        getCurrentWinRate(currentCount = 0) {
+            const targetRate = 0.016; // 目标1.6%
+            const maxDeviation = 0.008; // 最大偏差0.8%
+            
+            // 如果达到保底，必中
+            if (currentCount >= 147) {
+                return 1.0;
+            }
+            
+            // 计算当前综合中奖率
+            const currentGlobalRate = this.globalStats.totalAttempts > 0 ? 
+                this.globalStats.totalWins / this.globalStats.totalAttempts : 0;
+            
+            // 基础概率根据当前偏离情况调整
+            let adjustedRate = targetRate;
+            
+            if (currentGlobalRate < targetRate) {
+                // 当前中奖率偏低，提高概率
+                const deficit = targetRate - currentGlobalRate;
+                adjustedRate = Math.min(targetRate + deficit * 2, targetRate + maxDeviation);
+            } else if (currentGlobalRate > targetRate) {
+                // 当前中奖率偏高，降低概率
+                const excess = currentGlobalRate - targetRate;
+                adjustedRate = Math.max(targetRate - excess * 1.5, targetRate - maxDeviation);
+            }
+            
+            // 保底机制：越接近147次，概率逐渐增加
+            if (currentCount >= 100) {
+                const guaranteeBoost = (currentCount - 100) / 47 * 0.05; // 最后47次逐渐提升5%
+                adjustedRate += guaranteeBoost;
+            }
+            
+            // 连击保护：防止连续中奖
+            if (this.globalStats.recentWins >= 3 && this.globalStats.recentAttempts <= 10) {
+                adjustedRate *= 0.3; // 大幅降低概率
+            }
+            
+            return Math.min(Math.max(adjustedRate, 0.001), 0.8); // 限制在0.1%-80%范围
+        },
+
+        // 更新统计数据
+        updateStats(isWin) {
+            this.globalStats.totalAttempts++;
+            this.globalStats.recentAttempts++;
+            
+            if (isWin) {
+                this.globalStats.totalWins++;
+                this.globalStats.recentWins++;
+            }
+            
+            // 每100次重置短期统计
+            if (this.globalStats.recentAttempts >= 100) {
+                this.globalStats.recentAttempts = 0;
+                this.globalStats.recentWins = 0;
+            }
+            
+            // 每10000次重置全局统计（防止数据过于庞大）
+            if (this.globalStats.totalAttempts >= 10000) {
+                this.globalStats.totalAttempts = Math.floor(this.globalStats.totalAttempts * 0.9);
+                this.globalStats.totalWins = Math.floor(this.globalStats.totalWins * 0.9);
+            }
+        },
+
+        // 主要祈愿逻辑
+        makeWish(currentCount = 0) {
+            // 获取当前动态概率
+            const winRate = this.getCurrentWinRate(currentCount);
+            
+            // 使用crypto真随机数
+            const randomBytes = crypto.randomBytes(4);
+            const randomValue = randomBytes.readUInt32BE(0) / 0xFFFFFFFF;
+            
+            const isWin = randomValue < winRate;
+            const guaranteed = currentCount >= 147;
+            
+            // 更新统计
+            this.updateStats(isWin);
+            
+            return {
+                isWin,
+                guaranteed,
+                actualRate: winRate,
+                globalRate: this.globalStats.totalAttempts > 0 ? 
+                    (this.globalStats.totalWins / this.globalStats.totalAttempts) : 0,
+                debug: {
+                    randomValue,
+                    winRate,
+                    currentCount,
+                    globalStats: { ...this.globalStats }
+                }
+            };
+        }
+    };
 }
 
 module.exports = GameLogic;

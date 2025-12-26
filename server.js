@@ -176,6 +176,21 @@ app.get('/spin', security.basicRateLimit, (req, res) => {
     });
 });
 
+app.get('/wish', security.basicRateLimit, (req, res) => {
+    // 初始化session
+    if (!req.session.initialized) {
+        req.session.initialized = true;
+        req.session.createdAt = Date.now();
+        req.session.csrfToken = GameLogic.generateToken(16);
+    }
+    
+    const username = generateUsername();
+    res.render('wish', { 
+        username,
+        csrfToken: req.session.csrfToken
+    });
+});
+
 // Quiz API 路由
 app.get('/api/user-info', security.basicRateLimit, (req, res) => {
     const username = generateUsername();
@@ -315,12 +330,31 @@ app.post('/api/spin',
     }
 });
 
+// Wish API 路由
+app.post('/api/wish', 
+    security.basicRateLimit,
+    security.csrfProtection,
+    (req, res) => {
+    try {
+        const { currentCount = 0 } = req.body;
+        const result = GameLogic.wish.makeWish(currentCount);
+        res.json({
+            success: true,
+            isWin: result.isWin,
+            guaranteed: result.guaranteed
+        });
+    } catch (error) {
+        console.error('Wish error:', error);
+        res.status(500).json({ success: false, message: '祈愿系统故障' });
+    }
+});
+
 // 健康检查
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        games: ['quiz', 'slot', 'scratch', 'spin'],
+        games: ['quiz', 'slot', 'scratch', 'spin', 'wish'],
         questions: questions.length
     });
 });

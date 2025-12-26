@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>幸运祈愿</title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        .wish-container {
+            text-align: center;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .wish-progress {
+            margin: 30px 0;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            height: 40px;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            transition: width 0.3s ease;
+            border-radius: 10px 0 0 10px;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #333;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .wish-button {
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 50px;
+            color: white;
+            padding: 20px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 20px 0;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+        }
+
+        .wish-button:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 25px rgba(0,0,0,0.2);
+        }
+
+        .wish-button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .wish-stats {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border: 2px solid #dee2e6;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+
+        .guarantee-notice {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            color: #856404;
+        }
+
+        /* 全屏弹窗样式 */
+        .fullscreen-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .modal-content {
+            text-align: center;
+            color: white;
+            font-size: 4rem;
+            font-weight: bold;
+            text-shadow: 0 0 20px rgba(255,255,255,0.5);
+            animation: pulse 2s infinite;
+        }
+
+        .modal-success {
+            color: #00ff00;
+            text-shadow: 0 0 30px #00ff00;
+        }
+
+        .modal-failure {
+            color: #ff0000;
+            text-shadow: 0 0 30px #ff0000;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        @media (max-width: 768px) {
+            .modal-content {
+                font-size: 2.5rem;
+            }
+            
+            .wish-button {
+                padding: 15px 30px;
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-button">← 返回</a>
+    <div class="wish-container">
+        <h1>🌟 幸运祈愿</h1>
+        <p>玩家：<%= username %></p>
+        <p style="color: #666;">向幸运女神许下心愿，祈求好运降临！</p>
+        
+        <div class="wish-progress">
+            <div class="progress-bar" id="progressBar"></div>
+            <div class="progress-text" id="progressText">0 / 148</div>
+        </div>
+        
+        <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
+        
+        <div class="wish-stats">
+            <h3>📊 祈愿统计</h3>
+            <div class="stats-row">
+                <span>总祈愿次数:</span>
+                <span id="totalWishes">0</span>
+            </div>
+            <div class="stats-row">
+                <span>成功次数:</span>
+                <span id="successCount">0</span>
+            </div>
+            <div class="stats-row">
+                <span>个人中奖率:</span>
+                <span id="personalRate">0.00%</span>
+            </div>
+            <div class="stats-row">
+                <span>全服综合率:</span>
+                <span id="globalRate">1.60%</span>
+            </div>
+            <div class="stats-row">
+                <span>当前进度:</span>
+                <span id="currentProgress">0 / 148</span>
+            </div>
+        </div>
+        
+        <div class="guarantee-notice">
+            <h4>🎯 祈愿规则</h4>
+            <p>• 系统保证全服综合中奖率为 1.6%</p>
+            <p>• 概率会根据全服统计动态调整</p>
+            <p>• 连续147次未中奖后，第148次必定成功</p>
+            <p>• 每次成功后重置个人进度计数</p>
+        </div>
+    </div>
+
+    <!-- 全屏弹窗 -->
+    <div id="fullscreenModal" class="fullscreen-modal">
+        <div id="modalContent" class="modal-content"></div>
+    </div>
+
+    <script>
+        const username = "<%= username %>";
+        const csrfToken = "<%= csrfToken %>";
+        
+        // 从localStorage获取祈愿数据
+        let wishData = JSON.parse(localStorage.getItem('wishData_' + username) || '{"total": 0, "success": 0, "current": 0}');
+        
+        function updateDisplay(serverData = null) {
+            document.getElementById('totalWishes').textContent = wishData.total;
+            document.getElementById('successCount').textContent = wishData.success;
+            document.getElementById('currentProgress').textContent = `${wishData.current} / 148`;
+            
+            // 更新个人中奖率
+            const personalRate = wishData.total > 0 ? (wishData.success / wishData.total * 100) : 0;
+            document.getElementById('personalRate').textContent = personalRate.toFixed(2) + '%';
+            
+            // 更新全服综合率（如果有服务器数据）
+            if (serverData && serverData.globalRate !== undefined) {
+                const globalRate = (serverData.globalRate * 100).toFixed(2);
+                document.getElementById('globalRate').textContent = globalRate + '%';
+            }
+            
+            const progressPercent = (wishData.current / 148) * 100;
+            document.getElementById('progressBar').style.width = progressPercent + '%';
+            document.getElementById('progressText').textContent = `${wishData.current} / 148`;
+        }
+        
+        function saveWishData() {
+            localStorage.setItem('wishData_' + username, JSON.stringify(wishData));
+        }
+        
+        function showModal(isSuccess) {
+            const modal = document.getElementById('fullscreenModal');
+            const content = document.getElementById('modalContent');
+            
+            if (isSuccess) {
+                content.textContent = '祈愿成功';
+                content.className = 'modal-content modal-success';
+            } else {
+                content.textContent = '祈愿失败';
+                content.className = 'modal-content modal-failure';
+            }
+            
+            modal.style.display = 'flex';
+            
+            setTimeout(() => {
+                modal.style.display = 'none';
+            }, 3000);
+        }
+        
+        async function makeWish() {
+            const button = document.getElementById('wishButton');
+            button.disabled = true;
+            button.textContent = '祈愿中...';
+            
+            try {
+                const response = await fetch('/api/wish', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    body: JSON.stringify({ 
+                        username,
+                        currentCount: wishData.current
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    wishData.total++;
+                    
+                    if (result.isWin) {
+                        wishData.success++;
+                        wishData.current = 0; // 重置进度
+                        showModal(true);
+                    } else {
+                        wishData.current++;
+                        showModal(false);
+                    }
+                    
+                    saveWishData();
+                    updateDisplay(result);
+                } else {
+                    alert('祈愿失败：' + result.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('网络错误，请重试');
+            } finally {
+                button.disabled = false;
+                button.textContent = '🙏 许愿祈祷';
+            }
+        }
+        
+        // 初始化显示
+        updateDisplay();
+        
+        // 点击弹窗关闭
+        document.getElementById('fullscreenModal').addEventListener('click', function() {
+            this.style.display = 'none';
+        });
+    </script>
+</body>
+</html>
