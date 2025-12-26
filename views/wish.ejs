@@ -155,7 +155,7 @@
             border: 2px solid rgba(255,215,0,0.6);
             padding: 8px 16px;
             border-radius: 20px;
-            animation: danmaku-slide 6s linear;
+            animation: danmaku-slide 12s linear;
             pointer-events: none;
             backdrop-filter: blur(2px);
         }
@@ -373,13 +373,13 @@
                 
                 this.container.appendChild(message);
                 
-                // 6秒后移除
+                // 12秒后移除
                 setTimeout(() => {
                     if (message.parentNode) {
                         message.parentNode.removeChild(message);
                     }
                     this.usedLanes.delete(lane);
-                }, 6000);
+                }, 12000);
                 
                 this.usedLanes.add(lane);
             }
