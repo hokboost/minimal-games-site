@@ -431,6 +431,54 @@ app.post('/api/wish',
     }
 });
 
+// 批量祈愿API - 瞬时处理
+app.post('/api/wish-batch', 
+    security.basicRateLimit,
+    security.csrfProtection,
+    (req, res) => {
+    try {
+        const { currentCount = 0, username, batchCount = 10 } = req.body;
+        
+        // 限制批量数量，防止滥用
+        if (batchCount > 10000) {
+            return res.status(400).json({ success: false, message: '批量数量过大' });
+        }
+        
+        let successCount = 0;
+        let newCurrentCount = currentCount;
+        let lastResult;
+        
+        // 批量执行祈愿
+        for (let i = 0; i < batchCount; i++) {
+            lastResult = GameLogic.wish.makeWish(newCurrentCount);
+            
+            if (lastResult.isWin) {
+                successCount++;
+                newCurrentCount = 0; // 重置保底计数
+                
+                // 只在成功时触发飘屏（避免刷屏）
+                if (username && Math.random() < 0.1) { // 10%概率显示飘屏
+                    broadcastDanmaku(username, 'wish', true);
+                }
+            } else {
+                newCurrentCount++;
+            }
+        }
+        
+        res.json({
+            success: true,
+            successCount,
+            newCurrentCount,
+            globalRate: lastResult.globalRate,
+            actualRate: ((successCount / batchCount) * 100).toFixed(4)
+        });
+        
+    } catch (error) {
+        console.error('Batch wish error:', error);
+        res.status(500).json({ success: false, message: '批量祈愿系统故障' });
+    }
+});
+
 // 健康检查
 app.get('/health', (req, res) => {
     res.json({ 

@@ -207,8 +207,11 @@
             <div class="progress-text" id="progressText">0 / 148</div>
         </div>
         
-        <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
-        <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="margin-left: 20px; background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+            <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
+            <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
+            <button id="wishThousandButton" class="wish-button" onclick="makeWishThousand()" style="background: linear-gradient(45deg, #e74c3c 0%, #c0392b 100%);">🚀 祈愿千次</button>
+        </div>
         
         <div class="wish-stats">
             <h3>📊 祈愿统计</h3>
@@ -236,7 +239,7 @@
         
         <div class="guarantee-notice">
             <h4>🎯 祈愿规则</h4>
-            <p>• 系统保证全服综合中奖率为 1.6%</p>
+            <p>• 系统保证全服综合中奖率为 1.45%</p>
             <p>• 概率会根据全服统计动态调整</p>
             <p>• 连续147次未中奖后，第148次必定成功</p>
             <p>• 每次成功后重置个人进度计数</p>
@@ -258,6 +261,9 @@
         // 从localStorage获取祈愿数据
         let wishData = JSON.parse(localStorage.getItem('wishData_' + username) || '{"total": 0, "success": 0, "current": 0}');
         
+        // 全服综合率初始值
+        let lastGlobalRate = 1.45;
+        
         function updateDisplay(serverData = null) {
             document.getElementById('totalWishes').textContent = wishData.total;
             document.getElementById('successCount').textContent = wishData.success;
@@ -269,8 +275,11 @@
             
             // 更新全服综合率（如果有服务器数据）
             if (serverData && serverData.globalRate !== undefined) {
+                lastGlobalRate = serverData.globalRate;
                 const globalRate = (serverData.globalRate * 100).toFixed(2);
                 document.getElementById('globalRate').textContent = globalRate + '%';
+            } else {
+                document.getElementById('globalRate').textContent = (lastGlobalRate * 100).toFixed(2) + '%';
             }
             
             const progressPercent = (wishData.current / 148) * 100;
@@ -440,69 +449,75 @@
         
         // 祈愿十次功能
         async function makeWishTen() {
-            const button = document.getElementById('wishTenButton');
-            const singleButton = document.getElementById('wishButton');
+            await batchWish(10, 'wishTenButton', '🙏 祈愿十次');
+        }
+
+        // 祈愿千次功能
+        async function makeWishThousand() {
+            await batchWish(1000, 'wishThousandButton', '🚀 祈愿千次');
+        }
+
+        // 批量祈愿通用函数
+        async function batchWish(count, buttonId, buttonText) {
+            const button = document.getElementById(buttonId);
+            const allButtons = [
+                document.getElementById('wishButton'),
+                document.getElementById('wishTenButton'),
+                document.getElementById('wishThousandButton')
+            ];
             
-            button.disabled = true;
-            singleButton.disabled = true;
+            // 禁用所有按钮
+            allButtons.forEach(btn => btn.disabled = true);
             button.textContent = '祈愿中...';
             
-            let successCount = 0;
-            
-            for (let i = 0; i < 10; i++) {
-                try {
-                    const response = await fetch('/api/wish', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-Token': csrfToken
-                        },
-                        body: JSON.stringify({ 
-                            username,
-                            currentCount: wishData.current
-                        })
-                    });
+            try {
+                // 发送批量请求
+                const response = await fetch('/api/wish-batch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    body: JSON.stringify({ 
+                        username,
+                        currentCount: wishData.current,
+                        batchCount: count
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // 更新本地数据
+                    wishData.total += count;
+                    wishData.success += result.successCount;
+                    wishData.current = result.newCurrentCount;
                     
-                    const result = await response.json();
+                    saveWishData();
+                    updateDisplay({globalRate: result.globalRate});
                     
-                    if (result.success) {
-                        wishData.total++;
-                        
-                        if (result.isWin) {
-                            successCount++;
-                            wishData.success++;
-                            wishData.current = 0;
-                        } else {
-                            wishData.current++;
-                        }
-                        
-                        updateDisplay(result);
-                    }
+                    // 显示结果
+                    const modal = document.getElementById('fullscreenModal');
+                    const content = document.getElementById('modalContent');
+                    const rate = ((result.successCount / count) * 100).toFixed(2);
+                    content.textContent = `${count}次祈愿完成！成功${result.successCount}次 (${rate}%)`;
+                    content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
+                    modal.style.display = 'flex';
                     
-                    // 每次祈愿间隔500ms，避免太快
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    
-                } catch (error) {
-                    console.error('祈愿失败:', error);
+                    setTimeout(() => {
+                        modal.style.display = 'none';
+                    }, 4000);
+                } else {
+                    alert('批量祈愿失败：' + result.message);
                 }
+            } catch (error) {
+                console.error('批量祈愿失败:', error);
+                alert('网络错误，请重试');
+            } finally {
+                // 恢复所有按钮
+                allButtons.forEach(btn => btn.disabled = false);
+                button.textContent = buttonText;
             }
-            
-            saveWishData();
-            
-            // 显示十连结果
-            const modal = document.getElementById('fullscreenModal');
-            const content = document.getElementById('modalContent');
-            content.textContent = `十连祈愿完成！成功 ${successCount} 次`;
-            content.className = successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
-            modal.style.display = 'flex';
-            
-            setTimeout(() => {
-                modal.style.display = 'none';
-            }, 3000);
-            
-            button.disabled = false;
-            singleButton.disabled = false;
-            button.textContent = '🙏 祈愿十次';
         }
 
         // 点击弹窗直接关闭
