@@ -184,16 +184,24 @@
             }
             
             .wish-button {
-                padding: 12px 20px;
-                font-size: 14px;
+                padding: 10px 16px;
+                font-size: 12px;
                 min-width: auto;
                 flex: 1;
-                max-width: 150px;
+                max-width: 130px;
             }
 
             .danmaku-message {
                 font-size: 14px;
                 padding: 6px 12px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .wish-button {
+                padding: 8px 12px;
+                font-size: 11px;
+                max-width: 110px;
             }
         }
     </style>
@@ -210,12 +218,13 @@
             <div class="progress-text" id="progressText">0 / 148</div>
         </div>
         
-        <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 800px; margin: 0 auto;">
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 900px; margin: 0 auto;">
             <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
             <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
             <button id="wishHundredButton" class="wish-button" onclick="makeWishHundred()" style="background: linear-gradient(45deg, #f39c12 0%, #e67e22 100%);">🔥 祈愿百次</button>
             <button id="wishThousandButton" class="wish-button" onclick="makeWishThousand()" style="background: linear-gradient(45deg, #e74c3c 0%, #c0392b 100%);">🚀 祈愿千次</button>
             <button id="wishTenThousandButton" class="wish-button" onclick="makeWishTenThousand()" style="background: linear-gradient(45deg, #8e44ad 0%, #2c3e50 100%);">⚡ 祈愿万次</button>
+            <button id="wishHundredThousandButton" class="wish-button" onclick="makeWishHundredThousand()" style="background: linear-gradient(45deg, #2c3e50 0%, #000000 100%);">💀 祈愿十万</button>
         </div>
         
         <div class="wish-stats">
@@ -472,6 +481,11 @@
             await batchWish(10000, 'wishTenThousandButton', '⚡ 祈愿万次');
         }
 
+        // 祈愿十万次功能
+        async function makeWishHundredThousand() {
+            await batchWish(100000, 'wishHundredThousandButton', '💀 祈愿十万');
+        }
+
         // 批量祈愿通用函数
         async function batchWish(count, buttonId, buttonText) {
             const button = document.getElementById(buttonId);
@@ -480,7 +494,8 @@
                 document.getElementById('wishTenButton'),
                 document.getElementById('wishHundredButton'),
                 document.getElementById('wishThousandButton'),
-                document.getElementById('wishTenThousandButton')
+                document.getElementById('wishTenThousandButton'),
+                document.getElementById('wishHundredThousandButton')
             ];
             
             // 禁用所有按钮

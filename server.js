@@ -440,7 +440,7 @@ app.post('/api/wish-batch',
         const { currentCount = 0, username, batchCount = 10 } = req.body;
         
         // 限制批量数量，防止滥用
-        if (batchCount > 10000) {
+        if (batchCount > 100000) {
             return res.status(400).json({ success: false, message: '批量数量过大' });
         }
         

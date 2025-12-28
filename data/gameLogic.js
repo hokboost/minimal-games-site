@@ -284,114 +284,137 @@ class GameLogic {
         }
     };
 
-    // Wish 幸运祈愿游戏逻辑 - 精确1.6%中奖率
+    // Wish 幸运祈愿游戏逻辑 - 真实系统模拟
     static wish = {
-        // 全局统计数据（模拟服务器端统计）
+        // 全局统计数据（轻量化）
         globalStats: {
             totalAttempts: 0,
             totalWins: 0,
-            guaranteedWins: 0, // 保底中奖次数
+            currentCycleLossScore: 0, // 当前轮次亏欠值
             recentWins: 0,
             recentAttempts: 0,
-            cumulativeError: 0.0, // 累积误差
             lastResetTime: Date.now()
         },
 
-        // 获取当前真实概率（精确控制到1.6%）
-        getCurrentWinRate(currentCount = 0) {
-            const targetRate = 0.0135; // 精确目标1.35%
+        // 分段概率配置 - 模拟真实系统
+        pityConfig: {
+            targetGlobalRate: 0.0135, // 目标1.35% = 平均74抽
+            hardPity: 147, // 硬保底
             
-            // 如果达到保底，必中
-            if (currentCount >= 147) {
+            // 分段概率曲线（更像真实系统）
+            earlyPhase: { start: 0, end: 60, baseRate: 0.006 }, // 0.6%
+            midPhase: { start: 61, end: 120, baseRate: 0.008 }, // 0.8%
+            latePhase: { start: 121, end: 146, baseRate: 0.035 }, // 3.5%
+            
+            // 跨轮补偿系数
+            cycleLossBonus: {
+                threshold: 90, // 超过90抽未出开始累积亏欠
+                bonusPerDraw: 0.0001, // 每抽增加0.01%补偿
+                maxBonus: 0.01, // 最大1%补偿
+                decayRate: 0.3 // 下轮开始时保留30%
+            }
+        },
+
+        // 计算当前抽数的基础概率
+        getBaseProbability(pityCount) {
+            const config = this.pityConfig;
+            
+            // 硬保底
+            if (pityCount >= config.hardPity) {
                 return 1.0;
             }
             
-            // 计算不包含保底的实际中奖率
-            const normalWins = this.globalStats.totalWins - this.globalStats.guaranteedWins;
-            const currentRate = this.globalStats.totalAttempts > 0 ? 
-                normalWins / this.globalStats.totalAttempts : 0;
-            
-            // PID控制器式精确调整
-            const error = targetRate - currentRate;
-            this.globalStats.cumulativeError += error;
-            
-            // 限制累积误差防止过度调整
-            this.globalStats.cumulativeError = Math.max(-0.05, Math.min(0.05, this.globalStats.cumulativeError));
-            
-            // 精确调整算法 - 更温和的调整
-            const Kp = 0.6;  // 降低比例系数，减少剧烈调整
-            const Ki = 0.2;  // 降低积分系数，减少历史影响
-            const adjustment = Kp * error + Ki * this.globalStats.cumulativeError;
-            
-            let adjustedRate = targetRate + adjustment;
-            
-            // 保底机制补偿：考虑保底对整体概率的影响
-            const guaranteeImpact = this.calculateGuaranteeImpact();
-            adjustedRate -= guaranteeImpact;
-            
-            // 渐进式保底：最后8次温和提升
-            if (currentCount >= 140) {
-                const gentleBoost = (currentCount - 140) / 8 * 0.005; // 最后8次提升0.5%
-                adjustedRate += gentleBoost;
+            // 分段概率
+            if (pityCount <= config.earlyPhase.end) {
+                return config.earlyPhase.baseRate;
+            } else if (pityCount <= config.midPhase.end) {
+                return config.midPhase.baseRate;
+            } else {
+                // 后期阶段：线性增长到保底
+                const lateStart = config.midPhase.end + 1;
+                const lateProgress = (pityCount - lateStart) / (config.hardPity - lateStart);
+                return config.latePhase.baseRate + lateProgress * (1.0 - config.latePhase.baseRate);
             }
-            
-            // 连击保护：防止短期内过多中奖
-            if (this.globalStats.recentWins >= 2 && this.globalStats.recentAttempts <= 5) {
-                adjustedRate *= 0.4; // 降低到40%
-            } else if (this.globalStats.recentWins >= 1 && this.globalStats.recentAttempts <= 3) {
-                adjustedRate *= 0.6; // 降低到60%
-            }
-            
-            // 精确限制范围
-            return Math.min(Math.max(adjustedRate, 0.002), 0.02); // 限制在0.2%-2%范围
         },
 
-        // 计算保底机制对整体概率的影响
-        calculateGuaranteeImpact() {
-            // 固定扣除理论保底贡献，不依赖实际数据
-            // 理论上每148次有1次保底 = 0.676%额外概率
-            const theoreticalGuaranteeRate = 1 / 148; // 0.00676 = 0.676%
+        // 计算跨轮补偿加成
+        getCycleLossBonus() {
+            const config = this.pityConfig.cycleLossBonus;
+            const bonus = Math.min(this.globalStats.currentCycleLossScore * config.bonusPerDraw, config.maxBonus);
+            return bonus;
+        },
+
+        // 计算最终概率
+        getCurrentWinRate(currentCount = 0) {
+            // 基础概率（分段）
+            let finalRate = this.getBaseProbability(currentCount);
             
-            // 始终扣除这个固定值，确保基础概率准确
-            return theoreticalGuaranteeRate;
+            // 跨轮补偿
+            const cycleLossBonus = this.getCycleLossBonus();
+            finalRate += cycleLossBonus;
+            
+            // 连击抑制（模拟真实系统的平滑机制）
+            if (this.globalStats.recentWins >= 1 && this.globalStats.recentAttempts <= 3) {
+                finalRate *= 0.7; // 降低到70%
+            }
+            
+            // 安全限制
+            return Math.min(Math.max(finalRate, 0.001), 0.8);
+        },
+
+        // 更新跨轮状态
+        updateCycleLossScore(currentCount, isWin) {
+            const config = this.pityConfig.cycleLossBonus;
+            
+            if (isWin) {
+                // 中奖时：如果上轮亏欠太多，下轮继承部分补偿
+                if (currentCount > config.threshold) {
+                    const lossAmount = currentCount - config.threshold;
+                    this.globalStats.currentCycleLossScore = Math.floor(lossAmount * config.decayRate);
+                } else {
+                    this.globalStats.currentCycleLossScore = 0;
+                }
+            } else {
+                // 未中奖时：如果超过阈值，累积亏欠
+                if (currentCount > config.threshold) {
+                    this.globalStats.currentCycleLossScore++;
+                }
+            }
         },
 
         // 更新统计数据
-        updateStats(isWin, isGuaranteed = false) {
+        updateStats(isWin, currentCount) {
             this.globalStats.totalAttempts++;
             this.globalStats.recentAttempts++;
             
             if (isWin) {
                 this.globalStats.totalWins++;
                 this.globalStats.recentWins++;
-                
-                if (isGuaranteed) {
-                    this.globalStats.guaranteedWins++;
-                }
             }
             
-            // 每50次重置短期统计
-            if (this.globalStats.recentAttempts >= 50) {
+            // 更新跨轮补偿状态
+            this.updateCycleLossScore(currentCount, isWin);
+            
+            // 每20次重置短期统计
+            if (this.globalStats.recentAttempts >= 20) {
                 this.globalStats.recentAttempts = 0;
                 this.globalStats.recentWins = 0;
             }
             
-            // 长期数据管理：保持统计精确性
-            if (this.globalStats.totalAttempts >= 20000) {
-                // 保持最近10000次的数据，丢弃更早的
-                const keepRatio = 0.5;
+            // 长期数据管理
+            if (this.globalStats.totalAttempts >= 50000) {
+                const keepRatio = 0.8;
                 this.globalStats.totalAttempts = Math.floor(this.globalStats.totalAttempts * keepRatio);
                 this.globalStats.totalWins = Math.floor(this.globalStats.totalWins * keepRatio);
-                this.globalStats.guaranteedWins = Math.floor(this.globalStats.guaranteedWins * keepRatio);
-                this.globalStats.cumulativeError *= keepRatio; // 误差也按比例缩放
+                this.globalStats.currentCycleLossScore = Math.floor(this.globalStats.currentCycleLossScore * keepRatio);
             }
         },
 
         // 主要祈愿逻辑
         makeWish(currentCount = 0) {
-            const isGuaranteed = currentCount >= 147;
+            const isGuaranteed = currentCount >= this.pityConfig.hardPity;
             
-            // 获取当前动态概率
+            // 获取当前概率（分段+跨轮补偿）
             const winRate = this.getCurrentWinRate(currentCount);
             
             // 使用crypto真随机数
@@ -401,11 +424,11 @@ class GameLogic {
             const isWin = randomValue < winRate;
             
             // 更新统计
-            this.updateStats(isWin, isGuaranteed && isWin);
+            this.updateStats(isWin, currentCount);
             
-            // 计算精确的全服中奖率
+            // 计算全服中奖率
             const exactGlobalRate = this.globalStats.totalAttempts > 0 ? 
-                (this.globalStats.totalWins / this.globalStats.totalAttempts) : 0.0135;
+                (this.globalStats.totalWins / this.globalStats.totalAttempts) : this.pityConfig.targetGlobalRate;
             
             return {
                 isWin,
@@ -416,9 +439,10 @@ class GameLogic {
                     randomValue,
                     winRate,
                     currentCount,
-                    normalWins: this.globalStats.totalWins - this.globalStats.guaranteedWins,
-                    guaranteedWins: this.globalStats.guaranteedWins,
-                    cumulativeError: this.globalStats.cumulativeError,
+                    baseRate: this.getBaseProbability(currentCount),
+                    cycleLossBonus: this.getCycleLossBonus(),
+                    cycleLossScore: this.globalStats.currentCycleLossScore,
+                    phase: currentCount <= 60 ? 'early' : currentCount <= 120 ? 'mid' : 'late',
                     globalStats: { ...this.globalStats }
                 }
             };
