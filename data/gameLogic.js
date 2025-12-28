@@ -299,7 +299,7 @@ class GameLogic {
 
         // 获取当前真实概率（精确控制到1.6%）
         getCurrentWinRate(currentCount = 0) {
-            const targetRate = 0.0145; // 精确目标1.45%
+            const targetRate = 0.0135; // 精确目标1.35%
             
             // 如果达到保底，必中
             if (currentCount >= 147) {
@@ -405,7 +405,7 @@ class GameLogic {
             
             // 计算精确的全服中奖率
             const exactGlobalRate = this.globalStats.totalAttempts > 0 ? 
-                (this.globalStats.totalWins / this.globalStats.totalAttempts) : 0.0145;
+                (this.globalStats.totalWins / this.globalStats.totalAttempts) : 0.0135;
             
             return {
                 isWin,

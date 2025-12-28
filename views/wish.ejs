@@ -184,8 +184,11 @@
             }
             
             .wish-button {
-                padding: 15px 30px;
-                font-size: 16px;
+                padding: 12px 20px;
+                font-size: 14px;
+                min-width: auto;
+                flex: 1;
+                max-width: 150px;
             }
 
             .danmaku-message {
@@ -207,10 +210,12 @@
             <div class="progress-text" id="progressText">0 / 148</div>
         </div>
         
-        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 800px; margin: 0 auto;">
             <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
             <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
+            <button id="wishHundredButton" class="wish-button" onclick="makeWishHundred()" style="background: linear-gradient(45deg, #f39c12 0%, #e67e22 100%);">🔥 祈愿百次</button>
             <button id="wishThousandButton" class="wish-button" onclick="makeWishThousand()" style="background: linear-gradient(45deg, #e74c3c 0%, #c0392b 100%);">🚀 祈愿千次</button>
+            <button id="wishTenThousandButton" class="wish-button" onclick="makeWishTenThousand()" style="background: linear-gradient(45deg, #8e44ad 0%, #2c3e50 100%);">⚡ 祈愿万次</button>
         </div>
         
         <div class="wish-stats">
@@ -239,7 +244,7 @@
         
         <div class="guarantee-notice">
             <h4>🎯 祈愿规则</h4>
-            <p>• 系统保证全服综合中奖率为 1.45%</p>
+            <p>• 系统保证全服综合中奖率为 1.35%</p>
             <p>• 概率会根据全服统计动态调整</p>
             <p>• 连续147次未中奖后，第148次必定成功</p>
             <p>• 每次成功后重置个人进度计数</p>
@@ -262,7 +267,7 @@
         let wishData = JSON.parse(localStorage.getItem('wishData_' + username) || '{"total": 0, "success": 0, "current": 0}');
         
         // 全服综合率初始值
-        let lastGlobalRate = 1.45;
+        let lastGlobalRate = 1.35;
         
         function updateDisplay(serverData = null) {
             document.getElementById('totalWishes').textContent = wishData.total;
@@ -452,9 +457,19 @@
             await batchWish(10, 'wishTenButton', '🙏 祈愿十次');
         }
 
+        // 祈愿百次功能
+        async function makeWishHundred() {
+            await batchWish(100, 'wishHundredButton', '🔥 祈愿百次');
+        }
+
         // 祈愿千次功能
         async function makeWishThousand() {
             await batchWish(1000, 'wishThousandButton', '🚀 祈愿千次');
+        }
+
+        // 祈愿万次功能
+        async function makeWishTenThousand() {
+            await batchWish(10000, 'wishTenThousandButton', '⚡ 祈愿万次');
         }
 
         // 批量祈愿通用函数
@@ -463,7 +478,9 @@
             const allButtons = [
                 document.getElementById('wishButton'),
                 document.getElementById('wishTenButton'),
-                document.getElementById('wishThousandButton')
+                document.getElementById('wishHundredButton'),
+                document.getElementById('wishThousandButton'),
+                document.getElementById('wishTenThousandButton')
             ];
             
             // 禁用所有按钮
