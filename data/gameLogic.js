@@ -318,9 +318,9 @@ class GameLogic {
             // 限制累积误差防止过度调整
             this.globalStats.cumulativeError = Math.max(-0.05, Math.min(0.05, this.globalStats.cumulativeError));
             
-            // 精确调整算法
-            const Kp = 1.0;  // 比例系数
-            const Ki = 0.3;  // 积分系数
+            // 精确调整算法 - 更温和的调整
+            const Kp = 0.6;  // 降低比例系数，减少剧烈调整
+            const Ki = 0.2;  // 降低积分系数，减少历史影响
             const adjustment = Kp * error + Ki * this.globalStats.cumulativeError;
             
             let adjustedRate = targetRate + adjustment;
@@ -329,33 +329,31 @@ class GameLogic {
             const guaranteeImpact = this.calculateGuaranteeImpact();
             adjustedRate -= guaranteeImpact;
             
-            // 渐进式保底：最后20次温和提升
-            if (currentCount >= 127) {
-                const gentleBoost = (currentCount - 127) / 20 * 0.01; // 最后20次提升1%
+            // 渐进式保底：最后8次温和提升
+            if (currentCount >= 140) {
+                const gentleBoost = (currentCount - 140) / 8 * 0.005; // 最后8次提升0.5%
                 adjustedRate += gentleBoost;
             }
             
-            // 连击保护：温和降低而非急剧下降
-            if (this.globalStats.recentWins >= 2 && this.globalStats.recentAttempts <= 8) {
-                adjustedRate *= 0.7; // 降低到70%
+            // 连击保护：防止短期内过多中奖
+            if (this.globalStats.recentWins >= 2 && this.globalStats.recentAttempts <= 5) {
+                adjustedRate *= 0.4; // 降低到40%
+            } else if (this.globalStats.recentWins >= 1 && this.globalStats.recentAttempts <= 3) {
+                adjustedRate *= 0.6; // 降低到60%
             }
             
             // 精确限制范围
-            return Math.min(Math.max(adjustedRate, 0.002), 0.04); // 限制在0.2%-4%范围
+            return Math.min(Math.max(adjustedRate, 0.002), 0.02); // 限制在0.2%-2%范围
         },
 
         // 计算保底机制对整体概率的影响
         calculateGuaranteeImpact() {
-            if (this.globalStats.totalAttempts === 0) return 0;
-            
-            // 估算保底机制额外贡献的中奖率
-            const guaranteeContribution = this.globalStats.guaranteedWins / this.globalStats.totalAttempts;
-            
+            // 固定扣除理论保底贡献，不依赖实际数据
             // 理论上每148次有1次保底 = 0.676%额外概率
-            const theoreticalGuaranteeRate = 1 / 148;
+            const theoreticalGuaranteeRate = 1 / 148; // 0.00676 = 0.676%
             
-            // 返回实际保底影响，用于从基础概率中扣除
-            return Math.min(guaranteeContribution, theoreticalGuaranteeRate);
+            // 始终扣除这个固定值，确保基础概率准确
+            return theoreticalGuaranteeRate;
         },
 
         // 更新统计数据
