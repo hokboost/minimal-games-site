@@ -48,10 +48,8 @@
                             <td>-</td>
                             <td>-</td>
                             <td>
-                                <button onclick="addSpin('<%= user.username %>', this)" class="btn-add">➕ 加1</button>
-                                <% if (user.username === userLoggedIn) { %>
-                                    <button disabled class="btn-disabled">自己</button>
-                                <% } else if (user.authorized) { %>
+                                <button onclick="addElectricCoin('<%= user.username %>', this)" class="btn-add">⚡ 加电币</button>
+                                <% if (user.authorized) { %>
                                     <button onclick="unauthorizeUser('<%= user.username %>', this)" class="btn-unauthorize">❌ 取消授权</button>
                                 <% } else { %>
                                     <button onclick="authorizeUser('<%= user.username %>', this)" class="btn-authorize">✅ 授权</button>
@@ -59,14 +57,14 @@
                             </td>
                             <td>
                                 <% if (user.username === userLoggedIn) { %>
-                                    <button disabled class="btn-disabled">自己</button>
+                                    <button onclick="changeSelfPassword()" class="btn-self">🔑 修改密码</button>
                                 <% } else { %>
                                     <button onclick="resetPassword('<%= user.username %>', this)" class="btn-reset">🔑 重置密码</button>
                                 <% } %>
                             </td>
                             <td>
                                 <% if (user.username === userLoggedIn) { %>
-                                    <button disabled class="btn-disabled">自己</button>
+                                    <span class="self-indicator">👤 自己</span>
                                 <% } else { %>
                                     <button onclick="deleteAccount('<%= user.username %>', this)" class="btn-delete">🗑️ 注销账号</button>
                                 <% } %>
@@ -307,6 +305,22 @@
         color: #ccc;
     }
 
+    .btn-self {
+        background: #17a2b8;
+        color: white;
+    }
+
+    .btn-self:hover {
+        background: #138496;
+        transform: translateY(-1px);
+    }
+
+    .self-indicator {
+        color: #17a2b8;
+        font-weight: bold;
+        font-style: italic;
+    }
+
     /* 状态样式 */
     .status-admin {
         color: #28a745;
@@ -364,21 +378,61 @@
     </style>
 
     <script>
-    function addSpin(username, btn) {
+    function addElectricCoin(username, btn) {
+        const amount = prompt(`为用户 "${username}" 添加电币:\\n\\n请输入要添加的电币数量:`, '100');
+        
+        if (amount === null) return; // 用户取消
+        
+        const coinAmount = parseFloat(amount);
+        
+        if (isNaN(coinAmount)) {
+            alert('请输入有效的数字金额！');
+            return;
+        }
+        
+        if (coinAmount <= 0) {
+            alert('添加数量必须大于0！');
+            return;
+        }
+        
+        if (coinAmount > 100000) {
+            alert('单次添加不能超过100,000电币！');
+            return;
+        }
+        
+        const confirmAdd = confirm(`确认为用户 "${username}" 添加 ${coinAmount} 电币？`);
+        
+        if (!confirmAdd) return;
+        
         btn.disabled = true;
-        fetch('/api/admin/add-spins', {
+        btn.textContent = '添加中...';
+        
+        fetch('/api/admin/add-electric-coin', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, count: 1 })
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': '<%= csrfToken %>'
+            },
+            body: JSON.stringify({ username, amount: coinAmount })
         })
         .then(res => res.json())
         .then(data => {
-            if (!data.success) return alert('添加失败: ' + data.message);
-            const row = btn.closest('tr');
-            row.querySelector('.spins').textContent = data.newSpins;
+            if (!data.success) {
+                alert('添加失败: ' + data.message);
+                return;
+            }
+            
+            alert(`✅ 成功为用户 "${username}" 添加 ${coinAmount} 电币！\\n新余额: ${data.newBalance} 电币`);
+            location.reload(); // 刷新页面显示新余额
         })
-        .catch(() => alert('请求失败'))
-        .finally(() => btn.disabled = false);
+        .catch(err => {
+            console.error('Add electric coin error:', err);
+            alert('添加请求失败，请稍后重试');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '⚡ 加电币';
+        });
     }
 
     function authorizeUser(username, btn) {
@@ -618,6 +672,63 @@
         })
         .catch(err => {
             console.error('Update balance error:', err);
+            alert('修改请求失败，请稍后重试');
+        });
+    }
+
+    function changeSelfPassword() {
+        const oldPassword = prompt('请输入当前密码:');
+        
+        if (!oldPassword) {
+            alert('必须输入当前密码！');
+            return;
+        }
+        
+        const newPassword = prompt('请输入新密码:\\n\\n注意: 新密码长度至少6位');
+        
+        if (!newPassword) {
+            alert('新密码不能为空！');
+            return;
+        }
+        
+        if (newPassword.length < 6) {
+            alert('新密码长度至少需要6位！');
+            return;
+        }
+        
+        const confirmPassword = prompt('请再次确认新密码:');
+        
+        if (newPassword !== confirmPassword) {
+            alert('两次输入的密码不一致！');
+            return;
+        }
+        
+        const confirmChange = confirm(`确认修改密码？\\n\\n旧密码: ${'*'.repeat(oldPassword.length)}\\n新密码: ${'*'.repeat(newPassword.length)}`);
+        
+        if (!confirmChange) return;
+        
+        fetch('/api/admin/change-self-password', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': '<%= csrfToken %>'
+            },
+            body: JSON.stringify({ 
+                oldPassword: oldPassword,
+                newPassword: newPassword 
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                alert('✅ 密码修改成功！\\n\\n请使用新密码重新登录。');
+                window.location.href = '/logout';
+            } else {
+                alert('修改失败: ' + data.message);
+            }
+        })
+        .catch(err => {
+            console.error('Change password error:', err);
             alert('修改请求失败，请稍后重试');
         });
     }
