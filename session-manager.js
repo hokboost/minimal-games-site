@@ -15,12 +15,12 @@ class SessionManager {
     }
 
     // 创建新会话并踢出其他设备
-    async createSingleDeviceSession(username, sessionId, ip, userAgent) {
+    async createSingleDeviceSession(username, sessionId, ip, userAgent, notifyCallback = null) {
         try {
             // 特殊处理：hokboost管理员允许多设备登录
             if (username !== 'hokboost') {
-                // 1. 先踢出该用户的所有其他会话
-                await this.terminateUserOtherSessions(username, sessionId);
+                // 1. 先踢出该用户的所有其他会话，并发送通知
+                await this.terminateUserOtherSessions(username, sessionId, notifyCallback);
             } else {
                 console.log(`管理员 ${username} 登录 - 保持多设备会话`);
             }
@@ -55,29 +55,51 @@ class SessionManager {
     }
 
     // 踢出用户的其他所有会话
-    async terminateUserOtherSessions(username, currentSessionId) {
+    async terminateUserOtherSessions(username, currentSessionId, notifyCallback = null) {
         try {
             // 1. 从数据库获取用户的所有其他活跃会话
             const otherSessions = await pool.query(`
-                SELECT session_id FROM active_sessions 
+                SELECT session_id, ip_address, user_agent, created_at 
+                FROM active_sessions 
                 WHERE username = $1 AND session_id != $2 AND is_active = true
             `, [username, currentSessionId]);
 
-            // 2. 标记数据库中的其他会话为非活跃
-            await pool.query(`
-                UPDATE active_sessions 
-                SET is_active = false, terminated_at = NOW(), 
-                    termination_reason = 'new_device_login'
-                WHERE username = $1 AND session_id != $2 AND is_active = true
-            `, [username, currentSessionId]);
-
-            // 3. 从内存缓存中移除其他会话
-            for (const session of otherSessions.rows) {
-                this.activeSessions.delete(session.session_id);
-            }
-
-            // 4. 删除其他会话的session数据
             if (otherSessions.rows.length > 0) {
+                // 2. 发送被踢出通知（如果提供了回调函数）
+                if (notifyCallback) {
+                    const deviceInfo = otherSessions.rows.map(session => ({
+                        ip: session.ip_address,
+                        userAgent: session.user_agent,
+                        loginTime: session.created_at
+                    }));
+
+                    notifyCallback(username, {
+                        type: 'device_logout',
+                        title: '账号安全提醒',
+                        message: '您的账号已在新设备登录，其他设备已自动退出',
+                        details: {
+                            newLogin: true,
+                            kickedDevices: deviceInfo.length,
+                            timestamp: new Date().toISOString()
+                        },
+                        level: 'warning'
+                    });
+                }
+
+                // 3. 标记数据库中的其他会话为非活跃
+                await pool.query(`
+                    UPDATE active_sessions 
+                    SET is_active = false, terminated_at = NOW(), 
+                        termination_reason = 'new_device_login'
+                    WHERE username = $1 AND session_id != $2 AND is_active = true
+                `, [username, currentSessionId]);
+
+                // 4. 从内存缓存中移除其他会话
+                for (const session of otherSessions.rows) {
+                    this.activeSessions.delete(session.session_id);
+                }
+
+                // 5. 删除其他会话的session数据
                 const sessionIds = otherSessions.rows.map(row => `'${row.session_id}'`).join(',');
                 await pool.query(`DELETE FROM user_sessions WHERE sid IN (${sessionIds})`);
             }

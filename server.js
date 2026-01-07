@@ -38,6 +38,64 @@ const io = new Server(server, {
     }
 });
 
+// WebSocket连接管理
+const userSockets = new Map(); // username -> Set of socket ids
+
+io.on('connection', (socket) => {
+    console.log('用户连接WebSocket:', socket.id);
+
+    // 用户身份验证和注册
+    socket.on('register', (username) => {
+        if (username) {
+            if (!userSockets.has(username)) {
+                userSockets.set(username, new Set());
+            }
+            userSockets.get(username).add(socket.id);
+            socket.username = username;
+            console.log(`用户 ${username} 注册WebSocket连接: ${socket.id}`);
+        }
+    });
+
+    // 处理断开连接
+    socket.on('disconnect', () => {
+        if (socket.username && userSockets.has(socket.username)) {
+            userSockets.get(socket.username).delete(socket.id);
+            if (userSockets.get(socket.username).size === 0) {
+                userSockets.delete(socket.username);
+            }
+            console.log(`用户 ${socket.username} 断开WebSocket连接: ${socket.id}`);
+        }
+    });
+});
+
+// 发送用户通知的辅助函数
+function notifyUser(username, notification) {
+    if (userSockets.has(username)) {
+        const socketIds = userSockets.get(username);
+        for (const socketId of socketIds) {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+                socket.emit('notification', notification);
+            }
+        }
+        console.log(`发送通知给用户 ${username}: ${notification.message}`);
+    }
+}
+
+// 发送安全警告的辅助函数
+function notifySecurityEvent(username, event) {
+    if (userSockets.has(username)) {
+        const socketIds = userSockets.get(username);
+        for (const socketId of socketIds) {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+                socket.emit('security-alert', event);
+            }
+        }
+        console.log(`发送安全警告给用户 ${username}: ${event.type}`);
+    }
+}
+
 const PORT = process.env.PORT || 3000;
 
 // 视图引擎设置
@@ -560,9 +618,9 @@ app.post('/login', loginLimiter, async (req, res) => {
             };
             req.session.username = user.username;
 
-            // 9. 创建单设备会话管理
+            // 9. 创建单设备会话管理，带通知功能
             const sessionSuccess = await SessionManager.createSingleDeviceSession(
-                username, req.sessionID, clientIP, userAgent
+                username, req.sessionID, clientIP, userAgent, notifySecurityEvent
             );
 
             if (!sessionSuccess) {
@@ -1819,6 +1877,15 @@ app.post('/api/admin/force-logout', requireLogin, requireAdmin, async (req, res)
         
         if (!username) {
             return res.status(400).json({ success: false, message: '用户名不能为空' });
+        }
+
+        // 特别保护hokboost管理员账号
+        if (username === 'hokboost') {
+            console.log(`⚠️ 管理员 ${adminUser} 试图强制注销hokboost - 已拒绝`);
+            return res.status(403).json({ 
+                success: false, 
+                message: '不能对hokboost管理员账号执行此操作' 
+            });
         }
 
         const sessionCount = await SessionManager.forceLogoutUser(username, 'admin_force_logout');

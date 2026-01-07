@@ -94,12 +94,16 @@ class IPManager {
             const hourlyCount = parseInt(recentActivity.rows[0].count);
             const uniqueUsers = parseInt(recentActivity.rows[0].unique_users);
 
-            if (hourlyCount > 100) {
-                riskScore += 30;
+            // 更合理的访问频率阈值 - 考虑正常游戏使用
+            if (hourlyCount > 1000) {
+                riskScore += 40;
                 reasons.push(`异常高频访问: ${hourlyCount}次/小时`);
-            } else if (hourlyCount > 50) {
-                riskScore += 15;
+            } else if (hourlyCount > 500) {
+                riskScore += 20;
                 reasons.push(`高频访问: ${hourlyCount}次/小时`);
+            } else if (hourlyCount > 200) {
+                riskScore += 5;
+                reasons.push(`较高频访问: ${hourlyCount}次/小时`);
             }
 
             if (uniqueUsers > 5) {
