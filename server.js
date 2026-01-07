@@ -19,6 +19,20 @@ const questions = require('./data/questions');
 const GameLogic = require('./data/gameLogic');
 const BalanceLogger = require('./balance-logger');
 
+// 礼物配置
+const fs = require('fs');
+const axios = require('axios');
+const { getGiftSender } = require('./bilibili-gift-sender');
+
+let giftConfig = {};
+try {
+    const giftConfigData = fs.readFileSync('./gift-codes.json', 'utf8');
+    giftConfig = JSON.parse(giftConfigData);
+    console.log('✅ 礼物配置加载成功');
+} catch (error) {
+    console.error('❌ 礼物配置加载失败:', error.message);
+}
+
 // 导入安全管理模块
 const IPManager = require('./ip-manager');
 const SessionManager = require('./session-manager');
@@ -1450,11 +1464,21 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             });
         }
 
-        // 定义可用的礼物类型
-        const availableGifts = {
-            'heartbox': { name: '心动盲盒', cost: 150 },
-            'fanlight': { name: '粉丝团灯牌', cost: 1 }
-        };
+        // 从配置文件获取可用的礼物类型
+        const availableGifts = {};
+        if (giftConfig.礼物映射) {
+            for (const [key, config] of Object.entries(giftConfig.礼物映射)) {
+                availableGifts[key] = {
+                    name: config.名称,
+                    cost: config.电币成本,
+                    bilibili_id: config.bilibili_id
+                };
+            }
+        } else {
+            // 备用配置
+            availableGifts.heartbox = { name: '心动盲盒', cost: 150, bilibili_id: '32251' };
+            availableGifts.fanlight = { name: '粉丝团灯牌', cost: 1, bilibili_id: '31164' };
+        }
 
         // 验证礼物类型
         if (!availableGifts[giftType]) {
@@ -1495,19 +1519,76 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             });
         }
 
-        // 记录兑换记录
-        await pool.query(`
+        // 获取用户的B站房间号
+        const userRoomResult = await pool.query(`
+            SELECT bilibili_room_id FROM users WHERE username = $1
+        `, [username]);
+
+        const bilibiliRoomId = userRoomResult.rows[0]?.bilibili_room_id;
+        
+        // 记录兑换记录，包含房间号和delivery状态
+        const insertResult = await pool.query(`
             INSERT INTO gift_exchanges (
-                username, gift_type, gift_name, cost, status, created_at
-            ) VALUES ($1, $2, $3, $4, 'completed', NOW())
-        `, [username, giftType, availableGifts[giftType].name, cost]);
+                username, gift_type, gift_name, cost, status, created_at,
+                bilibili_room_id, delivery_status
+            ) VALUES ($1, $2, $3, $4, 'completed', NOW(), $5, $6)
+            RETURNING id
+        `, [username, giftType, availableGifts[giftType].name, cost, bilibiliRoomId, 
+            bilibiliRoomId ? 'pending' : 'no_room']);
+
+        const exchangeId = insertResult.rows[0].id;
 
         console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name}，花费 ${cost} 电币`);
 
+        // 如果用户绑定了房间号，尝试发送B站礼物
+        let deliveryMessage = '';
+        if (bilibiliRoomId) {
+            try {
+                console.log(`🎁 开始向房间 ${bilibiliRoomId} 发送礼物 ${availableGifts[giftType].name}...`);
+                
+                // 使用内置的playwright模块发送礼物
+                const giftSender = getGiftSender();
+                const giftResult = await giftSender.sendGift(
+                    availableGifts[giftType].bilibili_id, 
+                    bilibiliRoomId
+                );
+                
+                if (giftResult.success) {
+                    // 更新delivery状态为成功
+                    await pool.query(`
+                        UPDATE gift_exchanges 
+                        SET delivery_status = 'delivered', processed_at = NOW() 
+                        WHERE id = $1
+                    `, [exchangeId]);
+                    
+                    console.log(`✅ 礼物发送成功到房间 ${bilibiliRoomId}`);
+                    deliveryMessage = '，礼物已发送到直播间！';
+                } else {
+                    throw new Error(giftResult.error || '礼物发送失败');
+                }
+                
+            } catch (error) {
+                console.error(`❌ 礼物发送失败:`, error.message);
+                
+                // 更新delivery状态为失败
+                await pool.query(`
+                    UPDATE gift_exchanges 
+                    SET delivery_status = 'failed', processed_at = NOW() 
+                    WHERE id = $1
+                `, [exchangeId]);
+                
+                deliveryMessage = `，但礼物发送失败: ${error.message}`;
+            }
+        } else {
+            console.log(`⚠️ 用户 ${username} 未绑定B站房间号，跳过礼物发送`);
+            deliveryMessage = '，请先绑定B站房间号以发送礼物';
+        }
+
         res.json({ 
             success: true, 
-            message: '兑换成功！',
-            newBalance: balanceResult.balance
+            message: `兑换成功${deliveryMessage}`,
+            newBalance: balanceResult.balance,
+            deliveryStatus: bilibiliRoomId ? (deliveryMessage.includes('成功') ? 'delivered' : 'failed') : 'no_room'
         });
 
     } catch (error) {
@@ -1555,6 +1636,238 @@ app.get('/api/gifts/history', requireLogin, requireAuthorized, async (req, res) 
 
     } catch (error) {
         console.error('获取兑换历史失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
+// 获取房间号绑定状态 (管理员可查看所有用户，普通用户只能查看自己)
+app.get('/api/bilibili/room', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const isAdmin = req.session.user.is_admin;
+        const targetUsername = req.query.username; // 管理员可通过查询参数指定用户
+        
+        // 普通用户只能查看自己的信息
+        const usernameToQuery = (isAdmin && targetUsername) ? targetUsername : username;
+        
+        // 如果是管理员且未指定用户，返回所有用户的房间绑定信息
+        if (isAdmin && !targetUsername) {
+            const result = await pool.query(`
+                SELECT username, bilibili_room_id, created_at as bind_time
+                FROM users 
+                WHERE bilibili_room_id IS NOT NULL
+                ORDER BY username
+            `);
+            
+            return res.json({
+                success: true,
+                isAdminView: true,
+                allBindings: result.rows.map(row => ({
+                    username: row.username,
+                    roomId: row.bilibili_room_id,
+                    bindTime: row.bind_time
+                }))
+            });
+        }
+        
+        const result = await pool.query(`
+            SELECT bilibili_room_id, created_at as bind_time
+            FROM users 
+            WHERE username = $1
+        `, [usernameToQuery]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: '用户不存在'
+            });
+        }
+        
+        const roomInfo = result.rows[0];
+        
+        res.json({
+            success: true,
+            username: usernameToQuery,
+            roomId: roomInfo.bilibili_room_id || null,
+            bindTime: roomInfo.bind_time,
+            isBound: !!roomInfo.bilibili_room_id,
+            isAdminView: isAdmin && targetUsername
+        });
+        
+    } catch (error) {
+        console.error('获取房间号失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
+// 绑定或更新B站房间号 (仅管理员)
+app.post('/api/bilibili/room', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+    try {
+        const { roomId, targetUsername } = req.body;
+        const adminUsername = req.session.user.username;
+        const usernameToUpdate = targetUsername || adminUsername; // 允许管理员为其他用户设置房间号
+        
+        // 验证房间号格式（数字，6-12位）
+        if (!roomId || !/^\d{6,12}$/.test(roomId.toString())) {
+            return res.status(400).json({
+                success: false,
+                message: '房间号格式不正确，应为6-12位数字'
+            });
+        }
+        
+        // 如果指定了目标用户，验证用户是否存在
+        if (targetUsername) {
+            const userExistsResult = await pool.query(`
+                SELECT username FROM users WHERE username = $1
+            `, [targetUsername]);
+            
+            if (userExistsResult.rows.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `用户 ${targetUsername} 不存在`
+                });
+            }
+        }
+        
+        // 检查房间号是否已被其他用户绑定
+        const existingResult = await pool.query(`
+            SELECT username FROM users 
+            WHERE bilibili_room_id = $1 AND username != $2
+        `, [roomId, usernameToUpdate]);
+        
+        if (existingResult.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `房间号 ${roomId} 已被用户 ${existingResult.rows[0].username} 绑定`
+            });
+        }
+        
+        // 更新用户的房间号
+        await pool.query(`
+            UPDATE users 
+            SET bilibili_room_id = $1 
+            WHERE username = $2
+        `, [roomId, usernameToUpdate]);
+        
+        console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功绑定B站房间号: ${roomId}`);
+        
+        res.json({
+            success: true,
+            message: `成功为用户 ${usernameToUpdate} 绑定B站房间号: ${roomId}`,
+            roomId: roomId,
+            targetUser: usernameToUpdate
+        });
+        
+    } catch (error) {
+        console.error('绑定房间号失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
+// 手动刷新B站Cookie (仅管理员)
+app.post('/api/bilibili/cookies/refresh', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+    try {
+        console.log(`🔄 管理员 ${req.session.user.username} 请求刷新B站Cookie`);
+        
+        const giftSender = getGiftSender();
+        const refreshResult = await giftSender.refreshCookies();
+        
+        if (refreshResult.success) {
+            console.log('✅ Cookie刷新成功');
+            res.json({
+                success: true,
+                message: refreshResult.message
+            });
+        } else {
+            console.log('❌ Cookie刷新失败');
+            res.status(500).json({
+                success: false,
+                message: refreshResult.error || 'Cookie刷新失败'
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ 刷新Cookie API失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
+// 检查B站Cookie状态 (仅管理员)
+app.get('/api/bilibili/cookies/status', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        console.log(`🔍 管理员 ${req.session.user.username} 检查Cookie状态`);
+        
+        const giftSender = getGiftSender();
+        const cookieManager = giftSender.cookieManager;
+        const checkResult = await cookieManager.checkCookieExpiry();
+        
+        res.json({
+            success: true,
+            expired: checkResult.expired,
+            reason: checkResult.reason,
+            lastCheck: giftSender.lastCookieCheck,
+            nextCheck: giftSender.lastCookieCheck + giftSender.cookieCheckInterval,
+            checkInterval: giftSender.cookieCheckInterval
+        });
+        
+    } catch (error) {
+        console.error('❌ 检查Cookie状态失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
+// 解除房间号绑定 (仅管理员)
+app.delete('/api/bilibili/room', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+    try {
+        const { targetUsername } = req.body;
+        const adminUsername = req.session.user.username;
+        const usernameToUpdate = targetUsername || adminUsername; // 允许管理员为其他用户解除绑定
+        
+        // 如果指定了目标用户，验证用户是否存在
+        if (targetUsername) {
+            const userExistsResult = await pool.query(`
+                SELECT username FROM users WHERE username = $1
+            `, [targetUsername]);
+            
+            if (userExistsResult.rows.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `用户 ${targetUsername} 不存在`
+                });
+            }
+        }
+        
+        await pool.query(`
+            UPDATE users 
+            SET bilibili_room_id = NULL 
+            WHERE username = $1
+        `, [usernameToUpdate]);
+        
+        console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功解除B站房间号绑定`);
+        
+        res.json({
+            success: true,
+            message: `成功为用户 ${usernameToUpdate} 解除房间号绑定`,
+            targetUser: usernameToUpdate
+        });
+        
+    } catch (error) {
+        console.error('解除房间号绑定失败:', error);
         res.status(500).json({ 
             success: false, 
             message: '服务器错误' 
@@ -2275,4 +2588,46 @@ server.listen(PORT, () => {
     console.log(`📚 题库包含 ${questions.length} 道题目`);
     console.log(`🌐 访问 http://localhost:${PORT} 开始游戏`);
     console.log(`🚀 WebSocket飘屏系统已启动`);
+    console.log(`🎁 B站送礼功能已启用`);
+});
+
+// 优雅关闭处理
+process.on('SIGINT', async () => {
+    console.log('\n🔄 正在优雅关闭服务器...');
+    
+    try {
+        // 清理B站送礼浏览器资源
+        const giftSender = getGiftSender();
+        await giftSender.cleanup();
+        
+        // 关闭数据库连接池
+        if (pool) {
+            await pool.end();
+            console.log('✅ 数据库连接已关闭');
+        }
+        
+        console.log('✅ 服务器已优雅关闭');
+        process.exit(0);
+    } catch (error) {
+        console.error('❌ 关闭服务器时发生错误:', error);
+        process.exit(1);
+    }
+});
+
+process.on('SIGTERM', async () => {
+    console.log('🔄 收到SIGTERM信号，正在关闭...');
+    
+    try {
+        const giftSender = getGiftSender();
+        await giftSender.cleanup();
+        
+        if (pool) {
+            await pool.end();
+        }
+        
+        process.exit(0);
+    } catch (error) {
+        console.error('❌ 关闭时发生错误:', error);
+        process.exit(1);
+    }
 });

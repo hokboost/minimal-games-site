@@ -18,6 +18,33 @@
         </div>
 
         <div class="admin-content">
+            <!-- B站Cookie管理区域 -->
+            <div class="cookie-management" style="
+                background: linear-gradient(135deg, rgba(255, 152, 0, 0.1), rgba(255, 193, 7, 0.05));
+                border: 2px solid #ff9800; border-radius: 15px; padding: 1.5rem; margin-bottom: 2rem;
+            ">
+                <h2 style="color: #ff9800; margin-bottom: 1rem;">🍪 B站Cookie管理</h2>
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <div id="cookieStatus" style="
+                        padding: 0.8rem 1.2rem; border-radius: 8px; font-weight: bold;
+                        background: rgba(158, 158, 158, 0.2); color: #9e9e9e;
+                    ">状态检查中...</div>
+                    
+                    <button onclick="checkCookieStatus()" style="
+                        padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #2196f3, #1976d2);
+                        color: white; border: none; border-radius: 8px; font-weight: bold;
+                        cursor: pointer; transition: all 0.3s ease;
+                    ">🔍 检查状态</button>
+                    
+                    <button onclick="refreshCookies()" style="
+                        padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #ff9800, #f57c00);
+                        color: white; border: none; border-radius: 8px; font-weight: bold;
+                        cursor: pointer; transition: all 0.3s ease;
+                    ">🔄 刷新Cookie</button>
+                </div>
+                <div id="cookieDetails" style="margin-top: 1rem; font-size: 0.9rem; color: #ccc;"></div>
+            </div>
+
             <table class="users-table">
                 <thead>
                     <tr>

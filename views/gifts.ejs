@@ -205,6 +205,73 @@
         <div class="nav-links">
             <a href="/">🏠 返回首页</a>
             <a href="/profile">👤 个人资料</a>
+            <% if (typeof user !== 'undefined' && user && user.is_admin) { %>
+                <a href="javascript:void(0)" onclick="showRoomBinding()">📺 管理直播间</a>
+            <% } %>
+        </div>
+
+        <!-- 房间号绑定模态框 -->
+        <div id="roomBindingModal" style="
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); z-index: 2000; align-items: center; justify-content: center;
+        ">
+            <div style="
+                background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
+                border-radius: 15px; padding: 2rem; max-width: 500px; width: 90%;
+                border: 2px solid #00c853; color: white;
+            ">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <h2 style="margin: 0; color: #00c853;">📺 B站直播间管理</h2>
+                    <button onclick="hideRoomBinding()" style="
+                        background: none; border: none; color: #ccc; font-size: 1.5rem;
+                        cursor: pointer; padding: 0.5rem;
+                    ">&times;</button>
+                </div>
+                
+                <div id="roomBindingContent">
+                    <div style="margin-bottom: 1rem; color: #ccc; line-height: 1.5;">
+                        <strong>管理员专用：</strong>为用户绑定B站直播间号，兑换的礼物将自动发送到对应直播间！
+                    </div>
+                    
+                    <div id="currentRoomInfo" style="margin-bottom: 1rem;"></div>
+                    
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; color: #00c853;">目标用户名:</label>
+                        <input type="text" id="targetUsernameInput" placeholder="请输入用户名 (例: 尧顺宇)"
+                            style="
+                                width: 100%; padding: 0.8rem; border: 1px solid #555;
+                                border-radius: 8px; background: rgba(255,255,255,0.1);
+                                color: white; font-size: 1rem;
+                            "
+                        />
+                    </div>
+                    
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; color: #00c853;">直播间号码:</label>
+                        <input type="text" id="roomIdInput" placeholder="请输入B站直播间号 (例: 3929738)"
+                            style="
+                                width: 100%; padding: 0.8rem; border: 1px solid #555;
+                                border-radius: 8px; background: rgba(255,255,255,0.1);
+                                color: white; font-size: 1rem;
+                            "
+                        />
+                    </div>
+                    
+                    <div style="display: flex; gap: 1rem;">
+                        <button onclick="bindRoom()" style="
+                            flex: 1; padding: 0.8rem; background: linear-gradient(135deg, #00c853, #00bfa5);
+                            color: white; border: none; border-radius: 8px; font-weight: bold;
+                            cursor: pointer; transition: all 0.3s ease;
+                        ">绑定房间</button>
+                        
+                        <button onclick="unbindRoom()" id="unbindBtn" style="
+                            flex: 1; padding: 0.8rem; background: linear-gradient(135deg, #f44336, #d32f2f);
+                            color: white; border: none; border-radius: 8px; font-weight: bold;
+                            cursor: pointer; transition: all 0.3s ease; display: none;
+                        ">解除绑定</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="gifts-grid">
@@ -401,6 +468,158 @@
         setTimeout(() => {
             messageDiv.remove();
         }, 3000);
+    }
+
+    // 房间号绑定相关功能
+    let currentRoomInfo = null;
+    
+    // 显示房间绑定模态框
+    function showRoomBinding() {
+        const modal = document.getElementById('roomBindingModal');
+        modal.style.display = 'flex';
+        loadRoomInfo();
+    }
+    
+    // 隐藏房间绑定模态框
+    function hideRoomBinding() {
+        const modal = document.getElementById('roomBindingModal');
+        modal.style.display = 'none';
+    }
+    
+    // 加载房间信息 (管理员模式 - 显示所有绑定)
+    async function loadRoomInfo() {
+        try {
+            const response = await fetch('/api/bilibili/room');
+            const result = await response.json();
+            
+            const roomInfoDiv = document.getElementById('currentRoomInfo');
+            const unbindBtn = document.getElementById('unbindBtn');
+            
+            if (result.success && result.isAdminView && result.allBindings) {
+                // 显示所有用户的房间绑定信息
+                if (result.allBindings.length > 0) {
+                    roomInfoDiv.innerHTML = `
+                        <div style="padding: 1rem; background: rgba(0, 200, 83, 0.1); border-radius: 8px; border: 1px solid #00c853;">
+                            <div style="color: #00c853; font-weight: bold; margin-bottom: 0.5rem;">📋 当前绑定的用户 (${result.allBindings.length})</div>
+                            ${result.allBindings.map(binding => `
+                                <div style="color: #ccc; margin: 0.3rem 0; padding: 0.3rem; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                    👤 <strong>${binding.username}</strong> → 房间 <strong>${binding.roomId}</strong>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    roomInfoDiv.innerHTML = `
+                        <div style="padding: 1rem; background: rgba(255, 193, 7, 0.1); border-radius: 8px; border: 1px solid #ffc107;">
+                            <div style="color: #ffc107; font-weight: bold;">⚠️ 暂无用户绑定直播间</div>
+                            <div style="color: #ccc; margin-top: 0.5rem;">使用下方表单为用户绑定直播间</div>
+                        </div>
+                    `;
+                }
+                unbindBtn.style.display = 'block';
+            } else {
+                roomInfoDiv.innerHTML = `
+                    <div style="padding: 1rem; background: rgba(244, 67, 54, 0.1); border-radius: 8px; border: 1px solid #f44336;">
+                        <div style="color: #f44336; font-weight: bold;">❌ 加载失败</div>
+                        <div style="color: #ccc; margin-top: 0.5rem;">无法获取房间绑定信息</div>
+                    </div>
+                `;
+                unbindBtn.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('加载房间信息失败:', error);
+            showMessage('加载房间信息失败', 'error');
+        }
+    }
+    
+    // 绑定房间 (管理员模式)
+    async function bindRoom() {
+        const roomId = document.getElementById('roomIdInput').value.trim();
+        const targetUsername = document.getElementById('targetUsernameInput').value.trim();
+        
+        if (!targetUsername) {
+            showMessage('请输入目标用户名', 'error');
+            return;
+        }
+        
+        if (!roomId) {
+            showMessage('请输入房间号', 'error');
+            return;
+        }
+        
+        if (!/^\d{6,12}$/.test(roomId)) {
+            showMessage('房间号格式不正确，应为6-12位数字', 'error');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/bilibili/room', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    roomId: roomId,
+                    targetUsername: targetUsername 
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showMessage(result.message, 'success');
+                loadRoomInfo(); // 重新加载房间信息
+                // 清空输入框
+                document.getElementById('targetUsernameInput').value = '';
+                document.getElementById('roomIdInput').value = '';
+            } else {
+                showMessage(result.message || '绑定失败', 'error');
+            }
+        } catch (error) {
+            console.error('绑定房间失败:', error);
+            showMessage('网络错误，请稍后重试', 'error');
+        }
+    }
+    
+    // 解除绑定 (管理员模式)
+    async function unbindRoom() {
+        const targetUsername = document.getElementById('targetUsernameInput').value.trim();
+        
+        if (!targetUsername) {
+            showMessage('请输入目标用户名', 'error');
+            return;
+        }
+        
+        if (!confirm(`确定要为用户 ${targetUsername} 解除直播间绑定吗？解除后该用户无法自动发送礼物。`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/bilibili/room', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    targetUsername: targetUsername 
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showMessage(result.message, 'success');
+                loadRoomInfo(); // 重新加载房间信息
+                // 清空输入框
+                document.getElementById('targetUsernameInput').value = '';
+                document.getElementById('roomIdInput').value = '';
+            } else {
+                showMessage(result.message || '解除绑定失败', 'error');
+            }
+        } catch (error) {
+            console.error('解除绑定失败:', error);
+            showMessage('网络错误，请稍后重试', 'error');
+        }
     }
 
     // 页面加载完成后加载兑换记录
