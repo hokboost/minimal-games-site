@@ -22,6 +22,7 @@ import sys
 sys.path.append('C:/Users/user/minimal-games-site')
 from bilibili_gift_sender import get_gift_sender
 import json
+import time
 
 try:
     sender = get_gift_sender()
@@ -34,6 +35,13 @@ try:
     result = sender.send_gift("${giftId}", "${roomId}")
     print(json.dumps(result, ensure_ascii=False))
     
+    # 保持浏览器打开，等待用户手动关闭
+    print("Browser will stay open. Check the bilibili page for gift sending result.")
+    print("Press Ctrl+C in the browser window or close it manually when done.")
+    
+    # 不自动退出，让浏览器保持打开
+    input("Press Enter to close browser...")
+    
 except Exception as e:
     print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
 `;
@@ -41,9 +49,22 @@ except Exception as e:
             // 写入临时文件到WSL路径，然后通过Windows访问
             fs.writeFileSync(tempScriptWSL, pythonCode, 'utf8');
             
-            // 使用cmd.exe调用Windows Python，通过WSL路径访问文件
-            const windowsScriptPath = tempScriptWSL.replace('/mnt/c', 'C:').replace(/\//g, '\\');
-            const pythonProcess = spawn('cmd.exe', ['/c', 'python', windowsScriptPath], {
+            // 写入Windows路径的临时脚本
+            const windowsTempScript = `C:/Users/user/minimal-games-site/temp_${Date.now()}.py`;
+            require('fs').writeFileSync(windowsTempScript.replace('C:/', '/mnt/c/'), pythonCode, 'utf8');
+            
+            // 使用cmd运行Python脚本
+            const batContent = `@echo off
+cd /d C:\\Users\\user\\minimal-games-site
+python temp_${Date.now()}.py
+del temp_${Date.now()}.py
+pause`;
+            
+            const batFile = `/mnt/c/Users/user/minimal-games-site/temp_${Date.now()}.bat`;
+            require('fs').writeFileSync(batFile, batContent);
+            
+            // 运行批处理文件
+            const pythonProcess = spawn('/mnt/c/Windows/System32/cmd.exe', ['/c', batFile.replace('/mnt/c/', 'C:\\').replace(/\//g, '\\')], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
