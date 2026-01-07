@@ -345,6 +345,45 @@ socket.on('notification', (notification) => {
 // 监听安全警告
 socket.on('security-alert', (event) => {
     console.log('🚨 收到安全警告:', event);
+    
+    // 如果是被踢出事件，立即跳转到登录页
+    if (event.type === 'device_logout') {
+        console.log('🔄 检测到账号在其他设备登录，即将跳转到登录页');
+        
+        // 显示简短提示后跳转
+        const alertDiv = document.createElement('div');
+        alertDiv.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 68, 68, 0.95);
+            color: white;
+            padding: 2rem;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            z-index: 10000;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        `;
+        alertDiv.innerHTML = `
+            <div>⚠️ 账号安全提醒</div>
+            <div style="margin-top: 1rem; font-size: 0.9rem;">您的账号已在其他设备登录</div>
+            <div style="margin-top: 0.5rem; font-size: 0.8rem;">即将跳转到登录页...</div>
+        `;
+        
+        document.body.appendChild(alertDiv);
+        
+        // 2秒后跳转到登录页
+        setTimeout(() => {
+            window.location.href = '/login?kicked=true';
+        }, 2000);
+        
+        return; // 不执行常规的安全警告显示
+    }
+    
+    // 其他类型的安全警告正常显示
     showSecurityAlert(event);
 });
 
@@ -567,21 +606,6 @@ function startScratchGame() {
         });
 }
 
-// 检查是否有踢出消息需要显示
-document.addEventListener('DOMContentLoaded', function() {
-    <% if (kickoutMessage) { %>
-    // 显示踢出消息弹窗
-    const kickoutData = <%- JSON.stringify(kickoutMessage) %>;
-    console.log('👢 显示踢出消息:', kickoutData);
-    
-    showSecurityAlert({
-        type: kickoutData.type || 'warning',
-        title: kickoutData.title || '账号安全提醒',
-        message: kickoutData.message || '您的账号已在新设备登录',
-        level: 'warning'
-    });
-    <% } %>
-});
 </script>
 <% } %>
 

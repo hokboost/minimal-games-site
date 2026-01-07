@@ -31,6 +31,10 @@
             <div class="success-message">✅ 注册成功！请登录您的账户。</div>
         <% } %>
 
+        <% if (typeof req !== 'undefined' && req.query && req.query.kicked === 'true') { %>
+            <div class="warning-message">⚠️ 您的账号已在其他设备登录，请重新登录。</div>
+        <% } %>
+
         <div class="auth-links">
             没有账号？<a href="/register">点我注册</a>
             <br>
@@ -135,21 +139,16 @@
     .auth-links a:hover {
         color: #00e676;
     }
-    </style>
     
-    <!-- 免责声明 -->
-    <div style="
-        max-width: 600px;
-        margin: 2rem auto;
-        padding: 1rem;
-        background: rgba(255, 255, 255, 0.05);
+    .warning-message {
+        background: rgba(255, 165, 0, 0.1);
+        color: #ff9800;
+        padding: 10px;
+        margin-top: 15px;
         border-radius: 8px;
-        font-size: 0.8rem;
-        color: #ccc;
+        border: 1px solid rgba(255, 165, 0, 0.3);
         text-align: center;
-        line-height: 1.4;
-    ">
-        登录即表示您确认：本平台仅供娱乐，虚拟积分无法兑换真实货币，严禁未满18周岁用户使用。
-    </div>
+    }
+    </style>
 </body>
 </html>
