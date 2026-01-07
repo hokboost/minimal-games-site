@@ -19,6 +19,10 @@ const questions = require('./data/questions');
 const GameLogic = require('./data/gameLogic');
 const BalanceLogger = require('./balance-logger');
 
+// 导入安全管理模块
+const IPManager = require('./ip-manager');
+const SessionManager = require('./session-manager');
+
 // 导入安全中间件
 const security = require('./middleware/security');
 
@@ -98,6 +102,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(mongoSanitize()); // 防止NoSQL注入
+
+// IP风控中间件
+app.use(async (req, res, next) => {
+    const clientIP = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for']?.split(',')[0];
+    const userAgent = req.get('User-Agent') || 'Unknown';
+    
+    // 记录所有请求的IP活动
+    if (req.session && req.session.user) {
+        await IPManager.recordIPActivity(clientIP, req.session.user.username, userAgent, 'request');
+    }
+    
+    // 将IP信息添加到请求对象
+    req.clientIP = clientIP;
+    req.userAgent = userAgent;
+    
+    next();
+});
 
 // ====================
 // 认证系统中间件
@@ -407,9 +428,11 @@ app.post('/register', registerLimiter, async (req, res) => {
     }
 });
 
-// 登录处理
+// 登录处理 - 集成IP风控和单设备登录
 app.post('/login', loginLimiter, async (req, res) => {
     const { username, password, _csrf } = req.body;
+    const clientIP = req.clientIP;
+    const userAgent = req.userAgent;
     
     if (_csrf !== req.session.csrfToken) {
         return res.status(403).send('⚠️ CSRF token 校验失败');
@@ -424,12 +447,34 @@ app.post('/login', loginLimiter, async (req, res) => {
     }
 
     try {
+        // 1. IP风险评估
+        const riskData = await IPManager.getIPRiskScore(clientIP, username);
+        console.log(`登录风险评估 - IP: ${clientIP}, 用户: ${username}, 风险分: ${riskData.score}, 等级: ${riskData.level}`);
+
+        // 2. 高风险IP直接阻断
+        if (IPManager.shouldBlock(riskData)) {
+            await pool.query(`
+                INSERT INTO security_events (event_type, username, ip_address, description, severity)
+                VALUES ('blocked_login_attempt', $1, $2, $3, 'high')
+            `, [username, clientIP, `高风险IP登录被阻断: ${riskData.reasons.join(', ')}`]);
+
+            await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_blocked');
+            
+            return res.status(403).render('login', {
+                title: '登录 - Minimal Games',
+                error: '当前网络环境存在安全风险，请稍后重试',
+                csrfToken: generateCSRFToken(req)
+            });
+        }
+
+        // 3. 检查用户是否存在
         const result = await pool.query(
             'SELECT * FROM users WHERE username = $1', 
             [username]
         );
         
         if (result.rows.length === 0) {
+            await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
             return res.status(401).render('login', {
                 title: '登录 - Minimal Games',
                 error: '用户名或密码错误！',
@@ -440,9 +485,10 @@ app.post('/login', loginLimiter, async (req, res) => {
         const user = result.rows[0];
         const now = new Date();
         
-        // 账户锁定检查
+        // 4. 账户锁定检查
         if (!user.is_admin && user.locked_until && new Date(user.locked_until) > now) {
             const lockMinutes = Math.ceil((new Date(user.locked_until) - now) / 60000);
+            await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_locked');
             return res.status(423).render('login', {
                 title: '登录 - Minimal Games',
                 error: `账户已被锁定，请 ${lockMinutes} 分钟后再试！`,
@@ -450,6 +496,7 @@ app.post('/login', loginLimiter, async (req, res) => {
             });
         }
 
+        // 5. 验证密码
         const isMatch = await bcrypt.compare(password, user.password_hash);
         
         if (!isMatch) {
@@ -468,6 +515,8 @@ app.post('/login', loginLimiter, async (req, res) => {
                     [failures, now, lockUntil, username]
                 );
                 
+                await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
+                
                 const errorMsg = lockUntil ? 
                     `密码错误！账户已被锁定 ${failures-2} 分钟` : 
                     `密码错误！连续错误3次将被锁定 (当前${failures}次)`;
@@ -477,10 +526,17 @@ app.post('/login', loginLimiter, async (req, res) => {
                     error: errorMsg,
                     csrfToken: generateCSRFToken(req)
                 });
+            } else {
+                await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
+                return res.status(401).render('login', {
+                    title: '登录 - Minimal Games',
+                    error: '用户名或密码错误！',
+                    csrfToken: generateCSRFToken(req)
+                });
             }
         }
 
-        // 成功 - 清除失败记录并重新生成session
+        // 6. 登录成功处理
         if (!user.is_admin) {
             await pool.query(
                 'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
@@ -488,25 +544,58 @@ app.post('/login', loginLimiter, async (req, res) => {
             );
         }
         
-        req.session.regenerate(function (err) {
+        // 7. 创建单设备会话（踢出其他设备）
+        req.session.regenerate(async function (err) {
             if (err) {
                 console.error("Session regenerate error:", err);
                 return res.status(500).send("Session error");
             }
             
+            // 8. 设置session
             req.session.user = {
                 id: user.id,
                 username: user.username,
                 authorized: user.authorized,
                 is_admin: user.is_admin
             };
-            
             req.session.username = user.username;
+
+            // 9. 创建单设备会话管理
+            const sessionSuccess = await SessionManager.createSingleDeviceSession(
+                username, req.sessionID, clientIP, userAgent
+            );
+
+            if (!sessionSuccess) {
+                console.error('创建单设备会话失败');
+            }
+
+            // 10. 记录登录日志和活动
+            await Promise.all([
+                pool.query(`
+                    INSERT INTO login_logs (username, ip_address, user_agent, login_result, risk_score)
+                    VALUES ($1, $2, $3, 'success', $4)
+                `, [username, clientIP, userAgent, riskData.score]),
+                
+                IPManager.recordIPActivity(clientIP, username, userAgent, 'login_success')
+            ]);
+
+            // 11. 中高风险登录警告
+            if (riskData.score >= 40) {
+                await pool.query(`
+                    INSERT INTO security_events (event_type, username, ip_address, description, severity)
+                    VALUES ('suspicious_login', $1, $2, $3, 'medium')
+                `, [username, clientIP, `中高风险登录: ${riskData.reasons.join(', ')}`]);
+                
+                console.log(`⚠️ 中高风险登录 - 用户: ${username}, IP: ${clientIP}, 风险分: ${riskData.score}`);
+            }
+            
+            console.log(`✅ 用户 ${username} 登录成功，IP: ${clientIP}, 风险分: ${riskData.score}`);
             res.redirect('/');
         });
 
     } catch (err) {
         console.error('❌ 登录错误:', err);
+        await IPManager.recordIPActivity(clientIP, username || 'unknown', userAgent, 'login_error');
         res.status(500).render('login', {
             title: '登录 - Minimal Games',
             error: '登录失败，请稍后再试。',
@@ -515,8 +604,17 @@ app.post('/login', loginLimiter, async (req, res) => {
     }
 });
 
-// 登出
-app.get('/logout', (req, res) => {
+// 登出 - 清理会话管理
+app.get('/logout', async (req, res) => {
+    const sessionId = req.sessionID;
+    const username = req.session?.user?.username;
+    
+    if (username && sessionId) {
+        // 清理单设备会话管理
+        await SessionManager.terminateSession(sessionId, 'user_logout');
+        console.log(`用户 ${username} 主动登出`);
+    }
+    
     req.session.destroy(() => {
         res.redirect('/');
     });
@@ -827,9 +925,9 @@ app.get('/', async (req, res) => {
         req.session.csrfToken = GameLogic.generateToken(16);
     }
     
-    // 如果用户已登录，获取余额
-    let balance = 0;
-    if (req.session.user) {
+    // 只有已登录且已授权的用户才能获取余额
+    let balance = null;
+    if (req.session.user && req.session.user.authorized) {
         try {
             const result = await pool.query(
                 'SELECT balance FROM users WHERE username = $1',
@@ -1010,6 +1108,8 @@ app.get('/api/user-info', security.basicRateLimit, (req, res) => {
 });
 
 app.post('/api/quiz/next', 
+    requireLogin,
+    requireAuthorized,
     security.basicRateLimit,
     security.csrfProtection,
     (req, res) => {
@@ -1164,7 +1264,7 @@ app.post('/api/quiz/submit',
 });
 
 // Quiz 排行榜 API
-app.get('/api/quiz/leaderboard', async (req, res) => {
+app.get('/api/quiz/leaderboard', requireLogin, requireAuthorized, async (req, res) => {
     try {
         // 修改为只显示每个账号的最高分
         const result = await pool.query(
@@ -1190,7 +1290,7 @@ app.get('/api/quiz/leaderboard', async (req, res) => {
 });
 
 // 余额变动记录 API
-app.get('/api/balance/logs', requireLogin, async (req, res) => {
+app.get('/api/balance/logs', requireLogin, requireAuthorized, async (req, res) => {
     try {
         const username = req.session.user.username;
         const page = parseInt(req.query.page) || 1;
@@ -1611,6 +1711,171 @@ app.post('/api/wish-batch',
     } catch (error) {
         console.error('Batch wish error:', error);
         res.status(500).json({ success: false, message: '批量祈愿系统故障' });
+    }
+});
+
+// ====================
+// IP管理和安全API
+// ====================
+
+// 获取IP风险信息
+app.get('/api/admin/ip/:ip', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const ip = req.params.ip;
+        const [riskData, stats] = await Promise.all([
+            IPManager.getIPRiskScore(ip),
+            IPManager.getIPStats(ip)
+        ]);
+
+        res.json({
+            success: true,
+            ip,
+            riskData,
+            stats
+        });
+    } catch (error) {
+        console.error('获取IP信息失败:', error);
+        res.status(500).json({ success: false, message: '获取IP信息失败' });
+    }
+});
+
+// 添加IP到黑名单
+app.post('/api/admin/ip/blacklist', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { ip, reason } = req.body;
+        const adminUser = req.session.user.username;
+        
+        if (!ip || !reason) {
+            return res.status(400).json({ success: false, message: 'IP和原因不能为空' });
+        }
+
+        const success = await IPManager.addToBlacklist(ip, reason, adminUser);
+        
+        if (success) {
+            console.log(`管理员 ${adminUser} 将IP ${ip} 添加到黑名单: ${reason}`);
+            res.json({ success: true, message: 'IP已添加到黑名单' });
+        } else {
+            res.status(500).json({ success: false, message: '添加黑名单失败' });
+        }
+    } catch (error) {
+        console.error('添加IP黑名单失败:', error);
+        res.status(500).json({ success: false, message: '系统错误' });
+    }
+});
+
+// 添加IP到白名单
+app.post('/api/admin/ip/whitelist', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { ip, reason } = req.body;
+        const adminUser = req.session.user.username;
+        
+        if (!ip || !reason) {
+            return res.status(400).json({ success: false, message: 'IP和原因不能为空' });
+        }
+
+        const success = await IPManager.addToWhitelist(ip, reason, adminUser);
+        
+        if (success) {
+            console.log(`管理员 ${adminUser} 将IP ${ip} 添加到白名单: ${reason}`);
+            res.json({ success: true, message: 'IP已添加到白名单' });
+        } else {
+            res.status(500).json({ success: false, message: '添加白名单失败' });
+        }
+    } catch (error) {
+        console.error('添加IP白名单失败:', error);
+        res.status(500).json({ success: false, message: '系统错误' });
+    }
+});
+
+// 移除IP黑名单
+app.post('/api/admin/ip/remove-blacklist', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { ip } = req.body;
+        const adminUser = req.session.user.username;
+        
+        if (!ip) {
+            return res.status(400).json({ success: false, message: 'IP不能为空' });
+        }
+
+        const success = await IPManager.removeFromBlacklist(ip);
+        
+        if (success) {
+            console.log(`管理员 ${adminUser} 将IP ${ip} 从黑名单移除`);
+            res.json({ success: true, message: 'IP已从黑名单移除' });
+        } else {
+            res.status(500).json({ success: false, message: '移除黑名单失败' });
+        }
+    } catch (error) {
+        console.error('移除IP黑名单失败:', error);
+        res.status(500).json({ success: false, message: '系统错误' });
+    }
+});
+
+// 强制踢出用户所有会话
+app.post('/api/admin/force-logout', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username } = req.body;
+        const adminUser = req.session.user.username;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '用户名不能为空' });
+        }
+
+        const sessionCount = await SessionManager.forceLogoutUser(username, 'admin_force_logout');
+        
+        console.log(`管理员 ${adminUser} 强制注销用户 ${username} 的 ${sessionCount} 个会话`);
+        res.json({ 
+            success: true, 
+            message: `已强制注销用户 ${username} 的 ${sessionCount} 个会话` 
+        });
+    } catch (error) {
+        console.error('强制注销失败:', error);
+        res.status(500).json({ success: false, message: '强制注销失败' });
+    }
+});
+
+// 获取活跃会话列表
+app.get('/api/admin/sessions', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const stats = await SessionManager.getSessionStats();
+        
+        const activeSessions = await pool.query(`
+            SELECT username, ip_address, user_agent, created_at, last_activity
+            FROM active_sessions 
+            WHERE is_active = true 
+            ORDER BY last_activity DESC 
+            LIMIT 50
+        `);
+
+        res.json({
+            success: true,
+            stats,
+            sessions: activeSessions.rows
+        });
+    } catch (error) {
+        console.error('获取会话列表失败:', error);
+        res.status(500).json({ success: false, message: '获取会话列表失败' });
+    }
+});
+
+// 获取安全事件列表
+app.get('/api/admin/security-events', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const events = await pool.query(`
+            SELECT id, event_type, username, ip_address, description, severity, 
+                   handled, handled_by, created_at
+            FROM security_events 
+            ORDER BY created_at DESC 
+            LIMIT 100
+        `);
+
+        res.json({
+            success: true,
+            events: events.rows
+        });
+    } catch (error) {
+        console.error('获取安全事件失败:', error);
+        res.status(500).json({ success: false, message: '获取安全事件失败' });
     }
 });
 

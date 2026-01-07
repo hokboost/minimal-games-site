@@ -213,26 +213,33 @@
 </head>
 <body>
     <div class="container">
-        <% if (typeof user !== 'undefined' && user && user.authorized) { %>
-            <!-- 授权用户：显示完整游戏界面 -->
-            <div class="header">
-                <h1 class="title">🎮 Minimal Games 游戏中心</h1>
-                <div class="user-info">
-                    <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
-                        <span>欢迎，<%= req.session.user.username %>!</span>
-                        <div class="user-menu">
-                            <a href="/profile" class="btn-profile">👤 个人资料</a>
-                            <% if (req.session.user.is_admin) { %>
-                                <a href="/admin" class="btn-admin">👑 管理后台</a>
-                            <% } %>
-                            <a href="/logout" class="btn-logout">🚺 退出登录</a>
-                        </div>
-                    <% } %>
-                </div>
+        <!-- 所有用户都能看到的头部导航 -->
+        <div class="header">
+            <h1 class="title">🎮 Minimal Games 游戏中心</h1>
+            <div class="user-info">
+                <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
+                    <span>欢迎，<%= req.session.user.username %>!</span>
+                    <div class="user-menu">
+                        <a href="/profile" class="btn-profile">👤 个人资料</a>
+                        <% if (req.session.user.is_admin) { %>
+                            <a href="/admin" class="btn-admin">👑 管理后台</a>
+                        <% } %>
+                        <a href="/logout" class="btn-logout">🚺 退出登录</a>
+                    </div>
+                <% } else { %>
+                    <div class="auth-menu">
+                        <a href="/login" class="btn-login">🔐 登录</a>
+                        <a href="/register" class="btn-register">🆕 注册</a>
+                    </div>
+                <% } %>
             </div>
+        </div>
+        
+        <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+            <!-- 授权用户：显示游戏内容 -->
             
             <div class="spins-reminder">
-                <h3>⚡ 电币余额：<%= balance || 0 %> 电币</h3>
+                <h3>⚡ 电币余额：<%= balance !== null ? balance : 0 %> 电币</h3>
                 <p>仅供娱乐，虚拟电币不可兑换真实货币</p>
             </div>
             
