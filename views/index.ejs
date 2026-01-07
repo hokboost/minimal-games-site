@@ -321,16 +321,30 @@
 const socket = io();
 const currentUser = '<%= user.username %>';
 
-// 注册用户WebSocket连接
-socket.emit('register', currentUser);
+// 调试WebSocket连接
+socket.on('connect', () => {
+    console.log('🔗 WebSocket连接成功:', socket.id);
+    // 注册用户WebSocket连接
+    socket.emit('register', currentUser);
+});
+
+socket.on('disconnect', () => {
+    console.log('❌ WebSocket连接断开');
+});
+
+socket.on('connect_error', (error) => {
+    console.error('🚨 WebSocket连接失败:', error);
+});
 
 // 监听通知
 socket.on('notification', (notification) => {
+    console.log('📨 收到通知:', notification);
     showNotification(notification);
 });
 
 // 监听安全警告
 socket.on('security-alert', (event) => {
+    console.log('🚨 收到安全警告:', event);
     showSecurityAlert(event);
 });
 

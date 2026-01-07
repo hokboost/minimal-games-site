@@ -84,15 +84,23 @@ function notifyUser(username, notification) {
 
 // 发送安全警告的辅助函数
 function notifySecurityEvent(username, event) {
+    console.log(`🔔 尝试发送安全警告给用户 ${username}: ${event.type}`);
+    
     if (userSockets.has(username)) {
         const socketIds = userSockets.get(username);
+        console.log(`📡 用户 ${username} 有 ${socketIds.size} 个WebSocket连接`);
+        
+        let sentCount = 0;
         for (const socketId of socketIds) {
             const socket = io.sockets.sockets.get(socketId);
             if (socket) {
                 socket.emit('security-alert', event);
+                sentCount++;
             }
         }
-        console.log(`发送安全警告给用户 ${username}: ${event.type}`);
+        console.log(`✅ 成功发送安全警告给用户 ${username}: ${event.type} (${sentCount}/${socketIds.size})`);
+    } else {
+        console.log(`⚠️ 用户 ${username} 没有活跃的WebSocket连接`);
     }
 }
 
@@ -602,29 +610,29 @@ app.post('/login', loginLimiter, async (req, res) => {
             );
         }
         
-        // 7. 创建单设备会话（踢出其他设备）
+        // 7. 设置session在session.regenerate之前
+        req.session.user = {
+            id: user.id,
+            username: user.username,
+            authorized: user.authorized,
+            is_admin: user.is_admin
+        };
+        req.session.username = user.username;
+
+        // 8. 创建单设备会话管理，带通知功能（在regenerate之前）
+        const sessionSuccess = await SessionManager.createSingleDeviceSession(
+            username, req.sessionID, clientIP, userAgent, notifySecurityEvent
+        );
+
+        if (!sessionSuccess) {
+            console.error('创建单设备会话失败');
+        }
+
+        // 9. 重新生成session ID以提高安全性
         req.session.regenerate(async function (err) {
             if (err) {
                 console.error("Session regenerate error:", err);
                 return res.status(500).send("Session error");
-            }
-            
-            // 8. 设置session
-            req.session.user = {
-                id: user.id,
-                username: user.username,
-                authorized: user.authorized,
-                is_admin: user.is_admin
-            };
-            req.session.username = user.username;
-
-            // 9. 创建单设备会话管理，带通知功能
-            const sessionSuccess = await SessionManager.createSingleDeviceSession(
-                username, req.sessionID, clientIP, userAgent, notifySecurityEvent
-            );
-
-            if (!sessionSuccess) {
-                console.error('创建单设备会话失败');
             }
 
             // 10. 记录登录日志和活动
@@ -1944,6 +1952,49 @@ app.get('/api/admin/security-events', requireLogin, requireAdmin, async (req, re
         console.error('获取安全事件失败:', error);
         res.status(500).json({ success: false, message: '获取安全事件失败' });
     }
+});
+
+// WebSocket测试页面
+app.get('/test-websocket', (req, res) => {
+    res.sendFile(path.join(__dirname, 'test-websocket.html'));
+});
+
+// 测试通知API
+app.post('/api/test/notification', (req, res) => {
+    const { username, type } = req.body;
+    
+    const testNotification = {
+        type: type || 'test',
+        title: '测试通知',
+        message: `这是发送给 ${username} 的测试通知`,
+        level: 'info'
+    };
+    
+    notifyUser(username, testNotification);
+    console.log(`📤 发送测试通知给用户: ${username}`);
+    
+    res.json({ success: true, message: '测试通知已发送' });
+});
+
+// 测试安全警告API
+app.post('/api/test/security-alert', (req, res) => {
+    const { username } = req.body;
+    
+    const testEvent = {
+        type: 'device_logout',
+        title: '测试安全提醒',
+        message: '这是一个测试的设备登录警告',
+        level: 'warning',
+        details: {
+            kickedDevices: 1,
+            timestamp: new Date().toISOString()
+        }
+    };
+    
+    notifySecurityEvent(username, testEvent);
+    console.log(`🚨 发送测试安全警告给用户: ${username}`);
+    
+    res.json({ success: true, message: '测试安全警告已发送' });
 });
 
 // 健康检查

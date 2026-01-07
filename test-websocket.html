@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket通知测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; }
+        button { padding: 10px 20px; margin: 10px; }
+        .log { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+        .notification { margin: 10px 0; padding: 10px; background: #e3f2fd; }
+        .alert { margin: 10px 0; padding: 10px; background: #fff3e0; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket通知测试页面</h1>
+    
+    <div class="test-section">
+        <h3>连接状态</h3>
+        <div id="connection-status">未连接</div>
+        <button onclick="connectWebSocket()">连接WebSocket</button>
+        <button onclick="disconnectWebSocket()">断开连接</button>
+    </div>
+
+    <div class="test-section">
+        <h3>用户注册</h3>
+        <input type="text" id="username" placeholder="输入用户名" value="老六">
+        <button onclick="registerUser()">注册用户</button>
+    </div>
+
+    <div class="test-section">
+        <h3>模拟通知</h3>
+        <button onclick="sendTestNotification()">发送测试通知</button>
+        <button onclick="sendTestSecurityAlert()">发送安全警告</button>
+    </div>
+
+    <div class="test-section">
+        <h3>消息日志</h3>
+        <div id="message-log"></div>
+        <button onclick="clearLog()">清空日志</button>
+    </div>
+
+    <div class="test-section">
+        <h3>通知显示区</h3>
+        <div id="notification-area"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        let socket = null;
+        let currentUser = '';
+
+        function log(message) {
+            const logDiv = document.getElementById('message-log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<div class="log">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function connectWebSocket() {
+            if (socket) {
+                socket.disconnect();
+            }
+
+            socket = io();
+            
+            socket.on('connect', () => {
+                document.getElementById('connection-status').textContent = `已连接 (${socket.id})`;
+                log('🔗 WebSocket连接成功: ' + socket.id);
+            });
+
+            socket.on('disconnect', () => {
+                document.getElementById('connection-status').textContent = '已断开';
+                log('❌ WebSocket连接断开');
+            });
+
+            socket.on('connect_error', (error) => {
+                log('🚨 WebSocket连接失败: ' + error.message);
+            });
+
+            socket.on('notification', (notification) => {
+                log('📨 收到通知: ' + JSON.stringify(notification));
+                showNotification(notification);
+            });
+
+            socket.on('security-alert', (event) => {
+                log('🚨 收到安全警告: ' + JSON.stringify(event));
+                showSecurityAlert(event);
+            });
+        }
+
+        function disconnectWebSocket() {
+            if (socket) {
+                socket.disconnect();
+            }
+        }
+
+        function registerUser() {
+            currentUser = document.getElementById('username').value;
+            if (socket && currentUser) {
+                socket.emit('register', currentUser);
+                log('👤 注册用户: ' + currentUser);
+            } else {
+                alert('请先连接WebSocket并输入用户名');
+            }
+        }
+
+        function sendTestNotification() {
+            if (!currentUser) {
+                alert('请先注册用户');
+                return;
+            }
+
+            // 模拟发送HTTP请求来触发通知
+            fetch('/api/test/notification', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    username: currentUser,
+                    type: 'test_notification'
+                })
+            }).then(response => {
+                log('📤 发送测试通知请求');
+            }).catch(error => {
+                log('❌ 发送失败: ' + error.message);
+            });
+        }
+
+        function sendTestSecurityAlert() {
+            if (!currentUser) {
+                alert('请先注册用户');
+                return;
+            }
+
+            // 直接模拟安全警告
+            const testEvent = {
+                type: 'device_logout',
+                title: '测试安全警告',
+                message: '这是一个测试的设备登录通知',
+                level: 'warning',
+                details: {
+                    kickedDevices: 1,
+                    timestamp: new Date().toISOString()
+                }
+            };
+
+            showSecurityAlert(testEvent);
+            log('🧪 显示测试安全警告');
+        }
+
+        function showNotification(notification) {
+            const area = document.getElementById('notification-area');
+            const div = document.createElement('div');
+            div.className = 'notification';
+            div.innerHTML = `
+                <strong>${notification.title || '通知'}</strong><br>
+                ${notification.message}<br>
+                <small>类型: ${notification.type}</small>
+            `;
+            area.appendChild(div);
+        }
+
+        function showSecurityAlert(event) {
+            const area = document.getElementById('notification-area');
+            const div = document.createElement('div');
+            div.className = 'alert';
+            div.innerHTML = `
+                <strong>⚠️ ${event.title}</strong><br>
+                ${event.message}<br>
+                <small>等级: ${event.level}</small>
+                ${event.details ? `<br><small>设备数: ${event.details.kickedDevices}</small>` : ''}
+            `;
+            area.appendChild(div);
+        }
+
+        function clearLog() {
+            document.getElementById('message-log').innerHTML = '';
+            document.getElementById('notification-area').innerHTML = '';
+        }
+
+        // 页面加载时自动连接
+        window.onload = function() {
+            connectWebSocket();
+        };
+    </script>
+</body>
+</html>
