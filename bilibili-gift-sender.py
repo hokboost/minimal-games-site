@@ -75,6 +75,10 @@ class BilibiliGiftSender:
             else:
                 raise Exception('无法加载cookie文件')
                 
+            # 初始化完成后等待10秒让页面稳定
+            logger.info('⏰ 浏览器初始化完成，等待10秒让页面稳定...')
+            time.sleep(10)
+            
             self.is_initialized = True
             logger.info('✅ B站送礼浏览器初始化完成')
             return True
@@ -139,24 +143,43 @@ class BilibiliGiftSender:
         try:
             logger.info(f'🎁 开始发送礼物，ID: {gift_id}，房间: {room_id}')
             
-            # 确保在正确的房间
+            # 确保在正确的房间（强制重新进入以触发等待）
+            self.current_room = None  # 强制重新进入
             if not self.enter_room(room_id):
                 return {
                     'success': False,
                     'error': '进入直播间失败'
                 }
             
-            # 使用JavaScript点击礼物（参考threeserver）
+            # 页面打开后等待5秒再找礼物
+            logger.info('⏰ 页面打开后等待5秒...')
+            time.sleep(5)
+            
+            # 等待更长时间确保礼物加载（参考threeserver）
+            logger.info('🎁 等待礼物列表加载...')
+            time.sleep(3)
+            
+            # 使用JavaScript点击礼物（完全参考threeserver逻辑）
             result = self.page.evaluate(f'''
                 () => {{
                     const selector = '.gift-id-{gift_id}';
                     const el = document.querySelector(selector);
+                    console.log('Looking for gift with selector:', selector);
+                    console.log('Found element:', el);
+                    
                     if (el) {{
+                        console.log('Gift element found, clicking...');
                         const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
                         el.dispatchEvent(evt);
-                        return {{success: true}};
+                        return {{success: true, selector: selector}};
                     }} else {{
-                        return {{success: false, error: 'Gift element not found'}};
+                        // 调试：查看页面中所有的礼物元素
+                        const allGifts = document.querySelectorAll('[class*="gift"]');
+                        console.log('All gift-related elements found:', allGifts.length);
+                        for (let i = 0; i < Math.min(allGifts.length, 10); i++) {{
+                            console.log('Gift element', i, ':', allGifts[i].className, allGifts[i]);
+                        }}
+                        return {{success: false, error: 'Gift element not found', selector: selector}};
                     }}
                 }}
             ''')

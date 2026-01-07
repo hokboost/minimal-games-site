@@ -13,9 +13,11 @@ class BilibiliGiftSenderPython {
         return new Promise((resolve) => {
             console.log(`🎁 Python版本发送礼物，ID: ${giftId}，房间: ${roomId}`);
             
-            // 创建Python脚本来执行礼物发送
-            const pythonCode = `
-# -*- coding: utf-8 -*-
+            // 创建临时Python文件
+            const fs = require('fs');
+            const tempScriptWSL = path.join(__dirname, 'temp_gift_sender.py');
+            
+            const pythonCode = `# -*- coding: utf-8 -*-
 import sys
 sys.path.append('C:/Users/user/minimal-games-site')
 from bilibili_gift_sender import get_gift_sender
@@ -30,14 +32,18 @@ try:
             sys.exit(1)
     
     result = sender.send_gift("${giftId}", "${roomId}")
-    print(json.dumps(result))
+    print(json.dumps(result, ensure_ascii=False))
     
 except Exception as e:
-    print(json.dumps({"success": False, "error": str(e)}))
+    print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
 `;
 
-            // 执行Python代码 - 使用Windows Python路径
-            const pythonProcess = spawn('/mnt/c/Users/user/AppData/Local/Programs/Python/Python313/python.exe', ['-c', pythonCode], {
+            // 写入临时文件到WSL路径，然后通过Windows访问
+            fs.writeFileSync(tempScriptWSL, pythonCode, 'utf8');
+            
+            // 使用cmd.exe调用Windows Python，通过WSL路径访问文件
+            const windowsScriptPath = tempScriptWSL.replace('/mnt/c', 'C:').replace(/\//g, '\\');
+            const pythonProcess = spawn('cmd.exe', ['/c', 'python', windowsScriptPath], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
@@ -54,6 +60,13 @@ except Exception as e:
             });
 
             pythonProcess.on('close', (code) => {
+                // 清理临时文件
+                try {
+                    fs.unlinkSync(tempScriptWSL);
+                } catch (cleanupError) {
+                    console.warn('清理临时文件失败:', cleanupError.message);
+                }
+                
                 try {
                     if (code === 0 && output.trim()) {
                         // 尝试解析JSON输出
@@ -127,7 +140,7 @@ except Exception as e:
     print(f"Python version initialization error: {e}")
 `;
 
-            const pythonProcess = spawn('/mnt/c/Users/user/AppData/Local/Programs/Python/Python313/python.exe', ['-c', pythonCode], {
+            const pythonProcess = spawn('cmd.exe', ['/c', 'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python313\\python.exe', '-c', pythonCode], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
