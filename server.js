@@ -123,18 +123,9 @@ const requireAuthorized = (req, res, next) => {
 };
 
 const requireAdmin = (req, res, next) => {
-    console.log('🔍 管理员权限检查:', {
-        session_exists: !!req.session.user,
-        user_info: req.session.user,
-        is_admin: req.session.user?.is_admin
-    });
-    
     if (!req.session.user || !req.session.user.is_admin) {
-        console.log('❌ 管理员权限被拒绝');
         return res.status(403).send("🚫 无权访问管理员后台");
     }
-    
-    console.log('✅ 管理员权限验证通过');
     next();
 };
 
@@ -317,6 +308,13 @@ app.get('/profile', requireLogin, async (req, res) => {
 // 管理员后台
 app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
     try {
+        // 初始化session
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            req.session.csrfToken = GameLogic.generateToken(16);
+        }
+        
         const usersResult = await pool.query(
             'SELECT username, balance, spins_allowed, authorized, is_admin, login_failures, last_failure_time, locked_until FROM users ORDER BY username'
         );
@@ -331,7 +329,8 @@ app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
             title: '管理后台 - Minimal Games',
             user: req.session.user,
             userLoggedIn: req.session.user?.username,
-            users: users
+            users: users,
+            csrfToken: req.session.csrfToken
         });
     } catch (err) {
         console.error('❌ 管理员页面加载失败:', err);
@@ -488,13 +487,6 @@ app.post('/login', loginLimiter, async (req, res) => {
             };
             
             req.session.username = user.username;
-            
-            console.log('✅ 用户登录成功:', {
-                username: user.username,
-                is_admin: user.is_admin,
-                authorized: user.authorized,
-                session_user: req.session.user
-            });
             res.redirect('/');
         });
 

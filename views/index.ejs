@@ -200,9 +200,9 @@
                 <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
                     <span>欢迎，<%= req.session.user.username %>!</span>
                     <div class="user-menu">
-                        <a href="/profile" class="btn-profile" onclick="console.log('个人资料按钮被点击'); return true;">👤 个人资料</a>
+                        <a href="/profile" class="btn-profile">👤 个人资料</a>
                         <% if (req.session.user.is_admin) { %>
-                            <a href="/admin" class="btn-admin" onclick="console.log('管理后台按钮被点击'); return true;">👑 管理后台</a>
+                            <a href="/admin" class="btn-admin">👑 管理后台</a>
                         <% } %>
                         <a href="/logout" class="btn-logout">🚺 退出登录</a>
                     </div>
