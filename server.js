@@ -1062,11 +1062,11 @@ app.post('/api/quiz/submit',
             }
         }
         
-        // 存储到数据库
+        // 存储到数据库 - 对齐kingboost格式
         try {
             await pool.query(
-                'INSERT INTO submissions (username, score, total_questions, submitted_at) VALUES ($1, $2, $3, NOW())',
-                [username, correctCount, answers.length]
+                'INSERT INTO submissions (username, score, submitted_at) VALUES ($1, $2, NOW())',
+                [username, correctCount]
             );
         } catch (dbError) {
             console.error('数据库存储失败:', dbError);
@@ -1108,6 +1108,7 @@ app.post('/api/quiz/submit',
 // Quiz 排行榜 API
 app.get('/api/quiz/leaderboard', async (req, res) => {
     try {
+        // 对齐kingboost的排行榜查询
         const result = await pool.query(
             `SELECT username, score, submitted_at 
              FROM submissions 
