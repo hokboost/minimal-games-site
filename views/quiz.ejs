@@ -39,11 +39,11 @@
 
         <div id="result" class="result-section"></div>
 
-        <div id="leaderboard" class="leaderboard-section" style="display: none;">
+        <div id="leaderboard" class="leaderboard-section">
             <h2>🏆 今日排行榜</h2>
             <div class="refresh-controls">
                 <button class="refresh-btn" onclick="loadLeaderboard()">🔄 刷新排行榜</button>
-                <button class="refresh-btn" onclick="backToResult()" style="margin-left: 10px; background: #2196f3;">📊 返回结果</button>
+                <button class="refresh-btn" onclick="backToResult()" style="margin-left: 10px; background: #2196f3; display: none;" id="back-to-result-btn">📊 返回结果</button>
                 <small style="display: block; margin-top: 5px;">排行榜每日重置</small>
             </div>
             <table class="leaderboard-table">
@@ -704,6 +704,11 @@
             document.getElementById('leaderboard-body').innerHTML = '<tr><td colspan="4">加载排行榜失败</td></tr>';
         }
     }
+    
+    // 页面加载完成后自动加载排行榜
+    document.addEventListener('DOMContentLoaded', function() {
+        loadLeaderboard();
+    });
     </script>
 </body>
 </html>

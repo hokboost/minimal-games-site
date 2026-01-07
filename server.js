@@ -1232,7 +1232,7 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
         
         const currentBalance = parseFloat(result.rows[0].balance);
         
-        // 新的中奖逻辑：期望值等于投注金额
+        // 按用户要求的中奖梯度：
         // 5元：50%中5元，20%中10元，1%中20元，29%不中
         // 10元：50%中10元，20%中20元，1%中40元，29%不中  
         // 100元：50%中100元，20%中200元，1%中400元，29%不中
@@ -1272,27 +1272,40 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             winningNumbers.push(Math.floor(Math.random() * 100) + 1);
         }
         
-        // 生成我的号码区域
+        // 生成我的号码区域 - 修复中奖金额显示逻辑
         const userSlots = [];
+        let matchedCount = 0;
+        
+        // 定义奖励金额梯度
+        const rewardAmounts = {
+            5: [5, 10, 15, 20, 25, 30, 50],     // 5电币档位奖励
+            10: [10, 20, 30, 40, 50, 80, 100],  // 10电币档位奖励
+            100: [100, 200, 300, 500, 800, 1000, 1500] // 100电币档位奖励
+        };
+        
+        const tierRewards = rewardAmounts[tier] || [tier, tier*2, tier*3, tier*4, tier*5, tier*8, tier*10];
+        
         for (let i = 0; i < selectedTier.userCount; i++) {
-            // 根据中奖概率决定是否匹配中奖号码
             let num;
-            if (payout > 0 && userSlots.filter(s => winningNumbers.includes(s.num)).length === 0) {
-                // 如果应该中奖且还没有匹配的号码，至少给一个匹配
+            let prize;
+            
+            // 如果应该中奖且还没有匹配号码
+            if (payout > 0 && matchedCount === 0) {
                 num = winningNumbers[Math.floor(Math.random() * winningNumbers.length)];
-            } else if (Math.random() < 0.1) {
-                // 10%概率随机匹配（增加刺激感）
-                num = winningNumbers[Math.floor(Math.random() * winningNumbers.length)];
+                prize = `${payout} 电币`; // 使用实际中奖金额
+                matchedCount++;
             } else {
-                // 生成不匹配的号码
+                // 生成不匹配的号码，显示诱人的大金额
                 do {
                     num = Math.floor(Math.random() * 100) + 1;
                 } while (winningNumbers.includes(num));
+                const bigReward = tierRewards[Math.floor(Math.random() * Math.min(4, tierRewards.length))];
+                prize = `${bigReward} 电币`;
             }
             
             userSlots.push({
                 num: num,
-                prize: winningNumbers.includes(num) ? `${payout} 电币` : '谢谢参与'
+                prize: prize
             });
         }
         
