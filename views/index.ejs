@@ -213,128 +213,101 @@
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1 class="title">🎮 Minimal Games 游戏中心</h1>
-            <div class="user-info">
-                <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
-                    <span>欢迎，<%= req.session.user.username %>!</span>
-                    <div class="user-menu">
-                        <a href="/profile" class="btn-profile">👤 个人资料</a>
-                        <% if (req.session.user.is_admin) { %>
-                            <a href="/admin" class="btn-admin">👑 管理后台</a>
-                        <% } %>
-                        <a href="/logout" class="btn-logout">🚺 退出登录</a>
-                    </div>
-                <% } else { %>
-                    <div class="auth-menu">
-                        <a href="/login" class="btn-login">🔐 登录</a>
-                        <a href="/register" class="btn-register">🆕 注册</a>
-                    </div>
-                <% } %>
-            </div>
-        </div>
-        
-        <!-- 任务转盘功能暂时隐藏
-        <div class="trigger-rules">
-            <h2>🎡 转盘触发规则</h2>
-            <div class="rules-grid">
-                <div class="rule-item">
-                    <span class="rule-icon">⏰</span>
-                    <div class="rule-text">
-                        <strong>定时触发：</strong><br>
-                        如果过去30分钟没有转盘，强制触发一次
-                    </div>
-                </div>
-                <div class="rule-item">
-                    <span class="rule-icon">🎁</span>
-                    <div class="rule-text">
-                        <strong>礼物累计：</strong><br>
-                        礼物累计到500票触发一次转盘
-                    </div>
-                </div>
-                <div class="rule-item">
-                    <span class="rule-icon">⚓</span>
-                    <div class="rule-text">
-                        <strong>指定特权：</strong><br>
-                        单人送礼500票可指定转盘任务
-                    </div>
+        <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+            <!-- 授权用户：显示完整游戏界面 -->
+            <div class="header">
+                <h1 class="title">🎮 Minimal Games 游戏中心</h1>
+                <div class="user-info">
+                    <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
+                        <span>欢迎，<%= req.session.user.username %>!</span>
+                        <div class="user-menu">
+                            <a href="/profile" class="btn-profile">👤 个人资料</a>
+                            <% if (req.session.user.is_admin) { %>
+                                <a href="/admin" class="btn-admin">👑 管理后台</a>
+                            <% } %>
+                            <a href="/logout" class="btn-logout">🚺 退出登录</a>
+                        </div>
+                    <% } %>
                 </div>
             </div>
-        </div>
-        -->
-        
-        <% if (typeof user !== 'undefined' && user) { %>
+            
             <div class="spins-reminder">
                 <h3>⚡ 电币余额：<%= balance || 0 %> 电币</h3>
                 <p>仅供娱乐，虚拟电币不可兑换真实货币</p>
             </div>
+            
+            <div class="games-grid">
+                <a href="/quiz" class="game-card">
+                    <span class="game-icon">🧠</span>
+                    <h2 class="game-title">知识问答</h2>
+                    <p class="game-description">测试你的知识，答对越多奖励越丰厚</p>
+                    <span class="game-status status-hot">🔥 热门</span>
+                </a>
+                
+                <a href="javascript:void(0)" onclick="startSlotGame()" class="game-card">
+                    <span class="game-icon">🎰</span>
+                    <h2 class="game-title">幸运老虎机</h2>
+                    <p class="game-description">经典老虎机游戏，三个相同图案即可获胜</p>
+                    <span class="game-status status-classic">⭐ 经典</span>
+                </a>
+                
+                <a href="javascript:void(0)" onclick="startScratchGame()" class="game-card">
+                    <span class="game-icon">🎟️</span>
+                    <h2 class="game-title">刮刮乐</h2>
+                    <p class="game-description">刮开涂层，发现隐藏的奖励，简单又刺激</p>
+                    <span class="game-status status-classic">⭐ 经典</span>
+                </a>
+                
+                <div class="game-card game-card-disabled">
+                    <span class="game-icon">🌟</span>
+                    <h2 class="game-title">许愿星</h2>
+                    <p class="game-description">许下心愿，看看幸运女神是否眷顾你</p>
+                    <span class="game-status status-developing">🔧 开发中</span>
+                </div>
+            </div>
+            
+            <!-- 免责声明 -->
+            <div style="
+                max-width: 800px;
+                margin: 3rem auto 0;
+                padding: 1.5rem;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 10px;
+                font-size: 0.9rem;
+                color: #ccc;
+                text-align: center;
+                line-height: 1.6;
+            ">
+                <div style="margin-bottom: 10px; font-weight: bold; color: #ff9800;">
+                    ⚠️ 重要声明
+                </div>
+                本平台所有游戏功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币交易。<br>
+                平台内虚拟积分、余额等均为娱乐道具，无法兑换为真实货币或有价物品。<br>
+                参与完全免费，无需任何付费，符合中华人民共和国相关法律法规。<br>
+                <strong>严禁未满18周岁用户使用，请理性娱乐，适度游戏。</strong>
+            </div>
+        <% } else { %>
+            <!-- 未登录或未授权用户：只显示网站功能开发中 -->
+            <div style="
+                text-align: center;
+                padding: 4rem 2rem;
+                margin: 2rem 0;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            ">
+                <div style="font-size: 4rem; margin-bottom: 1.5rem;">🚧</div>
+                <h2 style="color: #ff9800; margin-bottom: 1rem;">网站功能开发中</h2>
+                <p style="color: #ccc; font-size: 1.1rem; line-height: 1.6;">
+                    敬请期待正式版本的上线
+                </p>
+            </div>
         <% } %>
-
-        <div class="games-grid">
-            <!-- 任务转盘游戏暂时隐藏
-            <a href="javascript:void(0)" onclick="startSpinGame()" class="game-card">
-                <span class="game-icon">🎡</span>
-                <h2 class="game-title">幸运转盘</h2>
-                <p class="game-description">转动幸运转盘，赢取丰厚奖励和游戏次数</p>
-                <span class="game-status status-hot">🔥 热门</span>
-            </a>
-            -->
-            
-            <a href="/quiz" class="game-card">
-                <span class="game-icon">🧠</span>
-                <h2 class="game-title">知识问答</h2>
-                <p class="game-description">测试你的知识，答对越多奖励越丰厚</p>
-                <span class="game-status status-hot">🔥 热门</span>
-            </a>
-            
-            <a href="javascript:void(0)" onclick="startSlotGame()" class="game-card">
-                <span class="game-icon">🎰</span>
-                <h2 class="game-title">幸运老虎机</h2>
-                <p class="game-description">经典老虎机游戏，三个相同图案即可获胜</p>
-                <span class="game-status status-classic">⭐ 经典</span>
-            </a>
-            
-            <a href="javascript:void(0)" onclick="startScratchGame()" class="game-card">
-                <span class="game-icon">🎟️</span>
-                <h2 class="game-title">刮刮乐</h2>
-                <p class="game-description">刮开涂层，发现隐藏的奖励，简单又刺激</p>
-                <span class="game-status status-classic">⭐ 经典</span>
-            </a>
-            
-            <div class="game-card game-card-disabled">
-                <span class="game-icon">🌟</span>
-                <h2 class="game-title">许愿星</h2>
-                <p class="game-description">许下心愿，看看幸运女神是否眷顾你</p>
-                <span class="game-status status-developing">🔧 开发中</span>
-            </div>
-        </div>
-        
-        <!-- 免责声明 -->
-        <div style="
-            max-width: 800px;
-            margin: 3rem auto 0;
-            padding: 1.5rem;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            font-size: 0.9rem;
-            color: #ccc;
-            text-align: center;
-            line-height: 1.6;
-        ">
-            <div style="margin-bottom: 10px; font-weight: bold; color: #ff9800;">
-                ⚠️ 重要声明
-            </div>
-            本平台所有游戏功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币交易。<br>
-            平台内虚拟积分、余额等均为娱乐道具，无法兑换为真实货币或有价物品。<br>
-            参与完全免费，无需任何付费，符合中华人民共和国相关法律法规。<br>
-            <strong>严禁未满18周岁用户使用，请理性娱乐，适度游戏。</strong>
-        </div>
     </div>
 
+<% if (typeof user !== 'undefined' && user && user.authorized) { %>
 <script>
-// 游戏服务器预热和跳转函数
-
 function createLoadingModal(gameName, iconEmoji, serverUrl) {
     const loadingModal = document.createElement('div');
     loadingModal.style.cssText = `
@@ -383,76 +356,36 @@ function createLoadingModal(gameName, iconEmoji, serverUrl) {
 function startSlotGame() {
     const modal = createLoadingModal('幸运老虎机', '🎰', 'https://slot-server-9682.onrender.com');
     
-    // 预热服务器
     fetch("https://slot-server-9682.onrender.com/ping")
         .then(() => {
             setTimeout(() => {
                 window.location.href = "/slot";
-            }, 3000); // 3秒后跳转
+            }, 3000);
         })
         .catch(() => {
-            // 即使ping失败也跳转，让老虎机页面处理
             setTimeout(() => {
                 window.location.href = "/slot";
-            }, 15000); // 15秒后跳转
+            }, 15000);
         });
 }
 
 function startScratchGame() {
     const modal = createLoadingModal('刮刮乐', '🎟️', 'https://scratch-server-vmit.onrender.com');
     
-    // 预热服务器
     fetch("https://scratch-server-vmit.onrender.com/ping")
         .then(() => {
             setTimeout(() => {
                 window.location.href = "/scratch";
-            }, 3000); // 3秒后跳转
+            }, 3000);
         })
         .catch(() => {
-            // 即使ping失败也跳转，让刮刮乐页面处理
             setTimeout(() => {
                 window.location.href = "/scratch";
-            }, 15000); // 15秒后跳转
-        });
-}
-
-// 许愿星功能暂时不可用 - 后台服务器开发中
-// function startWishGame() {
-//     const modal = createLoadingModal('许愿星', '🌟', 'https://wish-server.onrender.com');
-//     
-//     // 预热服务器
-//     fetch("https://wish-server.onrender.com/ping")
-//         .then(() => {
-//             setTimeout(() => {
-//                 window.location.href = "/wish";
-//             }, 3000); // 3秒后跳转
-//         })
-//         .catch(() => {
-//             // 即使ping失败也跳转，让许愿星页面处理
-//             setTimeout(() => {
-//                 window.location.href = "/wish";
-//             }, 15000); // 15秒后跳转
-//         });
-// }
-
-function startSpinGame() {
-    const modal = createLoadingModal('幸运转盘', '🎡', 'https://secure-spin-server.onrender.com');
-    
-    // 预热服务器
-    fetch("https://secure-spin-server.onrender.com/ping")
-        .then(() => {
-            setTimeout(() => {
-                window.location.href = "/spin";
-            }, 3000); // 3秒后跳转
-        })
-        .catch(() => {
-            // 即使ping失败也跳转，让转盘页面处理
-            setTimeout(() => {
-                window.location.href = "/spin";
-            }, 15000); // 15秒后跳转
+            }, 15000);
         });
 }
 </script>
+<% } %>
 
 </body>
 </html>

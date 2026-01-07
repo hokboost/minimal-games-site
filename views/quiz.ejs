@@ -56,7 +56,6 @@
             <h2>🏆 今日排行榜</h2>
             <div class="refresh-controls">
                 <button class="refresh-btn" onclick="loadLeaderboard()">🔄 刷新排行榜</button>
-                <button class="refresh-btn" onclick="backToResult()" style="margin-left: 10px; background: #2196f3; display: none;" id="back-to-result-btn">📊 返回结果</button>
                 <small style="display: block; margin-top: 5px;">排行榜显示每个用户最高分</small>
             </div>
             <table class="leaderboard-table">
@@ -641,16 +640,6 @@
                     cursor: pointer;
                 ">🔄 再来一次 (消耗10电币)</button>
                 
-                <button onclick="showLeaderboard()" style="
-                    background: linear-gradient(45deg, #ff9800, #f57c00);
-                    color: white;
-                    border: none;
-                    padding: 12px 24px;
-                    font-size: 16px;
-                    border-radius: 25px;
-                    cursor: pointer;
-                ">🏆 查看排行榜</button>
-                
                 <button onclick="backToHome()" style="
                     background: linear-gradient(45deg, #2196f3, #1976d2);
                     color: white;
@@ -664,41 +653,35 @@
         `;
         
         resultDiv.innerHTML = resultHTML;
+        
+        // 参考kingboost逻辑：显示结果后自动显示排行榜
+        setTimeout(() => {
+            // 显示当前局结果在排行榜上方
+            document.getElementById('current-game-result').style.display = 'block';
+            document.getElementById('current-score').textContent = `本局得分：${score}/${total} 分 (${percentage}%)`;
+            document.getElementById('current-reward').textContent = `获得电币：${reward} 电币`;
+            
+            // 显示排行榜
+            document.getElementById('leaderboard').style.display = 'block';
+            loadLeaderboard();
+        }, 1000); // 1秒后显示排行榜
     }
 
     function restartQuiz() {
         document.getElementById('result').style.display = 'none';
+        document.getElementById('leaderboard').style.display = 'none';
+        document.getElementById('current-game-result').style.display = 'none';
         document.getElementById('user-section').style.display = 'block';
+        
+        // 清理上局数据
+        window.lastGameResult = null;
     }
     
-    function showLeaderboard() {
-        // 隐藏结果页面，显示排行榜
-        document.getElementById('result').style.display = 'none';
-        document.getElementById('leaderboard').style.display = 'block';
-        
-        // 显示当前局结果
-        if (window.lastGameResult) {
-            document.getElementById('current-game-result').style.display = 'block';
-            document.getElementById('current-score').textContent = `本局得分：${window.lastGameResult.score}/${window.lastGameResult.total} 分`;
-            document.getElementById('current-reward').textContent = `获得电币：${window.lastGameResult.reward} 电币`;
-            
-            // 显示返回结果按钮
-            document.getElementById('back-to-result-btn').style.display = 'inline-block';
-        }
-        
-        // 刷新排行榜数据
-        loadLeaderboard();
-    }
     
     function backToHome() {
         window.location.href = '/';
     }
     
-    function backToResult() {
-        // 隐藏排行榜，显示结果页面
-        document.getElementById('leaderboard').style.display = 'none';
-        document.getElementById('result').style.display = 'block';
-    }
 
     async function loadLeaderboard() {
         try {

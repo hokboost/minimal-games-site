@@ -583,19 +583,30 @@ app.post('/api/admin/add-electric-coin', requireLogin, requireAdmin, async (req,
             return res.status(400).json({ success: false, message: '单次添加不能超过100,000电币' });
         }
         
-        const result = await pool.query(
-            'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
-            [amount, username]
-        );
+        // 使用余额日志系统进行管理员充值
+        const balanceResult = await BalanceLogger.updateBalance({
+            username: username,
+            amount: parseFloat(amount),
+            operationType: 'admin_add',
+            description: `管理员充值：添加 ${amount} 电币`,
+            gameData: {
+                admin_user: req.session.user.username,
+                amount: amount,
+                type: 'manual_recharge'
+            },
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent'),
+            requireSufficientBalance: false
+        });
         
-        if (result.rows.length === 0) {
-            return res.status(404).json({ success: false, message: '用户不存在' });
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
         }
         
         res.json({ 
             success: true, 
-            newBalance: parseFloat(result.rows[0].balance),
-            addedAmount: amount
+            newBalance: balanceResult.balance,
+            addedAmount: parseFloat(amount)
         });
     } catch (error) {
         console.error('添加电币失败:', error);
@@ -1241,17 +1252,21 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
             return res.status(400).json({ success: false, message: '投注金额必须在1-1000电币之间' });
         }
         
-        // 检查并扣除电币
-        const result = await pool.query(
-            'UPDATE users SET balance = balance - $1 WHERE username = $2 AND balance >= $1 RETURNING balance',
-            [betAmount, username]
-        );
+        // 扣除投注电币
+        const betResult = await BalanceLogger.updateBalance({
+            username: username,
+            amount: -betAmount,
+            operationType: 'slot_bet',
+            description: `老虎机投注：${betAmount} 电币`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
         
-        if (result.rows.length === 0) {
-            return res.status(400).json({ success: false, message: '电币不足' });
+        if (!betResult.success) {
+            return res.status(400).json({ success: false, message: betResult.message });
         }
         
-        const currentBalance = parseFloat(result.rows[0].balance);
+        const currentBalance = betResult.balance;
         
         // 生成游戏结果 - 5种结果各20%概率
         const outcomes = [
@@ -1268,13 +1283,29 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
         // 计算奖励
         const payout = Math.floor(betAmount * outcome.multiplier);
         
-        // 更新用户余额
-        const finalResult = await pool.query(
-            'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
-            [payout, username]
-        );
-        
-        const finalBalance = parseFloat(finalResult.rows[0].balance);
+        // 发放奖励电币
+        let finalBalance = currentBalance;
+        if (payout > 0) {
+            const winResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: payout,
+                operationType: 'slot_win',
+                description: `老虎机中奖：${outcome.type}，获得 ${payout} 电币`,
+                gameData: {
+                    bet_amount: betAmount,
+                    outcome: outcome.type,
+                    multiplier: outcome.multiplier,
+                    payout: payout
+                },
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                requireSufficientBalance: false
+            });
+            
+            if (winResult.success) {
+                finalBalance = winResult.balance;
+            }
+        }
         
         // 存储游戏记录到slot_results表（对齐kingboost格式）
         try {
@@ -1336,17 +1367,21 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             return res.status(400).json({ success: false, message: '无效的游戏档位' });
         }
         
-        // 检查并扣除电币
-        const result = await pool.query(
-            'UPDATE users SET balance = balance - $1 WHERE username = $2 AND balance >= $1 RETURNING balance',
-            [tier, username]
-        );
+        // 扣除投注电币
+        const betResult = await BalanceLogger.updateBalance({
+            username: username,
+            amount: -tier,
+            operationType: 'scratch_bet',
+            description: `刮刮乐投注：${tier} 电币 (${selectedTier.winCount}中奖+${selectedTier.userCount}我的)`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
         
-        if (result.rows.length === 0) {
-            return res.status(400).json({ success: false, message: '电币不足' });
+        if (!betResult.success) {
+            return res.status(400).json({ success: false, message: betResult.message });
         }
         
-        const currentBalance = parseFloat(result.rows[0].balance);
+        const currentBalance = betResult.balance;
         
         // 按用户要求的中奖梯度：
         // 5元：50%中5元，20%中10元，1%中20元，29%不中
@@ -1374,13 +1409,29 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             outcomeType = '未中奖';
         }
         
-        // 更新用户余额
-        const finalResult = await pool.query(
-            'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
-            [payout, username]
-        );
-        
-        const finalBalance = parseFloat(finalResult.rows[0].balance);
+        // 发放奖励电币
+        let finalBalance = currentBalance;
+        if (payout > 0) {
+            const winResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: payout,
+                operationType: 'scratch_win',
+                description: `刮刮乐中奖：${outcomeType}，获得 ${payout} 电币`,
+                gameData: {
+                    tier: tier,
+                    outcome: outcomeType,
+                    payout: payout,
+                    tier_config: selectedTier
+                },
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                requireSufficientBalance: false
+            });
+            
+            if (winResult.success) {
+                finalBalance = winResult.balance;
+            }
+        }
         
         // 生成刮刮乐显示内容 - 修复为正确的号码配置
         const winningNumbers = [];
