@@ -1208,14 +1208,14 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             return res.status(403).json({ success: false, message: '用户名不匹配' });
         }
         
-        // 验证档位参数 - 修复winCount根据档位设置
+        // 验证档位参数 - 修复为正确的号码配置逻辑
         const validTiers = [
-            { cost: 5, winCount: 5 },   // 5元档位，5个中奖号码
-            { cost: 10, winCount: 10 }, // 10元档位，10个中奖号码  
-            { cost: 100, winCount: 20 } // 100元档位，20个中奖号码
+            { cost: 5, winCount: 5, userCount: 5 },    // 5元：5个中奖号码，5个我的号码
+            { cost: 10, winCount: 5, userCount: 10 },  // 10元：5个中奖号码，10个我的号码  
+            { cost: 100, winCount: 5, userCount: 20 }  // 100元：5个中奖号码，20个我的号码
         ];
         
-        const selectedTier = validTiers.find(t => t.cost === tier && t.winCount === winCount);
+        const selectedTier = validTiers.find(t => t.cost === tier);
         if (!selectedTier) {
             return res.status(400).json({ success: false, message: '无效的游戏档位' });
         }
@@ -1266,25 +1266,33 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
         
         const finalBalance = parseFloat(finalResult.rows[0].balance);
         
-        // 生成刮刮乐显示内容
+        // 生成刮刮乐显示内容 - 修复为正确的号码配置
         const winningNumbers = [];
-        for (let i = 0; i < winCount; i++) {
+        for (let i = 0; i < selectedTier.winCount; i++) {
             winningNumbers.push(Math.floor(Math.random() * 100) + 1);
         }
         
-        // 生成非中奖区域 - 显示各种诱人的金额
-        const slots = [];
-        const attractiveAmounts = [
-            1000, 2000, 5000, 10000, 20000, 50000, 100000, 
-            500000, 1000000, 2000000, 5000000, 10000000, 
-            88888, 66666, 99999, 168000, 888888, 666666
-        ];
-        
-        for (let i = 0; i < (25 - winCount); i++) {
-            const randomAmount = attractiveAmounts[Math.floor(Math.random() * attractiveAmounts.length)];
-            slots.push({
-                num: Math.floor(Math.random() * 100) + 1,
-                prize: `${randomAmount} 电币`
+        // 生成我的号码区域
+        const userSlots = [];
+        for (let i = 0; i < selectedTier.userCount; i++) {
+            // 根据中奖概率决定是否匹配中奖号码
+            let num;
+            if (payout > 0 && userSlots.filter(s => winningNumbers.includes(s.num)).length === 0) {
+                // 如果应该中奖且还没有匹配的号码，至少给一个匹配
+                num = winningNumbers[Math.floor(Math.random() * winningNumbers.length)];
+            } else if (Math.random() < 0.1) {
+                // 10%概率随机匹配（增加刺激感）
+                num = winningNumbers[Math.floor(Math.random() * winningNumbers.length)];
+            } else {
+                // 生成不匹配的号码
+                do {
+                    num = Math.floor(Math.random() * 100) + 1;
+                } while (winningNumbers.includes(num));
+            }
+            
+            userSlots.push({
+                num: num,
+                prize: winningNumbers.includes(num) ? `${payout} 电币` : '谢谢参与'
             });
         }
         
@@ -1295,7 +1303,7 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             newBalance: currentBalance,
             finalBalance: finalBalance,
             winningNumbers: winningNumbers,
-            slots: slots
+            slots: userSlots  // 使用新的userSlots
         });
         
     } catch (error) {

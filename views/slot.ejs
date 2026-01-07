@@ -404,19 +404,17 @@
     }
     
     function generateReelsForOutcome(outcome) {
-        const symbols = ['🍎', '🍊', '🍋', '🍇', '🍓'];
+        const betAmount = parseInt(document.getElementById('bet-amount').value) || 10;
+        const spinNumbers = generateSpinNumbers(betAmount);
         
-        if (outcome === '不亏不赚' || outcome.includes('×')) {
-            // 显示三个相同符号表示获胜
-            const symbol = symbols[Math.floor(Math.random() * symbols.length)];
-            return [symbol, symbol, symbol];
+        if (outcome === '不亏不赚' || outcome.includes('×') || outcome.includes('中奖')) {
+            // 显示三个相同数字表示获胜
+            const number = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
+            return [number.toString(), number.toString(), number.toString()];
         } else {
-            // 显示不同符号表示失败
-            return [
-                symbols[Math.floor(Math.random() * symbols.length)],
-                symbols[Math.floor(Math.random() * symbols.length)],
-                symbols[Math.floor(Math.random() * symbols.length)]
-            ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3);
+            // 显示三个不同数字表示失败
+            const shuffled = [...spinNumbers].sort(() => Math.random() - 0.5);
+            return [shuffled[0].toString(), shuffled[1].toString(), shuffled[2].toString()];
         }
     }
 

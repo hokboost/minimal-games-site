@@ -378,17 +378,17 @@
                     <button class="tier-btn" data-cost="5" data-wins="5">
                         🎟️ 普通版<br>
                         <span class="tier-cost">5 电币</span><br>
-                        <span class="tier-detail">5个中奖号码</span>
+                        <span class="tier-detail">5个中奖号码+5个我的号码</span>
                     </button>
-                    <button class="tier-btn" data-cost="10" data-wins="10">
+                    <button class="tier-btn" data-cost="10" data-wins="5">
                         🎆 进阶版<br>
                         <span class="tier-cost">10 电币</span><br>
-                        <span class="tier-detail">10个中奖号码</span>
+                        <span class="tier-detail">5个中奖号码+10个我的号码</span>
                     </button>
-                    <button class="tier-btn" data-cost="100" data-wins="20">
+                    <button class="tier-btn" data-cost="100" data-wins="5">
                         💰 豪华版<br>
                         <span class="tier-cost">100 电币</span><br>
-                        <span class="tier-detail">20个中奖号码</span>
+                        <span class="tier-detail">5个中奖号码+20个我的号码</span>
                     </button>
                 </div>
             </div>
@@ -441,15 +441,29 @@
     let currentGameData = null;
     let selectedTier = null;
         
-    function createCard(num, prize) {
+    function createCard(num, prize, isWinningArea = false) {
         const cell = document.createElement('div');
         cell.className = 'grid-item';
         
-        // 如果是中奖号码，使用不同的样式
-        const isWinning = prize && (prize.includes('中奖号码') || (prize.includes('电币') && !prize.includes('1000000')));
+        // 区分中奖号码区域和我的号码区域
         const numberStyle = 'font-size: 1.8rem; font-weight: bold; color: #fff;';
-        const prizeStyle = isWinning ? 'color: #00c853; font-weight: bold; font-size: 0.9rem;' : 'color: #ffeb3b; font-size: 0.8rem;';
+        let prizeStyle;
+        let bgStyle = '';
         
+        if (isWinningArea) {
+            // 中奖号码区域 - 金色背景
+            prizeStyle = 'color: #00c853; font-weight: bold; font-size: 0.9rem;';
+            bgStyle = 'background: rgba(255, 215, 0, 0.2); border: 2px solid #FFD700;';
+        } else if (prize && prize.includes('电币') && !prize.includes('谢谢')) {
+            // 我的号码中奖了 - 绿色高亮
+            prizeStyle = 'color: #00c853; font-weight: bold; font-size: 0.9rem;';
+            bgStyle = 'background: rgba(0, 200, 83, 0.2); border: 2px solid #00c853;';
+        } else {
+            // 普通我的号码
+            prizeStyle = 'color: #ccc; font-size: 0.8rem;';
+        }
+        
+        cell.style.cssText = bgStyle;
         cell.innerHTML = `
             <div style="${numberStyle}">${num}</div>
             <div style="${prizeStyle}">${prize || ''}</div>
@@ -530,8 +544,9 @@
         document.getElementById('game-board').style.display = 'block';
         
         // 显示当前档位信息
+        const userCount = gameData.slots.length;
         document.getElementById('current-tier-info').innerHTML = `
-            <div>当前档位: ${selectedTier.cost} 电币 | 中奖号码: ${selectedTier.winCount} 个</div>
+            <div>当前档位: ${selectedTier.cost} 电币 | 中奖号码: ${gameData.winningNumbers.length} 个 | 我的号码: ${userCount} 个</div>
             <div>结果: ${gameData.outcome} | 获得: ${gameData.payout} 电币</div>
         `;
 
@@ -546,16 +561,15 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.globalCompositeOperation = 'destination-out';
 
-        // 生成显示内容
-        const winPrize = gameData.payout > 0 ? `${gameData.payout} 电币` : '中奖号码';
+        // 生成显示内容 - 分为中奖号码区和我的号码区
         const all = [
-            ...gameData.winningNumbers.map(n => ({ num: n, prize: winPrize })),
-            ...gameData.slots
+            ...gameData.winningNumbers.map(n => ({ num: n, prize: '中奖号码', isWinning: true })),
+            ...gameData.slots.map(s => ({ ...s, isWinning: false }))
         ];
 
         const container = document.getElementById('scratchContent');
         container.innerHTML = '';
-        all.forEach(({ num, prize }) => container.appendChild(createCard(num, prize)));
+        all.forEach(({ num, prize, isWinning }) => container.appendChild(createCard(num, prize, isWinning)));
                 
         // 刮刮逻辑（保持不变）
         let isDrawing = false, lastX = null, lastY = null;
@@ -632,8 +646,9 @@
         }
         
         const grid = Array.from(document.querySelectorAll('#scratchContent .grid-item'));
-        const winNums = grid.slice(0, selectedTier.winCount).map(cell => parseInt(cell.children[0].textContent));
-        const userSlots = grid.slice(selectedTier.winCount);
+        const winNums = currentGameData.winningNumbers;
+        const winCount = currentGameData.winningNumbers.length;
+        const userSlots = grid.slice(winCount);
 
         const matched = [];
 
