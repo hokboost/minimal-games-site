@@ -111,12 +111,22 @@ function generateCSRFToken(req) {
 
 // 认证中间件
 const requireLogin = (req, res, next) => {
-    if (!req.session.user) return res.redirect('/login');
+    if (!req.session.user) {
+        // 检查是否是API请求
+        if (req.path.startsWith('/api/')) {
+            return res.status(401).json({ success: false, message: '请先登录' });
+        }
+        return res.redirect('/login');
+    }
     next();
 };
 
 const requireAuthorized = (req, res, next) => {
     if (!req.session.user || !req.session.user.authorized) {
+        // 检查是否是API请求
+        if (req.path.startsWith('/api/')) {
+            return res.status(403).json({ success: false, message: '未授权访问' });
+        }
         return res.status(403).send("❌ 未授权访问");
     }
     next();
@@ -124,6 +134,10 @@ const requireAuthorized = (req, res, next) => {
 
 const requireAdmin = (req, res, next) => {
     if (!req.session.user || !req.session.user.is_admin) {
+        // 检查是否是API请求
+        if (req.path.startsWith('/api/')) {
+            return res.status(403).json({ success: false, message: '无权访问管理员后台' });
+        }
         return res.status(403).send("🚫 无权访问管理员后台");
     }
     next();
@@ -555,27 +569,35 @@ app.post('/api/change-password', requireLogin, async (req, res) => {
 // 管理员API路由
 // ====================
 
-// 添加游戏次数
-app.post('/api/admin/add-spins', requireLogin, requireAdmin, async (req, res) => {
+// 添加电币
+app.post('/api/admin/add-electric-coin', requireLogin, requireAdmin, async (req, res) => {
     try {
-        const { username, count = 1 } = req.body;
+        const { username, amount } = req.body;
         
-        if (!username || count <= 0) {
-            return res.status(400).json({ success: false, message: '参数错误' });
+        if (!username || !amount || amount <= 0) {
+            return res.status(400).json({ success: false, message: '参数错误：用户名和电币数量必须有效' });
+        }
+        
+        if (amount > 100000) {
+            return res.status(400).json({ success: false, message: '单次添加不能超过100,000电币' });
         }
         
         const result = await pool.query(
-            'UPDATE users SET spins_allowed = spins_allowed + $1 WHERE username = $2 RETURNING spins_allowed',
-            [count, username]
+            'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
+            [amount, username]
         );
         
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, message: '用户不存在' });
         }
         
-        res.json({ success: true, newSpins: result.rows[0].spins_allowed });
+        res.json({ 
+            success: true, 
+            newBalance: parseFloat(result.rows[0].balance),
+            addedAmount: amount
+        });
     } catch (error) {
-        console.error('添加游戏次数失败:', error);
+        console.error('添加电币失败:', error);
         res.status(500).json({ success: false, message: '服务器错误' });
     }
 });
@@ -735,6 +757,49 @@ app.post('/api/admin/clear-failures', requireLogin, requireAdmin, async (req, re
         res.json({ success: true, message: '失败记录清除成功' });
     } catch (error) {
         console.error('清除失败记录失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// 管理员修改自己密码
+app.post('/api/admin/change-self-password', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { oldPassword, newPassword } = req.body;
+        const username = req.session.user.username;
+        
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({ success: false, message: '缺少必要参数' });
+        }
+        
+        if (newPassword.length < 6) {
+            return res.status(400).json({ success: false, message: '新密码长度至少需要6位' });
+        }
+        
+        // 验证当前密码
+        const userResult = await pool.query('SELECT password FROM users WHERE username = $1', [username]);
+        
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: '用户不存在' });
+        }
+        
+        const isOldPasswordValid = await bcrypt.compare(oldPassword, userResult.rows[0].password);
+        
+        if (!isOldPasswordValid) {
+            return res.status(400).json({ success: false, message: '当前密码错误' });
+        }
+        
+        // 加密新密码
+        const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+        
+        // 更新密码
+        await pool.query(
+            'UPDATE users SET password = $1 WHERE username = $2',
+            [hashedNewPassword, username]
+        );
+        
+        res.json({ success: true, message: '密码修改成功' });
+    } catch (error) {
+        console.error('修改密码失败:', error);
         res.status(500).json({ success: false, message: '服务器错误' });
     }
 });
