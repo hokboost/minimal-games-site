@@ -824,34 +824,64 @@ app.post('/api/quiz/start', requireLogin, requireAuthorized, security.basicRateL
     }
 });
 
-app.get('/slot', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
-    // 初始化session
-    if (!req.session.initialized) {
-        req.session.initialized = true;
-        req.session.createdAt = Date.now();
-        req.session.csrfToken = GameLogic.generateToken(16);
+app.get('/slot', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        // 初始化session
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            req.session.csrfToken = GameLogic.generateToken(16);
+        }
+        
+        const username = req.session.user.username;
+        
+        // 获取用户余额
+        const userResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+        
+        const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+        
+        res.render('slot', { 
+            username,
+            balance,
+            csrfToken: req.session.csrfToken
+        });
+    } catch (error) {
+        console.error('Slot page error:', error);
+        res.status(500).send('服务器错误');
     }
-    
-    const username = req.session.user.username;
-    res.render('slot', { 
-        username,
-        csrfToken: req.session.csrfToken
-    });
 });
 
-app.get('/scratch', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
-    // 初始化session
-    if (!req.session.initialized) {
-        req.session.initialized = true;
-        req.session.createdAt = Date.now();
-        req.session.csrfToken = GameLogic.generateToken(16);
+app.get('/scratch', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        // 初始化session
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            req.session.csrfToken = GameLogic.generateToken(16);
+        }
+        
+        const username = req.session.user.username;
+        
+        // 获取用户余额
+        const userResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+        
+        const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+        
+        res.render('scratch', { 
+            username,
+            balance,
+            csrfToken: req.session.csrfToken
+        });
+    } catch (error) {
+        console.error('Scratch page error:', error);
+        res.status(500).send('服务器错误');
     }
-    
-    const username = req.session.user.username;
-    res.render('scratch', { 
-        username,
-        csrfToken: req.session.csrfToken
-    });
 });
 
 app.get('/spin', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
