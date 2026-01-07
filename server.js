@@ -17,6 +17,7 @@ const pgSession = require('connect-pg-simple')(session);
 // 导入本地游戏数据和逻辑
 const questions = require('./data/questions');
 const GameLogic = require('./data/gameLogic');
+const BalanceLogger = require('./balance-logger');
 
 // 导入安全中间件
 const security = require('./middleware/security');
@@ -876,20 +877,24 @@ app.post('/api/quiz/start', requireLogin, requireAuthorized, security.basicRateL
             return res.status(403).json({ success: false, message: '用户名不匹配' });
         }
         
-        // 检查并扣除电币
-        const result = await pool.query(
-            'UPDATE users SET balance = balance - 10 WHERE username = $1 AND balance >= 10 RETURNING balance',
-            [username]
-        );
+        // 使用余额日志系统扣除电币
+        const balanceResult = await BalanceLogger.updateBalance({
+            username: username,
+            amount: -10,
+            operationType: 'quiz_start',
+            description: '开始答题游戏',
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
         
-        if (result.rows.length === 0) {
-            return res.status(400).json({ success: false, message: '电币不足，需要10电币才能开始答题' });
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
         }
         
         res.json({ 
             success: true, 
             message: '游戏开始，已扣除10电币',
-            newBalance: result.rows[0].balance 
+            newBalance: balanceResult.balance 
         });
     } catch (error) {
         console.error('Quiz start error:', error);
@@ -1062,12 +1067,41 @@ app.post('/api/quiz/submit',
             }
         }
         
-        // 存储到数据库 - 对齐kingboost格式
+        // 存储到数据库 - 完全对齐kingboost格式
         try {
-            await pool.query(
-                'INSERT INTO submissions (username, score, submitted_at) VALUES ($1, $2, NOW())',
-                [username, correctCount]
+            const crypto = require('crypto');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-${Date.now()}-${Math.random()}`)
+                .digest('hex');
+                
+            // 存储主记录到submissions表
+            const submissionResult = await pool.query(
+                'INSERT INTO submissions (username, score, submitted_at, proof) VALUES ($1, $2, NOW(), $3) RETURNING id',
+                [username, correctCount, proof]
             );
+            
+            const submissionId = submissionResult.rows[0].id;
+            
+            // 存储详细答题记录到submission_details表
+            for (let i = 0; i < answers.length; i++) {
+                const answer = answers[i];
+                const userSession = userSessions.get(username) || {};
+                const sessionData = userSession[answer.token];
+                
+                if (sessionData) {
+                    const question = questionMap.get(sessionData.questionId);
+                    if (question) {
+                        const userAnswer = question.options[answer.answerIndex];
+                        const correctAnswer = question.options[question.correct];
+                        const isCorrect = answer.answerIndex === question.correct;
+                        
+                        await pool.query(
+                            'INSERT INTO submission_details (submission_id, question_id, user_answer, is_correct, correct_answer) VALUES ($1, $2, $3, $4, $5)',
+                            [submissionId, question.id, userAnswer, isCorrect, correctAnswer]
+                        );
+                    }
+                }
+            }
         } catch (dbError) {
             console.error('数据库存储失败:', dbError);
         }
@@ -1081,14 +1115,27 @@ app.post('/api/quiz/submit',
         const reward = correctCount * 2;
         let newBalance = 0;
         
-        try {
-            const balanceResult = await pool.query(
-                'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
-                [reward, username]
-            );
-            newBalance = balanceResult.rows[0]?.balance || 0;
-        } catch (balanceError) {
-            console.error('电币奖励发放失败:', balanceError);
+        if (reward > 0) {
+            const balanceResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: reward,
+                operationType: 'quiz_reward',
+                description: `答题奖励：${correctCount}题正确 × 2电币`,
+                gameData: {
+                    score: correctCount,
+                    total: answers.length,
+                    reward: reward
+                },
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                requireSufficientBalance: false
+            });
+            
+            if (balanceResult.success) {
+                newBalance = balanceResult.balance;
+            } else {
+                console.error('电币奖励发放失败:', balanceResult.message);
+            }
         }
         
         res.json({
@@ -1108,11 +1155,15 @@ app.post('/api/quiz/submit',
 // Quiz 排行榜 API
 app.get('/api/quiz/leaderboard', async (req, res) => {
     try {
-        // 对齐kingboost的排行榜查询
+        // 修改为只显示每个账号的最高分
         const result = await pool.query(
-            `SELECT username, score, submitted_at 
-             FROM submissions 
+            `SELECT username, MAX(score) as score, 
+                    (SELECT submitted_at FROM submissions s2 
+                     WHERE s2.username = s1.username AND s2.score = MAX(s1.score) 
+                     ORDER BY submitted_at DESC LIMIT 1) as submitted_at
+             FROM submissions s1
              WHERE DATE(submitted_at) = CURRENT_DATE 
+             GROUP BY username
              ORDER BY score DESC, submitted_at ASC 
              LIMIT 20`
         );
@@ -1124,6 +1175,51 @@ app.get('/api/quiz/leaderboard', async (req, res) => {
     } catch (error) {
         console.error('Quiz leaderboard error:', error);
         res.status(500).json({ success: false, message: '获取排行榜失败' });
+    }
+});
+
+// 余额变动记录 API
+app.get('/api/balance/logs', requireLogin, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const offset = (page - 1) * limit;
+        
+        const logs = await BalanceLogger.getUserBalanceLogs(username, limit, offset);
+        
+        res.json({
+            success: true,
+            logs: logs,
+            page: page,
+            limit: limit
+        });
+    } catch (error) {
+        console.error('Balance logs error:', error);
+        res.status(500).json({ success: false, message: '获取记录失败' });
+    }
+});
+
+// 管理员查看所有余额记录 API
+app.get('/api/admin/balance/logs', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+        const offset = (page - 1) * limit;
+        const operationType = req.query.type || null;
+        
+        const logs = await BalanceLogger.getAllBalanceLogs(limit, offset, operationType);
+        
+        res.json({
+            success: true,
+            logs: logs,
+            page: page,
+            limit: limit,
+            operationType: operationType
+        });
+    } catch (error) {
+        console.error('Admin balance logs error:', error);
+        res.status(500).json({ success: false, message: '获取记录失败' });
     }
 });
 
@@ -1179,6 +1275,26 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
         );
         
         const finalBalance = parseFloat(finalResult.rows[0].balance);
+        
+        // 存储游戏记录到slot_results表（对齐kingboost格式）
+        try {
+            const crypto = require('crypto');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-${Date.now()}-${Math.random()}`)
+                .digest('hex');
+                
+            await pool.query(`
+                INSERT INTO slot_results (username, result, won, proof) 
+                VALUES ($1, $2, $3, $4)
+            `, [
+                username, 
+                JSON.stringify([outcome.type, outcome.type, outcome.type]), // 三个相同结果
+                outcome.type,
+                proof
+            ]);
+        } catch (dbError) {
+            console.error('Slot游戏记录存储失败:', dbError);
+        }
         
         res.json({
             success: true,
@@ -1307,6 +1423,34 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
                 num: num,
                 prize: prize
             });
+        }
+        
+        // 存储游戏记录到scratch_results表（对齐kingboost格式）
+        try {
+            const crypto = require('crypto');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-${Date.now()}-${Math.random()}`)
+                .digest('hex');
+                
+            // 生成reward_list（匹配的奖励）
+            const rewardList = [];
+            if (payout > 0) {
+                rewardList.push(`${payout} 电币`);
+            }
+            
+            await pool.query(`
+                INSERT INTO scratch_results (username, winning_numbers, slots, reward, proof, reward_list) 
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [
+                username,
+                JSON.stringify(winningNumbers),
+                JSON.stringify(userSlots),
+                outcomeType,
+                proof,
+                JSON.stringify(rewardList)
+            ]);
+        } catch (dbError) {
+            console.error('Scratch游戏记录存储失败:', dbError);
         }
         
         res.json({

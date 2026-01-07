@@ -40,11 +40,24 @@
         <div id="result" class="result-section"></div>
 
         <div id="leaderboard" class="leaderboard-section">
+            <div id="current-game-result" style="
+                background: rgba(255, 255, 255, 0.1);
+                padding: 1.5rem;
+                border-radius: 12px;
+                margin-bottom: 2rem;
+                text-align: center;
+                display: none;
+            ">
+                <h3 style="color: #00c853; margin-bottom: 1rem;">📊 本局结果</h3>
+                <div id="current-score" style="font-size: 1.3rem; color: #ffeb3b; margin-bottom: 0.5rem;"></div>
+                <div id="current-reward" style="font-size: 1.1rem; color: #00c853;"></div>
+            </div>
+            
             <h2>🏆 今日排行榜</h2>
             <div class="refresh-controls">
                 <button class="refresh-btn" onclick="loadLeaderboard()">🔄 刷新排行榜</button>
                 <button class="refresh-btn" onclick="backToResult()" style="margin-left: 10px; background: #2196f3; display: none;" id="back-to-result-btn">📊 返回结果</button>
-                <small style="display: block; margin-top: 5px;">排行榜每日重置</small>
+                <small style="display: block; margin-top: 5px;">排行榜显示每个用户最高分</small>
             </div>
             <table class="leaderboard-table">
                 <thead>
@@ -577,6 +590,14 @@
         const resultDiv = document.getElementById('result');
         resultDiv.className = 'result-section show';
         
+        // 保存当前局结果供排行榜使用
+        window.lastGameResult = {
+            score: score,
+            total: total,
+            reward: reward,
+            newBalance: newBalance
+        };
+        
         const percentage = Math.round((score / total) * 100);
         const endTime = new Date();
         const timeTaken = Math.round((endTime - startTime) / 1000);
@@ -654,6 +675,17 @@
         // 隐藏结果页面，显示排行榜
         document.getElementById('result').style.display = 'none';
         document.getElementById('leaderboard').style.display = 'block';
+        
+        // 显示当前局结果
+        if (window.lastGameResult) {
+            document.getElementById('current-game-result').style.display = 'block';
+            document.getElementById('current-score').textContent = `本局得分：${window.lastGameResult.score}/${window.lastGameResult.total} 分`;
+            document.getElementById('current-reward').textContent = `获得电币：${window.lastGameResult.reward} 电币`;
+            
+            // 显示返回结果按钮
+            document.getElementById('back-to-result-btn').style.display = 'inline-block';
+        }
+        
         // 刷新排行榜数据
         loadLeaderboard();
     }

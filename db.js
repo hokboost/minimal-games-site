@@ -14,12 +14,10 @@ const dbConfig = {
   connectionTimeoutMillis: 10000,
 };
 
-// 生产环境需要SSL
-if (process.env.NODE_ENV === 'production') {
-  dbConfig.ssl = {
-    rejectUnauthorized: false // Render 需要这个设置
-  };
-}
+// Render PostgreSQL 总是需要SSL
+dbConfig.ssl = {
+  rejectUnauthorized: false // Render 需要这个设置
+};
 
 console.log('数据库配置:', {
   user: dbConfig.user,
