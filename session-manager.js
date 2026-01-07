@@ -45,7 +45,11 @@ class SessionManager {
                 createdAt: Date.now()
             });
 
-            console.log(`用户 ${username} 新设备登录，已踢出其他设备`);
+            if (username !== 'hokboost') {
+                console.log(`用户 ${username} 新设备登录，已踢出其他设备`);
+            } else {
+                console.log(`管理员 ${username} 新设备登录，允许多设备会话`);
+            }
             return true;
 
         } catch (error) {

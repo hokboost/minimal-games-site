@@ -30,8 +30,8 @@
                     </span>
                 </div>
                 <div class="info-item">
-                    <label>剩余游戏次数:</label>
-                    <span class="spins-count"><%= user.spins_allowed || 0 %></span>
+                    <label>电币余额:</label>
+                    <span class="balance-count"><%= user.balance || 0 %> 电币</span>
                 </div>
             </div>
         </div>
@@ -180,7 +180,7 @@
         color: #ff9800;
     }
 
-    .spins-count {
+    .balance-count {
         color: #e91e63 !important;
         font-size: 1.2rem;
     }

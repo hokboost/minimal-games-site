@@ -88,7 +88,7 @@ class LoginSession {
             await this.getLoginPage();
         }
 
-        const postData = `username=老六&password=123456&_csrf=${encodeURIComponent(this.csrfToken)}`;
+        const postData = `username=老六&password=111111&_csrf=${encodeURIComponent(this.csrfToken)}`;
         
         const response = await this.request('POST', '/login', postData, {
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -186,7 +186,7 @@ async function testKickoutMessage() {
 
     console.log('\n💡 手动验证步骤:');
     console.log('1. 在浏览器1访问 http://localhost:3000');
-    console.log('2. 用账号"老六"登录 (密码: 123456)');
+    console.log('2. 用账号"老六"登录 (密码: 111111)');
     console.log('3. 在浏览器2也访问同样网址用同账号登录');
     console.log('4. 浏览器2登录后应该显示踢出消息弹窗');
 }

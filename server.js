@@ -387,7 +387,7 @@ app.get('/profile', requireLogin, async (req, res) => {
     try {
         const username = req.session.user.username;
         const userResult = await pool.query(
-            'SELECT username, authorized, spins_allowed FROM users WHERE username = $1',
+            'SELECT username, authorized, balance FROM users WHERE username = $1',
             [username]
         );
         
@@ -636,6 +636,8 @@ app.post('/login', loginLimiter, async (req, res) => {
                     type: 'warning'
                 };
             }
+        } else {
+            console.log(`管理员 ${username} 登录 - 跳过踢出消息检查`);
         }
 
         // 9. 创建单设备会话管理（不使用WebSocket通知）
@@ -653,6 +655,18 @@ app.post('/login', loginLimiter, async (req, res) => {
                 console.error("Session regenerate error:", err);
                 return res.status(500).send("Session error");
             }
+
+            // 重新设置session数据（regenerate会清空所有数据）
+            req.session.user = {
+                id: user.id,
+                username: user.username,
+                authorized: user.authorized,
+                is_admin: user.is_admin
+            };
+            req.session.username = user.username;
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            req.session.csrfToken = GameLogic.generateToken(16);
 
             // 10. 记录登录日志和活动
             await Promise.all([
