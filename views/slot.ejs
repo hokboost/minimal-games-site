@@ -26,16 +26,6 @@
                 <input type="number" id="bet-amount" min="1" max="1000" value="10" placeholder="输入投注金额 (1-1000)">
                 <span class="bet-info">电币</span>
             </div>
-            <div class="outcome-info">
-                <h4>🎯 可能结果:</h4>
-                <div class="outcomes-grid">
-                    <div class="outcome-item">不亏不赚 (20%)</div>
-                    <div class="outcome-item">×2 倍数 (20%)</div>
-                    <div class="outcome-item">归零 (20%)</div>
-                    <div class="outcome-item">×1.5 倍数 (20%)</div>
-                    <div class="outcome-item">×0.5 倍数 (20%)</div>
-                </div>
-            </div>
         </div>
         
         <div id="slot" class="slot-area">
@@ -240,32 +230,6 @@
         font-weight: bold;
     }
     
-    .outcome-info {
-        text-align: center;
-    }
-    
-    .outcome-info h4 {
-        color: #00c853;
-        margin-bottom: 1rem;
-    }
-    
-    .outcomes-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 0.8rem;
-        max-width: 800px;
-        margin: 0 auto;
-    }
-    
-    .outcome-item {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 0.6rem;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        color: #ccc;
-        font-size: 0.9rem;
-        text-align: center;
-    }
     
     .slot-area {
         text-align: center;
@@ -305,15 +269,6 @@
             gap: 0.8rem;
         }
         
-        .outcomes-grid {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 0.5rem;
-        }
-        
-        .outcome-item {
-            font-size: 0.8rem;
-            padding: 0.5rem;
-        }
     }
     </style>
 
@@ -378,7 +333,7 @@
         }
         
         if (currentBalance < betAmount) {
-            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${betAmount} 电币`);
+            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${betAmount} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`);
             return;
         }
         

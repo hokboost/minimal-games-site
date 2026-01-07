@@ -228,32 +228,6 @@
             font-size: 0.9rem;
         }
         
-        .outcome-info {
-            text-align: center;
-        }
-        
-        .outcome-info h4 {
-            color: #00c853;
-            margin-bottom: 1rem;
-        }
-        
-        .outcomes-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 0.8rem;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        
-        .outcome-item {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 0.6rem;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #ccc;
-            font-size: 0.9rem;
-            text-align: center;
-        }
         
         .game-info {
             text-align: center;
@@ -308,15 +282,6 @@
                 padding: 1rem;
             }
             
-            .outcomes-grid {
-                grid-template-columns: repeat(2, 1fr);
-                gap: 0.5rem;
-            }
-            
-            .outcome-item {
-                font-size: 0.8rem;
-                padding: 0.5rem;
-            }
             
             .board {
                 max-width: 100%;
@@ -427,16 +392,6 @@
                     </button>
                 </div>
             </div>
-            <div class="outcome-info">
-                <h4>🎯 可能结果 (所有档位均相同):</h4>
-                <div class="outcomes-grid">
-                    <div class="outcome-item">不亏不赚 (20%)</div>
-                    <div class="outcome-item">×2 倍数 (20%)</div>
-                    <div class="outcome-item">归零 (20%)</div>
-                    <div class="outcome-item">×1.5 倍数 (20%)</div>
-                    <div class="outcome-item">×0.5 倍数 (20%)</div>
-                </div>
-            </div>
         </div>
         
         <div class="board" id="game-board" style="display: none;">
@@ -517,7 +472,7 @@
         const currentBalance = parseInt(document.getElementById('current-balance').textContent);
         
         if (currentBalance < cost) {
-            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币`);
+            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`);
             return;
         }
         

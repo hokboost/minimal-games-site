@@ -123,9 +123,18 @@ const requireAuthorized = (req, res, next) => {
 };
 
 const requireAdmin = (req, res, next) => {
+    console.log('🔍 管理员权限检查:', {
+        session_exists: !!req.session.user,
+        user_info: req.session.user,
+        is_admin: req.session.user?.is_admin
+    });
+    
     if (!req.session.user || !req.session.user.is_admin) {
+        console.log('❌ 管理员权限被拒绝');
         return res.status(403).send("🚫 无权访问管理员后台");
     }
+    
+    console.log('✅ 管理员权限验证通过');
     next();
 };
 
@@ -479,6 +488,13 @@ app.post('/login', loginLimiter, async (req, res) => {
             };
             
             req.session.username = user.username;
+            
+            console.log('✅ 用户登录成功:', {
+                username: user.username,
+                is_admin: user.is_admin,
+                authorized: user.authorized,
+                session_user: req.session.user
+            });
             res.redirect('/');
         });
 
