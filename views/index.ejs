@@ -5,10 +5,133 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>游戏中心</title>
     <link rel="stylesheet" href="/styles.css">
+    <style>
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    .title {
+        margin: 0;
+        color: #fff;
+    }
+    
+    .user-info {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        color: #ccc;
+    }
+    
+    .user-menu {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .auth-menu {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .btn-profile, .btn-admin, .btn-logout, .btn-login, .btn-register {
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: bold;
+        transition: all 0.3s ease;
+        border: none;
+        cursor: pointer;
+    }
+    
+    .btn-profile {
+        background: linear-gradient(135deg, #2196f3, #1976d2);
+        color: white;
+    }
+    
+    .btn-profile:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(33, 150, 243, 0.4);
+    }
+    
+    .btn-admin {
+        background: linear-gradient(135deg, #ff9800, #f57c00);
+        color: white;
+    }
+    
+    .btn-admin:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(255, 152, 0, 0.4);
+    }
+    
+    .btn-logout {
+        background: linear-gradient(135deg, #f44336, #d32f2f);
+        color: white;
+    }
+    
+    .btn-logout:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(244, 67, 54, 0.4);
+    }
+    
+    .btn-login {
+        background: linear-gradient(135deg, #4caf50, #45a049);
+        color: white;
+    }
+    
+    .btn-login:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+    }
+    
+    .btn-register {
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        color: white;
+    }
+    
+    .btn-register:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 200, 83, 0.4);
+    }
+    
+    @media (max-width: 768px) {
+        .header {
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .user-menu, .auth-menu {
+            flex-wrap: wrap;
+        }
+    }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="title">生存直播挑战</h1>
+        <div class="header">
+            <h1 class="title">🎮 Minimal Games 游戏中心</h1>
+            <div class="user-info">
+                <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
+                    <span>欢迎，<%= req.session.user.username %>!</span>
+                    <div class="user-menu">
+                        <a href="/profile" class="btn-profile">👤 个人资料</a>
+                        <% if (req.session.user.is_admin) { %>
+                            <a href="/admin" class="btn-admin">👑 管理后台</a>
+                        <% } %>
+                        <a href="/logout" class="btn-logout">🚺 退出登录</a>
+                    </div>
+                <% } else { %>
+                    <div class="auth-menu">
+                        <a href="/login" class="btn-login">🔐 登录</a>
+                        <a href="/register" class="btn-register">🆕 注册</a>
+                    </div>
+                <% } %>
+            </div>
+        </div>
         
         <div class="trigger-rules">
             <h2>🎡 转盘触发规则</h2>

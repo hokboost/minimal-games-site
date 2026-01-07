@@ -301,16 +301,16 @@ class GameLogic {
             targetGlobalRate: 0.0135, // 目标1.35% = 平均74抽
             hardPity: 147, // 硬保底
             
-            // 分段概率曲线（更像真实系统）
-            earlyPhase: { start: 0, end: 60, baseRate: 0.006 }, // 0.6%
-            midPhase: { start: 61, end: 120, baseRate: 0.008 }, // 0.8%
-            latePhase: { start: 121, end: 146, baseRate: 0.035 }, // 3.5%
+            // 分段概率曲线（控制在合理范围）
+            earlyPhase: { start: 0, end: 60, baseRate: 0.008 }, // 0.8%
+            midPhase: { start: 61, end: 120, baseRate: 0.011 }, // 1.1%
+            latePhase: { start: 121, end: 146, baseRate: 0.025 }, // 2.5%
             
-            // 跨轮补偿系数
+            // 跨轮补偿系数（温和补偿）
             cycleLossBonus: {
-                threshold: 90, // 超过90抽未出开始累积亏欠
+                threshold: 80, // 超过80抽未出开始累积亏欠
                 bonusPerDraw: 0.0001, // 每抽增加0.01%补偿
-                maxBonus: 0.01, // 最大1%补偿
+                maxBonus: 0.008, // 最大0.8%补偿
                 decayRate: 0.3 // 下轮开始时保留30%
             }
         },
@@ -330,10 +330,20 @@ class GameLogic {
             } else if (pityCount <= config.midPhase.end) {
                 return config.midPhase.baseRate;
             } else {
-                // 后期阶段：线性增长到保底
+                // 后期阶段：温和线性增长（控制概率）
                 const lateStart = config.midPhase.end + 1;
                 const lateProgress = (pityCount - lateStart) / (config.hardPity - lateStart);
-                return config.latePhase.baseRate + lateProgress * (1.0 - config.latePhase.baseRate);
+                // 最大只到6%，最后几抽再快速增长到100%
+                const maxRate = 0.06; // 最大6%
+                
+                if (pityCount >= config.hardPity - 3) {
+                    // 最后3抽快速增长：145->20%, 146->60%, 147->100%
+                    const finalBoost = [0.2, 0.6, 1.0];
+                    return finalBoost[pityCount - (config.hardPity - 3)] || 1.0;
+                } else {
+                    // 其他时候温和增长到6%
+                    return config.latePhase.baseRate + lateProgress * (maxRate - config.latePhase.baseRate);
+                }
             }
         },
 

@@ -5,6 +5,14 @@ const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
 const http = require('http');
 const { Server } = require('socket.io');
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
+const csrf = require('csrf');
+require('dotenv').config();
+
+// 数据库连接
+const pool = require('./db');
+const pgSession = require('connect-pg-simple')(session);
 
 // 导入本地游戏数据和逻辑
 const questions = require('./data/questions');
@@ -12,6 +20,9 @@ const GameLogic = require('./data/gameLogic');
 
 // 导入安全中间件
 const security = require('./middleware/security');
+
+// CSRF 保护
+const tokens = new csrf();
 
 const app = express();
 const server = http.createServer(app);
@@ -54,16 +65,25 @@ app.use(helmet({
     }
 }));
 
-// Session配置
+// Session配置 - 使用PostgreSQL存储
 app.use(session({
+    store: new pgSession({
+        pool: pool,
+        tableName: 'user_sessions',
+        pruneSessionInterval: 60,
+        errorLog: console.error
+    }),
     secret: process.env.SESSION_SECRET || 'your-secret-key-change-this-in-production',
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
-        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24小时
-    }
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 24 * 60 * 60 * 1000
+    },
+    name: 'minimal_games_sid'
 }));
 
 // 基础中间件
@@ -71,6 +91,52 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(mongoSanitize()); // 防止NoSQL注入
+
+// ====================
+// 认证系统中间件
+// ====================
+
+// CSRF token 生成
+function generateCSRFToken(req) {
+    const token = tokens.create(req.session.id);
+    req.session.csrfToken = token;
+    return token;
+}
+
+// 认证中间件
+const requireLogin = (req, res, next) => {
+    if (!req.session.user) return res.redirect('/login');
+    next();
+};
+
+const requireAuthorized = (req, res, next) => {
+    if (!req.session.user || !req.session.user.authorized) {
+        return res.status(403).send("❌ 未授权访问");
+    }
+    next();
+};
+
+const requireAdmin = (req, res, next) => {
+    if (!req.session.user || !req.session.user.is_admin) {
+        return res.status(403).send("🚫 无权访问管理员后台");
+    }
+    next();
+};
+
+// 限流配置
+const loginLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    message: "❌ 尝试次数过多，请 10 分钟后再试。"
+});
+
+const registerLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 3,
+    message: "⚠️ 注册太频繁，请稍后再试。",
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 // 简化安全中间件 - 只保留基础速率限制
 // app.use(security.checkBlacklist);
@@ -180,7 +246,463 @@ setInterval(() => {
     console.log(`Session cleanup: ${userSessions.size} active users`);
 }, 60000); // 每分钟清理一次
 
-// 路由
+// ====================
+// 认证路由
+// ====================
+
+// 登录页面
+app.get('/login', (req, res) => {
+    if (req.session.user) {
+        return res.redirect('/');
+    }
+    res.render('login', {
+        title: '登录 - Minimal Games',
+        csrfToken: generateCSRFToken(req),
+        error: req.query.error
+    });
+});
+
+// 注册页面
+app.get('/register', (req, res) => {
+    if (req.session.user) {
+        return res.redirect('/');
+    }
+    res.render('register', {
+        title: '注册 - Minimal Games',
+        csrfToken: generateCSRFToken(req),
+        error: req.query.error
+    });
+});
+
+// 个人资料页面
+app.get('/profile', requireLogin, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const userResult = await pool.query(
+            'SELECT username, authorized, spins_allowed FROM users WHERE username = $1',
+            [username]
+        );
+        
+        if (userResult.rows.length === 0) {
+            return res.status(404).send('用户不存在');
+        }
+        
+        const user = userResult.rows[0];
+        
+        res.render('profile', {
+            title: '个人资料 - Minimal Games',
+            user: user
+        });
+    } catch (error) {
+        console.error('获取用户数据失败:', error);
+        res.status(500).send('服务器错误');
+    }
+});
+
+// 管理员后台
+app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const usersResult = await pool.query(
+            'SELECT username, spins_allowed, authorized, is_admin, login_failures, last_failure_time, locked_until FROM users ORDER BY username'
+        );
+        
+        const users = usersResult.rows.map(user => ({
+            ...user,
+            is_locked: user.locked_until && new Date(user.locked_until) > new Date(),
+            lock_minutes: user.locked_until ? Math.ceil((new Date(user.locked_until) - new Date()) / 60000) : 0
+        }));
+        
+        res.render('admin', {
+            title: '管理后台 - Minimal Games',
+            user: req.session.user,
+            userLoggedIn: req.session.user?.username,
+            users: users
+        });
+    } catch (err) {
+        console.error('❌ 管理员页面加载失败:', err);
+        res.status(500).send("后台加载失败");
+    }
+});
+
+// 注册处理
+app.post('/register', registerLimiter, async (req, res) => {
+    const { username, password, _csrf } = req.body;
+    
+    // CSRF 验证
+    if (_csrf !== req.session.csrfToken) {
+        return res.status(403).send('⚠️ CSRF token 校验失败');
+    }
+
+    // 输入验证
+    if (!username || !password) {
+        return res.render('register', {
+            title: '注册 - Minimal Games',
+            error: '用户名或密码不能为空！',
+            csrfToken: generateCSRFToken(req)
+        });
+    }
+
+    // 密码强度验证
+    if (password.length < 6) {
+        return res.render('register', {
+            title: '注册 - Minimal Games',
+            error: '密码长度至少需要6个字符',
+            csrfToken: generateCSRFToken(req)
+        });
+    }
+
+    try {
+        const hashed = await bcrypt.hash(password, 12);
+        const result = await pool.query(
+            'INSERT INTO users (username, password_hash, created_at) VALUES ($1, $2, NOW()) RETURNING id',
+            [username, hashed]
+        );
+        
+        console.log(`[注册成功] 用户ID: ${result.rows[0].id}, 用户名: ${username}`);
+        res.redirect('/login?registered=true');
+    } catch (err) {
+        if (err.code === '23505') {
+            res.render('register', {
+                title: '注册 - Minimal Games',
+                error: '❌ 用户名已存在！',
+                csrfToken: generateCSRFToken(req)
+            });
+        } else {
+            console.error(err);
+            res.render('register', {
+                title: '注册 - Minimal Games',
+                error: '❌ 注册失败，请稍后重试。',
+                csrfToken: generateCSRFToken(req)
+            });
+        }
+    }
+});
+
+// 登录处理
+app.post('/login', loginLimiter, async (req, res) => {
+    const { username, password, _csrf } = req.body;
+    
+    if (_csrf !== req.session.csrfToken) {
+        return res.status(403).send('⚠️ CSRF token 校验失败');
+    }
+
+    if (!username || !password) {
+        return res.status(400).render('login', {
+            title: '登录 - Minimal Games',
+            error: '用户名或密码不能为空！',
+            csrfToken: generateCSRFToken(req)
+        });
+    }
+
+    try {
+        const result = await pool.query(
+            'SELECT * FROM users WHERE username = $1', 
+            [username]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(401).render('login', {
+                title: '登录 - Minimal Games',
+                error: '用户名或密码错误！',
+                csrfToken: generateCSRFToken(req)
+            });
+        }
+
+        const user = result.rows[0];
+        const now = new Date();
+        
+        // 账户锁定检查
+        if (!user.is_admin && user.locked_until && new Date(user.locked_until) > now) {
+            const lockMinutes = Math.ceil((new Date(user.locked_until) - now) / 60000);
+            return res.status(423).render('login', {
+                title: '登录 - Minimal Games',
+                error: `账户已被锁定，请 ${lockMinutes} 分钟后再试！`,
+                csrfToken: generateCSRFToken(req)
+            });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password_hash);
+        
+        if (!isMatch) {
+            // 失败登录处理
+            if (!user.is_admin) {
+                const failures = (user.login_failures || 0) + 1;
+                let lockUntil = null;
+                
+                if (failures >= 3) {
+                    const lockMinutes = failures - 2;
+                    lockUntil = new Date(now.getTime() + lockMinutes * 60000);
+                }
+                
+                await pool.query(
+                    'UPDATE users SET login_failures = $1, last_failure_time = $2, locked_until = $3 WHERE username = $4',
+                    [failures, now, lockUntil, username]
+                );
+                
+                const errorMsg = lockUntil ? 
+                    `密码错误！账户已被锁定 ${failures-2} 分钟` : 
+                    `密码错误！连续错误3次将被锁定 (当前${failures}次)`;
+                    
+                return res.status(401).render('login', {
+                    title: '登录 - Minimal Games',
+                    error: errorMsg,
+                    csrfToken: generateCSRFToken(req)
+                });
+            }
+        }
+
+        // 成功 - 清除失败记录并重新生成session
+        if (!user.is_admin) {
+            await pool.query(
+                'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
+                [username]
+            );
+        }
+        
+        req.session.regenerate(function (err) {
+            if (err) {
+                console.error("Session regenerate error:", err);
+                return res.status(500).send("Session error");
+            }
+            
+            req.session.user = {
+                id: user.id,
+                username: user.username,
+                authorized: user.authorized,
+                is_admin: user.is_admin
+            };
+            
+            req.session.username = user.username;
+            res.redirect('/');
+        });
+
+    } catch (err) {
+        console.error('❌ 登录错误:', err);
+        res.status(500).render('login', {
+            title: '登录 - Minimal Games',
+            error: '登录失败，请稍后再试。',
+            csrfToken: generateCSRFToken(req)
+        });
+    }
+});
+
+// 登出
+app.get('/logout', (req, res) => {
+    req.session.destroy(() => {
+        res.redirect('/');
+    });
+});
+
+// 修改密码API
+app.post('/api/change-password', requireLogin, async (req, res) => {
+    try {
+        const { currentPassword, newPassword, confirmPassword } = req.body;
+        const username = req.session.user.username;
+
+        // 输入验证
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            return res.status(400).json({ success: false, message: '请填写所有字段' });
+        }
+
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({ success: false, message: '新密码和确认密码不匹配' });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({ success: false, message: '新密码至少需要6个字符' });
+        }
+
+        // 验证当前密码
+        const userResult = await pool.query(
+            'SELECT password_hash FROM users WHERE username = $1',
+            [username]
+        );
+
+        const isValidPassword = await bcrypt.compare(currentPassword, userResult.rows[0].password_hash);
+        if (!isValidPassword) {
+            return res.status(400).json({ success: false, message: '当前密码错误' });
+        }
+
+        // 更新密码
+        const newPasswordHash = await bcrypt.hash(newPassword, 10);
+        await pool.query(
+            'UPDATE users SET password_hash = $1 WHERE username = $2',
+            [newPasswordHash, username]
+        );
+
+        res.json({ success: true, message: '密码修改成功！' });
+    } catch (error) {
+        console.error('修改密码失败:', error);
+        res.status(500).json({ success: false, message: '修改密码失败，请稍后重试' });
+    }
+});
+
+// ====================
+// 管理员API路由
+// ====================
+
+// 添加游戏次数
+app.post('/api/admin/add-spins', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username, count = 1 } = req.body;
+        
+        if (!username || count <= 0) {
+            return res.status(400).json({ success: false, message: '参数错误' });
+        }
+        
+        const result = await pool.query(
+            'UPDATE users SET spins_allowed = spins_allowed + $1 WHERE username = $2 RETURNING spins_allowed',
+            [count, username]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: '用户不存在' });
+        }
+        
+        res.json({ success: true, newSpins: result.rows[0].spins_allowed });
+    } catch (error) {
+        console.error('添加游戏次数失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// 授权用户
+app.post('/api/admin/authorize-user', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username } = req.body;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名' });
+        }
+        
+        await pool.query(
+            'UPDATE users SET authorized = true WHERE username = $1',
+            [username]
+        );
+        
+        res.json({ success: true, message: '授权成功' });
+    } catch (error) {
+        console.error('授权失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// 取消授权
+app.post('/api/admin/unauthorize-user', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username } = req.body;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名' });
+        }
+        
+        await pool.query(
+            'UPDATE users SET authorized = false WHERE username = $1',
+            [username]
+        );
+        
+        res.json({ success: true, message: '取消授权成功' });
+    } catch (error) {
+        console.error('取消授权失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// 重置密码
+app.post('/api/admin/reset-password', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username, newPassword = '123456' } = req.body;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名' });
+        }
+        
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+        await pool.query(
+            'UPDATE users SET password_hash = $1 WHERE username = $2',
+            [hashedPassword, username]
+        );
+        
+        res.json({ success: true, message: '密码重置成功' });
+    } catch (error) {
+        console.error('重置密码失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// 删除账户
+app.post('/api/admin/delete-account', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username } = req.body;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名' });
+        }
+        
+        // 防止删除管理员账户
+        const userResult = await pool.query(
+            'SELECT is_admin FROM users WHERE username = $1',
+            [username]
+        );
+        
+        if (userResult.rows[0]?.is_admin) {
+            return res.status(403).json({ success: false, message: '不能删除管理员账户' });
+        }
+        
+        await pool.query('DELETE FROM users WHERE username = $1', [username]);
+        
+        res.json({ success: true, message: '账户删除成功' });
+    } catch (error) {
+        console.error('删除账户失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// 解锁账户
+app.post('/api/admin/unlock-account', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username } = req.body;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名' });
+        }
+        
+        await pool.query(
+            'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
+            [username]
+        );
+        
+        res.json({ success: true, message: '账户解锁成功' });
+    } catch (error) {
+        console.error('解锁账户失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// 清除失败记录
+app.post('/api/admin/clear-failures', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username } = req.body;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名' });
+        }
+        
+        await pool.query(
+            'UPDATE users SET login_failures = 0, last_failure_time = NULL WHERE username = $1',
+            [username]
+        );
+        
+        res.json({ success: true, message: '失败记录清除成功' });
+    } catch (error) {
+        console.error('清除失败记录失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// ====================
+// 游戏路由
+// ====================
 app.get('/', (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
@@ -188,10 +710,14 @@ app.get('/', (req, res) => {
         req.session.createdAt = Date.now();
         req.session.csrfToken = GameLogic.generateToken(16);
     }
-    res.render('index');
+    res.render('index', {
+        title: 'Minimal Games 游戏中心',
+        user: req.session.user || null,
+        req: req
+    });
 });
 
-app.get('/quiz', security.basicRateLimit, (req, res) => {
+app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
         req.session.initialized = true;
@@ -199,14 +725,14 @@ app.get('/quiz', security.basicRateLimit, (req, res) => {
         req.session.csrfToken = GameLogic.generateToken(16);
     }
     
-    const username = generateUsername();
+    const username = req.session.user.username;
     res.render('quiz', { 
         username,
         csrfToken: req.session.csrfToken
     });
 });
 
-app.get('/slot', security.basicRateLimit, (req, res) => {
+app.get('/slot', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
         req.session.initialized = true;
@@ -214,14 +740,14 @@ app.get('/slot', security.basicRateLimit, (req, res) => {
         req.session.csrfToken = GameLogic.generateToken(16);
     }
     
-    const username = generateUsername();
+    const username = req.session.user.username;
     res.render('slot', { 
         username,
         csrfToken: req.session.csrfToken
     });
 });
 
-app.get('/scratch', security.basicRateLimit, (req, res) => {
+app.get('/scratch', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
         req.session.initialized = true;
@@ -229,14 +755,14 @@ app.get('/scratch', security.basicRateLimit, (req, res) => {
         req.session.csrfToken = GameLogic.generateToken(16);
     }
     
-    const username = generateUsername();
+    const username = req.session.user.username;
     res.render('scratch', { 
         username,
         csrfToken: req.session.csrfToken
     });
 });
 
-app.get('/spin', security.basicRateLimit, (req, res) => {
+app.get('/spin', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
         req.session.initialized = true;
@@ -244,14 +770,14 @@ app.get('/spin', security.basicRateLimit, (req, res) => {
         req.session.csrfToken = GameLogic.generateToken(16);
     }
     
-    const username = generateUsername();
+    const username = req.session.user.username;
     res.render('spin', { 
         username,
         csrfToken: req.session.csrfToken
     });
 });
 
-app.get('/wish', security.basicRateLimit, (req, res) => {
+app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
         req.session.initialized = true;
@@ -259,7 +785,7 @@ app.get('/wish', security.basicRateLimit, (req, res) => {
         req.session.csrfToken = GameLogic.generateToken(16);
     }
     
-    const username = generateUsername();
+    const username = req.session.user.username;
     res.render('wish', { 
         username,
         csrfToken: req.session.csrfToken

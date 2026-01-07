@@ -3,349 +3,546 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安全管理面板</title>
-    <style>
-        body {
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #007bff;
-        }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-        }
-        .stat-number {
-            font-size: 2em;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        .stat-label {
-            font-size: 0.9em;
-            opacity: 0.9;
-        }
-        .section {
-            margin-bottom: 30px;
-        }
-        .section h3 {
-            color: #333;
-            border-bottom: 2px solid #007bff;
-            padding-bottom: 10px;
-        }
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-        .table th, .table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        .table th {
-            background: #f8f9fa;
-            font-weight: bold;
-        }
-        .table tr:hover {
-            background: #f5f5f5;
-        }
-        .btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.9em;
-        }
-        .btn:hover {
-            background: #c82333;
-        }
-        .refresh-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-bottom: 20px;
-        }
-        .refresh-btn:hover {
-            background: #218838;
-        }
-        .score-high { color: #dc3545; font-weight: bold; }
-        .score-medium { color: #ffc107; font-weight: bold; }
-        .score-low { color: #28a745; }
-        .login-form {
-            max-width: 400px;
-            margin: 100px auto;
-            padding: 30px;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        .form-group input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 16px;
-        }
-        .login-btn {
-            width: 100%;
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 12px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        .login-btn:hover {
-            background: #0056b3;
-        }
-        .error {
-            color: #dc3545;
-            margin-top: 10px;
-            text-align: center;
-        }
-    </style>
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <div id="loginForm" class="login-form">
-        <h2 style="text-align: center; margin-bottom: 30px;">🔐 安全管理面板</h2>
-        <div class="form-group">
-            <label for="password">管理员密码：</label>
-            <input type="password" id="password" placeholder="输入管理员密码">
-        </div>
-        <button class="login-btn" onclick="login()">登录</button>
-        <div id="error" class="error"></div>
-    </div>
-
-    <div id="dashboard" class="container" style="display: none;">
-        <div class="header">
-            <h1>🛡️ 安全管理面板</h1>
-            <p>实时监控系统安全状态</p>
-        </div>
-
-        <button class="refresh-btn" onclick="loadData()">🔄 刷新数据</button>
-
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-number" id="blacklistCount">-</div>
-                <div class="stat-label">黑名单IP</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="activeUsers">-</div>
-                <div class="stat-label">活跃用户</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="suspiciousUsers">-</div>
-                <div class="stat-label">可疑用户</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="lastUpdate">-</div>
-                <div class="stat-label">最后更新</div>
+    <div class="container">
+        <div class="admin-header">
+            <h1>👑 管理后台</h1>
+            <div class="nav-links">
+                <span>欢迎，<%= user.username %></span>
+                <a href="/">🏠 首页</a>
+                <a href="/logout">🚪 退出登录</a>
             </div>
         </div>
 
-        <div class="section">
-            <h3>🚫 黑名单IP</h3>
-            <div id="blacklistSection">
-                <p>加载中...</p>
-            </div>
-        </div>
-
-        <div class="section">
-            <h3>👥 用户行为监控</h3>
-            <table class="table">
+        <div class="admin-content">
+            <table class="users-table">
                 <thead>
                     <tr>
-                        <th>IP地址</th>
-                        <th>总请求数</th>
-                        <th>可疑评分</th>
-                        <th>平均间隔(ms)</th>
-                        <th>最小间隔(ms)</th>
-                        <th>最后活动</th>
+                        <th>用户名</th>
+                        <th>剩余次数</th>
+                        <th>最新 Quiz</th>
+                        <th>最新 Slot</th>
+                        <th>最新 Spin</th>
+                        <th>最新 Scratch</th>
                         <th>操作</th>
+                        <th>密码管理</th>
+                        <th>账号管理</th>
+                        <th>登录状态</th>
                     </tr>
                 </thead>
-                <tbody id="behaviorTable">
-                    <tr><td colspan="7">加载中...</td></tr>
+                <tbody>
+                    <% users.forEach(user => { %>
+                        <tr>
+                            <td><%= user.username %></td>
+                            <td class="spins"><%= user.spins_allowed || 0 %></td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>
+                                <button onclick="addSpin('<%= user.username %>', this)" class="btn-add">➕ 加1</button>
+                                <% if (user.username === userLoggedIn) { %>
+                                    <button disabled class="btn-disabled">自己</button>
+                                <% } else if (user.authorized) { %>
+                                    <button onclick="unauthorizeUser('<%= user.username %>', this)" class="btn-unauthorize">❌ 取消授权</button>
+                                <% } else { %>
+                                    <button onclick="authorizeUser('<%= user.username %>', this)" class="btn-authorize">✅ 授权</button>
+                                <% } %>
+                            </td>
+                            <td>
+                                <% if (user.username === userLoggedIn) { %>
+                                    <button disabled class="btn-disabled">自己</button>
+                                <% } else { %>
+                                    <button onclick="resetPassword('<%= user.username %>', this)" class="btn-reset">🔑 重置密码</button>
+                                <% } %>
+                            </td>
+                            <td>
+                                <% if (user.username === userLoggedIn) { %>
+                                    <button disabled class="btn-disabled">自己</button>
+                                <% } else { %>
+                                    <button onclick="deleteAccount('<%= user.username %>', this)" class="btn-delete">🗑️ 注销账号</button>
+                                <% } %>
+                            </td>
+                            <td>
+                                <% if (user.is_admin) { %>
+                                    <span class="status-admin">👑 管理员</span>
+                                <% } else if (user.is_locked) { %>
+                                    <div class="status-locked">
+                                        🔒 已锁定<br>
+                                        <small>剩余 <%= user.lock_minutes %> 分钟</small><br>
+                                        <small>失败次数: <%= user.login_failures %></small><br>
+                                        <button onclick="unlockAccount('<%= user.username %>', this)" class="btn-unlock">解锁</button>
+                                    </div>
+                                <% } else if (user.login_failures > 0) { %>
+                                    <div class="status-warning">
+                                        ⚠️ 警告<br>
+                                        <small>失败次数: <%= user.login_failures %></small><br>
+                                        <button onclick="clearFailures('<%= user.username %>', this)" class="btn-clear">清除</button>
+                                    </div>
+                                <% } else { %>
+                                    <span class="status-normal">✅ 正常</span>
+                                <% } %>
+                            </td>
+                        </tr>
+                    <% }) %>
                 </tbody>
             </table>
         </div>
     </div>
 
+    <style>
+    .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        color: #fff;
+    }
+
+    .admin-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #00c853;
+    }
+
+    .admin-header h1 {
+        margin: 0;
+        color: #00c853;
+    }
+
+    .nav-links {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+    }
+
+    .nav-links span {
+        color: #ccc;
+        font-weight: bold;
+    }
+
+    .nav-links a {
+        color: #fff;
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+    }
+
+    .nav-links a:hover {
+        background: rgba(0, 200, 83, 0.2);
+        transform: translateY(-2px);
+    }
+
+    .admin-content {
+        overflow-x: auto;
+    }
+
+    .users-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .users-table th {
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        color: #fff;
+        padding: 1rem 0.5rem;
+        text-align: left;
+        font-weight: bold;
+        font-size: 0.9rem;
+    }
+
+    .users-table td {
+        padding: 1rem 0.5rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        vertical-align: top;
+    }
+
+    .users-table tr:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .spins {
+        color: #e91e63;
+        font-weight: bold;
+        font-size: 1.1rem;
+    }
+
+    /* 按钮样式 */
+    .users-table button {
+        padding: 0.3rem 0.6rem;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.8rem;
+        margin: 0.1rem;
+        transition: all 0.3s ease;
+        font-weight: bold;
+    }
+
+    .btn-add {
+        background: #4caf50;
+        color: white;
+    }
+
+    .btn-add:hover {
+        background: #45a049;
+        transform: translateY(-1px);
+    }
+
+    .btn-authorize {
+        background: #2196f3;
+        color: white;
+    }
+
+    .btn-authorize:hover {
+        background: #1976d2;
+        transform: translateY(-1px);
+    }
+
+    .btn-unauthorize {
+        background: #ff9800;
+        color: white;
+    }
+
+    .btn-unauthorize:hover {
+        background: #f57c00;
+        transform: translateY(-1px);
+    }
+
+    .btn-reset {
+        background: #ff6b6b;
+        color: white;
+    }
+
+    .btn-reset:hover {
+        background: #ff5252;
+        transform: translateY(-1px);
+    }
+
+    .btn-delete {
+        background: #dc3545;
+        color: white;
+    }
+
+    .btn-delete:hover {
+        background: #c82333;
+        transform: translateY(-1px);
+    }
+
+    .btn-unlock {
+        background: #ffc107;
+        color: #000;
+        font-size: 0.7rem;
+        padding: 0.2rem 0.4rem;
+        margin-top: 0.2rem;
+    }
+
+    .btn-unlock:hover {
+        background: #ffb300;
+    }
+
+    .btn-clear {
+        background: #17a2b8;
+        color: white;
+        font-size: 0.7rem;
+        padding: 0.2rem 0.4rem;
+        margin-top: 0.2rem;
+    }
+
+    .btn-clear:hover {
+        background: #138496;
+    }
+
+    .btn-disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: #666;
+        color: #ccc;
+    }
+
+    /* 状态样式 */
+    .status-admin {
+        color: #28a745;
+        font-weight: bold;
+    }
+
+    .status-locked {
+        color: #dc3545;
+        font-weight: bold;
+        font-size: 0.8rem;
+        line-height: 1.2;
+    }
+
+    .status-warning {
+        color: #ffc107;
+        font-weight: bold;
+        font-size: 0.8rem;
+        line-height: 1.2;
+    }
+
+    .status-normal {
+        color: #28a745;
+    }
+
+    @media (max-width: 1200px) {
+        .users-table {
+            font-size: 0.8rem;
+        }
+        
+        .users-table th,
+        .users-table td {
+            padding: 0.5rem 0.3rem;
+        }
+        
+        .users-table button {
+            padding: 0.2rem 0.4rem;
+            font-size: 0.7rem;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .container {
+            padding: 1rem;
+        }
+        
+        .admin-header {
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .users-table {
+            font-size: 0.7rem;
+        }
+    }
+    </style>
+
     <script>
-        let currentPassword = '';
+    function addSpin(username, btn) {
+        btn.disabled = true;
+        fetch('/api/admin/add-spins', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, count: 1 })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) return alert('添加失败: ' + data.message);
+            const row = btn.closest('tr');
+            row.querySelector('.spins').textContent = data.newSpins;
+        })
+        .catch(() => alert('请求失败'))
+        .finally(() => btn.disabled = false);
+    }
 
-        function login() {
-            const password = document.getElementById('password').value;
-            if (!password) {
-                showError('请输入密码');
+    function authorizeUser(username, btn) {
+        btn.disabled = true;
+        fetch('/api/admin/authorize-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) return alert('授权失败: ' + data.message);
+            location.reload();
+        })
+        .catch(() => alert('授权请求失败'));
+    }
+
+    function unauthorizeUser(username, btn) {
+        btn.disabled = true;
+        fetch('/api/admin/unauthorize-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) return alert('取消失败: ' + data.message);
+            location.reload();
+        })
+        .catch(() => alert('取消请求失败'));
+    }
+
+    function resetPassword(username, btn) {
+        const confirmReset = confirm('确定要重置用户 "' + username + '" 的密码吗？\\n\\n新密码将设置为: 123456');
+        
+        if (!confirmReset) return;
+        
+        const doubleConfirm = confirm('⚠️ 警告：此操作不可撤销！\\n\\n用户: ' + username + '\\n新密码: 123456\\n\\n确定继续吗？');
+        
+        if (!doubleConfirm) return;
+        
+        btn.disabled = true;
+        btn.textContent = '重置中...';
+        
+        fetch('/api/admin/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                username: username,
+                newPassword: '123456'
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) {
+                alert('重置失败: ' + data.message);
                 return;
             }
-
-            // 验证密码
-            fetch('/admin/security', {
-                headers: {
-                    'Authorization': 'Bearer ' + password
-                }
-            })
-            .then(response => {
-                if (response.ok) {
-                    currentPassword = password;
-                    document.getElementById('loginForm').style.display = 'none';
-                    document.getElementById('dashboard').style.display = 'block';
-                    loadData();
-                } else {
-                    showError('密码错误');
-                }
-            })
-            .catch(error => {
-                showError('连接失败');
-            });
-        }
-
-        function showError(message) {
-            document.getElementById('error').textContent = message;
-        }
-
-        function loadData() {
-            fetch('/admin/security', {
-                headers: {
-                    'Authorization': 'Bearer ' + currentPassword
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                updateDashboard(data);
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
-        }
-
-        function updateDashboard(data) {
-            const security = data.security;
             
-            // 更新统计数据
-            document.getElementById('blacklistCount').textContent = security.blacklistedIPs;
-            document.getElementById('activeUsers').textContent = security.activeUsers;
-            document.getElementById('suspiciousUsers').textContent = security.suspiciousUsers;
-            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+            alert('✅ 密码重置成功！\\n\\n用户: ' + username + '\\n新密码: 123456\\n\\n请通知用户尽快登录并修改密码！');
+        })
+        .catch(err => {
+            console.error('Reset password error:', err);
+            alert('重置请求失败，请稍后重试');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '🔑 重置密码';
+        });
+    }
 
-            // 更新黑名单
-            const blacklistSection = document.getElementById('blacklistSection');
-            if (security.blacklist.length === 0) {
-                blacklistSection.innerHTML = '<p style="color: #28a745;">✅ 当前无黑名单IP</p>';
-            } else {
-                let html = '<table class="table"><thead><tr><th>IP地址</th><th>操作</th></tr></thead><tbody>';
-                security.blacklist.forEach(ip => {
-                    html += `<tr>
-                        <td>${ip}</td>
-                        <td><button class="btn" onclick="unblockIP('${ip}')">解封</button></td>
-                    </tr>`;
-                });
-                html += '</tbody></table>';
-                blacklistSection.innerHTML = html;
+    function deleteAccount(username, btn) {
+        const confirmDelete = confirm('⚠️ 危险操作！\\n\\n确定要永久注销用户 "' + username + '" 的账号吗？\\n\\n此操作将删除：\\n- 用户账号信息\\n- 所有游戏记录\\n- 无法恢复！');
+        
+        if (!confirmDelete) return;
+        
+        const typeUsername = prompt('请输入要删除的用户名以确认操作：\\n\\n输入 "' + username + '" 确认删除');
+        
+        if (typeUsername !== username) {
+            if (typeUsername !== null) {
+                alert('用户名不匹配，操作取消！');
             }
-
-            // 更新行为表格
-            const behaviorTable = document.getElementById('behaviorTable');
-            if (security.recentBehavior.length === 0) {
-                behaviorTable.innerHTML = '<tr><td colspan="7">暂无用户数据</td></tr>';
-            } else {
-                let html = '';
-                security.recentBehavior.forEach(user => {
-                    const scoreClass = user.suspicionScore > 60 ? 'score-high' : 
-                                     user.suspicionScore > 30 ? 'score-medium' : 'score-low';
-                    html += `<tr>
-                        <td>${user.ip}</td>
-                        <td>${user.totalRequests}</td>
-                        <td><span class="${scoreClass}">${user.suspicionScore}</span></td>
-                        <td>${user.avgInterval}</td>
-                        <td>${user.minInterval}</td>
-                        <td>${new Date(user.lastSeen).toLocaleString()}</td>
-                        <td><button class="btn" onclick="unblockIP('${user.ip}')">重置</button></td>
-                    </tr>`;
-                });
-                behaviorTable.innerHTML = html;
-            }
+            return;
         }
-
-        function unblockIP(ip) {
-            if (!confirm(`确定要解封/重置 ${ip} 吗？`)) {
+        
+        const finalConfirm = confirm('🚨 最后确认！🚨\\n\\n用户: ' + username + '\\n操作: 永久删除账号\\n结果: 无法恢复\\n\\n确定执行吗？');
+        
+        if (!finalConfirm) return;
+        
+        btn.disabled = true;
+        btn.textContent = '删除中...';
+        btn.style.background = '#6c757d';
+        
+        fetch('/api/admin/delete-account', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                username: username
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) {
+                alert('注销失败: ' + data.message);
                 return;
             }
-
-            fetch('/admin/security/unblock', {
-                method: 'POST',
-                headers: {
-                    'Authorization': 'Bearer ' + currentPassword,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ ip: ip })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('操作成功');
-                    loadData();
-                } else {
-                    alert('操作失败: ' + data.message);
-                }
-            })
-            .catch(error => {
-                alert('操作失败');
-            });
-        }
-
-        // 每30秒自动刷新
-        setInterval(() => {
-            if (currentPassword && document.getElementById('dashboard').style.display !== 'none') {
-                loadData();
-            }
-        }, 30000);
-
-        // 回车登录
-        document.getElementById('password').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                login();
-            }
+            
+            alert('✅ 账号注销成功！\\n\\n用户 "' + username + '" 及其所有数据已永久删除。');
+            
+            const row = btn.closest('tr');
+            row.style.background = '#ffebee';
+            row.style.transition = 'all 0.5s ease';
+            
+            setTimeout(() => {
+                row.remove();
+            }, 500);
+        })
+        .catch(err => {
+            console.error('Delete account error:', err);
+            alert('注销请求失败，请稍后重试');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '🗑️ 注销账号';
+            btn.style.background = '#dc3545';
         });
+    }
+
+    function unlockAccount(username, btn) {
+        const confirmUnlock = confirm('确定要解锁用户 "' + username + '" 的账号吗？\\n\\n这将清除所有登录失败记录。');
+        
+        if (!confirmUnlock) return;
+        
+        btn.disabled = true;
+        btn.textContent = '解锁中...';
+        btn.style.background = '#6c757d';
+        
+        fetch('/api/admin/unlock-account', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) {
+                alert('解锁失败: ' + data.message);
+                return;
+            }
+            
+            alert('✅ 账号解锁成功！\\n\\n用户 "' + username + '" 现在可以正常登录了。');
+            location.reload();
+        })
+        .catch(err => {
+            console.error('Unlock account error:', err);
+            alert('解锁请求失败，请稍后重试');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '解锁';
+            btn.style.background = '#ffc107';
+        });
+    }
+
+    function clearFailures(username, btn) {
+        const confirmClear = confirm('确定要清除用户 "' + username + '" 的登录失败记录吗？');
+        
+        if (!confirmClear) return;
+        
+        btn.disabled = true;
+        btn.textContent = '清除中...';
+        btn.style.background = '#6c757d';
+        
+        fetch('/api/admin/clear-failures', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) {
+                alert('清除失败: ' + data.message);
+                return;
+            }
+            
+            alert('✅ 失败记录清除成功！\\n\\n用户 "' + username + '" 的登录失败计数已重置。');
+            location.reload();
+        })
+        .catch(err => {
+            console.error('Clear failures error:', err);
+            alert('清除请求失败，请稍后重试');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '清除';
+            btn.style.background = '#17a2b8';
+        });
+    }
     </script>
 </body>
 </html>
