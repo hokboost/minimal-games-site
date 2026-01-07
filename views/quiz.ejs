@@ -3,323 +3,591 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>知识问答</title>
+    <title>KingBoost Quiz 知识问答</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <a href="/" class="back-button">← 返回</a>
-    <div class="game-container">
-        <h1>🧠 知识问答</h1>
-        <p>玩家：<%= username %></p>
-        <p style="color: #666;">30秒内回答15道题，看看你能得多少分！</p>
-        
-        <div id="user-section">
+    <div class="container">
+        <div class="header">
+            <h1>🧐 KingBoost 在线答题</h1>
+            <div class="nav-links">
+                <span>用户：<%= username %></span>
+                <a href="/">🏠 返回首页</a>
+                <a href="/profile">👤 个人中心</a>
+            </div>
+        </div>
+
+        <div id="user-section" class="game-section">
+            <p class="game-desc">挑战知识问答，展示你的智慧！每题限时30秒，答对得分，错误不扣分。</p>
             <button onclick="startQuiz()">🎮 准备开始</button>
         </div>
-        
-        <div id="quiz" style="display:none">
-            <p id="timer"></p>
+
+        <div id="quiz" style="display:none" class="quiz-section">
+            <div class="quiz-header">
+                <p id="timer" class="timer">准备中...</p>
+                <p id="progress" class="progress">题目 1/15</p>
+            </div>
             <div class="quiz-container">
                 <div id="question" class="question"></div>
                 <div id="options" class="options"></div>
             </div>
         </div>
-        
-        <div id="result"></div>
+
+        <div id="result" class="result-section"></div>
+
+        <div id="leaderboard" class="leaderboard-section">
+            <h2>🏆 今日排行榜</h2>
+            <div class="refresh-controls">
+                <button class="refresh-btn" onclick="loadLeaderboard()">🔄 刷新排行榜</button>
+                <small>排行榜每日重置</small>
+            </div>
+            <table class="leaderboard-table">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>用户名</th>
+                        <th>得分</th>
+                        <th>完成时间</th>
+                    </tr>
+                </thead>
+                <tbody id="leaderboard-body">
+                    <tr><td colspan="4">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <style>
-        #question {
-            font-size: 20px;
-            margin: 20px 0;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 12px;
-            border-left: 4px solid #007bff;
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        color: #fff;
+    }
+
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #00c853;
+    }
+
+    .header h1 {
+        margin: 0;
+        color: #00c853;
+    }
+
+    .nav-links {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        color: #ccc;
+    }
+
+    .nav-links a {
+        color: #fff;
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+    }
+
+    .nav-links a:hover {
+        background: rgba(0, 200, 83, 0.2);
+        transform: translateY(-2px);
+    }
+
+    .game-section {
+        text-align: center;
+        padding: 2rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        margin-bottom: 2rem;
+    }
+
+    .game-desc {
+        color: #ccc;
+        margin-bottom: 2rem;
+        font-size: 1.1rem;
+        line-height: 1.6;
+    }
+
+    .game-section button {
+        background: linear-gradient(45deg, #4caf50, #45a049);
+        color: white;
+        border: none;
+        padding: 15px 40px;
+        font-size: 18px;
+        font-weight: bold;
+        border-radius: 25px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+    }
+
+    .game-section button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+    }
+
+    .quiz-section {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    .quiz-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+
+    .timer {
+        font-size: 1.5rem;
+        color: #ff6b6b;
+        font-weight: bold;
+        background: rgba(255, 107, 107, 0.1);
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        margin: 0;
+    }
+
+    .progress {
+        color: #00c853;
+        font-weight: bold;
+        font-size: 1.1rem;
+        margin: 0;
+    }
+
+    .quiz-container {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 2rem;
+        border-radius: 12px;
+    }
+
+    .question {
+        font-size: 1.3rem;
+        margin-bottom: 2rem;
+        padding: 1.5rem;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        border-left: 4px solid #00c853;
+        line-height: 1.6;
+    }
+
+    .options {
+        display: grid;
+        gap: 1rem;
+    }
+
+    .option {
+        padding: 1rem 1.5rem;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        cursor: pointer;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+        background: rgba(255, 255, 255, 0.05);
+        font-size: 1rem;
+    }
+
+    .option:hover {
+        background: rgba(0, 200, 83, 0.1);
+        border-color: #00c853;
+        transform: translateX(5px);
+    }
+
+    .option.selected {
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        color: white;
+        border-color: #00c853;
+        transform: translateX(5px);
+    }
+
+    .option.locked {
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .result-section {
+        text-align: center;
+        padding: 2rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        margin-bottom: 2rem;
+        font-size: 1.2rem;
+        display: none;
+    }
+
+    .result-section.show {
+        display: block;
+    }
+
+    .leaderboard-section {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 2rem;
+    }
+
+    .leaderboard-section h2 {
+        color: #00c853;
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+
+    .refresh-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+    }
+
+    .refresh-btn {
+        padding: 0.5rem 1rem;
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        border: none;
+        border-radius: 6px;
+        color: white;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .refresh-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 200, 83, 0.4);
+    }
+
+    .refresh-controls small {
+        color: #888;
+        font-size: 0.85rem;
+    }
+
+    .leaderboard-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .leaderboard-table th {
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        color: white;
+        padding: 1rem;
+        text-align: left;
+        font-weight: bold;
+    }
+
+    .leaderboard-table td {
+        padding: 0.8rem 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .leaderboard-table tr:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .leaderboard-table tr:nth-child(1) td:first-child::before { content: "🥇 "; }
+    .leaderboard-table tr:nth-child(2) td:first-child::before { content: "🥈 "; }
+    .leaderboard-table tr:nth-child(3) td:first-child::before { content: "🥉 "; }
+
+    @media (max-width: 768px) {
+        .container {
+            padding: 1rem;
         }
         
-        .option {
-            margin: 10px auto;
-            padding: 15px;
-            border: 2px solid #dee2e6;
-            cursor: pointer;
-            width: 80%;
-            border-radius: 8px;
-            transition: all 0.2s;
-            background: white;
+        .header {
+            flex-direction: column;
+            gap: 1rem;
         }
         
-        .option:hover {
-            background-color: #e3f2fd;
-            border-color: #2196f3;
+        .quiz-header {
+            flex-direction: column;
+            gap: 1rem;
         }
         
-        .option.selected {
-            background-color: #1976d2;
-            color: white;
-            border-color: #1565c0;
+        .question {
+            font-size: 1.1rem;
         }
-        
-        .option.locked {
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-        
-        #timer {
-            font-size: 18px;
-            color: #d32f2f;
-            font-weight: bold;
-            text-align: center;
-            padding: 10px;
-            background: #ffebee;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        
-        #result {
-            margin-top: 30px;
-            font-size: 18px;
-            text-align: center;
-        }
-        
-        .quiz-container {
-            background: white;
-            padding: 20px;
-            border-radius: 15px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            margin: 20px 0;
-        }
-        
-        #user-section button {
-            background: linear-gradient(45deg, #4caf50, #45a049);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 18px;
-            font-weight: bold;
-            border-radius: 25px;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin: 20px;
-        }
-        
-        #user-section button:hover {
-            background: linear-gradient(45deg, #45a049, #4caf50);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.3);
-        }
+    }
     </style>
 
     <script>
-        const username = "<%= username %>";
-        const csrfToken = "<%= csrfToken %>";
-        let currentIndex = 0;
-        let totalQuestions = 15;
-        let answers = [];
-        let timerId;
-        let seenIds = [];
-        let lock = false;
-        let currentToken = null;
-        let currentSignature = null;
+    let currentQuestions = [];
+    let currentAnswers = [];
+    let questionIndex = 0;
+    let timer;
+    let startTime;
+    let totalQuestions = 15;
+    let timePerQuestion = 30;
 
-        const QUIZ_DURATION = 30; // 答题时间（秒）
-        let endTime = 0;
+    // 页面加载时获取排行榜
+    document.addEventListener('DOMContentLoaded', function() {
+        loadLeaderboard();
+    });
 
-        async function startQuiz() {
-            document.getElementById("user-section").style.display = "none";
-            document.getElementById("quiz").style.display = "block";
-            document.getElementById("result").innerHTML = "";
-            
-            answers = [];
-            currentIndex = 0;
-            seenIds = [];
+    function startQuiz() {
+        document.getElementById('user-section').style.display = 'none';
+        document.getElementById('quiz').style.display = 'block';
+        document.getElementById('result').style.display = 'none';
+        
+        currentQuestions = [];
+        currentAnswers = [];
+        questionIndex = 0;
+        startTime = new Date();
+        
+        // 显示预热信息
+        showWarmupMessage();
+        
+        // 开始获取第一道题
+        nextQuestion();
+    }
 
-            endTime = Date.now() + QUIZ_DURATION * 1000;
-            startTimer();
-            await loadNext();
+    function showWarmupMessage() {
+        const timer = document.getElementById('timer');
+        const question = document.getElementById('question');
+        const options = document.getElementById('options');
+        
+        timer.textContent = '服务器预热中...';
+        question.textContent = '正在准备题目，请稍候...';
+        options.innerHTML = '';
+        
+        // 模拟预热延迟
+        setTimeout(() => {
+            timer.textContent = '游戏开始！';
+        }, 1000);
+    }
+
+    async function nextQuestion() {
+        if (questionIndex >= totalQuestions) {
+            submitQuiz();
+            return;
         }
 
-        function startTimer() {
-            timerId = setInterval(() => {
-                const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
-                const timerElement = document.getElementById("timer");
-                timerElement.textContent = `倒计时：${remaining} 秒`;
-                
-                // 时间紧急时改变颜色
-                if (remaining <= 5) {
-                    timerElement.style.color = '#ff4757';
-                    timerElement.style.backgroundColor = '#ffeaa7';
-                } else {
-                    timerElement.style.color = '#d32f2f';
-                    timerElement.style.backgroundColor = '#ffebee';
-                }
-                
-                if (remaining <= 0) {
-                    clearInterval(timerId);
-                    submitQuiz();
-                }
-            }, 500); // 半秒刷新，更平滑 - 完全按照原版
-        }
+        try {
+            const response = await fetch('/api/quiz/next', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                },
+                body: JSON.stringify({
+                    username: '<%= username %>',
+                    seen: currentQuestions.map(q => q.id),
+                    questionIndex: questionIndex
+                })
+            });
 
-        async function loadNext() {
-            if (currentIndex >= totalQuestions) return submitQuiz();
+            const data = await response.json();
             
-            try {
-                const res = await fetch('/api/quiz/next', {
-                    method: "POST",
-                    headers: { 
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrfToken
-                    },
-                    body: JSON.stringify({ username, seen: seenIds, questionIndex: currentIndex })
+            if (data.success) {
+                currentQuestions.push({
+                    id: data.question.id,
+                    token: data.token,
+                    signature: data.signature
                 });
                 
-                const data = await res.json();
+                displayQuestion(data.question, data.token);
+                startQuestionTimer();
                 
-                if (!data.success || !data.question) {
-                    console.warn('No more questions available');
-                    return submitQuiz();
-                }
-                
-                currentToken = data.token;
-                currentSignature = data.signature;
-                seenIds.push(data.question.id);
-                showQuestion(data.question);
-            } catch (error) {
-                console.error('Error loading question:', error);
-                submitQuiz();
+                // 更新进度
+                document.getElementById('progress').textContent = `题目 ${questionIndex + 1}/${totalQuestions}`;
+            } else {
+                alert('获取题目失败: ' + data.message);
             }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('网络错误，请稍后重试');
         }
+    }
 
-        function showQuestion(q) {
-            lock = false;
-            const qDiv = document.getElementById("question");
-            const opts = document.getElementById("options");
+    function displayQuestion(question, token) {
+        document.getElementById('question').textContent = question.question;
+        
+        const optionsDiv = document.getElementById('options');
+        optionsDiv.innerHTML = '';
+        
+        question.options.forEach((option, index) => {
+            const optionDiv = document.createElement('div');
+            optionDiv.className = 'option';
+            optionDiv.textContent = option;
+            optionDiv.onclick = () => selectOption(index, token, optionDiv);
+            optionsDiv.appendChild(optionDiv);
+        });
+    }
 
-            qDiv.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <span style="font-size: 1.1rem; font-weight: bold;">题目 ${currentIndex + 1}/${totalQuestions}</span>
-                    <span style="background: #e3f2fd; padding: 4px 12px; border-radius: 12px; font-size: 0.9rem; color: #1976d2;">第${currentIndex + 1}题</span>
-                </div>
-                <div style="font-size: 1.2rem; line-height: 1.4;">${q.question}</div>
-            `;
-            
-            opts.innerHTML = "";
-            // 防止选项闪现 - 完全按照原版
-            opts.style.display = "none";
-            setTimeout(() => { opts.style.display = "block"; }, 10);
-            
-            q.options.forEach((opt, idx) => {
-                const div = document.createElement("div");
-                div.className = "option";
-                div.innerHTML = `<span style="color: #666; margin-right: 10px;">${String.fromCharCode(65 + idx)}</span>${opt}`;
-                div.onclick = () => selectAnswer(idx);
-                opts.appendChild(div);
-            });
-        }
+    function selectOption(answerIndex, token, optionElement) {
+        // 禁用所有选项
+        const options = document.querySelectorAll('.option');
+        options.forEach(opt => {
+            opt.classList.add('locked');
+            opt.onclick = null;
+        });
+        
+        // 标记选中的选项
+        optionElement.classList.add('selected');
+        
+        // 记录答案
+        currentAnswers.push({
+            token: token,
+            answerIndex: answerIndex
+        });
+        
+        // 清除计时器
+        clearInterval(timer);
+        
+        // 短暂延迟后进入下一题
+        setTimeout(() => {
+            questionIndex++;
+            nextQuestion();
+        }, 1000);
+    }
 
-        function selectAnswer(idx) {
-            if (lock) return;
-            lock = true;
+    function startQuestionTimer() {
+        let timeLeft = timePerQuestion;
+        document.getElementById('timer').textContent = `剩余时间: ${timeLeft}s`;
+        
+        timer = setInterval(() => {
+            timeLeft--;
+            document.getElementById('timer').textContent = `剩余时间: ${timeLeft}s`;
             
-            const options = document.getElementsByClassName("option");
-            options[idx].classList.add("selected");
-            
-            // 锁定所有选项 - 完全按照原版
-            Array.from(options).forEach(el => {
-                el.onclick = null;
-                el.style.cursor = 'default';
-                el.classList.add("locked");
-            });
-
-            answers.push({ 
-                token: currentToken, 
-                signature: currentSignature, 
-                answerIndex: idx,
-                questionId: seenIds[seenIds.length - 1]
-            });
-            
-            currentIndex++;
-            setTimeout(() => loadNext(), 500); // 延迟加载下一题
-        }
-
-        async function submitQuiz() {
-            clearInterval(timerId);
-            const timestamp = Math.floor(Date.now() / 1000);
-            const nonce = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
-            
-            try {
-                const res = await fetch('/api/quiz/submit', {
-                    method: "POST",
-                    headers: { 
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrfToken
-                    },
-                    body: JSON.stringify({ username, answers, timestamp, nonce })
+            if (timeLeft <= 0) {
+                clearInterval(timer);
+                // 时间到，自动跳过
+                currentAnswers.push({
+                    token: currentQuestions[questionIndex].token,
+                    answerIndex: -1 // -1 表示超时
                 });
-                
-                const result = await res.json();
-                
-                document.getElementById("quiz").style.display = "none";
-                const resultDiv = document.getElementById("result");
-                
-                if (result.success) {
-                    const score = result.score;
-                    let points = 0;
-                    let pointsText = "";
-                    let color = "#f39c12";
-                    
-                    // 新积分规则 - 简化版
-                    if (score <= 4) { 
-                        points = -2; 
-                        pointsText = "扣2加币"; 
-                        color = "#e74c3c"; 
-                    }
-                    else if (score <= 9) { 
-                        points = -1; 
-                        pointsText = "扣1加币"; 
-                        color = "#e67e22"; 
-                    }
-                    else { 
-                        points = +1; 
-                        pointsText = "加1加币"; 
-                        color = "#27ae60"; 
-                    }
-                    
-                    resultDiv.innerHTML = `
-                        <div style="text-align: center; margin-top: 30px;">
-                            <div style="background: linear-gradient(45deg, ${color}, ${color}aa); color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                                <h2 style="margin: 0 0 10px 0;">Quiz完成！</h2>
-                                <div style="font-size: 2rem; font-weight: bold; margin: 10px 0;">${score}/15</div>
-                                <div style="font-size: 1.5rem; font-weight: bold;">${pointsText}</div>
-                            </div>
-                            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px; color: #333;">
-                                <p><strong>积分规则：</strong></p>
-                                <p>0-4分扣2加币 | 5-9分扣1加币 | 10分以上加1加币</p>
-                            </div>
-                            <div style="margin-top: 30px;">
-                                <button onclick="location.reload()" style="margin: 10px; background: #3498db; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">再挑战一次</button>
-                                <button onclick="location.href='/'" style="margin: 10px; background: #95a5a6; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">返回主页</button>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    resultDiv.innerHTML = `
-                        <div style="text-align: center; margin-top: 30px;">
-                            <p style="color: #e74c3c; font-size: 1.2rem;">提交失败：${result.message || '未知错误'}</p>
-                            <button onclick="location.reload()" style="margin-top: 20px; background: #e74c3c; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">重试</button>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                document.getElementById("result").innerHTML = `
-                    <div style="text-align: center; margin-top: 30px;">
-                        <p style="color: #e74c3c; font-size: 1.2rem;">网络错误，请重试</p>
-                        <button onclick="location.reload()" style="margin-top: 20px; background: #e74c3c; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">重试</button>
-                    </div>
-                `;
+                questionIndex++;
+                nextQuestion();
             }
+        }, 1000);
+    }
+
+    async function submitQuiz() {
+        try {
+            const response = await fetch('/api/quiz/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                },
+                body: JSON.stringify({
+                    username: '<%= username %>',
+                    answers: currentAnswers
+                })
+            });
+
+            const data = await response.json();
+            
+            if (data.success) {
+                showResult(data.score, data.total);
+                // 提交后刷新排行榜
+                setTimeout(() => {
+                    loadLeaderboard();
+                }, 1000);
+            } else {
+                alert('提交失败: ' + data.message);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('提交失败，请稍后重试');
         }
+    }
+
+    function showResult(score, total) {
+        document.getElementById('quiz').style.display = 'none';
+        const resultDiv = document.getElementById('result');
+        resultDiv.className = 'result-section show';
+        
+        const percentage = Math.round((score / total) * 100);
+        const endTime = new Date();
+        const timeTaken = Math.round((endTime - startTime) / 1000);
+        
+        let resultHTML = `
+            <h2>🎉 答题完成！</h2>
+            <div style="font-size: 2rem; margin: 1rem 0; color: #00c853;">
+                ${score}/${total} 分 (${percentage}%)
+            </div>
+            <p>用时: ${timeTaken} 秒</p>
+        `;
+        
+        if (percentage >= 80) {
+            resultHTML += `<p style="color: #4caf50;">🌟 优秀！知识渊博！</p>`;
+        } else if (percentage >= 60) {
+            resultHTML += `<p style="color: #ff9800;">👍 不错！继续努力！</p>`;
+        } else {
+            resultHTML += `<p style="color: #f44336;">💪 加油！多学习多练习！</p>`;
+        }
+        
+        resultHTML += `
+            <button onclick="restartQuiz()" style="
+                background: linear-gradient(45deg, #00c853, #00bfa5);
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                font-size: 16px;
+                border-radius: 25px;
+                cursor: pointer;
+                margin-top: 1rem;
+            ">🔄 再来一次</button>
+        `;
+        
+        resultDiv.innerHTML = resultHTML;
+    }
+
+    function restartQuiz() {
+        document.getElementById('result').style.display = 'none';
+        document.getElementById('user-section').style.display = 'block';
+    }
+
+    async function loadLeaderboard() {
+        try {
+            const response = await fetch('/api/quiz/leaderboard');
+            const data = await response.json();
+            
+            const tbody = document.getElementById('leaderboard-body');
+            
+            if (data.success && Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
+                tbody.innerHTML = '';
+                data.leaderboard.forEach((record, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${record.username}</td>
+                        <td>${record.score}</td>
+                        <td>${new Date(record.submitted_at).toLocaleString('zh-CN', { 
+                            timeZone: 'Asia/Shanghai', 
+                            year: 'numeric', 
+                            month: '2-digit', 
+                            day: '2-digit', 
+                            hour: '2-digit', 
+                            minute: '2-digit', 
+                            second: '2-digit', 
+                            hour12: false 
+                        })}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="4">暂无排行榜数据</td></tr>';
+            }
+        } catch (error) {
+            console.error('加载排行榜失败:', error);
+            document.getElementById('leaderboard-body').innerHTML = '<tr><td colspan="4">加载排行榜失败</td></tr>';
+        }
+    }
     </script>
 </body>
 </html>

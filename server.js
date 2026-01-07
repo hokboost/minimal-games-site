@@ -839,11 +839,18 @@ app.post('/api/quiz/next',
 });
 
 app.post('/api/quiz/submit', 
+    requireLogin,
+    requireAuthorized,
     security.basicRateLimit,
     security.csrfProtection,
-    (req, res) => {
+    async (req, res) => {
     try {
         const { username, answers = [] } = req.body;
+        
+        // 验证用户名与登录用户一致
+        if (username !== req.session.user.username) {
+            return res.status(403).json({ success: false, message: '用户名不匹配' });
+        }
         
         let correctCount = 0;
         const userSession = userSessions.get(username) || {};
@@ -851,7 +858,7 @@ app.post('/api/quiz/submit',
         for (const answer of answers) {
             const sessionData = userSession[answer.token];
             if (sessionData) {
-                const question = questionMap.get(sessionData.questionId); // O(1)查找
+                const question = questionMap.get(sessionData.questionId);
                 if (question && GameLogic.quiz.validateAnswer(question, answer.answerIndex)) {
                     correctCount++;
                 }
@@ -860,7 +867,17 @@ app.post('/api/quiz/submit',
             }
         }
         
-        // 只有在成功验证答案后才清理用户会话
+        // 存储到数据库
+        try {
+            await pool.query(
+                'INSERT INTO submissions (username, score, total_questions, submitted_at) VALUES ($1, $2, $3, NOW())',
+                [username, correctCount, answers.length]
+            );
+        } catch (dbError) {
+            console.error('数据库存储失败:', dbError);
+        }
+        
+        // 清理用户会话
         if (Object.keys(userSession).length > 0) {
             userSessions.delete(username);
         }
@@ -877,13 +894,54 @@ app.post('/api/quiz/submit',
     }
 });
 
+// Quiz 排行榜 API
+app.get('/api/quiz/leaderboard', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT username, score, submitted_at 
+             FROM submissions 
+             WHERE DATE(submitted_at) = CURRENT_DATE 
+             ORDER BY score DESC, submitted_at ASC 
+             LIMIT 20`
+        );
+        
+        res.json({
+            success: true,
+            leaderboard: result.rows
+        });
+    } catch (error) {
+        console.error('Quiz leaderboard error:', error);
+        res.status(500).json({ success: false, message: '获取排行榜失败' });
+    }
+});
+
 // Slot API 路由
 app.post('/api/slot/spin', 
+    requireLogin,
+    requireAuthorized,
     security.basicRateLimit,
     security.csrfProtection,
-    (req, res) => {
+    async (req, res) => {
     try {
+        const { username } = req.body;
+        
+        // 验证用户名
+        if (username !== req.session.user.username) {
+            return res.status(403).json({ success: false, message: '用户名不匹配' });
+        }
+        
         const result = GameLogic.slot.spin();
+        
+        // 存储到数据库
+        try {
+            await pool.query(
+                'INSERT INTO slot_results (username, reels, reward, won, created_at) VALUES ($1, $2, $3, $4, NOW())',
+                [username, JSON.stringify(result.reels), result.reward, result.reward !== '再来一次']
+            );
+        } catch (dbError) {
+            console.error('数据库存储失败:', dbError);
+        }
+        
         res.json({
             success: true,
             reels: result.reels,
@@ -895,21 +953,88 @@ app.post('/api/slot/spin',
     }
 });
 
+// Slot 排行榜 API
+app.get('/api/slot/leaderboard', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT username, COUNT(*) as wins, created_at as latest_win 
+             FROM slot_results 
+             WHERE DATE(created_at) = CURRENT_DATE AND won = true 
+             GROUP BY username 
+             ORDER BY wins DESC, latest_win ASC 
+             LIMIT 20`
+        );
+        
+        res.json({
+            success: true,
+            leaderboard: result.rows
+        });
+    } catch (error) {
+        console.error('Slot leaderboard error:', error);
+        res.status(500).json({ success: false, message: '获取排行榜失败' });
+    }
+});
+
 // Scratch API 路由
 app.post('/api/scratch', 
+    requireLogin,
+    requireAuthorized,
     security.basicRateLimit,
     security.csrfProtection,
-    (req, res) => {
+    async (req, res) => {
     try {
+        const { username } = req.body;
+        
+        // 验证用户名
+        if (username !== req.session.user.username) {
+            return res.status(403).json({ success: false, message: '用户名不匹配' });
+        }
+        
         const card = GameLogic.scratch.generateCard();
+        const isWin = card.slots.some(slot => card.winningNumbers.includes(slot));
+        const reward = isWin ? '中奖了！' : '再来一次';
+        
+        // 存储到数据库
+        try {
+            await pool.query(
+                'INSERT INTO scratch_results (username, winning_numbers, slots, reward, won, created_at) VALUES ($1, $2, $3, $4, $5, NOW())',
+                [username, JSON.stringify(card.winningNumbers), JSON.stringify(card.slots), reward, isWin]
+            );
+        } catch (dbError) {
+            console.error('数据库存储失败:', dbError);
+        }
+        
         res.json({
             success: true,
             winningNumbers: card.winningNumbers,
-            slots: card.slots
+            slots: card.slots,
+            reward: reward
         });
     } catch (error) {
         console.error('Scratch error:', error);
         res.status(500).json({ success: false, message: '刮刮卡生成失败' });
+    }
+});
+
+// Scratch 排行榜 API
+app.get('/api/scratch/leaderboard', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT username, COUNT(*) as wins, MAX(created_at) as latest_win 
+             FROM scratch_results 
+             WHERE DATE(created_at) = CURRENT_DATE AND won = true 
+             GROUP BY username 
+             ORDER BY wins DESC, latest_win ASC 
+             LIMIT 20`
+        );
+        
+        res.json({
+            success: true,
+            leaderboard: result.rows
+        });
+    } catch (error) {
+        console.error('Scratch leaderboard error:', error);
+        res.status(500).json({ success: false, message: '获取排行榜失败' });
     }
 });
 

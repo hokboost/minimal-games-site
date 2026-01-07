@@ -3,31 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>刮刮卡</title>
+    <title>KingBoost 刮刮乐</title>
     <link rel="stylesheet" href="/styles.css">
     <style>
-        body {
-            background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), 
-                        radial-gradient(circle at center, #667eea 0%, #764ba2 100%);
-            color: #fff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 10px;
-        }
-        
-        .board {
-            max-width: 750px;
-            margin: auto;
-            background: rgba(255, 255, 255, 0.08);
-            border: 2px solid rgba(255,255,255,0.2);
-            border-radius: 16px;
-            padding: 1.5rem;
-            position: relative;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
-        }
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        color: #fff;
+    }
+
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #00c853;
+    }
+
+    .header h1 {
+        margin: 0;
+        color: #00c853;
+    }
+
+    .nav-links {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        color: #ccc;
+    }
+
+    .nav-links a {
+        color: #fff;
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+    }
+
+    .nav-links a:hover {
+        background: rgba(0, 200, 83, 0.2);
+        transform: translateY(-2px);
+    }
+
+    .board {
+        max-width: 750px;
+        margin: auto;
+        background: rgba(255, 255, 255, 0.08);
+        border: 2px solid rgba(255,255,255,0.2);
+        border-radius: 16px;
+        padding: 1.5rem;
+        position: relative;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    }
         
         .labels {
             margin-bottom: 1rem;
@@ -203,17 +236,34 @@
                 font-size: 1rem;
                 margin-top: 0.8rem;
             }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
             
+            .header {
+                flex-direction: column;
+                gap: 1rem;
+            }
         }
     </style>
 </head>
 <body>
-    <a href="/" class="back-button">← 返回</a>
-    <div class="game-container">
+    <div class="container">
+        <div class="header">
+            <h1>🎟️ KingBoost 刮刮乐</h1>
+            <div class="nav-links">
+                <span>用户：<%= username %></span>
+                <a href="/">🏠 返回首页</a>
+                <a href="/profile">👤 个人中心</a>
+            </div>
+        </div>
+        
         <div class="board">
-            <h2>🎯 刮刮卡</h2>
-            <p>玩家：<%= username %></p>
-            <div class="labels">前5个格子是中奖号码，后20个格子刮开找匹配！</div>
+            <h2>🎯 KingBoost 刮刮乐</h2>
+            <div class="labels">共有20次中奖机会哦，多中多得！（奖品不涉及真实钱财）</div>
             <div id="scratchContainer">
                 <div id="scratchContent"></div>
                 <canvas id="scratchCanvas"></canvas>
@@ -221,236 +271,191 @@
 
             <div class="scratch-ui">
                 <button onclick="startScratch()">开始刮奖</button>
-                <button onclick="verifyWin()">🎯 验证结果</button>
+                <button onclick="verifyWin()">🎯 点击验证中奖</button>
                 <p id="verifyResult" style="font-weight: bold; font-size: 1.2rem;"></p>
             </div>
+        </div>
+        
+        <div style="
+            max-width: 760px;
+            margin: 2rem auto 0;
+            padding: 1rem;
+            background: rgba(0,0,0,0.5);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #ccc;
+            line-height: 1.5;
+            text-align: center;
+        ">
+            ⚠️ <strong>Disclaimer:</strong> This scratch card feature is provided solely for entertainment purposes. It does not involve gambling, betting, or the use of any real currency. No monetary prizes are offered or can be won. Participation is entirely free, and this feature complies with Canadian laws. By using this feature, you acknowledge that it is not a game of chance and is not subject to gambling regulations.
         </div>
     </div>
 
     <script>
-        const username = "<%= username %>";
-        const csrfToken = "<%= csrfToken %>";
+    // Polyfill for crypto.randomUUID
+    if (!crypto.randomUUID) {
+        crypto.randomUUID = function () {
+            return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+                (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+            );
+        };
+    }
+    
+    let hasVerified = true;
         
-        // Polyfill for crypto.randomUUID
-        if (!crypto.randomUUID) {
-            crypto.randomUUID = function () {
-                return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-                    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-                );
-            };
+    function createCard(num, prize) {
+        const cell = document.createElement('div');
+        cell.className = 'grid-item';
+        cell.innerHTML = `<div>${num}</div><div>${prize || ''}</div>`;
+        return cell;
+    }
+        
+    async function startScratch() {
+        if (!hasVerified) {
+            alert('请先验证当前结果后再进行下一次刮奖哦！');
+            return;
         }
-        
-        let hasVerified = true;
-        
-        // 音效控制
-        const sounds = {
-            scratch: new Audio('/assets/audio/scratch.mp3'),
-            win: new Audio('/assets/audio/win.mp3'),
-            lose: new Audio('/assets/audio/lose.mp3')
+        hasVerified = false;
+
+        // 提前初始化 canvas 遮罩，防止号码闪现
+        const canvas = document.getElementById('scratchCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+
+        const image = new Image();
+        image.src = '/assets/images/chiikawa1.png';
+        image.onload = () => {
+            ctx.globalAlpha = 1.0;
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            ctx.globalCompositeOperation = 'destination-out';
         };
         
-        // 预加载音效
-        Object.values(sounds).forEach(sound => {
-            sound.load();
-        });
-        
-        // 刮刮音效控制
-        let scratchSoundPlaying = false;
-        let scratchSoundTimeout = null;
-        
-        function createCard(num, prize, isWinning = false) {
-            const cell = document.createElement('div');
-            cell.className = isWinning ? 'grid-item winning-number' : 'grid-item';
-            cell.innerHTML = `<div>${num}</div><div>${prize || ''}</div>`;
-            return cell;
-        }
-        
-        async function startScratch() {
-            if (!hasVerified) {
-                alert('请先验证当前结果，再开始下一轮刮奖！');
-                return;
-            }
-            hasVerified = false;
-            
-            // 初始化Canvas遮罩层 - 防止数字闪现
-            const canvas = document.getElementById('scratchCanvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = canvas.offsetWidth;
-            canvas.height = canvas.offsetHeight;
-            
-            // 创建银色遮罩层
+        // 如果图片加载失败，使用默认遮罩
+        image.onerror = () => {
             ctx.fillStyle = '#c0c0c0';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // 添加纹理效果
-            for (let i = 0; i < 50; i++) {
-                ctx.fillStyle = `rgba(${160 + Math.random() * 80}, ${160 + Math.random() * 80}, ${160 + Math.random() * 80}, 0.3)`;
-                ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 5, 5);
-            }
-            
             ctx.globalCompositeOperation = 'destination-out';
-            
-            // 请求数据
-            const timestamp = Math.floor(Date.now() / 1000);
-            const nonce = crypto.randomUUID();
-            
-            try {
-                const res = await fetch('/api/scratch', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify({ username, timestamp, nonce })
-                });
+        };
+
+        // 再去请求数据
+        const username = "<%= username %>";
+        const timestamp = Math.floor(Date.now() / 1000);
+        const nonce = crypto.randomUUID();
+
+        const res = await fetch('https://scratch-server-vmit.onrender.com/scratch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, timestamp, nonce })
+        });
+
+        const data = await res.json();
+        if (!data.success) return alert('❌ ' + data.message);
+
+        const all = [
+            ...data.winningNumbers.map(n => ({ num: n, prize: '中奖号码' })),
+            ...data.slots
+        ];
+
+        const container = document.getElementById('scratchContent');
+        container.innerHTML = '';
+        all.forEach(({ num, prize }) => container.appendChild(createCard(num, prize)));
                 
-                const data = await res.json();
-                if (!data.success) {
-                    alert('❌ ' + data.message);
-                    return;
+        // 刮刮逻辑（保持不变）
+        let isDrawing = false, lastX = null, lastY = null;
+
+        // 鼠标事件
+        canvas.onmousedown = () => {
+            isDrawing = true;
+        };
+
+        canvas.onmouseup = canvas.onmouseleave = () => {
+            isDrawing = false;
+            lastX = lastY = null;
+        };
+
+        canvas.onmousemove = e => {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            drawAt(x, y);
+        };
+
+        // 触摸事件（手机）
+        canvas.ontouchstart = e => {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            lastX = touch.clientX - rect.left;
+            lastY = touch.clientY - rect.top;
+            drawAt(lastX, lastY);
+        };
+
+        canvas.ontouchmove = e => {
+            if (!isDrawing) return;
+            e.preventDefault(); // 防止页面滚动
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            drawAt(x, y);
+        };
+
+        canvas.ontouchend = () => {
+            isDrawing = false;
+            lastX = lastY = null;
+        };
+
+        // 抽出通用绘制函数
+        function drawAt(x, y) {
+            if (lastX !== null && lastY !== null) {
+                const dx = x - lastX;
+                const dy = y - lastY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const steps = Math.ceil(dist / 4);
+                for (let i = 0; i <= steps; i++) {
+                    const lerpX = lastX + (dx * i / steps);
+                    const lerpY = lastY + (dy * i / steps);
+                    ctx.beginPath();
+                    ctx.arc(lerpX, lerpY, 20, 0, Math.PI * 2);
+                    ctx.fill();
                 }
-                
-                const container = document.getElementById('scratchContent');
-                container.innerHTML = '';
-                
-                // 先添加5个中奖号码
-                data.winningNumbers.forEach(n => {
-                    container.appendChild(createCard(n, '中奖号码', true));
-                });
-                
-                // 再添加20个刮奖号码
-                data.slots.forEach(({ num, amount, prize }) => {
-                    container.appendChild(createCard(num, amount || prize, false));
-                });
-                
-                // 刮刮逻辑 - 完全按照原版
-                let isDrawing = false, lastX = null, lastY = null;
-                
-                // 鼠标事件
-                canvas.onmousedown = (e) => {
-                    isDrawing = true;
-                    const rect = canvas.getBoundingClientRect();
-                    lastX = e.clientX - rect.left;
-                    lastY = e.clientY - rect.top;
-                    drawAt(lastX, lastY);
-                };
-                
-                canvas.onmouseup = canvas.onmouseleave = () => {
-                    isDrawing = false;
-                    lastX = lastY = null;
-                };
-                
-                canvas.onmousemove = e => {
-                    if (!isDrawing) return;
-                    const rect = canvas.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    drawAt(x, y);
-                };
-                
-                // 触摸事件（移动端）
-                canvas.ontouchstart = e => {
-                    isDrawing = true;
-                    e.preventDefault();
-                    const rect = canvas.getBoundingClientRect();
-                    const touch = e.touches[0];
-                    lastX = touch.clientX - rect.left;
-                    lastY = touch.clientY - rect.top;
-                    drawAt(lastX, lastY);
-                };
-                
-                canvas.ontouchmove = e => {
-                    if (!isDrawing) return;
-                    e.preventDefault();
-                    const rect = canvas.getBoundingClientRect();
-                    const touch = e.touches[0];
-                    const x = touch.clientX - rect.left;
-                    const y = touch.clientY - rect.top;
-                    drawAt(x, y);
-                };
-                
-                canvas.ontouchend = () => {
-                    isDrawing = false;
-                    lastX = lastY = null;
-                };
-                
-                // 绘制函数
-                function drawAt(x, y) {
-                    if (lastX !== null && lastY !== null) {
-                        const dx = x - lastX;
-                        const dy = y - lastY;
-                        const dist = Math.sqrt(dx * dx + dy * dy);
-                        const steps = Math.ceil(dist / 4);
-                        for (let i = 0; i <= steps; i++) {
-                            const lerpX = lastX + (dx * i / steps);
-                            const lerpY = lastY + (dy * i / steps);
-                            ctx.beginPath();
-                            ctx.arc(lerpX, lerpY, 20, 0, Math.PI * 2);
-                            ctx.fill();
-                        }
-                    }
-                    lastX = x;
-                    lastY = y;
-                    
-                    // 播放刮刮音效
-                    if (!scratchSoundPlaying) {
-                        scratchSoundPlaying = true;
-                        sounds.scratch.currentTime = 0;
-                        sounds.scratch.play().catch(e => console.log('无法播放音效:', e));
-                    }
-                    
-                    // 延迟停止音效
-                    clearTimeout(scratchSoundTimeout);
-                    scratchSoundTimeout = setTimeout(() => {
-                        sounds.scratch.pause();
-                        scratchSoundPlaying = false;
-                    }, 100);
-                }
-                
-                document.getElementById('verifyResult').textContent = '';
-                
-            } catch (error) {
-                alert('网络错误，请重试');
-                console.error('Error:', error);
             }
+            lastX = x;
+            lastY = y;
         }
+
+        document.getElementById('verifyResult').textContent = '';
+    }
         
-        function verifyWin() {
-            const grid = Array.from(document.querySelectorAll('#scratchContent .grid-item'));
-            const winNums = grid.slice(0, 5).map(cell => parseInt(cell.children[0].textContent));
-            const userSlots = grid.slice(5);
-            
-            const matched = [];
-            
-            userSlots.forEach(cell => {
-                const num = parseInt(cell.children[0].textContent);
-                const amount = cell.children[1].textContent;
-                if (winNums.includes(num) && amount !== '0') {
-                    matched.push({ num, amount });
-                }
-            });
-            
-            const result = document.getElementById('verifyResult');
-            if (matched.length > 0) {
-                const totalAmount = matched.reduce((sum, m) => {
-                    const amt = parseInt(m.amount.replace('+', ''));
-                    return sum + (isNaN(amt) ? 0 : amt);
-                }, 0);
-                result.textContent = `🎉 恭喜中奖！总金额：+${totalAmount}`;
-                result.style.color = '#00ff88';
-                // 播放中奖音效
-                sounds.win.currentTime = 0;
-                sounds.win.play().catch(e => console.log('无法播放音效:', e));
-            } else {
-                result.textContent = '😢 很遗憾，这次没有中奖。再试一次！';
-                result.style.color = '#ff5555';
-                // 播放未中奖音效
-                sounds.lose.currentTime = 0;
-                sounds.lose.play().catch(e => console.log('无法播放音效:', e));
+    function verifyWin() {
+        const grid = Array.from(document.querySelectorAll('#scratchContent .grid-item'));
+        const winNums = grid.slice(0, 5).map(cell => parseInt(cell.children[0].textContent));
+        const userSlots = grid.slice(5);
+
+        const matched = [];
+
+        userSlots.forEach(cell => {
+            const num = parseInt(cell.children[0].textContent);
+            const prize = cell.children[1].textContent;
+            if (winNums.includes(num)) {
+                matched.push({ num, prize });
             }
-            
-            hasVerified = true;
+        });
+
+        const result = document.getElementById('verifyResult');
+        if (matched.length > 0) {
+            const msg = matched.map(m => `号码 ${m.num}：${m.prize}`).join('， ');
+            result.textContent = `🎉 恭喜，你命中了 ${matched.length} 个奖项！${msg}`;
+            result.style.color = '#00ff88';
+        } else {
+            result.textContent = '😢 很遗憾，未中奖，再试一次吧！';
+            result.style.color = '#ff5555';
         }
+
+        hasVerified = true;
+    }
     </script>
 </body>
 </html>

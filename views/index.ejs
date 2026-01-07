@@ -108,6 +108,88 @@
             flex-wrap: wrap;
         }
     }
+    
+    .games-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 2rem;
+        margin-top: 2rem;
+    }
+    
+    .game-card {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        transition: all 0.3s;
+        cursor: pointer;
+        text-decoration: none;
+        color: inherit;
+        display: block;
+    }
+    
+    .game-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        border-color: #f0c040;
+    }
+    
+    .game-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        display: block;
+    }
+    
+    .game-title {
+        color: #f0c040;
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+        font-weight: bold;
+    }
+    
+    .game-description {
+        color: #ccc;
+        font-size: 1rem;
+        line-height: 1.5;
+        margin-bottom: 1rem;
+    }
+    
+    .game-status {
+        margin-top: 1rem;
+        padding: 0.5rem 1rem;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        font-size: 0.9rem;
+        display: inline-block;
+    }
+    
+    .status-new {
+        color: #4ecdc4;
+        border: 1px solid #4ecdc4;
+    }
+    
+    .status-hot {
+        color: #ff6b6b;
+        border: 1px solid #ff6b6b;
+    }
+    
+    .status-classic {
+        color: #f0c040;
+        border: 1px solid #f0c040;
+    }
+    
+    @media (max-width: 768px) {
+        .games-grid {
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+        
+        .game-icon {
+            font-size: 3rem;
+        }
+    }
     </style>
 </head>
 <body>
@@ -133,6 +215,7 @@
             </div>
         </div>
         
+        <!-- 任务转盘功能暂时隐藏
         <div class="trigger-rules">
             <h2>🎡 转盘触发规则</h2>
             <div class="rules-grid">
@@ -159,38 +242,175 @@
                 </div>
             </div>
         </div>
+        -->
         
-        <div class="game-grid">
-            <a href="/spin" class="game-card">
-                <div class="game-icon">🎡</div>
-                <h2>Spin</h2>
-                <p>挑战任务轮盘</p>
+        <% if (typeof user !== 'undefined' && user) { %>
+            <div class="spins-reminder">
+                <h3>🎯 剩余游戏次数：<%= user.spins_allowed || 0 %></h3>
+                <p>完成代练订单可获得更多游戏机会</p>
+            </div>
+        <% } %>
+
+        <div class="games-grid">
+            <!-- 任务转盘游戏暂时隐藏
+            <a href="javascript:void(0)" onclick="startSpinGame()" class="game-card">
+                <span class="game-icon">🎡</span>
+                <h2 class="game-title">幸运转盘</h2>
+                <p class="game-description">转动幸运转盘，赢取丰厚奖励和游戏次数</p>
+                <span class="game-status status-hot">🔥 热门</span>
             </a>
+            -->
             
             <a href="/quiz" class="game-card">
-                <div class="game-icon">🧠</div>
-                <h2>Quiz</h2>
-                <p>知识挑战积分系统</p>
+                <span class="game-icon">🧠</span>
+                <h2 class="game-title">知识问答</h2>
+                <p class="game-description">测试你的知识，答对越多奖励越丰厚</p>
+                <span class="game-status status-hot">🔥 热门</span>
             </a>
             
-            <a href="/slot" class="game-card">
-                <div class="game-icon">🎰</div>
-                <h2>Slot</h2>
-                <p>金额转动机</p>
+            <a href="javascript:void(0)" onclick="startSlotGame()" class="game-card">
+                <span class="game-icon">🎰</span>
+                <h2 class="game-title">幸运老虎机</h2>
+                <p class="game-description">经典老虎机游戏，三个相同图案即可获胜</p>
+                <span class="game-status status-classic">⭐ 经典</span>
             </a>
             
-            <a href="/scratch" class="game-card">
-                <div class="game-icon">🎟️</div>
-                <h2>Scratch</h2>
-                <p>刮奖金额卡</p>
+            <a href="javascript:void(0)" onclick="startScratchGame()" class="game-card">
+                <span class="game-icon">🎟️</span>
+                <h2 class="game-title">刮刮乐</h2>
+                <p class="game-description">刮开涂层，发现隐藏的奖励，简单又刺激</p>
+                <span class="game-status status-classic">⭐ 经典</span>
             </a>
             
-            <a href="/wish" class="game-card">
-                <div class="game-icon">🌟</div>
-                <h2>Wish</h2>
-                <p>幸运祈愿</p>
+            <a href="javascript:void(0)" onclick="startWishGame()" class="game-card">
+                <span class="game-icon">🌟</span>
+                <h2 class="game-title">许愿星</h2>
+                <p class="game-description">许下心愿，看看幸运女神是否眷顾你</p>
+                <span class="game-status status-new">✨ 新游戏</span>
             </a>
         </div>
     </div>
+
+<script>
+// 游戏服务器预热和跳转函数
+
+function createLoadingModal(gameName, iconEmoji, serverUrl) {
+    const loadingModal = document.createElement('div');
+    loadingModal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        font-size: 1.5rem;
+    `;
+    loadingModal.innerHTML = `
+        <div style="text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 15px; backdrop-filter: blur(10px);">
+            <div style="font-size: 2rem; margin-bottom: 20px;">${iconEmoji}</div>
+            <div>正在启动${gameName}...</div>
+            <div style="margin-top: 15px; font-size: 1.1rem; color: #aaa;">Render免费版启动需要30-60秒，请耐心等待</div>
+            <div style="margin-top: 20px;">
+                <div class="loading-spinner"></div>
+            </div>
+        </div>
+        <style>
+            .loading-spinner {
+                width: 30px;
+                height: 30px;
+                border: 3px solid rgba(255,255,255,0.3);
+                border-top: 3px solid white;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 0 auto;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    `;
+    document.body.appendChild(loadingModal);
+    return loadingModal;
+}
+
+function startSlotGame() {
+    const modal = createLoadingModal('幸运老虎机', '🎰', 'https://slot-server-9682.onrender.com');
+    
+    // 预热服务器
+    fetch("https://slot-server-9682.onrender.com/ping")
+        .then(() => {
+            setTimeout(() => {
+                window.location.href = "/slot";
+            }, 3000); // 3秒后跳转
+        })
+        .catch(() => {
+            // 即使ping失败也跳转，让老虎机页面处理
+            setTimeout(() => {
+                window.location.href = "/slot";
+            }, 15000); // 15秒后跳转
+        });
+}
+
+function startScratchGame() {
+    const modal = createLoadingModal('刮刮乐', '🎟️', 'https://scratch-server.onrender.com');
+    
+    // 预热服务器
+    fetch("https://scratch-server.onrender.com/ping")
+        .then(() => {
+            setTimeout(() => {
+                window.location.href = "/scratch";
+            }, 3000); // 3秒后跳转
+        })
+        .catch(() => {
+            // 即使ping失败也跳转，让刮刮乐页面处理
+            setTimeout(() => {
+                window.location.href = "/scratch";
+            }, 15000); // 15秒后跳转
+        });
+}
+
+function startWishGame() {
+    const modal = createLoadingModal('许愿星', '🌟', 'https://wish-server.onrender.com');
+    
+    // 预热服务器
+    fetch("https://wish-server.onrender.com/ping")
+        .then(() => {
+            setTimeout(() => {
+                window.location.href = "/wish";
+            }, 3000); // 3秒后跳转
+        })
+        .catch(() => {
+            // 即使ping失败也跳转，让许愿星页面处理
+            setTimeout(() => {
+                window.location.href = "/wish";
+            }, 15000); // 15秒后跳转
+        });
+}
+
+function startSpinGame() {
+    const modal = createLoadingModal('幸运转盘', '🎡', 'https://secure-spin-server.onrender.com');
+    
+    // 预热服务器
+    fetch("https://secure-spin-server.onrender.com/ping")
+        .then(() => {
+            setTimeout(() => {
+                window.location.href = "/spin";
+            }, 3000); // 3秒后跳转
+        })
+        .catch(() => {
+            // 即使ping失败也跳转，让转盘页面处理
+            setTimeout(() => {
+                window.location.href = "/spin";
+            }, 15000); // 15秒后跳转
+        });
+}
+</script>
+
 </body>
 </html>

@@ -3,400 +3,284 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>老虎机</title>
+    <title>KingBoost 幸运老虎机</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <a href="/" class="back-button">← 返回</a>
-    <div class="game-container">
-        <h1>🎰 老虎机</h1>
-        <p>玩家：<%= username %></p>
-        <p style="color: #666;">转动轮盘，三个相同图案即可获得奖励！</p>
-        
-        <div class="slot-machine">
-            <div class="reels">
-                <div class="reel" id="r1">🍎</div>
-                <div class="reel" id="r2">🍋</div>
-                <div class="reel" id="r3">🍒</div>
+    <div class="container">
+        <div class="header">
+            <h1>🎰 KingBoost 幸运老虎机</h1>
+            <div class="nav-links">
+                <span>用户：<%= username %></span>
+                <a href="/">🏠 返回首页</a>
+                <a href="/profile">👤 个人中心</a>
             </div>
-            <button id="spinBtn" onclick="spin()">🎰 开始旋转</button>
         </div>
         
-        <div id="result" style="margin-top: 20px; font-size: 1.2rem; min-height: 40px;"></div>
+        <div id="slot" class="slot-area">
+            <div class="slot-reels">
+                <span id="r1">加载中</span>
+                <span id="r2">加载中</span>
+                <span id="r3">加载中</span>
+            </div>
+            <button id="spinBtn">点击抽奖</button>
+        </div>
+        <p id="rewardResult" class="result-text"></p>
+        <div style="
+            max-width: 800px;
+            margin: 2rem auto 0;
+            padding: 1rem 1.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            font-size: 0.9rem;
+            color: #ccc;
+            text-align: center;
+            line-height: 1.5;
+        ">
+            ⚠️ <strong>Disclaimer:</strong> This slot machine feature is intended for amusement only. It does not involve any form of gambling, betting, or the use of real currency. No monetary prizes are offered or can be won. Participation is entirely free, and no purchase is necessary. This feature complies with applicable Canadian laws and is not classified as a game of chance or lottery. By using this feature, you acknowledge and accept these terms.
+        </div>
     </div>
 
     <style>
-        .slot-machine {
-            padding: 2rem;
-            text-align: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 20px;
-            margin: 20px 0;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        color: #fff;
+    }
+
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #00c853;
+    }
+
+    .header h1 {
+        margin: 0;
+        color: #00c853;
+    }
+
+    .nav-links {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        color: #ccc;
+    }
+
+    .nav-links a {
+        color: #fff;
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+    }
+
+    .nav-links a:hover {
+        background: rgba(0, 200, 83, 0.2);
+        transform: translateY(-2px);
+    }
+
+    .slot-reels {
+        font-size: 2.2rem;
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        margin: 1.5rem 0;
+    }
+    
+    .slot-reels span {
+        padding: 1rem 1.5rem;
+        border: 3px solid #ffaad4;
+        border-radius: 12px;
+        background: linear-gradient(to bottom right, #fff0f6, #ffe4f4);
+        box-shadow: 0 0 10px rgba(255, 120, 170, 0.4);
+        font-weight: bold;
+        color: #d63384;
+        transition: transform 0.3s ease;
+    }
+
+    .result-text {
+        font-weight: bold;
+        margin-top: 1rem;
+        min-height: 2em;
+    }
+    
+    .result-text.big {
+        font-size: 1.6rem;
+        color: #ff5e8e;
+        animation: pop 0.5s ease-in-out;
+    }
+    
+    .result-text.narrow {
+        font-size: 1.2rem;
+        color: #999;
+        animation: shake 0.6s ease-in-out;
+    }
+
+    @keyframes pop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.4); }
+        100% { transform: scale(1); }
+    }
+
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-6px); }
+        50% { transform: translateX(6px); }
+        75% { transform: translateX(-4px); }
+    }
+    
+    #spinBtn {
+        background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+        color: white;
+        border: none;
+        padding: 15px 35px;
+        font-size: 18px;
+        font-weight: bold;
+        border-radius: 25px;
+        cursor: pointer;
+        transition: all 0.3s;
+        box-shadow: 0 6px 20px rgba(255, 107, 107, 0.3);
+    }
+
+    #spinBtn:hover:not(:disabled) {
+        background: linear-gradient(45deg, #ee5a24, #ff6b6b);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(255, 107, 107, 0.4);
+    }
+
+    #spinBtn:disabled {
+        background: #95a5a6;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: 0 4px 10px rgba(149, 165, 166, 0.2);
+    }
+    
+    .slot-area {
+        text-align: center;
+        padding: 2rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        margin-bottom: 2rem;
+    }
+    
+    @media (max-width: 768px) {
+        .container {
+            padding: 1rem;
         }
         
-        .reels {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-bottom: 2rem;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
+        .header {
+            flex-direction: column;
+            gap: 1rem;
         }
         
-        .reel {
-            width: 100px;
-            height: 100px;
-            background: linear-gradient(145deg, #ffffff, #f0f0f0);
-            border: 3px solid #e0e0e0;
-            border-radius: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 3rem;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            box-shadow: 
-                0 8px 15px rgba(0, 0, 0, 0.1),
-                inset 0 2px 5px rgba(255, 255, 255, 0.8);
-            position: relative;
+        .slot-reels {
+            gap: 1rem;
+            font-size: 1.8rem;
         }
         
-        .reel::before {
-            content: '';
-            position: absolute;
-            top: -3px;
-            left: -3px;
-            right: -3px;
-            bottom: -3px;
-            background: linear-gradient(45deg, #ffd700, #ffed4a, #ffd700);
-            border-radius: 15px;
-            z-index: -1;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-        
-        .reel.spinning {
-            animation: spinReel 0.1s linear infinite;
-            background: #fff9c4;
-            border-color: #ffc107;
-            transform: scale(1.05);
-        }
-        
-        .reel.win {
-            background: linear-gradient(145deg, #d4edda, #c3e6cb);
-            border-color: #28a745;
-            transform: scale(1.1);
-            box-shadow: 
-                0 12px 25px rgba(40, 167, 69, 0.3),
-                inset 0 2px 5px rgba(255, 255, 255, 0.9);
-        }
-        
-        .reel.win::before {
-            opacity: 1;
-            animation: goldenGlow 1s ease-in-out infinite alternate;
-        }
-        
-        @keyframes spinReel {
-            0% { transform: rotateY(0deg) scale(1.05); }
-            100% { transform: rotateY(360deg) scale(1.05); }
-        }
-        
-        @keyframes goldenGlow {
-            from { opacity: 0.7; }
-            to { opacity: 1; }
-        }
-        
-        .result-win {
-            color: #28a745;
-            font-weight: bold;
-            animation: celebrate 0.8s ease-in-out;
-            text-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
-        }
-        
-        .result-lose {
-            color: #6c757d;
-        }
-        
-        @keyframes celebrate {
-            0%, 100% { transform: scale(1); }
-            25% { transform: scale(1.1) rotate(-2deg); }
-            75% { transform: scale(1.1) rotate(2deg); }
+        .slot-reels span {
+            padding: 0.8rem 1rem;
         }
         
         #spinBtn {
-            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
-            color: white;
-            border: none;
-            padding: 15px 35px;
-            font-size: 18px;
-            font-weight: bold;
-            border-radius: 25px;
-            cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.3);
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            padding: 12px 25px;
+            font-size: 16px;
         }
-        
-        #spinBtn:hover:not(:disabled) {
-            background: linear-gradient(45deg, #ee5a24, #ff6b6b);
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(255, 107, 107, 0.4);
-        }
-        
-        #spinBtn:disabled {
-            background: #95a5a6;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: 0 4px 10px rgba(149, 165, 166, 0.2);
-        }
-
-        .prize-info {
-            margin-top: 30px;
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 12px;
-            padding: 20px;
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .prize-info h3 {
-            margin: 0 0 15px 0;
-            color: #333;
-            font-size: 1.1rem;
-        }
-        
-        .prize-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 10px;
-            margin-top: 15px;
-        }
-        
-        .prize-item {
-            background: #f8f9fa;
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-            border: 1px solid #dee2e6;
-        }
-        
-        
-        /* 手机端优化 */
-        @media (max-width: 768px) {
-            .slot-machine {
-                padding: 1rem;
-                margin: 15px 0;
-            }
-            
-            .reels {
-                gap: 10px;
-                padding: 15px;
-                margin-bottom: 1rem;
-            }
-            
-            .reel {
-                width: 80px;
-                height: 80px;
-                font-size: 2rem;
-            }
-            
-            #spinBtn {
-                padding: 12px 25px;
-                font-size: 16px;
-            }
-            
-            .game-container {
-                padding: 15px;
-                width: 100%;
-                max-width: 400px;
-                margin: 0 auto;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                text-align: center;
-            }
-            
-            .game-container h1 {
-                font-size: 1.8rem;
-                margin-bottom: 15px;
-            }
-            
-            /* Mobile centering */
-            body {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
-                margin: 0;
-                padding: 10px;
-            }
-            
-            .prize-info {
-                margin-top: 20px;
-                padding: 12px;
-                font-size: 0.8rem;
-            }
-            
-            .prize-info h3 {
-                font-size: 1rem;
-                margin-bottom: 10px;
-            }
-            
-            .prize-grid {
-                grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-                gap: 8px;
-                font-size: 0.75rem;
-            }
-            
-            .prize-item {
-                padding: 8px 4px;
-                font-size: 0.75rem;
-            }
-        }
+    }
     </style>
 
     <script>
-        const username = "<%= username %>";
-        const csrfToken = "<%= csrfToken %>";
-        const reels = ['r1', 'r2', 'r3'];
-        const symbols = ['+2', '+1', '0', '-1', '-2'];
-        
-        // 金额映射
-        const symbolMap = {
-            '+2': '+2',
-            '+1': '+1',
-            '0': '0',
-            '-1': '-1',
-            '-2': '-2'
-        };
-        
-        function generateNonce(length = 16) {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-        }
-        
-        function animateReels(finalSymbols, reward, isWin) {
-            const button = document.getElementById('spinBtn');
-            const resultDiv = document.getElementById('result');
-            
-            button.disabled = true;
-            resultDiv.textContent = '';
-            
-            // 开始旋转动画
-            reels.forEach(reel => {
-                const element = document.getElementById(reel);
-                element.classList.add('spinning');
-            });
-            
-            // 模拟旋转效果
-            let spins = 0;
-            const maxSpins = 30 + Math.floor(Math.random() * 15);
-            
-            const spinInterval = setInterval(() => {
-                reels.forEach(reel => {
-                    document.getElementById(reel).textContent = 
-                        symbols[Math.floor(Math.random() * symbols.length)];
-                });
-                spins++;
-                
-                if (spins > maxSpins) {
-                    clearInterval(spinInterval);
-                    
-                    // 显示最终结果
-                    reels.forEach((reel, index) => {
-                        const element = document.getElementById(reel);
-                        element.classList.remove('spinning');
-                        element.textContent = finalSymbols[index];
-                        
-                        if (isWin) {
-                            setTimeout(() => {
-                                element.classList.add('win');
-                                setTimeout(() => element.classList.remove('win'), 3000);
-                            }, 100 * index);
-                        }
-                    });
-                    
-                    // 显示结果消息
+    const username = "<%= username %>";
+    const r1 = document.getElementById('r1');
+    const r2 = document.getElementById('r2');
+    const r3 = document.getElementById('r3');
+    const btn = document.getElementById('spinBtn');
+    const result = document.getElementById('rewardResult');
+
+    const fakeWords = [
+        '好运来', '再来一次', '就差一点', '今天必中', '好运加持', '冲鸭', '眼看要中', '差一点点'
+    ];
+
+    // 动画逻辑
+    function animateSpin(finalReels, reward, callback) {
+        let steps = 38;
+        const interval = setInterval(() => {
+            r1.textContent = fakeWords[Math.floor(Math.random() * fakeWords.length)];
+            r2.textContent = fakeWords[Math.floor(Math.random() * fakeWords.length)];
+            r3.textContent = fakeWords[Math.floor(Math.random() * fakeWords.length)];
+            steps--;
+            if (steps <= 0) {
+                clearInterval(interval);
+                [r1.textContent, r2.textContent, r3.textContent] = finalReels;
+
+                const [a, b, c] = finalReels;
+                if (reward === '谢谢惠顾' && ((a === b) || (b === c) || (a === c))) {
+                    result.textContent = '😭 差一点点就中了！';
+                    result.className = 'result-text narrow';
+                } else if (reward !== '谢谢惠顾') {
+                    result.textContent = `🎉 恭喜你获得：${reward}`;
+                    result.className = 'result-text big';
+                    r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1.4)';
                     setTimeout(() => {
-                        if (reward && reward !== '0' && reward !== '无奖') {
-                            resultDiv.innerHTML = `
-                                <div class="result-win">
-                                    ${reward}
-                                </div>
-                            `;
-                        } else {
-                            resultDiv.innerHTML = `<div class="result-lose">0</div>`;
-                        }
-                        
-                        button.disabled = false;
-                    }, 800);
+                        r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1)';
+                    }, 500);
+                } else {
+                    result.textContent = '😅 谢谢惠顾';
+                    result.className = 'result-text narrow';
                 }
-            }, 80);
-        }
-        
-        async function spin() {
-            const nonce = generateNonce();
-            const timestamp = Math.floor(Date.now() / 1000);
-            const resultDiv = document.getElementById('result');
-            
-            resultDiv.innerHTML = '<div style="color: #0984e3; font-weight: bold;">🎰 旋转中...</div>';
-            
-            try {
-                const response = await fetch('/api/slot/spin', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify({ username, timestamp, nonce })
-                });
-                
-                const data = await response.json();
-                
-                if (!data.success) {
-                    resultDiv.innerHTML = `<div style="color: #dc3545;">错误：${data.message}</div>`;
-                    document.getElementById('spinBtn').disabled = false;
-                    return;
-                }
-                
-                // 转换文本结果为金额符号
-                const finalSymbols = data.reels.map(reel => symbolMap[reel] || '0');
-                const isWin = data.reward && data.reward !== '0' && data.reward !== '无奖';
-                
-                animateReels(finalSymbols, data.reward, isWin);
-                
-            } catch (error) {
-                resultDiv.innerHTML = '<div style="color: #dc3545;">网络错误，请重试</div>';
-                document.getElementById('spinBtn').disabled = false;
-                console.error('Error:', error);
+
+                callback();
             }
-        }
-        
-        // 初始化随机符号
-        window.addEventListener('load', () => {
-            reels.forEach(reel => {
-                document.getElementById(reel).textContent = 
-                    symbols[Math.floor(Math.random() * symbols.length)];
-            });
+        }, 70);
+    }
+
+    function generateNonce(length = 16) {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    }
+
+    btn.addEventListener('click', () => {
+        const nonce = generateNonce();
+        const timestamp = Math.floor(Date.now() / 1000);
+        btn.disabled = true;
+        result.textContent = '🎰 抽奖中...';
+        result.className = 'result-text';
+
+        fetch('https://slot-server-9682.onrender.com/spin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, timestamp, nonce })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) {
+                result.textContent = `❌ 抽奖失败：${data.message}`;
+                return;
+            }
+
+            const reels = data.reels || ['谢谢惠顾', '谢谢惠顾', '谢谢惠顾'];
+            const reward = data.reward;
+
+            animateSpin(reels, reward, () => {});
+        })
+        .catch(err => {
+            result.textContent = '⚠️ 网络错误或服务器未响应';
+        })
+        .finally(() => {
+            btn.disabled = false;
         });
+    });
     </script>
-    
-    <div class="prize-info">
-        <h3>💰 金额说明</h3>
-        <p>转动转轮，获得随机金额奖励！</p>
-        <div class="prize-grid">
-            <div class="prize-item">+2加币</div>
-            <div class="prize-item">+1加币</div>
-            <div class="prize-item">0加币</div>
-            <div class="prize-item">-1加币</div>
-            <div class="prize-item">-2加币</div>
-        </div>
-    </div>
-    
+
 </body>
 </html>
