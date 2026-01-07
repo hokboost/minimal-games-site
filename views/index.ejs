@@ -180,6 +180,25 @@
         border: 1px solid #f0c040;
     }
     
+    .status-developing {
+        color: #9e9e9e;
+        border: 1px solid #9e9e9e;
+    }
+    
+    .game-card-disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        pointer-events: none;
+        filter: grayscale(0.5);
+    }
+    
+    .game-card-disabled:hover {
+        transform: none;
+        box-shadow: none;
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+    
     @media (max-width: 768px) {
         .games-grid {
             grid-template-columns: 1fr;
@@ -282,12 +301,12 @@
                 <span class="game-status status-classic">⭐ 经典</span>
             </a>
             
-            <a href="javascript:void(0)" onclick="startWishGame()" class="game-card">
+            <div class="game-card game-card-disabled">
                 <span class="game-icon">🌟</span>
                 <h2 class="game-title">许愿星</h2>
                 <p class="game-description">许下心愿，看看幸运女神是否眷顾你</p>
-                <span class="game-status status-new">✨ 新游戏</span>
-            </a>
+                <span class="game-status status-developing">🔧 开发中</span>
+            </div>
         </div>
         
         <!-- 免责声明 -->
@@ -397,23 +416,24 @@ function startScratchGame() {
         });
 }
 
-function startWishGame() {
-    const modal = createLoadingModal('许愿星', '🌟', 'https://wish-server.onrender.com');
-    
-    // 预热服务器
-    fetch("https://wish-server.onrender.com/ping")
-        .then(() => {
-            setTimeout(() => {
-                window.location.href = "/wish";
-            }, 3000); // 3秒后跳转
-        })
-        .catch(() => {
-            // 即使ping失败也跳转，让许愿星页面处理
-            setTimeout(() => {
-                window.location.href = "/wish";
-            }, 15000); // 15秒后跳转
-        });
-}
+// 许愿星功能暂时不可用 - 后台服务器开发中
+// function startWishGame() {
+//     const modal = createLoadingModal('许愿星', '🌟', 'https://wish-server.onrender.com');
+//     
+//     // 预热服务器
+//     fetch("https://wish-server.onrender.com/ping")
+//         .then(() => {
+//             setTimeout(() => {
+//                 window.location.href = "/wish";
+//             }, 3000); // 3秒后跳转
+//         })
+//         .catch(() => {
+//             // 即使ping失败也跳转，让许愿星页面处理
+//             setTimeout(() => {
+//                 window.location.href = "/wish";
+//             }, 15000); // 15秒后跳转
+//         });
+// }
 
 function startSpinGame() {
     const modal = createLoadingModal('幸运转盘', '🎡', 'https://secure-spin-server.onrender.com');
