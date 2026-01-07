@@ -42,22 +42,28 @@ app.set('views', path.join(__dirname, 'views'));
 // 信任代理（Render等平台需要）
 app.set('trust proxy', 1);
 
-// Helmet 安全头
+// CSP设置 - 完全按照kingboost模式
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", `
+    default-src 'self';
+    script-src 'self' 'unsafe-inline';
+    script-src-elem 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline';
+    style-src-elem 'self' 'unsafe-inline';
+    font-src 'self';
+    img-src 'self' data:;
+    connect-src 'self'
+      https://slot-server-9682.onrender.com
+      https://scratch-server-vmit.onrender.com
+      https://secure-spin-server.onrender.com
+      https://wish-server.onrender.com;
+  `.replace(/\n/g, ' '));
+  next();
+});
+
+// Helmet 安全头 (简化版)
 app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-            scriptSrcAttr: ["'unsafe-inline'"], // 允许内联事件处理器
-            imgSrc: ["'self'", "data:", "https:"],
-            connectSrc: ["'self'"],
-            fontSrc: ["'self'"],
-            objectSrc: ["'none'"],
-            mediaSrc: ["'self'"],
-            frameSrc: ["'none'"],
-        },
-    },
+    contentSecurityPolicy: false, // 禁用helmet的CSP，使用上面的手动设置
     hsts: {
         maxAge: 31536000,
         includeSubDomains: true,
