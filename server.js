@@ -619,37 +619,7 @@ app.post('/login', loginLimiter, async (req, res) => {
         };
         req.session.username = user.username;
 
-        // 8. 检查是否有其他设备登录，如果有则准备显示踢出消息
-        let kickoutMessage = null;
-        if (username !== 'hokboost') {
-            // 检查是否有其他活跃会话
-            const otherSessions = await pool.query(`
-                SELECT session_id, ip_address, user_agent, created_at 
-                FROM active_sessions 
-                WHERE username = $1 AND session_id != $2 AND is_active = true
-            `, [username, req.sessionID]);
-
-            if (otherSessions.rows.length > 0) {
-                kickoutMessage = {
-                    title: '账号安全提醒',
-                    message: `您的账号已在新设备登录，已自动退出 ${otherSessions.rows.length} 个其他设备`,
-                    type: 'warning'
-                };
-            }
-        } else {
-            console.log(`管理员 ${username} 登录 - 跳过踢出消息检查`);
-        }
-
-        // 9. 创建单设备会话管理（不使用WebSocket通知）
-        const sessionSuccess = await SessionManager.createSingleDeviceSession(
-            username, req.sessionID, clientIP, userAgent, null
-        );
-
-        if (!sessionSuccess) {
-            console.error('创建单设备会话失败');
-        }
-
-        // 10. 重新生成session ID以提高安全性
+        // 8. 重新生成session ID以提高安全性
         req.session.regenerate(async function (err) {
             if (err) {
                 console.error("Session regenerate error:", err);
@@ -668,7 +638,37 @@ app.post('/login', loginLimiter, async (req, res) => {
             req.session.createdAt = Date.now();
             req.session.csrfToken = GameLogic.generateToken(16);
 
-            // 10. 记录登录日志和活动
+            // 9. 检查是否有其他设备登录，如果有则准备显示踢出消息
+            let kickoutMessage = null;
+            if (username !== 'hokboost') {
+                // 检查是否有其他活跃会话
+                const otherSessions = await pool.query(`
+                    SELECT session_id, ip_address, user_agent, created_at 
+                    FROM active_sessions 
+                    WHERE username = $1 AND session_id != $2 AND is_active = true
+                `, [username, req.sessionID]);
+
+                if (otherSessions.rows.length > 0) {
+                    kickoutMessage = {
+                        title: '账号安全提醒',
+                        message: `您的账号已在新设备登录，已自动退出 ${otherSessions.rows.length} 个其他设备`,
+                        type: 'warning'
+                    };
+                }
+            } else {
+                console.log(`管理员 ${username} 登录 - 跳过踢出消息检查`);
+            }
+
+            // 10. 创建单设备会话管理（使用新的session ID）
+            const sessionSuccess = await SessionManager.createSingleDeviceSession(
+                username, req.sessionID, clientIP, userAgent, null
+            );
+
+            if (!sessionSuccess) {
+                console.error('创建单设备会话失败');
+            }
+
+            // 11. 记录登录日志和活动
             await Promise.all([
                 pool.query(`
                     INSERT INTO login_logs (username, ip_address, user_agent, login_result, risk_score)
@@ -678,7 +678,7 @@ app.post('/login', loginLimiter, async (req, res) => {
                 IPManager.recordIPActivity(clientIP, username, userAgent, 'login_success')
             ]);
 
-            // 11. 中高风险登录警告
+            // 12. 中高风险登录警告
             if (riskData.score >= 40) {
                 await pool.query(`
                     INSERT INTO security_events (event_type, username, ip_address, description, severity)
@@ -688,7 +688,7 @@ app.post('/login', loginLimiter, async (req, res) => {
                 console.log(`⚠️ 中高风险登录 - 用户: ${username}, IP: ${clientIP}, 风险分: ${riskData.score}`);
             }
             
-            // 12. 如果有踢出消息，存储到session中
+            // 13. 如果有踢出消息，存储到session中
             if (kickoutMessage) {
                 req.session.kickoutMessage = kickoutMessage;
                 console.log(`👢 用户 ${username} 登录时踢出了其他设备: ${kickoutMessage.message}`);
