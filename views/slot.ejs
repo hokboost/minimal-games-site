@@ -17,13 +17,34 @@
             </div>
         </div>
         
+        <div class="balance-betting-section">
+            <div class="balance-info">
+                <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+            </div>
+            <div class="betting-section">
+                <label for="bet-amount">💰 投注金额:</label>
+                <input type="number" id="bet-amount" min="1" max="1000" value="10" placeholder="输入投注金额 (1-1000)">
+                <span class="bet-info">电币</span>
+            </div>
+            <div class="outcome-info">
+                <h4>🎯 可能结果:</h4>
+                <div class="outcomes-grid">
+                    <div class="outcome-item">不亏不赚 (20%)</div>
+                    <div class="outcome-item">×2 倍数 (20%)</div>
+                    <div class="outcome-item">归零 (20%)</div>
+                    <div class="outcome-item">×1.5 倍数 (20%)</div>
+                    <div class="outcome-item">×0.5 倍数 (20%)</div>
+                </div>
+            </div>
+        </div>
+        
         <div id="slot" class="slot-area">
             <div class="slot-reels">
                 <span id="r1">加载中</span>
                 <span id="r2">加载中</span>
                 <span id="r3">加载中</span>
             </div>
-            <button id="spinBtn">点击抽奖</button>
+            <button id="spinBtn">🎰 开始游戏</button>
         </div>
         <p id="rewardResult" class="result-text"></p>
         <div style="
@@ -39,7 +60,7 @@
             text-align: center;
             line-height: 1.5;
         ">
-            ⚠️ <strong>Disclaimer:</strong> This slot machine feature is intended for amusement only. It does not involve any form of gambling, betting, or the use of real currency. No monetary prizes are offered or can be won. Participation is entirely free, and no purchase is necessary. This feature complies with applicable Canadian laws and is not classified as a game of chance or lottery. By using this feature, you acknowledge and accept these terms.
+            ⚠️ <strong>免责声明：</strong>本老虎机功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得，参与完全免费，无需任何付费。本功能符合中华人民共和国相关法律法规，不属于博彩或彩票性质。使用本功能即表示您确认并接受这些条款。严禁未满18周岁用户使用，请理性娱乐。
         </div>
     </div>
 
@@ -165,6 +186,87 @@
         box-shadow: 0 4px 10px rgba(149, 165, 166, 0.2);
     }
     
+    .balance-betting-section {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+    }
+    
+    .balance-info {
+        text-align: center;
+        margin-bottom: 1.5rem;
+    }
+    
+    .balance-info h3 {
+        color: #ffeb3b;
+        margin: 0;
+    }
+    
+    .betting-section {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
+    
+    .betting-section label {
+        color: #ccc;
+        font-weight: bold;
+        font-size: 1.1rem;
+    }
+    
+    #bet-amount {
+        padding: 0.7rem 1rem;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        font-size: 1.1rem;
+        width: 120px;
+        text-align: center;
+    }
+    
+    #bet-amount:focus {
+        outline: none;
+        border-color: #00c853;
+        box-shadow: 0 0 10px rgba(0, 200, 83, 0.3);
+    }
+    
+    .bet-info {
+        color: #ffeb3b;
+        font-weight: bold;
+    }
+    
+    .outcome-info {
+        text-align: center;
+    }
+    
+    .outcome-info h4 {
+        color: #00c853;
+        margin-bottom: 1rem;
+    }
+    
+    .outcomes-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.8rem;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    
+    .outcome-item {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 0.6rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #ccc;
+        font-size: 0.9rem;
+        text-align: center;
+    }
+    
     .slot-area {
         text-align: center;
         padding: 2rem;
@@ -195,6 +297,22 @@
         #spinBtn {
             padding: 12px 25px;
             font-size: 16px;
+        }
+        
+        .betting-section {
+            flex-direction: column;
+            align-items: center;
+            gap: 0.8rem;
+        }
+        
+        .outcomes-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+        
+        .outcome-item {
+            font-size: 0.8rem;
+            padding: 0.5rem;
         }
     }
     </style>
@@ -249,37 +367,95 @@
         return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
     }
 
-    btn.addEventListener('click', () => {
-        const nonce = generateNonce();
-        const timestamp = Math.floor(Date.now() / 1000);
+    async function playSlot() {
+        // 检查投注金额
+        const betAmount = parseInt(document.getElementById('bet-amount').value);
+        const currentBalance = parseInt(document.getElementById('current-balance').textContent);
+        
+        if (!betAmount || betAmount < 1 || betAmount > 1000) {
+            alert('请输入有效的投注金额 (1-1000电币)');
+            return;
+        }
+        
+        if (currentBalance < betAmount) {
+            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${betAmount} 电币`);
+            return;
+        }
+        
         btn.disabled = true;
-        result.textContent = '🎰 抽奖中...';
+        result.textContent = '🎰 游戏中...';
         result.className = 'result-text';
-
-        fetch('https://slot-server-9682.onrender.com/spin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, timestamp, nonce })
-        })
-        .then(res => res.json())
-        .then(data => {
+        
+        try {
+            // 扣除电币
+            const response = await fetch('/api/slot/play', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                },
+                body: JSON.stringify({ 
+                    username: username,
+                    betAmount: betAmount
+                })
+            });
+            
+            const data = await response.json();
             if (!data.success) {
-                result.textContent = `❌ 抽奖失败：${data.message}`;
+                result.textContent = `❌ 游戏失败：${data.message}`;
                 return;
             }
-
-            const reels = data.reels || ['谢谢惠顾', '谢谢惠顾', '谢谢惠顾'];
-            const reward = data.reward;
-
-            animateSpin(reels, reward, () => {});
-        })
-        .catch(err => {
-            result.textContent = '⚠️ 网络错误或服务器未响应';
-        })
-        .finally(() => {
+            
+            // 更新余额显示
+            document.getElementById('current-balance').textContent = data.newBalance;
+            
+            // 显示游戏结果
+            const { outcome, multiplier, payout, finalBalance } = data;
+            
+            // 模拟老虎机动画
+            const reels = generateReelsForOutcome(outcome);
+            animateSpin(reels, `${outcome} | 获得: ${payout} 电币`, () => {
+                // 显示详细结果
+                let resultMessage;
+                if (outcome === '不亏不赚') {
+                    resultMessage = `🎯 ${outcome}！投注: ${betAmount} 电币，返还: ${payout} 电币`;
+                } else if (outcome === '归零') {
+                    resultMessage = `💸 ${outcome}！投注: ${betAmount} 电币，损失全部投注`;
+                } else {
+                    resultMessage = `🎉 ${outcome}！投注: ${betAmount} 电币，获得: ${payout} 电币`;
+                }
+                result.textContent = `${resultMessage} | 余额: ${finalBalance} 电币`;
+                
+                // 更新最终余额
+                document.getElementById('current-balance').textContent = finalBalance;
+            });
+            
+        } catch (error) {
+            console.error('Slot play error:', error);
+            result.textContent = '⚠️ 网络错误，请稍后重试';
+        } finally {
             btn.disabled = false;
-        });
-    });
+        }
+    }
+    
+    function generateReelsForOutcome(outcome) {
+        const symbols = ['🍎', '🍊', '🍋', '🍇', '🍓'];
+        
+        if (outcome === '不亏不赚' || outcome.includes('×')) {
+            // 显示三个相同符号表示获胜
+            const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+            return [symbol, symbol, symbol];
+        } else {
+            // 显示不同符号表示失败
+            return [
+                symbols[Math.floor(Math.random() * symbols.length)],
+                symbols[Math.floor(Math.random() * symbols.length)],
+                symbols[Math.floor(Math.random() * symbols.length)]
+            ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3);
+        }
+    }
+
+    btn.addEventListener('click', playSlot);
     </script>
 
 </body>

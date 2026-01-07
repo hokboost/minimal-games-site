@@ -18,8 +18,12 @@
         </div>
 
         <div id="user-section" class="game-section">
-            <p class="game-desc">挑战知识问答，展示你的智慧！每题限时30秒，答对得分，错误不扣分。</p>
-            <button onclick="startQuiz()">🎮 准备开始</button>
+            <div class="balance-info">
+                <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+                <p class="cost-info">💰 游戏费用: 10 电币 | 🏆 获胜奖励: 得分 × 2 电币</p>
+            </div>
+            <p class="game-desc">挑战知识问答，展示你的智慧！15题总共30秒，答对得分，答错不扣分。</p>
+            <button onclick="startQuiz()" id="start-quiz-btn">🎮 开始答题 (消耗10电币)</button>
         </div>
 
         <div id="quiz" style="display:none" class="quiz-section">
@@ -54,6 +58,21 @@
                     <tr><td colspan="4">加载中...</td></tr>
                 </tbody>
             </table>
+        </div>
+        
+        <!-- 免责声明 -->
+        <div style="
+            max-width: 760px;
+            margin: 2rem auto 0;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #ccc;
+            line-height: 1.5;
+            text-align: center;
+        ">
+            ⚠️ <strong>免责声明：</strong>本问答游戏仅供娱乐学习，积分为虚拟奖励，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。请理性游戏，严禁未满18周岁用户使用。
         </div>
     </div>
 
@@ -134,6 +153,24 @@
     .game-section button:hover {
         transform: translateY(-3px);
         box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+    }
+
+    .balance-info {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1.5rem;
+        border-radius: 12px;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+
+    .balance-info h3 {
+        color: #ffeb3b;
+        margin-bottom: 0.5rem;
+    }
+
+    .cost-info {
+        color: #ccc;
+        font-size: 0.9rem;
     }
 
     .quiz-section {
@@ -338,7 +375,40 @@
         loadLeaderboard();
     });
 
-    function startQuiz() {
+    async function startQuiz() {
+        // 检查电币余额
+        const currentBalance = parseInt(document.getElementById('current-balance').textContent);
+        if (currentBalance < 10) {
+            alert('⚡ 电币不足！需要10电币才能开始答题，请联系管理员充值。');
+            return;
+        }
+        
+        // 扣除电币
+        try {
+            const response = await fetch('/api/quiz/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                },
+                body: JSON.stringify({ username: '<%= username %>' })
+            });
+            
+            const data = await response.json();
+            if (!data.success) {
+                alert('开始游戏失败：' + data.message);
+                return;
+            }
+            
+            // 更新显示的电币余额
+            document.getElementById('current-balance').textContent = data.newBalance;
+            
+        } catch (error) {
+            console.error('Start quiz error:', error);
+            alert('网络错误，请稍后重试');
+            return;
+        }
+        
         document.getElementById('user-section').style.display = 'none';
         document.getElementById('quiz').style.display = 'block';
         document.getElementById('result').style.display = 'none';
@@ -487,7 +557,7 @@
             const data = await response.json();
             
             if (data.success) {
-                showResult(data.score, data.total);
+                showResult(data.score, data.total, data.reward, data.newBalance);
                 // 提交后刷新排行榜
                 setTimeout(() => {
                     loadLeaderboard();
@@ -501,7 +571,7 @@
         }
     }
 
-    function showResult(score, total) {
+    function showResult(score, total, reward, newBalance) {
         document.getElementById('quiz').style.display = 'none';
         const resultDiv = document.getElementById('result');
         resultDiv.className = 'result-section show';
@@ -515,8 +585,19 @@
             <div style="font-size: 2rem; margin: 1rem 0; color: #00c853;">
                 ${score}/${total} 分 (${percentage}%)
             </div>
+            <div style="font-size: 1.5rem; margin: 1rem 0; color: #ffeb3b;">
+                ⚡ 获得奖励: ${reward || 0} 电币
+            </div>
+            <div style="font-size: 1.2rem; margin: 1rem 0; color: #ffeb3b;">
+                💰 当前余额: ${newBalance || 0} 电币
+            </div>
             <p>用时: ${timeTaken} 秒</p>
         `;
+        
+        // 更新页面上的余额显示
+        if (newBalance !== undefined) {
+            document.getElementById('current-balance').textContent = newBalance;
+        }
         
         if (percentage >= 80) {
             resultHTML += `<p style="color: #4caf50;">🌟 优秀！知识渊博！</p>`;
@@ -536,7 +617,7 @@
                 border-radius: 25px;
                 cursor: pointer;
                 margin-top: 1rem;
-            ">🔄 再来一次</button>
+            ">🔄 再来一次 (消耗10电币)</button>
         `;
         
         resultDiv.innerHTML = resultHTML;

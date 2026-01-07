@@ -309,7 +309,7 @@ app.get('/profile', requireLogin, async (req, res) => {
 app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
     try {
         const usersResult = await pool.query(
-            'SELECT username, spins_allowed, authorized, is_admin, login_failures, last_failure_time, locked_until FROM users ORDER BY username'
+            'SELECT username, balance, spins_allowed, authorized, is_admin, login_failures, last_failure_time, locked_until FROM users ORDER BY username'
         );
         
         const users = usersResult.rows.map(user => ({
@@ -636,6 +636,31 @@ app.post('/api/admin/reset-password', requireLogin, requireAdmin, async (req, re
     }
 });
 
+// 修改用户余额
+app.post('/api/admin/update-balance', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const { username, balance } = req.body;
+        
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名' });
+        }
+        
+        if (balance === undefined || balance < 0) {
+            return res.status(400).json({ success: false, message: '无效的余额数值' });
+        }
+        
+        await pool.query(
+            'UPDATE users SET balance = $1 WHERE username = $2',
+            [balance, username]
+        );
+        
+        res.json({ success: true, message: '余额修改成功', newBalance: balance });
+    } catch (error) {
+        console.error('修改余额失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
 // 删除账户
 app.post('/api/admin/delete-account', requireLogin, requireAdmin, async (req, res) => {
     try {
@@ -709,21 +734,37 @@ app.post('/api/admin/clear-failures', requireLogin, requireAdmin, async (req, re
 // ====================
 // 游戏路由
 // ====================
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
         req.session.initialized = true;
         req.session.createdAt = Date.now();
         req.session.csrfToken = GameLogic.generateToken(16);
     }
+    
+    // 如果用户已登录，获取余额
+    let balance = 0;
+    if (req.session.user) {
+        try {
+            const result = await pool.query(
+                'SELECT balance FROM users WHERE username = $1',
+                [req.session.user.username]
+            );
+            balance = result.rows.length > 0 ? result.rows[0].balance : 0;
+        } catch (dbError) {
+            console.error('Database query error:', dbError);
+        }
+    }
+    
     res.render('index', {
         title: 'Minimal Games 游戏中心',
         user: req.session.user || null,
+        balance: balance,
         req: req
     });
 });
 
-app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
+app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
     // 初始化session
     if (!req.session.initialized) {
         req.session.initialized = true;
@@ -732,10 +773,55 @@ app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, (req,
     }
     
     const username = req.session.user.username;
+    
+    // 获取用户电币余额
+    let balance = 0;
+    try {
+        const result = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+        balance = result.rows.length > 0 ? result.rows[0].balance : 0;
+    } catch (dbError) {
+        console.error('Database query error:', dbError);
+    }
+    
     res.render('quiz', { 
         username,
+        balance,
         csrfToken: req.session.csrfToken
     });
+});
+
+// Quiz 开始游戏 API - 扣除电币
+app.post('/api/quiz/start', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        const { username } = req.body;
+        
+        // 验证用户名
+        if (username !== req.session.user.username) {
+            return res.status(403).json({ success: false, message: '用户名不匹配' });
+        }
+        
+        // 检查并扣除电币
+        const result = await pool.query(
+            'UPDATE users SET balance = balance - 10 WHERE username = $1 AND balance >= 10 RETURNING balance',
+            [username]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, message: '电币不足，需要10电币才能开始答题' });
+        }
+        
+        res.json({ 
+            success: true, 
+            message: '游戏开始，已扣除10电币',
+            newBalance: result.rows[0].balance 
+        });
+    } catch (error) {
+        console.error('Quiz start error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
 });
 
 app.get('/slot', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
@@ -888,10 +974,26 @@ app.post('/api/quiz/submit',
             userSessions.delete(username);
         }
         
+        // 发放电币奖励 (得分 × 2)
+        const reward = correctCount * 2;
+        let newBalance = 0;
+        
+        try {
+            const balanceResult = await pool.query(
+                'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
+                [reward, username]
+            );
+            newBalance = balanceResult.rows[0]?.balance || 0;
+        } catch (balanceError) {
+            console.error('电币奖励发放失败:', balanceError);
+        }
+        
         res.json({
             success: true,
             score: correctCount,
             total: answers.length,
+            reward: reward,
+            newBalance: newBalance,
             proof: GameLogic.generateToken(8)
         });
     } catch (error) {
@@ -921,128 +1023,166 @@ app.get('/api/quiz/leaderboard', async (req, res) => {
     }
 });
 
-// Slot API 路由
-app.post('/api/slot/spin', 
-    requireLogin,
-    requireAuthorized,
-    security.basicRateLimit,
-    security.csrfProtection,
-    async (req, res) => {
+// ====================
+// Slot 老虎机游戏API
+// ====================
+
+app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
     try {
-        const { username } = req.body;
+        const { username, betAmount } = req.body;
         
         // 验证用户名
         if (username !== req.session.user.username) {
             return res.status(403).json({ success: false, message: '用户名不匹配' });
         }
         
-        const result = GameLogic.slot.spin();
-        
-        // 存储到数据库
-        try {
-            await pool.query(
-                'INSERT INTO slot_results (username, reels, reward, won, created_at) VALUES ($1, $2, $3, $4, NOW())',
-                [username, JSON.stringify(result.reels), result.reward, result.reward !== '再来一次']
-            );
-        } catch (dbError) {
-            console.error('数据库存储失败:', dbError);
+        // 验证投注金额
+        if (!betAmount || betAmount < 1 || betAmount > 1000) {
+            return res.status(400).json({ success: false, message: '投注金额必须在1-1000电币之间' });
         }
         
-        res.json({
-            success: true,
-            reels: result.reels,
-            reward: result.reward
-        });
-    } catch (error) {
-        console.error('Slot error:', error);
-        res.status(500).json({ success: false, message: '老虎机故障' });
-    }
-});
-
-// Slot 排行榜 API
-app.get('/api/slot/leaderboard', async (req, res) => {
-    try {
+        // 检查并扣除电币
         const result = await pool.query(
-            `SELECT username, COUNT(*) as wins, created_at as latest_win 
-             FROM slot_results 
-             WHERE DATE(created_at) = CURRENT_DATE AND won = true 
-             GROUP BY username 
-             ORDER BY wins DESC, latest_win ASC 
-             LIMIT 20`
+            'UPDATE users SET balance = balance - $1 WHERE username = $2 AND balance >= $1 RETURNING balance',
+            [betAmount, username]
         );
+        
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, message: '电币不足' });
+        }
+        
+        const currentBalance = parseFloat(result.rows[0].balance);
+        
+        // 生成游戏结果 - 5种结果各20%概率
+        const outcomes = [
+            { type: '不亏不赚', multiplier: 1.0 },
+            { type: '×2', multiplier: 2.0 },
+            { type: '归零', multiplier: 0.0 },
+            { type: '×1.5', multiplier: 1.5 },
+            { type: '×0.5', multiplier: 0.5 }
+        ];
+        
+        const randomIndex = Math.floor(Math.random() * 5);
+        const outcome = outcomes[randomIndex];
+        
+        // 计算奖励
+        const payout = Math.floor(betAmount * outcome.multiplier);
+        
+        // 更新用户余额
+        const finalResult = await pool.query(
+            'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
+            [payout, username]
+        );
+        
+        const finalBalance = parseFloat(finalResult.rows[0].balance);
         
         res.json({
             success: true,
-            leaderboard: result.rows
+            outcome: outcome.type,
+            multiplier: outcome.multiplier,
+            payout: payout,
+            newBalance: currentBalance,
+            finalBalance: finalBalance
         });
+        
     } catch (error) {
-        console.error('Slot leaderboard error:', error);
-        res.status(500).json({ success: false, message: '获取排行榜失败' });
+        console.error('Slot play error:', error);
+        res.status(500).json({ success: false, message: '游戏失败，请稍后重试' });
     }
 });
 
-// Scratch API 路由
-app.post('/api/scratch', 
-    requireLogin,
-    requireAuthorized,
-    security.basicRateLimit,
-    security.csrfProtection,
-    async (req, res) => {
+// ====================
+// Scratch 刮刮乐游戏API
+// ====================
+
+app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
     try {
-        const { username } = req.body;
+        const { username, tier, winCount } = req.body;
         
         // 验证用户名
         if (username !== req.session.user.username) {
             return res.status(403).json({ success: false, message: '用户名不匹配' });
         }
         
-        const card = GameLogic.scratch.generateCard();
-        const isWin = card.slots.some(slot => card.winningNumbers.includes(slot));
-        const reward = isWin ? '中奖了！' : '再来一次';
+        // 验证档位参数
+        const validTiers = [
+            { cost: 5, winCount: 5 },
+            { cost: 10, winCount: 10 },
+            { cost: 100, winCount: 20 }
+        ];
         
-        // 存储到数据库
-        try {
-            await pool.query(
-                'INSERT INTO scratch_results (username, winning_numbers, slots, reward, won, created_at) VALUES ($1, $2, $3, $4, $5, NOW())',
-                [username, JSON.stringify(card.winningNumbers), JSON.stringify(card.slots), reward, isWin]
-            );
-        } catch (dbError) {
-            console.error('数据库存储失败:', dbError);
+        const selectedTier = validTiers.find(t => t.cost === tier && t.winCount === winCount);
+        if (!selectedTier) {
+            return res.status(400).json({ success: false, message: '无效的游戏档位' });
+        }
+        
+        // 检查并扣除电币
+        const result = await pool.query(
+            'UPDATE users SET balance = balance - $1 WHERE username = $2 AND balance >= $1 RETURNING balance',
+            [tier, username]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, message: '电币不足' });
+        }
+        
+        const currentBalance = parseFloat(result.rows[0].balance);
+        
+        // 生成游戏结果 - 5种结果各20%概率
+        const outcomes = [
+            { type: '不亏不赚', multiplier: 1.0 },
+            { type: '×2', multiplier: 2.0 },
+            { type: '归零', multiplier: 0.0 },
+            { type: '×1.5', multiplier: 1.5 },
+            { type: '×0.5', multiplier: 0.5 }
+        ];
+        
+        const randomIndex = Math.floor(Math.random() * 5);
+        const outcome = outcomes[randomIndex];
+        
+        // 计算奖励
+        const payout = Math.floor(tier * outcome.multiplier);
+        
+        // 更新用户余额
+        const finalResult = await pool.query(
+            'UPDATE users SET balance = balance + $1 WHERE username = $2 RETURNING balance',
+            [payout, username]
+        );
+        
+        const finalBalance = parseFloat(finalResult.rows[0].balance);
+        
+        // 生成刮刮乐显示内容
+        const winningNumbers = [];
+        for (let i = 0; i < winCount; i++) {
+            winningNumbers.push(Math.floor(Math.random() * 100) + 1);
+        }
+        
+        const slots = [];
+        for (let i = 0; i < (25 - winCount); i++) {
+            slots.push({
+                num: Math.floor(Math.random() * 100) + 1,
+                prize: '谢谢参与'
+            });
         }
         
         res.json({
             success: true,
-            winningNumbers: card.winningNumbers,
-            slots: card.slots,
-            reward: reward
+            outcome: outcome.type,
+            multiplier: outcome.multiplier,
+            payout: payout,
+            newBalance: currentBalance,
+            finalBalance: finalBalance,
+            winningNumbers: winningNumbers,
+            slots: slots
         });
+        
     } catch (error) {
-        console.error('Scratch error:', error);
-        res.status(500).json({ success: false, message: '刮刮卡生成失败' });
+        console.error('Scratch play error:', error);
+        res.status(500).json({ success: false, message: '游戏失败，请稍后重试' });
     }
 });
 
-// Scratch 排行榜 API
-app.get('/api/scratch/leaderboard', async (req, res) => {
-    try {
-        const result = await pool.query(
-            `SELECT username, COUNT(*) as wins, MAX(created_at) as latest_win 
-             FROM scratch_results 
-             WHERE DATE(created_at) = CURRENT_DATE AND won = true 
-             GROUP BY username 
-             ORDER BY wins DESC, latest_win ASC 
-             LIMIT 20`
-        );
-        
-        res.json({
-            success: true,
-            leaderboard: result.rows
-        });
-    } catch (error) {
-        console.error('Scratch leaderboard error:', error);
-        res.status(500).json({ success: false, message: '获取排行榜失败' });
-    }
-});
+
 
 // Spin API 路由
 app.post('/api/spin', 

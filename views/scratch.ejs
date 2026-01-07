@@ -164,6 +164,127 @@
             transform: translateY(-2px);
         }
         
+        .balance-tier-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .balance-info {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .balance-info h3 {
+            color: #ffeb3b;
+            margin: 0;
+        }
+        
+        .tier-selection {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .tier-selection h4 {
+            color: #00c853;
+            margin-bottom: 1.5rem;
+        }
+        
+        .tier-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+        
+        .tier-btn {
+            background: linear-gradient(135deg, #4caf50, #45a049);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 1.5rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 140px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        }
+        
+        .tier-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+        }
+        
+        .tier-cost {
+            color: #ffeb3b;
+            font-size: 1.1rem;
+        }
+        
+        .tier-detail {
+            color: #ccc;
+            font-size: 0.9rem;
+        }
+        
+        .outcome-info {
+            text-align: center;
+        }
+        
+        .outcome-info h4 {
+            color: #00c853;
+            margin-bottom: 1rem;
+        }
+        
+        .outcomes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.8rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .outcome-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 0.6rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ccc;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        
+        .game-info {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        
+        #current-tier-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-weight: bold;
+        }
+        
+        button {
+            padding: 0.8rem 1.5rem;
+            background: #ffcc00;
+            color: #000;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 0.5rem;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            background: #ffd700;
+            transform: translateY(-2px);
+        }
+        
         button:disabled {
             background: #95a5a6;
             cursor: not-allowed;
@@ -176,6 +297,27 @@
         
         /* 手机端优化 */
         @media (max-width: 768px) {
+            .tier-buttons {
+                flex-direction: column;
+                align-items: center;
+                gap: 1rem;
+            }
+            
+            .tier-btn {
+                min-width: 120px;
+                padding: 1rem;
+            }
+            
+            .outcomes-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.5rem;
+            }
+            
+            .outcome-item {
+                font-size: 0.8rem;
+                padding: 0.5rem;
+            }
+            
             .board {
                 max-width: 100%;
                 margin: 10px;
@@ -261,18 +403,57 @@
             </div>
         </div>
         
-        <div class="board">
+        <div class="balance-tier-section">
+            <div class="balance-info">
+                <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+            </div>
+            <div class="tier-selection">
+                <h4>🎯 选择游戏档位:</h4>
+                <div class="tier-buttons">
+                    <button class="tier-btn" data-cost="5" data-wins="5">
+                        🎟️ 普通版<br>
+                        <span class="tier-cost">5 电币</span><br>
+                        <span class="tier-detail">5个中奖号码</span>
+                    </button>
+                    <button class="tier-btn" data-cost="10" data-wins="10">
+                        🎆 进阶版<br>
+                        <span class="tier-cost">10 电币</span><br>
+                        <span class="tier-detail">10个中奖号码</span>
+                    </button>
+                    <button class="tier-btn" data-cost="100" data-wins="20">
+                        💰 豪华版<br>
+                        <span class="tier-cost">100 电币</span><br>
+                        <span class="tier-detail">20个中奖号码</span>
+                    </button>
+                </div>
+            </div>
+            <div class="outcome-info">
+                <h4>🎯 可能结果 (所有档位均相同):</h4>
+                <div class="outcomes-grid">
+                    <div class="outcome-item">不亏不赚 (20%)</div>
+                    <div class="outcome-item">×2 倍数 (20%)</div>
+                    <div class="outcome-item">归零 (20%)</div>
+                    <div class="outcome-item">×1.5 倍数 (20%)</div>
+                    <div class="outcome-item">×0.5 倍数 (20%)</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="board" id="game-board" style="display: none;">
             <h2>🎯 KingBoost 刮刮乐</h2>
-            <div class="labels">共有20次中奖机会哦，多中多得！（奖品不涉及真实钱财）</div>
+            <div class="game-info">
+                <div id="current-tier-info"></div>
+                <div class="labels">刮开涂层看看你的幸运号码！</div>
+            </div>
             <div id="scratchContainer">
                 <div id="scratchContent"></div>
                 <canvas id="scratchCanvas"></canvas>
             </div>
 
             <div class="scratch-ui">
-                <button onclick="startScratch()">开始刮奖</button>
                 <button onclick="verifyWin()">🎯 点击验证中奖</button>
-                <p id="verifyResult" style="font-weight: bold; font-size: 1.2rem;"></p>
+                <button onclick="backToTierSelection()">🔙 返回选择</button>
+                <div id="game-result"></div>
             </div>
         </div>
         
@@ -287,7 +468,7 @@
             line-height: 1.5;
             text-align: center;
         ">
-            ⚠️ <strong>Disclaimer:</strong> This scratch card feature is provided solely for entertainment purposes. It does not involve gambling, betting, or the use of any real currency. No monetary prizes are offered or can be won. Participation is entirely free, and this feature complies with Canadian laws. By using this feature, you acknowledge that it is not a game of chance and is not subject to gambling regulations.
+            ⚠️ <strong>免责声明：</strong>本刮刮乐功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得。参与完全免费，符合中华人民共和国相关法律法规。使用本功能即表示您确认这不是博彩游戏。严禁未满18周岁用户使用，请理性娱乐。
         </div>
     </div>
 
@@ -302,6 +483,8 @@
     }
     
     let hasVerified = true;
+    let currentGameData = null;
+    let selectedTier = null;
         
     function createCard(num, prize) {
         const cell = document.createElement('div');
@@ -309,13 +492,84 @@
         cell.innerHTML = `<div>${num}</div><div>${prize || ''}</div>`;
         return cell;
     }
+    
+    function backToTierSelection() {
+        document.getElementById('game-board').style.display = 'none';
+        document.querySelector('.balance-tier-section').style.display = 'block';
+        hasVerified = true;
+        currentGameData = null;
+        selectedTier = null;
+    }
+    
+    // 添加点击事件监听器
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.tier-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const cost = parseInt(this.dataset.cost);
+                const wins = parseInt(this.dataset.wins);
+                selectTier(cost, wins);
+            });
+        });
+    });
+    
+    async function selectTier(cost, winCount) {
+        // 检查电币余额
+        const currentBalance = parseInt(document.getElementById('current-balance').textContent);
         
-    async function startScratch() {
-        if (!hasVerified) {
-            alert('请先验证当前结果后再进行下一次刮奖哦！');
+        if (currentBalance < cost) {
+            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币`);
             return;
         }
+        
+        selectedTier = { cost, winCount };
+        
+        try {
+            // 扣除电币并获取游戏结果
+            const response = await fetch('/api/scratch/play', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                },
+                body: JSON.stringify({ 
+                    username: '<%= username %>',
+                    tier: cost,
+                    winCount: winCount
+                })
+            });
+            
+            const data = await response.json();
+            if (!data.success) {
+                alert('游戏开始失败：' + data.message);
+                return;
+            }
+            
+            currentGameData = data;
+            
+            // 更新余额显示
+            document.getElementById('current-balance').textContent = data.newBalance;
+            
+            // 显示游戏界面
+            startScratchGame(data);
+            
+        } catch (error) {
+            console.error('Scratch game error:', error);
+            alert('网络错误，请稍后重试');
+        }
+    }
+        
+    async function startScratchGame(gameData) {
         hasVerified = false;
+        
+        // 隐藏档位选择，显示游戏界面
+        document.querySelector('.balance-tier-section').style.display = 'none';
+        document.getElementById('game-board').style.display = 'block';
+        
+        // 显示当前档位信息
+        document.getElementById('current-tier-info').innerHTML = `
+            <div>当前档位: ${selectedTier.cost} 电币 | 中奖号码: ${selectedTier.winCount} 个</div>
+            <div>结果: ${gameData.outcome} | 获得: ${gameData.payout} 电币</div>
+        `;
 
         // 提前初始化 canvas 遮罩，防止号码闪现
         const canvas = document.getElementById('scratchCanvas');
@@ -323,38 +577,15 @@
         canvas.width = canvas.offsetWidth;
         canvas.height = canvas.offsetHeight;
 
-        const image = new Image();
-        image.src = '/assets/images/chiikawa1.png';
-        image.onload = () => {
-            ctx.globalAlpha = 1.0;
-            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-            ctx.globalCompositeOperation = 'destination-out';
-        };
-        
-        // 如果图片加载失败，使用默认遮罩
-        image.onerror = () => {
-            ctx.fillStyle = '#c0c0c0';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.globalCompositeOperation = 'destination-out';
-        };
+        // 使用灰色遮罩层
+        ctx.fillStyle = '#c0c0c0';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalCompositeOperation = 'destination-out';
 
-        // 再去请求数据
-        const username = "<%= username %>";
-        const timestamp = Math.floor(Date.now() / 1000);
-        const nonce = crypto.randomUUID();
-
-        const res = await fetch('https://scratch-server-vmit.onrender.com/scratch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, timestamp, nonce })
-        });
-
-        const data = await res.json();
-        if (!data.success) return alert('❌ ' + data.message);
-
+        // 生成显示内容
         const all = [
-            ...data.winningNumbers.map(n => ({ num: n, prize: '中奖号码' })),
-            ...data.slots
+            ...gameData.winningNumbers.map(n => ({ num: n, prize: '中奖号码' })),
+            ...gameData.slots
         ];
 
         const container = document.getElementById('scratchContent');
@@ -426,13 +657,18 @@
             lastY = y;
         }
 
-        document.getElementById('verifyResult').textContent = '';
+        document.getElementById('game-result').innerHTML = '';
     }
         
     function verifyWin() {
+        if (!currentGameData) {
+            alert('请先开始游戏！');
+            return;
+        }
+        
         const grid = Array.from(document.querySelectorAll('#scratchContent .grid-item'));
-        const winNums = grid.slice(0, 5).map(cell => parseInt(cell.children[0].textContent));
-        const userSlots = grid.slice(5);
+        const winNums = grid.slice(0, selectedTier.winCount).map(cell => parseInt(cell.children[0].textContent));
+        const userSlots = grid.slice(selectedTier.winCount);
 
         const matched = [];
 
@@ -444,15 +680,26 @@
             }
         });
 
-        const result = document.getElementById('verifyResult');
-        if (matched.length > 0) {
-            const msg = matched.map(m => `号码 ${m.num}：${m.prize}`).join('， ');
-            result.textContent = `🎉 恭喜，你命中了 ${matched.length} 个奖项！${msg}`;
-            result.style.color = '#00ff88';
+        const result = document.getElementById('game-result');
+        let resultMessage;
+        
+        if (currentGameData.outcome === '不亏不赚') {
+            resultMessage = `🎯 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，返还: ${currentGameData.payout} 电币`;
+        } else if (currentGameData.outcome === '归零') {
+            resultMessage = `💸 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，损失全部投注`;
         } else {
-            result.textContent = '😢 很遗憾，未中奖，再试一次吧！';
-            result.style.color = '#ff5555';
+            resultMessage = `🎉 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，获得: ${currentGameData.payout} 电币`;
         }
+        
+        result.innerHTML = `
+            <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                <div style="color: #ffeb3b; font-size: 1.1rem; margin-bottom: 0.5rem;">${resultMessage}</div>
+                <div style="color: #ccc;">匹配号码: ${matched.length} 个 | 余额: ${currentGameData.finalBalance} 电币</div>
+            </div>
+        `;
+        
+        // 更新最终余额
+        document.getElementById('current-balance').textContent = currentGameData.finalBalance;
 
         hasVerified = true;
     }

@@ -246,8 +246,8 @@
         
         <% if (typeof user !== 'undefined' && user) { %>
             <div class="spins-reminder">
-                <h3>🎯 剩余游戏次数：<%= user.spins_allowed || 0 %></h3>
-                <p>完成代练订单可获得更多游戏机会</p>
+                <h3>⚡ 电币余额：<%= balance || 0 %> 电币</h3>
+                <p>联系管理员充值获得更多电币用于游戏</p>
             </div>
         <% } %>
 
@@ -288,6 +288,28 @@
                 <p class="game-description">许下心愿，看看幸运女神是否眷顾你</p>
                 <span class="game-status status-new">✨ 新游戏</span>
             </a>
+        </div>
+        
+        <!-- 免责声明 -->
+        <div style="
+            max-width: 800px;
+            margin: 3rem auto 0;
+            padding: 1.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            font-size: 0.9rem;
+            color: #ccc;
+            text-align: center;
+            line-height: 1.6;
+        ">
+            <div style="margin-bottom: 10px; font-weight: bold; color: #ff9800;">
+                ⚠️ 重要声明
+            </div>
+            本平台所有游戏功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币交易。<br>
+            平台内虚拟积分、余额等均为娱乐道具，无法兑换为真实货币或有价物品。<br>
+            参与完全免费，无需任何付费，符合中华人民共和国相关法律法规。<br>
+            <strong>严禁未满18周岁用户使用，请理性娱乐，适度游戏。</strong>
         </div>
     </div>
 

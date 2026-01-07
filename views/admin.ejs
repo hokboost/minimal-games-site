@@ -22,7 +22,7 @@
                 <thead>
                     <tr>
                         <th>用户名</th>
-                        <th>剩余次数</th>
+                        <th>电币余额</th>
                         <th>最新 Quiz</th>
                         <th>最新 Slot</th>
                         <th>最新 Spin</th>
@@ -37,7 +37,12 @@
                     <% users.forEach(user => { %>
                         <tr>
                             <td><%= user.username %></td>
-                            <td class="spins"><%= user.spins_allowed || 0 %></td>
+                            <td class="balance">
+                                <span class="balance-display">⚡<%= user.balance || 0 %> 电币</span>
+                                <button class="edit-balance-btn" onclick="editBalance('<%= user.username %>', <%= user.balance || 0 %>)">
+                                    ✏️ 修改
+                                </button>
+                            </td>
                             <td>-</td>
                             <td>-</td>
                             <td>-</td>
@@ -240,6 +245,34 @@
 
     .btn-delete:hover {
         background: #c82333;
+        transform: translateY(-1px);
+    }
+
+    .balance {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .balance-display {
+        font-weight: bold;
+        color: #4caf50;
+        min-width: 60px;
+    }
+
+    .edit-balance-btn {
+        background: #ff9800;
+        color: white;
+        border: none;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .edit-balance-btn:hover {
+        background: #f57c00;
         transform: translateY(-1px);
     }
 
@@ -541,6 +574,51 @@
             btn.disabled = false;
             btn.textContent = '清除';
             btn.style.background = '#17a2b8';
+        });
+    }
+
+    function editBalance(username, currentBalance) {
+        const newBalance = prompt(`修改用户 "${username}" 的电币余额:\\n\\n当前余额: ${currentBalance} 电币\\n\\n请输入新的电币数量:`, currentBalance);
+        
+        if (newBalance === null) return; // 用户取消
+        
+        const balance = parseFloat(newBalance);
+        
+        if (isNaN(balance)) {
+            alert('请输入有效的数字金额！');
+            return;
+        }
+        
+        if (balance < 0) {
+            alert('余额不能为负数！');
+            return;
+        }
+        
+        const confirmChange = confirm(`确认修改电币余额？\\n\\n用户: ${username}\\n当前余额: ${currentBalance} 电币\\n新余额: ${balance} 电币`);
+        
+        if (!confirmChange) return;
+        
+        // 发送请求到服务器
+        fetch('/api/admin/update-balance', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': '<%= csrfToken %>'
+            },
+            body: JSON.stringify({ username, balance })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                alert(`✅ 用户 "${username}" 的电币余额已成功修改为 ${balance} 电币`);
+                location.reload(); // 刷新页面显示新余额
+            } else {
+                alert('修改失败: ' + data.message);
+            }
+        })
+        .catch(err => {
+            console.error('Update balance error:', err);
+            alert('修改请求失败，请稍后重试');
         });
     }
     </script>
