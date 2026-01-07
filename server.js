@@ -22,7 +22,7 @@ const BalanceLogger = require('./balance-logger');
 // 礼物配置
 const fs = require('fs');
 const axios = require('axios');
-const { getGiftSender } = require('./bilibili-gift-sender');
+const { getPythonGiftSender } = require('./bilibili-gift-sender-python');
 
 let giftConfig = {};
 try {
@@ -1546,8 +1546,8 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             try {
                 console.log(`🎁 开始向房间 ${bilibiliRoomId} 发送礼物 ${availableGifts[giftType].name}...`);
                 
-                // 使用内置的playwright模块发送礼物
-                const giftSender = getGiftSender();
+                // 使用Python版本的playwright模块发送礼物
+                const giftSender = getPythonGiftSender();
                 const giftResult = await giftSender.sendGift(
                     availableGifts[giftType].bilibili_id, 
                     bilibiliRoomId

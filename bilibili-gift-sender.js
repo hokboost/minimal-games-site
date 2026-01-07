@@ -70,16 +70,10 @@ class BilibiliGiftSender {
         }
     }
 
-    // 初始化浏览器
+    // 初始化浏览器 - 直接使用现有cookie，跳过验证
     async initialize() {
         try {
             console.log('🚀 初始化B站送礼浏览器...');
-            
-            // 首先确保cookie有效
-            const cookiesValid = await this.ensureValidCookies();
-            if (!cookiesValid) {
-                throw new Error('Cookie无效且无法刷新，请手动登录');
-            }
             
             this.browser = await chromium.launch({ 
                 headless: false,
@@ -89,12 +83,12 @@ class BilibiliGiftSender {
             const context = await this.browser.newContext();
             this.page = await context.newPage();
 
-            // 加载最新的有效cookies
+            // 直接加载cookie文件，跳过验证
             const cookies = this.loadCookiesFromTxt(this.cookiePath);
             if (cookies.length > 0) {
                 await this.page.goto('https://www.bilibili.com/');
                 await this.page.context().addCookies(cookies);
-                console.log('✅ 最新Cookies加载成功');
+                console.log('✅ Cookies加载成功');
             } else {
                 throw new Error('无法加载cookie文件');
             }
@@ -153,12 +147,6 @@ class BilibiliGiftSender {
             // 确保浏览器已初始化
             if (!this.isInitialized) {
                 await this.initialize();
-            }
-
-            // 再次检查cookie有效性（如果是敏感操作）
-            const cookiesValid = await this.ensureValidCookies();
-            if (!cookiesValid) {
-                throw new Error('Cookie已过期，无法发送礼物');
             }
 
             // 确保在正确的房间

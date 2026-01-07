@@ -45,6 +45,89 @@
                 <div id="cookieDetails" style="margin-top: 1rem; font-size: 0.9rem; color: #ccc;"></div>
             </div>
 
+            <!-- 直播间管理区域 -->
+            <div class="room-management" style="
+                background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(129, 199, 132, 0.05));
+                border: 2px solid #4caf50; border-radius: 15px; padding: 1.5rem; margin-bottom: 2rem;
+            ">
+                <h2 style="color: #4caf50; margin-bottom: 1rem;">📺 直播间绑定管理</h2>
+                
+                <!-- 绑定操作区域 -->
+                <div style="
+                    background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
+                ">
+                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;">➕ 绑定新房间</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 1rem; align-items: end;">
+                        <div>
+                            <label style="display: block; margin-bottom: 0.3rem; color: #4caf50; font-size: 0.9rem;">用户名:</label>
+                            <input type="text" id="bindUsername" placeholder="请输入用户名 (例: 尧顺宇)"
+                                style="
+                                    width: 100%; padding: 0.8rem; border: 1px solid #555;
+                                    border-radius: 8px; background: rgba(255,255,255,0.1);
+                                    color: white; font-size: 1rem;
+                                "
+                            />
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 0.3rem; color: #4caf50; font-size: 0.9rem;">直播间号:</label>
+                            <input type="text" id="bindRoomId" placeholder="B站直播间号 (例: 3929738)"
+                                style="
+                                    width: 100%; padding: 0.8rem; border: 1px solid #555;
+                                    border-radius: 8px; background: rgba(255,255,255,0.1);
+                                    color: white; font-size: 1rem;
+                                "
+                            />
+                        </div>
+                        <button onclick="bindUserRoom()" style="
+                            padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #4caf50, #45a049);
+                            color: white; border: none; border-radius: 8px; font-weight: bold;
+                            cursor: pointer; transition: all 0.3s ease; white-space: nowrap;
+                        ">🔗 绑定房间</button>
+                    </div>
+                </div>
+
+                <!-- 解绑操作区域 -->
+                <div style="
+                    background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
+                ">
+                    <h3 style="color: #f44336; margin-bottom: 0.8rem; font-size: 1.1rem;">➖ 解除绑定</h3>
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: end;">
+                        <div>
+                            <label style="display: block; margin-bottom: 0.3rem; color: #f44336; font-size: 0.9rem;">用户名:</label>
+                            <input type="text" id="unbindUsername" placeholder="请输入要解绑的用户名"
+                                style="
+                                    width: 100%; padding: 0.8rem; border: 1px solid #555;
+                                    border-radius: 8px; background: rgba(255,255,255,0.1);
+                                    color: white; font-size: 1rem;
+                                "
+                            />
+                        </div>
+                        <button onclick="unbindUserRoom()" style="
+                            padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #f44336, #d32f2f);
+                            color: white; border: none; border-radius: 8px; font-weight: bold;
+                            cursor: pointer; transition: all 0.3s ease; white-space: nowrap;
+                        ">🔓 解除绑定</button>
+                    </div>
+                </div>
+
+                <!-- 当前绑定列表 -->
+                <div>
+                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;">📋 当前绑定列表</h3>
+                    <div id="currentBindings" style="
+                        background: rgba(0, 0, 0, 0.3); border-radius: 8px; padding: 1rem;
+                        min-height: 100px; color: #ccc;
+                    ">
+                        <div style="text-align: center; color: #999;">正在加载绑定信息...</div>
+                    </div>
+                    <button onclick="loadRoomBindings()" style="
+                        margin-top: 0.8rem; padding: 0.6rem 1.2rem; 
+                        background: linear-gradient(135deg, #2196f3, #1976d2);
+                        color: white; border: none; border-radius: 6px; font-weight: bold;
+                        cursor: pointer; transition: all 0.3s ease;
+                    ">🔄 刷新列表</button>
+                </div>
+            </div>
+
             <table class="users-table">
                 <thead>
                     <tr>
@@ -759,6 +842,304 @@
             alert('修改请求失败，请稍后重试');
         });
     }
+
+    // ==========================================
+    // Cookie 管理功能
+    // ==========================================
+    
+    // 检查Cookie状态
+    async function checkCookieStatus() {
+        try {
+            showMessage('正在检查Cookie状态...', 'info');
+            
+            const response = await fetch('/api/bilibili/cookies/status');
+            const result = await response.json();
+            
+            const statusDiv = document.getElementById('cookieStatus');
+            const detailsDiv = document.getElementById('cookieDetails');
+            
+            if (result.success) {
+                if (result.expired) {
+                    statusDiv.style.background = 'rgba(244, 67, 54, 0.8)';
+                    statusDiv.style.color = 'white';
+                    statusDiv.innerHTML = '❌ Cookie已过期';
+                    
+                    let reasonText = '';
+                    switch(result.reason) {
+                        case 'no_cookies': reasonText = '未找到cookie文件'; break;
+                        case 'missing_key_cookies': reasonText = '缺少关键cookie'; break;
+                        case 'login_required': reasonText = '需要重新登录'; break;
+                        default: reasonText = result.reason || '未知原因';
+                    }
+                    
+                    detailsDiv.innerHTML = `
+                        <div style="color: #f44336;">🚨 Cookie状态: 已过期</div>
+                        <div style="margin-top: 0.5rem;">原因: ${reasonText}</div>
+                        <div style="margin-top: 0.5rem;">建议: 点击"刷新Cookie"按钮重新获取</div>
+                    `;
+                } else {
+                    statusDiv.style.background = 'rgba(76, 175, 80, 0.8)';
+                    statusDiv.style.color = 'white';
+                    statusDiv.innerHTML = '✅ Cookie有效';
+                    
+                    const lastCheck = new Date(result.lastCheck).toLocaleString('zh-CN');
+                    const nextCheck = new Date(result.nextCheck).toLocaleString('zh-CN');
+                    
+                    detailsDiv.innerHTML = `
+                        <div style="color: #4caf50;">✅ Cookie状态: 有效</div>
+                        <div style="margin-top: 0.5rem;">上次检查: ${result.lastCheck ? lastCheck : '未检查'}</div>
+                        <div style="margin-top: 0.5rem;">下次检查: ${nextCheck}</div>
+                        <div style="margin-top: 0.5rem;">检查间隔: ${Math.round(result.checkInterval / 60000)} 分钟</div>
+                    `;
+                }
+            } else {
+                statusDiv.style.background = 'rgba(244, 67, 54, 0.8)';
+                statusDiv.style.color = 'white';
+                statusDiv.innerHTML = '❌ 检查失败';
+                detailsDiv.innerHTML = `<div style="color: #f44336;">错误: ${result.message}</div>`;
+            }
+            
+        } catch (error) {
+            console.error('检查Cookie状态失败:', error);
+            showMessage('检查Cookie状态失败: ' + error.message, 'error');
+        }
+    }
+
+    // 刷新Cookie
+    async function refreshCookies() {
+        try {
+            if (!confirm('确定要刷新B站Cookie吗？\\n\\n这将打开浏览器窗口，请在浏览器中完成登录操作。')) {
+                return;
+            }
+            
+            showMessage('正在刷新Cookie，请在弹出的浏览器中完成登录...', 'info');
+            
+            const statusDiv = document.getElementById('cookieStatus');
+            statusDiv.style.background = 'rgba(255, 193, 7, 0.8)';
+            statusDiv.style.color = 'white';
+            statusDiv.innerHTML = '🔄 正在刷新...';
+            
+            const response = await fetch('/api/bilibili/cookies/refresh', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showMessage('Cookie刷新成功！', 'success');
+                checkCookieStatus(); // 重新检查状态
+            } else {
+                showMessage('Cookie刷新失败: ' + result.message, 'error');
+                statusDiv.style.background = 'rgba(244, 67, 54, 0.8)';
+                statusDiv.innerHTML = '❌ 刷新失败';
+            }
+            
+        } catch (error) {
+            console.error('刷新Cookie失败:', error);
+            showMessage('刷新Cookie失败: ' + error.message, 'error');
+        }
+    }
+
+    // ==========================================
+    // 直播间管理功能
+    // ==========================================
+    
+    // 绑定用户房间
+    async function bindUserRoom() {
+        try {
+            const username = document.getElementById('bindUsername').value.trim();
+            const roomId = document.getElementById('bindRoomId').value.trim();
+            
+            if (!username) {
+                showMessage('请输入用户名', 'error');
+                return;
+            }
+            
+            if (!roomId) {
+                showMessage('请输入房间号', 'error');
+                return;
+            }
+            
+            if (!/^\\d{6,12}$/.test(roomId)) {
+                showMessage('房间号格式不正确，应为6-12位数字', 'error');
+                return;
+            }
+            
+            if (!confirm(`确定要为用户 "${username}" 绑定房间号 "${roomId}" 吗？`)) {
+                return;
+            }
+            
+            const response = await fetch('/api/bilibili/room', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                },
+                body: JSON.stringify({
+                    targetUsername: username,
+                    roomId: roomId
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showMessage(result.message, 'success');
+                // 清空输入框
+                document.getElementById('bindUsername').value = '';
+                document.getElementById('bindRoomId').value = '';
+                // 刷新绑定列表
+                loadRoomBindings();
+            } else {
+                showMessage(result.message || '绑定失败', 'error');
+            }
+            
+        } catch (error) {
+            console.error('绑定房间失败:', error);
+            showMessage('网络错误，请稍后重试', 'error');
+        }
+    }
+
+    // 解除用户房间绑定
+    async function unbindUserRoom() {
+        try {
+            const username = document.getElementById('unbindUsername').value.trim();
+            
+            if (!username) {
+                showMessage('请输入用户名', 'error');
+                return;
+            }
+            
+            if (!confirm(`确定要为用户 "${username}" 解除房间绑定吗？\\n\\n解除后该用户无法自动发送礼物。`)) {
+                return;
+            }
+            
+            const response = await fetch('/api/bilibili/room', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '<%= csrfToken %>'
+                },
+                body: JSON.stringify({
+                    targetUsername: username
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showMessage(result.message, 'success');
+                // 清空输入框
+                document.getElementById('unbindUsername').value = '';
+                // 刷新绑定列表
+                loadRoomBindings();
+            } else {
+                showMessage(result.message || '解除绑定失败', 'error');
+            }
+            
+        } catch (error) {
+            console.error('解除绑定失败:', error);
+            showMessage('网络错误，请稍后重试', 'error');
+        }
+    }
+
+    // 加载房间绑定列表
+    async function loadRoomBindings() {
+        try {
+            const response = await fetch('/api/bilibili/room');
+            const result = await response.json();
+            
+            const bindingsDiv = document.getElementById('currentBindings');
+            
+            if (result.success && result.isAdminView && result.allBindings) {
+                if (result.allBindings.length > 0) {
+                    bindingsDiv.innerHTML = result.allBindings.map(binding => `
+                        <div style="
+                            display: flex; justify-content: space-between; align-items: center;
+                            padding: 0.8rem; margin-bottom: 0.5rem;
+                            background: rgba(76, 175, 80, 0.1); border-radius: 8px;
+                            border-left: 4px solid #4caf50;
+                        ">
+                            <div>
+                                <strong style="color: #4caf50;">👤 ${binding.username}</strong>
+                                <span style="margin: 0 1rem; color: #ccc;">→</span>
+                                <strong style="color: #ff9800;">📺 ${binding.roomId}</strong>
+                            </div>
+                            <div style="font-size: 0.8rem; color: #999;">
+                                ${new Date(binding.bindTime).toLocaleString('zh-CN')}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    bindingsDiv.innerHTML = `
+                        <div style="text-align: center; color: #999; padding: 2rem;">
+                            📭 暂无用户绑定直播间
+                        </div>
+                    `;
+                }
+            } else {
+                bindingsDiv.innerHTML = `
+                    <div style="text-align: center; color: #f44336; padding: 2rem;">
+                        ❌ 加载绑定信息失败
+                    </div>
+                `;
+            }
+            
+        } catch (error) {
+            console.error('加载房间绑定失败:', error);
+            const bindingsDiv = document.getElementById('currentBindings');
+            bindingsDiv.innerHTML = `
+                <div style="text-align: center; color: #f44336; padding: 2rem;">
+                    ❌ 网络错误，无法加载绑定信息
+                </div>
+            `;
+        }
+    }
+
+    // 显示消息
+    function showMessage(message, type = 'info') {
+        const messageDiv = document.createElement('div');
+        messageDiv.style.cssText = `
+            position: fixed; top: 20px; right: 20px; padding: 1rem 1.5rem;
+            border-radius: 8px; color: white; font-weight: bold; z-index: 1001;
+            animation: slideIn 0.3s ease; max-width: 400px;
+        `;
+        
+        const colors = {
+            success: 'linear-gradient(135deg, #4caf50, #45a049)',
+            error: 'linear-gradient(135deg, #f44336, #d32f2f)',
+            info: 'linear-gradient(135deg, #2196f3, #1976d2)'
+        };
+        
+        messageDiv.style.background = colors[type] || colors.info;
+        messageDiv.textContent = message;
+        
+        document.body.appendChild(messageDiv);
+        
+        setTimeout(() => {
+            messageDiv.remove();
+        }, 5000);
+    }
+
+    // 页面加载完成后的初始化
+    document.addEventListener('DOMContentLoaded', function() {
+        // 自动检查Cookie状态
+        checkCookieStatus();
+        // 自动加载房间绑定
+        loadRoomBindings();
+    });
+
     </script>
+    
+    <style>
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateX(100%); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    </style>
 </body>
 </html>
