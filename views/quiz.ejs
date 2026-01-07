@@ -330,7 +330,8 @@
     let timer;
     let startTime;
     let totalQuestions = 15;
-    let timePerQuestion = 30;
+    let totalTime = 30; // 总共30秒
+    let timeLeft = totalTime;
 
     // 页面加载时获取排行榜
     document.addEventListener('DOMContentLoaded', function() {
@@ -345,13 +346,15 @@
         currentQuestions = [];
         currentAnswers = [];
         questionIndex = 0;
+        timeLeft = totalTime;
         startTime = new Date();
         
         // 显示预热信息
         showWarmupMessage();
         
-        // 开始获取第一道题
+        // 开始获取第一道题并启动总计时器
         nextQuestion();
+        startTotalTimer();
     }
 
     function showWarmupMessage() {
@@ -399,7 +402,6 @@
                 });
                 
                 displayQuestion(data.question, data.token);
-                startQuestionTimer();
                 
                 // 更新进度
                 document.getElementById('progress').textContent = `题目 ${questionIndex + 1}/${totalQuestions}`;
@@ -444,18 +446,16 @@
             answerIndex: answerIndex
         });
         
-        // 清除计时器
-        clearInterval(timer);
+        // 不清除总计时器，继续倒计时
         
         // 短暂延迟后进入下一题
         setTimeout(() => {
             questionIndex++;
             nextQuestion();
-        }, 1000);
+        }, 800);
     }
 
-    function startQuestionTimer() {
-        let timeLeft = timePerQuestion;
+    function startTotalTimer() {
         document.getElementById('timer').textContent = `剩余时间: ${timeLeft}s`;
         
         timer = setInterval(() => {
@@ -464,13 +464,8 @@
             
             if (timeLeft <= 0) {
                 clearInterval(timer);
-                // 时间到，自动跳过
-                currentAnswers.push({
-                    token: currentQuestions[questionIndex].token,
-                    answerIndex: -1 // -1 表示超时
-                });
-                questionIndex++;
-                nextQuestion();
+                // 时间到，强制提交
+                submitQuiz();
             }
         }, 1000);
     }

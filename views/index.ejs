@@ -358,10 +358,10 @@ function startSlotGame() {
 }
 
 function startScratchGame() {
-    const modal = createLoadingModal('刮刮乐', '🎟️', 'https://scratch-server.onrender.com');
+    const modal = createLoadingModal('刮刮乐', '🎟️', 'https://scratch-server-vmit.onrender.com');
     
     // 预热服务器
-    fetch("https://scratch-server.onrender.com/ping")
+    fetch("https://scratch-server-vmit.onrender.com/ping")
         .then(() => {
             setTimeout(() => {
                 window.location.href = "/scratch";
