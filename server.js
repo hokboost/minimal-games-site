@@ -1015,11 +1015,6 @@ app.get('/health', (req, res) => {
     });
 });
 
-// 管理员登录页面
-app.get('/admin', (req, res) => {
-    res.render('admin');
-});
-
 // 安全监控面板（需要认证）
 app.get('/admin/security', (req, res) => {
     // 简单的密码保护
