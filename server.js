@@ -619,16 +619,35 @@ app.post('/login', loginLimiter, async (req, res) => {
         };
         req.session.username = user.username;
 
-        // 8. 创建单设备会话管理，带通知功能（在regenerate之前）
+        // 8. 检查是否有其他设备登录，如果有则准备显示踢出消息
+        let kickoutMessage = null;
+        if (username !== 'hokboost') {
+            // 检查是否有其他活跃会话
+            const otherSessions = await pool.query(`
+                SELECT session_id, ip_address, user_agent, created_at 
+                FROM active_sessions 
+                WHERE username = $1 AND session_id != $2 AND is_active = true
+            `, [username, req.sessionID]);
+
+            if (otherSessions.rows.length > 0) {
+                kickoutMessage = {
+                    title: '账号安全提醒',
+                    message: `您的账号已在新设备登录，已自动退出 ${otherSessions.rows.length} 个其他设备`,
+                    type: 'warning'
+                };
+            }
+        }
+
+        // 9. 创建单设备会话管理（不使用WebSocket通知）
         const sessionSuccess = await SessionManager.createSingleDeviceSession(
-            username, req.sessionID, clientIP, userAgent, notifySecurityEvent
+            username, req.sessionID, clientIP, userAgent, null
         );
 
         if (!sessionSuccess) {
             console.error('创建单设备会话失败');
         }
 
-        // 9. 重新生成session ID以提高安全性
+        // 10. 重新生成session ID以提高安全性
         req.session.regenerate(async function (err) {
             if (err) {
                 console.error("Session regenerate error:", err);
@@ -653,6 +672,12 @@ app.post('/login', loginLimiter, async (req, res) => {
                 `, [username, clientIP, `中高风险登录: ${riskData.reasons.join(', ')}`]);
                 
                 console.log(`⚠️ 中高风险登录 - 用户: ${username}, IP: ${clientIP}, 风险分: ${riskData.score}`);
+            }
+            
+            // 12. 如果有踢出消息，存储到session中
+            if (kickoutMessage) {
+                req.session.kickoutMessage = kickoutMessage;
+                console.log(`👢 用户 ${username} 登录时踢出了其他设备: ${kickoutMessage.message}`);
             }
             
             console.log(`✅ 用户 ${username} 登录成功，IP: ${clientIP}, 风险分: ${riskData.score}`);
@@ -1005,10 +1030,17 @@ app.get('/', async (req, res) => {
         }
     }
     
+    // 检查是否有踢出消息需要显示
+    const kickoutMessage = req.session.kickoutMessage || null;
+    if (kickoutMessage) {
+        delete req.session.kickoutMessage; // 显示一次后删除
+    }
+    
     res.render('index', {
         title: 'Minimal Games 游戏中心',
         user: req.session.user || null,
         balance: balance,
+        kickoutMessage: kickoutMessage,
         req: req
     });
 });

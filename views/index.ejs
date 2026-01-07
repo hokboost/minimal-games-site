@@ -566,6 +566,22 @@ function startScratchGame() {
             }, 15000);
         });
 }
+
+// 检查是否有踢出消息需要显示
+document.addEventListener('DOMContentLoaded', function() {
+    <% if (kickoutMessage) { %>
+    // 显示踢出消息弹窗
+    const kickoutData = <%- JSON.stringify(kickoutMessage) %>;
+    console.log('👢 显示踢出消息:', kickoutData);
+    
+    showSecurityAlert({
+        type: kickoutData.type || 'warning',
+        title: kickoutData.title || '账号安全提醒',
+        message: kickoutData.message || '您的账号已在新设备登录',
+        level: 'warning'
+    });
+    <% } %>
+});
 </script>
 <% } %>
 
