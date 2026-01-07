@@ -113,7 +113,7 @@ with sync_playwright() as p:
             
             // 调用Windows批处理文件
             const batFile = '/mnt/c/Users/user/minimal-games-site/send_gift.bat';
-            const pythonProcess = spawn('/mnt/c/Windows/System32/cmd.exe', ['/c', 'C:\\Users\\user\\minimal-games-site\\send_gift.bat', giftId, roomId], {
+            const pythonProcess = spawn('cmd.exe', ['/c', 'C:\\Users\\user\\minimal-games-site\\send_gift.bat', giftId, roomId], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
