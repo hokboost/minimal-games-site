@@ -234,13 +234,13 @@ const requireAdmin = (req, res, next) => {
 // 限流配置
 const loginLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
-    max: 5,
+    max: 25, // 放宽5倍：从5次改为25次
     message: "❌ 尝试次数过多，请 10 分钟后再试。"
 });
 
 const registerLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
-    max: 3,
+    max: 15, // 放宽5倍：从3次改为15次
     message: "⚠️ 注册太频繁，请稍后再试。",
     standardHeaders: true,
     legacyHeaders: false,
@@ -494,8 +494,19 @@ app.post('/register', registerLimiter, async (req, res) => {
     }
 });
 
+// 管理员登录限流豁免中间件
+const adminLoginLimiterExempt = (req, res, next) => {
+    // 如果是hokboost管理员，跳过限流
+    if (req.body && req.body.username === 'hokboost') {
+        console.log('管理员hokboost登录 - 跳过限流检查');
+        return next();
+    }
+    // 其他用户正常应用限流
+    return loginLimiter(req, res, next);
+};
+
 // 登录处理 - 集成IP风控和单设备登录
-app.post('/login', loginLimiter, async (req, res) => {
+app.post('/login', adminLoginLimiterExempt, async (req, res) => {
     const { username, password, _csrf } = req.body;
     const clientIP = req.clientIP;
     const userAgent = req.userAgent;
