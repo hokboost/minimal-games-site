@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        color: #fff;
+    }
+
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        border-bottom: 2px solid #00c853;
+        padding-bottom: 1rem;
+    }
+
+    .header h1 {
+        margin: 0;
+        color: #00c853;
+    }
+
+    .balance-display {
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        padding: 1rem 1.5rem;
+        border-radius: 10px;
+        font-size: 1.2rem;
+        font-weight: bold;
+    }
+
+    .gifts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    .gift-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+        border: 2px solid rgba(0, 200, 83, 0.3);
+        border-radius: 15px;
+        padding: 1.5rem;
+        text-align: center;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .gift-card:hover {
+        transform: translateY(-5px);
+        border-color: #00c853;
+        box-shadow: 0 10px 25px rgba(0, 200, 83, 0.3);
+    }
+
+    .gift-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        display: block;
+    }
+
+    .gift-name {
+        font-size: 1.3rem;
+        font-weight: bold;
+        color: #00c853;
+        margin-bottom: 0.5rem;
+    }
+
+    .gift-description {
+        color: #ccc;
+        margin-bottom: 1rem;
+        line-height: 1.4;
+        font-size: 0.9rem;
+    }
+
+    .gift-price {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #ff9800;
+        margin-bottom: 1rem;
+    }
+
+    .gift-button {
+        width: 100%;
+        padding: 0.8rem 1.5rem;
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .gift-button:hover:not(:disabled) {
+        background: linear-gradient(135deg, #00e676, #1de9b6);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 200, 83, 0.4);
+    }
+
+    .gift-button:disabled {
+        background: rgba(255, 255, 255, 0.2);
+        color: #999;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+    }
+
+    .nav-links {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .nav-links a {
+        color: #00c853;
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        background: rgba(0, 200, 83, 0.1);
+        transition: all 0.3s ease;
+    }
+
+    .nav-links a:hover {
+        background: rgba(0, 200, 83, 0.2);
+        transform: translateY(-2px);
+    }
+
+    .exchange-history {
+        margin-top: 3rem;
+        padding-top: 2rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .history-title {
+        color: #00c853;
+        margin-bottom: 1rem;
+        font-size: 1.3rem;
+        font-weight: bold;
+    }
+
+    .history-item {
+        background: rgba(255, 255, 255, 0.05);
+        padding: 1rem;
+        margin-bottom: 0.5rem;
+        border-radius: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .history-gift {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .history-time {
+        color: #999;
+        font-size: 0.9rem;
+    }
+
+    .loading {
+        text-align: center;
+        color: #ccc;
+        padding: 2rem;
+    }
+
+    @media (max-width: 768px) {
+        .container {
+            padding: 1rem;
+        }
+        
+        .header {
+            flex-direction: column;
+            gap: 1rem;
+            text-align: center;
+        }
+        
+        .gifts-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎁 礼物兑换商店</h1>
+            <div class="balance-display">
+                💰 电币余额: <span id="currentBalance"><%= balance || 0 %></span>
+            </div>
+        </div>
+
+        <div class="nav-links">
+            <a href="/">🏠 返回首页</a>
+            <a href="/profile">👤 个人资料</a>
+        </div>
+
+        <div class="gifts-grid">
+            <!-- 心动盲盒 -->
+            <div class="gift-card">
+                <span class="gift-icon">💝</span>
+                <div class="gift-name">心动盲盒</div>
+                <div class="gift-description">
+                    随机获得精美礼品，充满惊喜！<br>
+                    适合送给心仪的主播
+                </div>
+                <div class="gift-price">150 电币</div>
+                <button class="gift-button" onclick="exchangeGift('heartbox', 150)">
+                    立即兑换
+                </button>
+            </div>
+
+            <!-- 粉丝团灯牌 -->
+            <div class="gift-card">
+                <span class="gift-icon">🏮</span>
+                <div class="gift-name">粉丝团灯牌</div>
+                <div class="gift-description">
+                    展示你对主播的支持！<br>
+                    成为铁粉的象征
+                </div>
+                <div class="gift-price">1 电币</div>
+                <button class="gift-button" onclick="exchangeGift('fanlight', 1)">
+                    立即兑换
+                </button>
+            </div>
+        </div>
+
+        <div class="exchange-history">
+            <div class="history-title">📜 兑换记录</div>
+            <div id="exchangeHistory">
+                <div class="loading">正在加载兑换记录...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebSocket连接用于接收踢出通知 -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+    // WebSocket连接
+    <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+        const socket = io();
+        const currentUser = '<%= user.username %>';
+        
+        socket.on('connect', () => {
+            console.log('🔗 礼物页面WebSocket连接成功');
+            socket.emit('register', currentUser);
+        });
+        
+        socket.on('security-alert', (event) => {
+            if (event.type === 'device_logout') {
+                const alertDiv = document.createElement('div');
+                alertDiv.style.cssText = `
+                    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                    background: rgba(255, 68, 68, 0.95); color: white; padding: 2rem;
+                    border-radius: 12px; font-size: 1.1rem; font-weight: bold;
+                    z-index: 10000; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+                `;
+                alertDiv.innerHTML = `
+                    <div>⚠️ 账号安全提醒</div>
+                    <div style="margin-top: 1rem; font-size: 0.9rem;">您的账号已在其他设备登录</div>
+                `;
+                document.body.appendChild(alertDiv);
+                
+                setTimeout(() => {
+                    window.location.href = '/login?kicked=true';
+                }, 3000);
+            }
+        });
+    <% } %>
+
+    // 礼物兑换功能
+    async function exchangeGift(giftType, cost) {
+        const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
+        
+        if (currentBalance < cost) {
+            showMessage('电币余额不足！', 'error');
+            return;
+        }
+
+        if (!confirm(`确定要花费 ${cost} 电币兑换这个礼物吗？`)) {
+            return;
+        }
+
+        try {
+            showMessage('正在处理兑换...', 'info');
+            
+            const response = await fetch('/api/gifts/exchange', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    giftType: giftType,
+                    cost: cost
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                showMessage('兑换成功！', 'success');
+                
+                // 更新余额显示
+                document.getElementById('currentBalance').textContent = result.newBalance;
+                
+                // 刷新兑换记录
+                loadExchangeHistory();
+            } else {
+                showMessage(result.message || '兑换失败', 'error');
+            }
+        } catch (error) {
+            console.error('兑换失败:', error);
+            showMessage('网络错误，请稍后重试', 'error');
+        }
+    }
+
+    // 加载兑换记录
+    async function loadExchangeHistory() {
+        try {
+            const response = await fetch('/api/gifts/history');
+            const result = await response.json();
+            
+            const historyDiv = document.getElementById('exchangeHistory');
+            
+            if (result.success && result.history.length > 0) {
+                historyDiv.innerHTML = result.history.map(item => `
+                    <div class="history-item">
+                        <div class="history-gift">
+                            <span>${getGiftIcon(item.gift_type)}</span>
+                            <span>${getGiftName(item.gift_type)}</span>
+                            <span style="color: #ff9800;">(-${item.cost} 电币)</span>
+                        </div>
+                        <div class="history-time">${formatTime(item.created_at)}</div>
+                    </div>
+                `).join('');
+            } else {
+                historyDiv.innerHTML = '<div class="loading">暂无兑换记录</div>';
+            }
+        } catch (error) {
+            console.error('加载兑换记录失败:', error);
+            document.getElementById('exchangeHistory').innerHTML = 
+                '<div class="loading">加载失败，请刷新重试</div>';
+        }
+    }
+
+    // 获取礼物图标
+    function getGiftIcon(giftType) {
+        const icons = {
+            'heartbox': '💝',
+            'fanlight': '🏮'
+        };
+        return icons[giftType] || '🎁';
+    }
+
+    // 获取礼物名称
+    function getGiftName(giftType) {
+        const names = {
+            'heartbox': '心动盲盒',
+            'fanlight': '粉丝团灯牌'
+        };
+        return names[giftType] || '未知礼物';
+    }
+
+    // 格式化时间
+    function formatTime(timestamp) {
+        return new Date(timestamp).toLocaleString('zh-CN');
+    }
+
+    // 显示消息
+    function showMessage(message, type = 'info') {
+        const messageDiv = document.createElement('div');
+        messageDiv.style.cssText = `
+            position: fixed; top: 20px; right: 20px; padding: 1rem 1.5rem;
+            border-radius: 8px; color: white; font-weight: bold; z-index: 1001;
+            animation: slideIn 0.3s ease;
+        `;
+        
+        const colors = {
+            success: 'linear-gradient(135deg, #4caf50, #45a049)',
+            error: 'linear-gradient(135deg, #f44336, #d32f2f)',
+            info: 'linear-gradient(135deg, #2196f3, #1976d2)'
+        };
+        
+        messageDiv.style.background = colors[type] || colors.info;
+        messageDiv.textContent = message;
+        
+        document.body.appendChild(messageDiv);
+        
+        setTimeout(() => {
+            messageDiv.remove();
+        }, 3000);
+    }
+
+    // 页面加载完成后加载兑换记录
+    document.addEventListener('DOMContentLoaded', function() {
+        loadExchangeHistory();
+    });
+    </script>
+
+    <style>
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateX(100%); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    </style>
+</body>
+</html>

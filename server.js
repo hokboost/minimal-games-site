@@ -407,6 +407,29 @@ app.get('/profile', requireLogin, async (req, res) => {
     }
 });
 
+// 礼物兑换页面
+app.get('/gifts', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const userResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+        
+        const balance = userResult.rows.length > 0 ? userResult.rows[0].balance : 0;
+        
+        res.render('gifts', {
+            title: '礼物兑换 - Minimal Games',
+            user: req.session.user,
+            balance: balance
+        });
+        
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('服务器错误');
+    }
+});
+
 // 管理员后台
 app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
     try {
@@ -1407,6 +1430,138 @@ app.get('/api/balance/logs', requireLogin, requireAuthorized, async (req, res) =
     }
 });
 
+// ====================
+// 礼物兑换 API
+// ====================
+
+// 礼物兑换
+app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        const { giftType, cost } = req.body;
+        const username = req.session.user.username;
+        const clientIP = req.clientIP;
+        const userAgent = req.userAgent;
+
+        // 验证输入参数
+        if (!giftType || !cost) {
+            return res.status(400).json({ 
+                success: false, 
+                message: '参数不完整' 
+            });
+        }
+
+        // 定义可用的礼物类型
+        const availableGifts = {
+            'heartbox': { name: '心动盲盒', cost: 150 },
+            'fanlight': { name: '粉丝团灯牌', cost: 1 }
+        };
+
+        // 验证礼物类型
+        if (!availableGifts[giftType]) {
+            return res.status(400).json({ 
+                success: false, 
+                message: '无效的礼物类型' 
+            });
+        }
+
+        // 验证价格
+        if (cost !== availableGifts[giftType].cost) {
+            return res.status(400).json({ 
+                success: false, 
+                message: '价格不匹配' 
+            });
+        }
+
+        // 使用BalanceLogger进行扣费
+        const balanceResult = await BalanceLogger.updateBalance({
+            username: username,
+            amount: -cost, // 负数表示扣除
+            operationType: 'gift_exchange',
+            description: `兑换礼物: ${availableGifts[giftType].name}`,
+            gameData: {
+                giftType: giftType,
+                giftName: availableGifts[giftType].name,
+                cost: cost
+            },
+            ipAddress: clientIP,
+            userAgent: userAgent,
+            requireSufficientBalance: true
+        });
+
+        if (!balanceResult.success) {
+            return res.status(400).json({ 
+                success: false, 
+                message: balanceResult.message 
+            });
+        }
+
+        // 记录兑换记录
+        await pool.query(`
+            INSERT INTO gift_exchanges (
+                username, gift_type, gift_name, cost, status, created_at
+            ) VALUES ($1, $2, $3, $4, 'completed', NOW())
+        `, [username, giftType, availableGifts[giftType].name, cost]);
+
+        console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name}，花费 ${cost} 电币`);
+
+        res.json({ 
+            success: true, 
+            message: '兑换成功！',
+            newBalance: balanceResult.balance
+        });
+
+    } catch (error) {
+        console.error('礼物兑换失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误，请稍后重试' 
+        });
+    }
+});
+
+// 获取兑换历史
+app.get('/api/gifts/history', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+        const offset = (page - 1) * limit;
+
+        const result = await pool.query(`
+            SELECT gift_type, gift_name, cost, status, created_at, delivery_status
+            FROM gift_exchanges 
+            WHERE username = $1 
+            ORDER BY created_at DESC 
+            LIMIT $2 OFFSET $3
+        `, [username, limit, offset]);
+
+        const totalResult = await pool.query(
+            'SELECT COUNT(*) as total FROM gift_exchanges WHERE username = $1',
+            [username]
+        );
+
+        const total = parseInt(totalResult.rows[0].total);
+
+        res.json({
+            success: true,
+            history: result.rows,
+            pagination: {
+                page: page,
+                limit: limit,
+                total: total,
+                pages: Math.ceil(total / limit)
+            }
+        });
+
+    } catch (error) {
+        console.error('获取兑换历史失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
 // 管理员查看所有余额记录 API
 app.get('/api/admin/balance/logs', requireLogin, requireAdmin, async (req, res) => {
     try {
@@ -1511,8 +1666,8 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
                 .digest('hex');
                 
             await pool.query(`
-                INSERT INTO slot_results (username, result, won, proof) 
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO slot_results (username, result, won, proof, created_at) 
+                VALUES ($1, $2, $3, $4, NOW())
             `, [
                 username, 
                 JSON.stringify([outcome.type, outcome.type, outcome.type]), // 三个相同结果
@@ -1686,8 +1841,8 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             }
             
             await pool.query(`
-                INSERT INTO scratch_results (username, winning_numbers, slots, reward, proof, reward_list) 
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO scratch_results (username, winning_numbers, slots, reward, proof, reward_list, created_at) 
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
             `, [
                 username,
                 JSON.stringify(winningNumbers),
