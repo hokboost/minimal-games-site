@@ -1207,11 +1207,11 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             return res.status(403).json({ success: false, message: '用户名不匹配' });
         }
         
-        // 验证档位参数
+        // 验证档位参数 - 修复winCount根据档位设置
         const validTiers = [
-            { cost: 5, winCount: 5 },
-            { cost: 10, winCount: 10 },
-            { cost: 100, winCount: 20 }
+            { cost: 5, winCount: 5 },   // 5元档位，5个中奖号码
+            { cost: 10, winCount: 10 }, // 10元档位，10个中奖号码  
+            { cost: 100, winCount: 20 } // 100元档位，20个中奖号码
         ];
         
         const selectedTier = validTiers.find(t => t.cost === tier && t.winCount === winCount);
@@ -1231,20 +1231,31 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
         
         const currentBalance = parseFloat(result.rows[0].balance);
         
-        // 生成游戏结果 - 5种结果各20%概率
-        const outcomes = [
-            { type: '不亏不赚', multiplier: 1.0 },
-            { type: '×2', multiplier: 2.0 },
-            { type: '归零', multiplier: 0.0 },
-            { type: '×1.5', multiplier: 1.5 },
-            { type: '×0.5', multiplier: 0.5 }
-        ];
+        // 新的中奖逻辑：期望值等于投注金额
+        // 5元：50%中5元，20%中10元，1%中20元，29%不中
+        // 10元：50%中10元，20%中20元，1%中40元，29%不中  
+        // 100元：50%中100元，20%中200元，1%中400元，29%不中
+        const random = Math.random() * 100; // 0-100的随机数
+        let payout = 0;
+        let outcomeType = '';
         
-        const randomIndex = Math.floor(Math.random() * 5);
-        const outcome = outcomes[randomIndex];
-        
-        // 计算奖励
-        const payout = Math.floor(tier * outcome.multiplier);
+        if (random <= 50) {
+            // 50% 概率中等额
+            payout = tier;
+            outcomeType = `中奖 ${tier} 电币`;
+        } else if (random <= 70) {
+            // 20% 概率中2倍
+            payout = tier * 2;
+            outcomeType = `大奖 ${payout} 电币`;
+        } else if (random <= 71) {
+            // 1% 概率中4倍  
+            payout = tier * 4;
+            outcomeType = `超级大奖 ${payout} 电币`;
+        } else {
+            // 29% 概率不中
+            payout = 0;
+            outcomeType = '未中奖';
+        }
         
         // 更新用户余额
         const finalResult = await pool.query(
@@ -1260,18 +1271,25 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             winningNumbers.push(Math.floor(Math.random() * 100) + 1);
         }
         
+        // 生成非中奖区域 - 显示各种诱人的金额
         const slots = [];
+        const attractiveAmounts = [
+            1000, 2000, 5000, 10000, 20000, 50000, 100000, 
+            500000, 1000000, 2000000, 5000000, 10000000, 
+            88888, 66666, 99999, 168000, 888888, 666666
+        ];
+        
         for (let i = 0; i < (25 - winCount); i++) {
+            const randomAmount = attractiveAmounts[Math.floor(Math.random() * attractiveAmounts.length)];
             slots.push({
                 num: Math.floor(Math.random() * 100) + 1,
-                prize: '谢谢参与'
+                prize: `${randomAmount} 电币`
             });
         }
         
         res.json({
             success: true,
-            outcome: outcome.type,
-            multiplier: outcome.multiplier,
+            outcome: outcomeType,
             payout: payout,
             newBalance: currentBalance,
             finalBalance: finalBalance,

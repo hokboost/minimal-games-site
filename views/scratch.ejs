@@ -444,7 +444,16 @@
     function createCard(num, prize) {
         const cell = document.createElement('div');
         cell.className = 'grid-item';
-        cell.innerHTML = `<div>${num}</div><div>${prize || ''}</div>`;
+        
+        // 如果是中奖号码，使用不同的样式
+        const isWinning = prize && (prize.includes('中奖号码') || (prize.includes('电币') && !prize.includes('1000000')));
+        const numberStyle = 'font-size: 1.8rem; font-weight: bold; color: #fff;';
+        const prizeStyle = isWinning ? 'color: #00c853; font-weight: bold; font-size: 0.9rem;' : 'color: #ffeb3b; font-size: 0.8rem;';
+        
+        cell.innerHTML = `
+            <div style="${numberStyle}">${num}</div>
+            <div style="${prizeStyle}">${prize || ''}</div>
+        `;
         return cell;
     }
     
@@ -538,8 +547,9 @@
         ctx.globalCompositeOperation = 'destination-out';
 
         // 生成显示内容
+        const winPrize = gameData.payout > 0 ? `${gameData.payout} 电币` : '中奖号码';
         const all = [
-            ...gameData.winningNumbers.map(n => ({ num: n, prize: '中奖号码' })),
+            ...gameData.winningNumbers.map(n => ({ num: n, prize: winPrize })),
             ...gameData.slots
         ];
 
@@ -638,10 +648,10 @@
         const result = document.getElementById('game-result');
         let resultMessage;
         
-        if (currentGameData.outcome === '不亏不赚') {
+        if (currentGameData.payout === 0) {
+            resultMessage = `😢 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，未中奖`;
+        } else if (currentGameData.payout === selectedTier.cost) {
             resultMessage = `🎯 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，返还: ${currentGameData.payout} 电币`;
-        } else if (currentGameData.outcome === '归零') {
-            resultMessage = `💸 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，损失全部投注`;
         } else {
             resultMessage = `🎉 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，获得: ${currentGameData.payout} 电币`;
         }

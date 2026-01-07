@@ -39,11 +39,12 @@
 
         <div id="result" class="result-section"></div>
 
-        <div id="leaderboard" class="leaderboard-section">
+        <div id="leaderboard" class="leaderboard-section" style="display: none;">
             <h2>🏆 今日排行榜</h2>
             <div class="refresh-controls">
                 <button class="refresh-btn" onclick="loadLeaderboard()">🔄 刷新排行榜</button>
-                <small>排行榜每日重置</small>
+                <button class="refresh-btn" onclick="backToResult()" style="margin-left: 10px; background: #2196f3;">📊 返回结果</button>
+                <small style="display: block; margin-top: 5px;">排行榜每日重置</small>
             </div>
             <table class="leaderboard-table">
                 <thead>
@@ -558,10 +559,10 @@
             
             if (data.success) {
                 showResult(data.score, data.total, data.reward, data.newBalance);
-                // 提交后刷新排行榜
-                setTimeout(() => {
-                    loadLeaderboard();
-                }, 1000);
+                // 不再自动刷新排行榜，让用户手动查看
+                // setTimeout(() => {
+                //     loadLeaderboard();
+                // }, 1000);
             } else {
                 alert('提交失败: ' + data.message);
             }
@@ -608,16 +609,37 @@
         }
         
         resultHTML += `
-            <button onclick="restartQuiz()" style="
-                background: linear-gradient(45deg, #00c853, #00bfa5);
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                font-size: 16px;
-                border-radius: 25px;
-                cursor: pointer;
-                margin-top: 1rem;
-            ">🔄 再来一次 (消耗10电币)</button>
+            <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap;">
+                <button onclick="restartQuiz()" style="
+                    background: linear-gradient(45deg, #00c853, #00bfa5);
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    font-size: 16px;
+                    border-radius: 25px;
+                    cursor: pointer;
+                ">🔄 再来一次 (消耗10电币)</button>
+                
+                <button onclick="showLeaderboard()" style="
+                    background: linear-gradient(45deg, #ff9800, #f57c00);
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    font-size: 16px;
+                    border-radius: 25px;
+                    cursor: pointer;
+                ">🏆 查看排行榜</button>
+                
+                <button onclick="backToHome()" style="
+                    background: linear-gradient(45deg, #2196f3, #1976d2);
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    font-size: 16px;
+                    border-radius: 25px;
+                    cursor: pointer;
+                ">🏠 返回首页</button>
+            </div>
         `;
         
         resultDiv.innerHTML = resultHTML;
@@ -626,6 +648,24 @@
     function restartQuiz() {
         document.getElementById('result').style.display = 'none';
         document.getElementById('user-section').style.display = 'block';
+    }
+    
+    function showLeaderboard() {
+        // 隐藏结果页面，显示排行榜
+        document.getElementById('result').style.display = 'none';
+        document.getElementById('leaderboard').style.display = 'block';
+        // 刷新排行榜数据
+        loadLeaderboard();
+    }
+    
+    function backToHome() {
+        window.location.href = '/';
+    }
+    
+    function backToResult() {
+        // 隐藏排行榜，显示结果页面
+        document.getElementById('leaderboard').style.display = 'none';
+        document.getElementById('result').style.display = 'block';
     }
 
     async function loadLeaderboard() {

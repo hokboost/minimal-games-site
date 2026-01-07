@@ -30,9 +30,9 @@
         
         <div id="slot" class="slot-area">
             <div class="slot-reels">
-                <span id="r1">加载中</span>
-                <span id="r2">加载中</span>
-                <span id="r3">加载中</span>
+                <span id="r1">50</span>
+                <span id="r2">100</span>
+                <span id="r3">150</span>
             </div>
             <button id="spinBtn">🎰 开始游戏</button>
         </div>
@@ -280,35 +280,45 @@
     const btn = document.getElementById('spinBtn');
     const result = document.getElementById('rewardResult');
 
-    const fakeWords = [
-        '好运来', '再来一次', '就差一点', '今天必中', '好运加持', '冲鸭', '眼看要中', '差一点点'
-    ];
+    // 根据投注金额生成对应的数字
+    function generateSpinNumbers(betAmount) {
+        const baseNumbers = [50, 100, 150, 200];
+        return baseNumbers.map(num => Math.round(num * betAmount / 100));
+    }
 
     // 动画逻辑
     function animateSpin(finalReels, reward, callback) {
+        const betAmount = parseInt(document.getElementById('bet-amount').value) || 10;
+        const spinNumbers = generateSpinNumbers(betAmount);
+        
         let steps = 38;
         const interval = setInterval(() => {
-            r1.textContent = fakeWords[Math.floor(Math.random() * fakeWords.length)];
-            r2.textContent = fakeWords[Math.floor(Math.random() * fakeWords.length)];
-            r3.textContent = fakeWords[Math.floor(Math.random() * fakeWords.length)];
+            r1.textContent = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
+            r2.textContent = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
+            r3.textContent = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
             steps--;
             if (steps <= 0) {
                 clearInterval(interval);
                 [r1.textContent, r2.textContent, r3.textContent] = finalReels;
 
                 const [a, b, c] = finalReels;
-                if (reward === '谢谢惠顾' && ((a === b) || (b === c) || (a === c))) {
-                    result.textContent = '😭 差一点点就中了！';
-                    result.className = 'result-text narrow';
-                } else if (reward !== '谢谢惠顾') {
-                    result.textContent = `🎉 恭喜你获得：${reward}`;
+                // 检查是否三个数字相同（获胜）
+                const isWin = (a === b && b === c);
+                // 检查是否有两个数字相同（差一点）
+                const isClose = !isWin && (a === b || b === c || a === c);
+                
+                if (isWin && reward !== '0') {
+                    result.textContent = `🎉 恭喜中奖！获得 ${reward} 电币`;
                     result.className = 'result-text big';
                     r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1.4)';
                     setTimeout(() => {
                         r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1)';
                     }, 500);
+                } else if (isClose) {
+                    result.textContent = '😭 差一点点就中了！继续努力';
+                    result.className = 'result-text narrow';
                 } else {
-                    result.textContent = '😅 谢谢惠顾';
+                    result.textContent = '😅 三个数字不同，未中奖';
                     result.className = 'result-text narrow';
                 }
 
