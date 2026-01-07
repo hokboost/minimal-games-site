@@ -1,325 +1,198 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>知识问答</title>
-    <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-    <a href="/" class="back-button">← 返回</a>
-    <div class="game-container">
-        <h1>🧠 知识问答</h1>
-        <p>玩家：<%= username %></p>
-        <p style="color: #666;">30秒内回答15道题，看看你能得多少分！</p>
-        
-        <div id="user-section">
-            <button onclick="startQuiz()">🎮 准备开始</button>
-        </div>
-        
-        <div id="quiz" style="display:none">
-            <p id="timer"></p>
-            <div class="quiz-container">
-                <div id="question" class="question"></div>
-                <div id="options" class="options"></div>
-            </div>
-        </div>
-        
-        <div id="result"></div>
-    </div>
+<h1>🧐 在线答题</h1>
+  <div id="user-section">
+  <button onclick="startQuiz()">🎮 准备开始</button>
+</div>
+<div id="quiz" style="display:none">
+    <p id="timer"></p>
+    <div id="question"></div>
+    <div id="options"></div>
+  </div>
+  <div id="result"></div>
+  <div id="leaderboard">
+    <h2>🏆 今日排行榜</h2>
+    <table>
+      <thead>
+        <tr><th>排名</th><th>用户名</th><th>得分</th><th>时间</th></tr>
+      </thead>
+      <tbody id="leaderboard-body"></tbody>
+    </table>
+  </div>
+</div>
 
-    <style>
-        #question {
-            font-size: 20px;
-            margin: 20px 0;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 12px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .option {
-            margin: 10px auto;
-            padding: 15px;
-            border: 2px solid #dee2e6;
-            cursor: pointer;
-            width: 80%;
-            border-radius: 8px;
-            transition: all 0.2s;
-            background: white;
-        }
-        
-        .option:hover {
-            background-color: #e3f2fd;
-            border-color: #2196f3;
-        }
-        
-        .option.selected {
-            background-color: #1976d2;
-            color: white;
-            border-color: #1565c0;
-        }
-        
-        .option.locked {
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-        
-        #timer {
-            font-size: 18px;
-            color: #d32f2f;
-            font-weight: bold;
-            text-align: center;
-            padding: 10px;
-            background: #ffebee;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        
-        #result {
-            margin-top: 30px;
-            font-size: 18px;
-            text-align: center;
-        }
-        
-        .quiz-container {
-            background: white;
-            padding: 20px;
-            border-radius: 15px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            margin: 20px 0;
-        }
-        
-        #user-section button {
-            background: linear-gradient(45deg, #4caf50, #45a049);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 18px;
-            font-weight: bold;
-            border-radius: 25px;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin: 20px;
-        }
-        
-        #user-section button:hover {
-            background: linear-gradient(45deg, #45a049, #4caf50);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.3);
-        }
-    </style>
+<style>
+  #question {
+    font-size: 20px;
+    margin: 20px 0;
+  }
+  .option {
+    margin: 10px auto;
+    padding: 10px;
+    border: 1px solid #ccc;
+    cursor: pointer;
+    width: 60%;
+    border-radius: 8px;
+    transition: background-color 0.2s;
+  }
+  .option:hover {
+    background-color: #f0f0f0;
+  }
+  #timer {
+    font-size: 18px;
+    color: red;
+  }
+  #result {
+    margin-top: 30px;
+    font-size: 22px;
+    color: green;
+    word-break: break-word;
+  }
+  #leaderboard {
+    margin-top: 40px;
+    font-size: 18px;
+    display: none;
+  }
+  table {
+    margin: 0 auto;
+    border-collapse: collapse;
+    width: 80%;
+  }
+  table th, table td {
+    border: 1px solid #ccc;
+    padding: 8px;
+  }
+</style>
 
-    <script>
-        const username = "<%= username %>";
-        const csrfToken = "<%= csrfToken %>";
-        let currentIndex = 0;
-        let totalQuestions = 15;
-        let answers = [];
-        let timerId;
-        let seenIds = [];
-        let lock = false;
-        let currentToken = null;
-        let currentSignature = null;
+<script>
+  const SERVER = "https://quiz-server-xbm0.onrender.com";
+  let username = "";
+  let currentIndex = 0;
+  let totalQuestions = 15;
+  let answers = [];
+  let timerId;
+  let timeLeft = 30;
+  let seenIds = [];
+  let lock = false;
 
-        const QUIZ_DURATION = 30; // 答题时间（秒）
-        let endTime = 0;
+const QUIZ_DURATION = 30; // 答题时间（秒）
+let endTime = 0;
 
-        async function startQuiz() {
-            document.getElementById("user-section").style.display = "none";
-            document.getElementById("quiz").style.display = "block";
-            document.getElementById("result").innerHTML = "";
-            
-            answers = [];
-            currentIndex = 0;
-            seenIds = [];
+async function startQuiz() {
+  const res = await fetch("/api/user-info");
+  const data = await res.json();
+  if (!data.success) return alert("❌ 请先登录！");
+  username = data.username;  // 从后端拿用户名
+  document.getElementById("user-section").style.display = "none";
+  document.getElementById("quiz").style.display = "block";
+  answers = [];
+  currentIndex = 0;
+  seenIds = [];
 
-            endTime = Date.now() + QUIZ_DURATION * 1000;
-            startTimer();
-            await loadNext();
+  endTime = Date.now() + QUIZ_DURATION * 1000;
+  startTimer();
+  await loadNext();
+}
+
+function startTimer() {
+  timerId = setInterval(() => {
+    const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+    document.getElementById("timer").textContent = `倒计时：${remaining} 秒`;
+    if (remaining <= 0) {
+      clearInterval(timerId);
+      submitQuiz();
+    }
+  }, 500); // 半秒刷新，更平滑
+}
+
+  let currentToken = null;
+  let currentSignature = null;
+
+  async function loadNext() {
+  if (currentIndex >= totalQuestions) return submitQuiz();
+  const res = await fetch(`${SERVER}/quiz/next`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, seen: seenIds })  // ✅ 这里加上 username
+  });
+  const data = await res.json();
+  if (!data.success || !data.question) return submitQuiz();
+  currentToken = data.token;
+  currentSignature = data.signature;
+  seenIds.push(data.question.id);
+  showQuestion(data.question);
+}
+
+
+  function showQuestion(q) {
+  lock = false;
+  const qDiv = document.getElementById("question");
+  const opts = document.getElementById("options");
+
+  qDiv.textContent = `题目 ${currentIndex + 1}：${q.question}`;
+  
+  // ✅ 新增这段
+  opts.innerHTML = "";
+  opts.style.display = "none";
+  setTimeout(() => { opts.style.display = "block"; }, 10);
+  
+  q.options.forEach((opt, idx) => {
+    const div = document.createElement("div");
+    div.className = "option";
+    div.textContent = opt;
+    div.onclick = () => {
+      if (lock) return;
+      lock = true;
+      if (document.activeElement) document.activeElement.blur();
+
+      Array.from(document.getElementsByClassName("option")).forEach(el => {
+        el.onclick = null;
+        el.classList.add("locked");
+      });
+
+      answers.push({ token: currentToken, signature: currentSignature, answerIndex: idx });
+      currentIndex++;
+      loadNext();
+    };
+
+    opts.appendChild(div);
+  });
+}
+
+
+  async function submitQuiz() {
+    clearInterval(timerId);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+    const res = await fetch(`${SERVER}/quiz/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, answers, timestamp, nonce })
+    });
+    const result = await res.json();
+    document.getElementById("quiz").style.display = "none";
+    const resultDiv = document.getElementById("result");
+    if (result.success) {
+      resultDiv.innerHTML = `✅ 答题结束！得分：<b>${result.score}/${result.total}</b><br>签名：<code>${result.proof}</code>`;
+      loadLeaderboard();
+    } else {
+      resultDiv.textContent = "提交失败：" + result.message;
+    }
+  }
+
+  function loadLeaderboard() {
+    fetch(`${SERVER}/quiz/leaderboard`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.leaderboard)) {
+          const board = document.getElementById("leaderboard");
+          const tbody = document.getElementById("leaderboard-body");
+          board.style.display = "block";
+          tbody.innerHTML = "";
+          data.leaderboard.forEach((r, i) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `<td>${i + 1}</td><td>${r.username}</td><td>${r.score}</td><td>${new Date(r.submitted_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</td>`;
+            tbody.appendChild(row);
+          });
         }
-
-        function startTimer() {
-            timerId = setInterval(() => {
-                const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
-                const timerElement = document.getElementById("timer");
-                timerElement.textContent = `倒计时：${remaining} 秒`;
-                
-                // 时间紧急时改变颜色
-                if (remaining <= 5) {
-                    timerElement.style.color = '#ff4757';
-                    timerElement.style.backgroundColor = '#ffeaa7';
-                } else {
-                    timerElement.style.color = '#d32f2f';
-                    timerElement.style.backgroundColor = '#ffebee';
-                }
-                
-                if (remaining <= 0) {
-                    clearInterval(timerId);
-                    submitQuiz();
-                }
-            }, 500); // 半秒刷新，更平滑 - 完全按照原版
-        }
-
-        async function loadNext() {
-            if (currentIndex >= totalQuestions) return submitQuiz();
-            
-            try {
-                const res = await fetch('/api/quiz/next', {
-                    method: "POST",
-                    headers: { 
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrfToken
-                    },
-                    body: JSON.stringify({ username, seen: seenIds, questionIndex: currentIndex })
-                });
-                
-                const data = await res.json();
-                
-                if (!data.success || !data.question) {
-                    console.warn('No more questions available');
-                    return submitQuiz();
-                }
-                
-                currentToken = data.token;
-                currentSignature = data.signature;
-                seenIds.push(data.question.id);
-                showQuestion(data.question);
-            } catch (error) {
-                console.error('Error loading question:', error);
-                submitQuiz();
-            }
-        }
-
-        function showQuestion(q) {
-            lock = false;
-            const qDiv = document.getElementById("question");
-            const opts = document.getElementById("options");
-
-            qDiv.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <span style="font-size: 1.1rem; font-weight: bold;">题目 ${currentIndex + 1}/${totalQuestions}</span>
-                    <span style="background: #e3f2fd; padding: 4px 12px; border-radius: 12px; font-size: 0.9rem; color: #1976d2;">第${currentIndex + 1}题</span>
-                </div>
-                <div style="font-size: 1.2rem; line-height: 1.4;">${q.question}</div>
-            `;
-            
-            opts.innerHTML = "";
-            // 防止选项闪现 - 完全按照原版
-            opts.style.display = "none";
-            setTimeout(() => { opts.style.display = "block"; }, 10);
-            
-            q.options.forEach((opt, idx) => {
-                const div = document.createElement("div");
-                div.className = "option";
-                div.innerHTML = `<span style="color: #666; margin-right: 10px;">${String.fromCharCode(65 + idx)}</span>${opt}`;
-                div.onclick = () => selectAnswer(idx);
-                opts.appendChild(div);
-            });
-        }
-
-        function selectAnswer(idx) {
-            if (lock) return;
-            lock = true;
-            
-            const options = document.getElementsByClassName("option");
-            options[idx].classList.add("selected");
-            
-            // 锁定所有选项 - 完全按照原版
-            Array.from(options).forEach(el => {
-                el.onclick = null;
-                el.style.cursor = 'default';
-                el.classList.add("locked");
-            });
-
-            answers.push({ 
-                token: currentToken, 
-                signature: currentSignature, 
-                answerIndex: idx,
-                questionId: seenIds[seenIds.length - 1]
-            });
-            
-            currentIndex++;
-            setTimeout(() => loadNext(), 500); // 延迟加载下一题
-        }
-
-        async function submitQuiz() {
-            clearInterval(timerId);
-            const timestamp = Math.floor(Date.now() / 1000);
-            const nonce = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
-            
-            try {
-                const res = await fetch('/api/quiz/submit', {
-                    method: "POST",
-                    headers: { 
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrfToken
-                    },
-                    body: JSON.stringify({ username, answers, timestamp, nonce })
-                });
-                
-                const result = await res.json();
-                
-                document.getElementById("quiz").style.display = "none";
-                const resultDiv = document.getElementById("result");
-                
-                if (result.success) {
-                    const score = result.score;
-                    let points = 0;
-                    let pointsText = "";
-                    let color = "#f39c12";
-                    
-                    // 新积分规则 - 简化版
-                    if (score <= 4) { 
-                        points = -2; 
-                        pointsText = "扣2加币"; 
-                        color = "#e74c3c"; 
-                    }
-                    else if (score <= 9) { 
-                        points = -1; 
-                        pointsText = "扣1加币"; 
-                        color = "#e67e22"; 
-                    }
-                    else { 
-                        points = +1; 
-                        pointsText = "加1加币"; 
-                        color = "#27ae60"; 
-                    }
-                    
-                    resultDiv.innerHTML = `
-                        <div style="text-align: center; margin-top: 30px;">
-                            <div style="background: linear-gradient(45deg, ${color}, ${color}aa); color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                                <h2 style="margin: 0 0 10px 0;">Quiz完成！</h2>
-                                <div style="font-size: 2rem; font-weight: bold; margin: 10px 0;">${score}/15</div>
-                                <div style="font-size: 1.5rem; font-weight: bold;">${pointsText}</div>
-                            </div>
-                            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px; color: #333;">
-                                <p><strong>积分规则：</strong></p>
-                                <p>0-4分扣2加币 | 5-9分扣1加币 | 10分以上加1加币</p>
-                            </div>
-                            <div style="margin-top: 30px;">
-                                <button onclick="location.reload()" style="margin: 10px; background: #3498db; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">再挑战一次</button>
-                                <button onclick="location.href='/'" style="margin: 10px; background: #95a5a6; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">返回主页</button>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    resultDiv.innerHTML = `
-                        <div style="text-align: center; margin-top: 30px;">
-                            <p style="color: #e74c3c; font-size: 1.2rem;">提交失败：${result.message || '未知错误'}</p>
-                            <button onclick="location.reload()" style="margin-top: 20px; background: #e74c3c; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">重试</button>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                document.getElementById("result").innerHTML = `
-                    <div style="text-align: center; margin-top: 30px;">
-                        <p style="color: #e74c3c; font-size: 1.2rem;">网络错误，请重试</p>
-                        <button onclick="location.reload()" style="margin-top: 20px; background: #e74c3c; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">重试</button>
-                    </div>
-                `;
-            }
-        }
-    </script>
-</body>
-</html>
+      });
+  }
+</script>
