@@ -111,9 +111,14 @@ with sync_playwright() as p:
             // 写入临时文件
             fs.writeFileSync(tempScript, pythonCode, 'utf8');
             
-            // 使用Windows路径格式调用Python
-            const pythonCmd = `/mnt/c/Users/user/AppData/Local/Programs/Python/Python313/python.exe "C:\\Users\\user\\minimal-games-site\\bilibili_gift_sender.py" ${giftId} ${roomId}`;
-            const pythonProcess = spawn('bash', ['-c', pythonCmd], {
+            // 直接使用Windows路径调用cmd.exe
+            const pythonProcess = spawn('C:\\Windows\\System32\\cmd.exe', [
+                '/c', 
+                'cd', '/d', 'C:\\Users\\user\\minimal-games-site',
+                '&&',
+                'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python313\\python.exe',
+                'bilibili_gift_sender.py', giftId, roomId
+            ], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
