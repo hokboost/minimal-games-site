@@ -43,12 +43,19 @@ class WindowsGiftListener {
         }
 
         try {
+            console.log(`🔄 轮询任务... ${new Date().toLocaleTimeString()}`);
+            
             const response = await axios.get(`${this.serverUrl}/api/gift-tasks`, {
                 timeout: 10000,
                 headers: {
-                    'X-API-Key': this.apiKey
+                    'X-API-Key': this.apiKey,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 }
             });
+
+            console.log(`📡 API响应状态: ${response.status}`);
+            console.log(`📊 API响应数据:`, response.data);
 
             if (response.data.success && response.data.tasks.length > 0) {
                 console.log(`📦 获取到 ${response.data.tasks.length} 个待处理任务`);
@@ -57,6 +64,8 @@ class WindowsGiftListener {
                 for (const task of response.data.tasks) {
                     await this.processTask(task);
                 }
+            } else if (response.data.success && response.data.tasks.length === 0) {
+                console.log(`📭 暂无待处理任务 (${new Date().toLocaleTimeString()})`);
             }
 
         } catch (error) {
@@ -64,8 +73,14 @@ class WindowsGiftListener {
                 console.log('🔍 正在等待服务器连接...');
             } else if (error.response?.status === 404) {
                 console.log('📭 暂无待处理任务');
+            } else if (error.response?.status === 401) {
+                console.error('❌ API密钥验证失败，请检查密钥设置');
             } else {
-                console.error('❌ 轮询任务失败:', error.message);
+                console.error('❌ 轮询任务失败:', {
+                    message: error.message,
+                    status: error.response?.status,
+                    data: error.response?.data
+                });
             }
         }
     }

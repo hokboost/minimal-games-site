@@ -2572,17 +2572,6 @@ app.post('/admin/security/unblock', (req, res) => {
     }
 });
 
-// 404 处理
-app.use('*', (req, res) => {
-    res.redirect('/');
-});
-
-// 错误处理
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    res.status(500).redirect('/');
-});
-
 // ====== Windows监听服务API ======
 
 // API密钥验证中间件
@@ -2690,6 +2679,17 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
             message: '服务器错误' 
         });
     }
+});
+
+// 404 处理（必须在所有API路由之后）
+app.use('*', (req, res) => {
+    res.redirect('/');
+});
+
+// 错误处理
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).redirect('/');
 });
 
 server.listen(PORT, () => {
