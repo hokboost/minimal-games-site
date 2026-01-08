@@ -31,13 +31,92 @@ def load_cookies_from_txt(file_path):
         print(f"加载cookie文件失败: {e}")
         return []
 
-def check_balance_insufficient(page):
-    """检测页面是否出现余额不足提示，参考threeserver"""
+def get_current_balance(page):
+    """获取当前B币余额，完全参考threeserver.py实现"""
     try:
+        print("[余额检测] 开始查找余额信息...")
+        
+        # 首先查找所有包含"余额"文字的元素
+        try:
+            balance_elements = page.query_selector_all("text=余额")
+            print(f"[余额检测] 找到 {len(balance_elements)} 个包含'余额'的元素")
+            
+            for i, element in enumerate(balance_elements):
+                try:
+                    if element.is_visible():
+                        text = element.text_content() or ""
+                        print(f"[余额检测] 余额元素{i}: '{text}'")
+                        
+                        # 尝试提取数字
+                        import re
+                        match = re.search(r'余额[:\s]*(\d+)', text)
+                        if match:
+                            balance = int(match.group(1))
+                            print(f"✅ [余额检测] 找到余额: {balance} B币")
+                            return balance
+                except Exception as e:
+                    print(f"[余额检测] 处理元素{i}失败: {e}")
+                    
+        except Exception as e:
+            print(f"[余额检测] 查找余额元素失败: {e}")
+        
+        # 尝试具体选择器
+        balance_selectors = [
+            ".balance-info .title",
+            "[data-v-2e691f81].title",
+            ".balance-info",
+            "[class*='balance']",
+            ".title",
+        ]
+        
+        for selector in balance_selectors:
+            try:
+                elements = page.query_selector_all(selector)
+                print(f"[余额检测] 选择器 '{selector}' 找到 {len(elements)} 个元素")
+                
+                for i, element in enumerate(elements):
+                    if element.is_visible():
+                        balance_text = element.text_content() or ""
+                        print(f"[余额检测] 选择器'{selector}' 元素{i}文本: '{balance_text}'")
+                        
+                        # 提取数字 "余额: 811" -> 811
+                        import re
+                        match = re.search(r'余额[:\s]*(\d+)', balance_text)
+                        if match:
+                            balance = int(match.group(1))
+                            print(f"📊 [余额检测] 解析余额成功: {balance} B币")
+                            return balance
+            except Exception as e:
+                print(f"[余额检测] 选择器 '{selector}' 处理失败: {e}")
+        
+        print("[余额检测] ❌ 所有方法都未找到余额信息")
+        return None
+        
+    except Exception as e:
+        print(f"[余额检测] 获取余额失败: {e}")
+        return None
+
+def check_balance_insufficient(page):
+    """检测页面是否出现余额不足提示或余额过低，完全参考threeserver"""
+    try:
+        # 首先尝试读取当前余额
+        balance_info = get_current_balance(page)
+        if balance_info is not None:
+            current_balance = balance_info
+            print(f"💰 当前余额: {current_balance} B币")
+            
+            # 如果余额过低（小于1），认为余额不足
+            if current_balance < 1:
+                print(f"🚫 余额过低: {current_balance} B币")
+                return True
+        
         # 检查常见的余额不足提示
         insufficient_selectors = [
             ".insufficient-balance",  # 余额不足类名
             "[class*='insufficient']",  # 包含insufficient的类名
+            "text='余额不足'",  # 直接文本匹配
+            "text='B币不足'",
+            "text='余额'",
             ".toast-message",  # 通用toast消息
             ".error-message",  # 错误消息
             ".gift-send-error"  # 送礼错误
@@ -50,7 +129,7 @@ def check_balance_insufficient(page):
                     if element.is_visible():
                         text_content = element.text_content() or ""
                         if any(keyword in text_content for keyword in ["余额", "不足", "B币", "充值"]):
-                            print(f"Balance insufficient detected: {text_content}")
+                            print(f"🚫 检测到余额不足提示: {text_content}")
                             return True
                 except:
                     continue
@@ -59,6 +138,49 @@ def check_balance_insufficient(page):
     except Exception as e:
         print(f"检测余额状态失败: {e}")
         return False
+
+def check_gift_send_result(page, gift_id, max_wait=3):
+    """检查送礼结果，完全参考threeserver.py实现"""
+    try:
+        # 等待可能的弹窗或提示
+        time.sleep(max_wait)
+        
+        # 检查是否余额不足
+        if check_balance_insufficient(page):
+            return {"success": False, "reason": "insufficient_balance"}
+        
+        # 检查是否有其他错误提示
+        error_selectors = [".error-tip", ".toast-error", ".gift-error", "[class*='error']"]
+        for selector in error_selectors:
+            elements = page.query_selector_all(selector)
+            for element in elements:
+                try:
+                    if element.is_visible():
+                        error_text = element.text_content() or ""
+                        print(f"⚠️ 送礼错误提示: {error_text}")
+                        return {"success": False, "reason": "other_error", "message": error_text}
+                except:
+                    continue
+        
+        # 检查成功提示（如果有的话）
+        success_selectors = [".gift-success", ".send-success", "[class*='success']"]
+        for selector in success_selectors:
+            elements = page.query_selector_all(selector)
+            for element in elements:
+                try:
+                    if element.is_visible():
+                        success_text = element.text_content() or ""
+                        print(f"✅ 送礼成功提示: {success_text}")
+                        return {"success": True, "message": success_text}
+                except:
+                    continue
+        
+        # 如果没有明确的错误或成功提示，假设成功
+        return {"success": True, "reason": "assumed_success"}
+        
+    except Exception as e:
+        print(f"检查送礼结果失败: {e}")
+        return {"success": False, "reason": "check_failed", "error": str(e)}
 
 def send_gift_simple(gift_id, room_id, quantity=1):
     """简单的礼物发送函数 - 每次独立运行"""
@@ -158,54 +280,35 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                     ''')
                 print(f"Instantly completed {quantity} gift clicks")
             
-            # 等待3秒让可能的提示出现
-            time.sleep(3)
+            # 使用threeserver的完整验证逻辑
+            print("Checking gift send result using threeserver validation logic...")
+            result = check_gift_send_result(page, gift_id, max_wait=3)
             
-            # 检查余额不足
-            balance_insufficient = check_balance_insufficient(page)
-            if balance_insufficient:
-                print("Balance insufficient detected")
-                return {"success": False, "error": "余额不足", "balance_insufficient": True, "gift_id": gift_id, "room_id": room_id}
-            
-            # 检查其他错误提示
-            error_check = page.evaluate('''
-                () => {
-                    const errorSelectors = ['.error-tip', '.toast-error', '.gift-error', '[class*="error"]'];
-                    for (const selector of errorSelectors) {
-                        const el = document.querySelector(selector);
-                        if (el && el.style.display !== 'none' && el.textContent.trim()) {
-                            return {hasError: true, message: el.textContent.trim()};
-                        }
-                    }
-                    return {hasError: false};
+            # 根据验证结果返回适当的响应
+            if result["success"]:
+                verified = "message" in result and result.get("reason") != "assumed_success"
+                print(f"✅ Gift sending successful - Verified: {verified}")
+                return {
+                    "success": True, 
+                    "gift_id": gift_id, 
+                    "room_id": room_id, 
+                    "quantity": quantity,
+                    "verified": verified,
+                    "message": result.get("message", "送礼成功")
                 }
-            ''')
-            
-            if error_check['hasError']:
-                print(f"Error detected: {error_check['message']}")
-                return {"success": False, "error": f"送礼失败: {error_check['message']}", "gift_id": gift_id, "room_id": room_id}
-            
-            # 检查成功提示
-            success_check = page.evaluate('''
-                () => {
-                    const successSelectors = ['.gift-success', '.send-success', '[class*="success"]'];
-                    for (const selector of successSelectors) {
-                        const el = document.querySelector(selector);
-                        if (el && el.style.display !== 'none' && el.textContent.trim()) {
-                            return {hasSuccess: true, message: el.textContent.trim()};
-                        }
-                    }
-                    return {hasSuccess: false};
+            else:
+                error_msg = result.get("message", result.get("reason", "未知错误"))
+                balance_insufficient = result.get("reason") == "insufficient_balance"
+                
+                print(f"❌ Gift sending failed - Reason: {error_msg}")
+                return {
+                    "success": False, 
+                    "error": error_msg, 
+                    "balance_insufficient": balance_insufficient,
+                    "gift_id": gift_id, 
+                    "room_id": room_id,
+                    "quantity": quantity
                 }
-            ''')
-            
-            if success_check['hasSuccess']:
-                print(f"Success confirmed: {success_check['message']}")
-                return {"success": True, "gift_id": gift_id, "room_id": room_id, "verified": True}
-            
-            # 没有明确错误或成功提示，假设成功（参考threeserver逻辑）
-            print("No clear error detected, assuming success")
-            return {"success": True, "gift_id": gift_id, "room_id": room_id, "verified": False}
                 
         except Exception as e:
             print(f"Gift sending error: {e}")
