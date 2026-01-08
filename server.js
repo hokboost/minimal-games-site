@@ -2604,9 +2604,9 @@ function requireApiKey(req, res, next) {
 app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT id, gift_id, room_id, username, gift_name, created_at
+            SELECT id, gift_type, bilibili_room_id, username, gift_name, created_at
             FROM gift_exchanges 
-            WHERE delivery_status = 'pending' AND room_id IS NOT NULL
+            WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
             ORDER BY created_at ASC 
             LIMIT 10
         `);
@@ -2615,8 +2615,8 @@ app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
             success: true,
             tasks: result.rows.map(row => ({
                 id: row.id,
-                giftId: row.gift_id,
-                roomId: row.room_id,
+                giftId: row.gift_type,
+                roomId: row.bilibili_room_id,
                 username: row.username,
                 giftName: row.gift_name,
                 createdAt: row.created_at
