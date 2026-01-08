@@ -546,11 +546,34 @@ app.get('/profile', requireLogin, async (req, res) => {
             return res.status(404).send('用户不存在');
         }
         
+        // 获取游戏记录统计
+        const gameStats = await Promise.all([
+            pool.query('SELECT COUNT(*) as count, MAX(score) as best_score FROM submissions WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN won != \'lost\' THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN matches_count > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username])
+        ]);
+        
+        const stats = {
+            quiz: {
+                total: parseInt(gameStats[0].rows[0].count) || 0,
+                bestScore: gameStats[0].rows[0].best_score || 0
+            },
+            slot: {
+                total: parseInt(gameStats[1].rows[0].count) || 0,
+                wins: parseInt(gameStats[1].rows[0].wins) || 0
+            },
+            scratch: {
+                total: parseInt(gameStats[2].rows[0].count) || 0,
+                wins: parseInt(gameStats[2].rows[0].wins) || 0
+            }
+        };
+        
         const user = userResult.rows[0];
         
         res.render('profile', {
             title: '个人资料 - Minimal Games',
-            user: user
+            user: user,
+            gameStats: stats
         });
     } catch (error) {
         console.error('获取用户数据失败:', error);
@@ -1696,46 +1719,68 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             });
         }
 
-        // 🛡️ 预扣机制：先检查余额是否足够，但暂时不扣除
-        const checkBalanceResult = await pool.query(
-            'SELECT balance FROM users WHERE username = $1', 
-            [username]
-        );
-        
-        if (checkBalanceResult.rows.length === 0) {
+        // 🛡️ 真正的预扣机制：在事务中原子地检查余额、锁住资金并创建任务
+        const client = await pool.connect();
+        let insertResult;
+        try {
+            await client.query('BEGIN');
+            
+            // 1. 锁定用户行并检查余额
+            const lockResult = await client.query(
+                'SELECT balance, bilibili_room_id FROM users WHERE username = $1 FOR UPDATE',
+                [username]
+            );
+            
+            if (lockResult.rows.length === 0) {
+                throw new Error('用户不存在');
+            }
+
+            const { balance: currentBalance, bilibili_room_id: bilibiliRoomId } = lockResult.rows[0];
+            
+            if (currentBalance < cost) {
+                throw new Error(`余额不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币`);
+            }
+
+            // 2. 检查是否有pending的任务（防止重复兑换）
+            const pendingResult = await client.query(
+                'SELECT COUNT(*) as count FROM gift_exchanges WHERE username = $1 AND delivery_status IN ($2, $3)',
+                [username, 'pending', 'processing']
+            );
+
+            if (parseInt(pendingResult.rows[0].count) > 0) {
+                throw new Error('您有礼物正在发送中，请等待完成后再兑换');
+            }
+
+            // 3. 立即锁住资金（从余额中扣除，但标记为frozen）
+            await client.query(
+                'UPDATE users SET balance = balance - $1 WHERE username = $2',
+                [cost, username]
+            );
+
+            // 4. 创建任务记录，标记资金已锁定
+            insertResult = await client.query(`
+                INSERT INTO gift_exchanges (
+                    username, gift_type, gift_name, cost, quantity, status, created_at,
+                    bilibili_room_id, delivery_status
+                ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7)
+                RETURNING id
+            `, [username, giftType, availableGifts[giftType].name, cost, quantity, bilibiliRoomId, 
+                bilibiliRoomId ? 'pending' : 'no_room']);
+
+            await client.query('COMMIT');
+            
+            console.log(`🔒 用户 ${username} 资金已锁定: ${cost} 电币，剩余余额: ${currentBalance - cost} 电币`);
+            
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('兑换事务失败:', error.message);
             return res.status(400).json({ 
                 success: false, 
-                message: '用户不存在' 
+                message: error.message 
             });
+        } finally {
+            client.release();
         }
-
-        const currentBalance = checkBalanceResult.rows[0].balance || 0;
-        if (currentBalance < cost) {
-            return res.status(400).json({ 
-                success: false, 
-                message: `余额不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币` 
-            });
-        }
-
-        console.log(`💰 预扣检查通过: 用户 ${username} 余额 ${currentBalance} 电币，兑换成本 ${cost} 电币`);
-
-        // 获取用户的B站房间号
-        const userRoomResult = await pool.query(`
-            SELECT bilibili_room_id FROM users WHERE username = $1
-        `, [username]);
-
-        const bilibiliRoomId = userRoomResult.rows[0]?.bilibili_room_id;
-        
-
-        // 🛡️ 预扣机制：创建pending任务，暂不扣除余额
-        const insertResult = await pool.query(`
-            INSERT INTO gift_exchanges (
-                username, gift_type, gift_name, cost, quantity, status, created_at,
-                bilibili_room_id, delivery_status
-            ) VALUES ($1, $2, $3, $4, $5, 'pending_payment', NOW(), $6, $7)
-            RETURNING id
-        `, [username, giftType, availableGifts[giftType].name, cost, quantity, bilibiliRoomId, 
-            bilibiliRoomId ? 'pending' : 'no_room']);
 
         const exchangeId = insertResult.rows[0].id;
 
@@ -2160,21 +2205,44 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
             }
         }
         
-        // 存储游戏记录到slot_results表（对齐kingboost格式）
+        // 存储游戏记录到slot_results表（记录金额转动结果）
         try {
             const crypto = require('crypto');
             const proof = crypto.createHash('sha256')
                 .update(`${username}-${Date.now()}-${Math.random()}`)
                 .digest('hex');
                 
+            // 生成三个金额转动结果（符合老虎机逻辑）
+            const amounts = [5, 10, 20, 50, 100, 200, 500];
+            const slot1 = amounts[Math.floor(Math.random() * amounts.length)];
+            const slot2 = amounts[Math.floor(Math.random() * amounts.length)];
+            const slot3 = amounts[Math.floor(Math.random() * amounts.length)];
+            
+            // 如果是中奖，让所有金额相同
+            const slotResults = outcome.type === 'lost' ? [slot1, slot2, slot3] : [slot1, slot1, slot1];
+                
             await pool.query(`
-                INSERT INTO slot_results (username, result, won, proof, created_at) 
-                VALUES ($1, $2, $3, $4, NOW())
+                INSERT INTO slot_results (
+                    username, result, won, proof, created_at,
+                    bet_amount, payout_amount, balance_before, balance_after, multiplier, game_details
+                ) 
+                VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10)
             `, [
                 username, 
-                JSON.stringify([outcome.type, outcome.type, outcome.type]), // 三个相同结果
+                JSON.stringify(slotResults), // 三个金额的转动结果
                 outcome.type,
-                proof
+                proof,
+                1, // bet_amount
+                payout, // payout_amount
+                currentBalance + 1, // balance_before
+                finalBalance, // balance_after
+                outcome.multiplier, // multiplier
+                JSON.stringify({
+                    outcome: outcome.type,
+                    amounts: slotResults,
+                    won: outcome.type !== 'lost',
+                    timestamp: new Date().toISOString()
+                })
             ]);
         } catch (dbError) {
             console.error('Slot游戏记录存储失败:', dbError);
@@ -2329,7 +2397,7 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             });
         }
         
-        // 存储游戏记录到scratch_results表（对齐kingboost格式）
+        // 存储完整游戏记录到scratch_results表
         try {
             const crypto = require('crypto');
             const proof = crypto.createHash('sha256')
@@ -2342,16 +2410,37 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
                 rewardList.push(`${payout} 电币`);
             }
             
+            // 计算中奖号码匹配情况
+            const matches = userSlots.filter(slot => 
+                winningNumbers.includes(slot.num) && slot.prize && slot.prize.includes('电币')
+            );
+            
             await pool.query(`
-                INSERT INTO scratch_results (username, winning_numbers, slots, reward, proof, reward_list, created_at) 
-                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                INSERT INTO scratch_results (
+                    username, winning_numbers, slots, reward, proof, reward_list,
+                    tier_cost, tier_config, balance_before, balance_after, matches_count, game_details
+                ) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             `, [
                 username,
                 JSON.stringify(winningNumbers),
                 JSON.stringify(userSlots),
                 outcomeType,
                 proof,
-                JSON.stringify(rewardList)
+                JSON.stringify(rewardList),
+                tier, // tier_cost
+                JSON.stringify(selectedTier), // tier_config
+                currentBalance + tier, // balance_before
+                finalBalance, // balance_after
+                matches.length, // matches_count
+                JSON.stringify({
+                    outcome: outcomeType,
+                    payout: payout,
+                    winningNumbers: winningNumbers,
+                    userSlots: userSlots,
+                    matches: matches,
+                    timestamp: new Date().toISOString()
+                })
             ]);
         } catch (dbError) {
             console.error('Scratch游戏记录存储失败:', dbError);
@@ -2878,44 +2967,44 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
 
         const { username, gift_name, cost, status, quantity } = taskResult.rows[0];
 
-        // 只有pending_payment状态的任务才需要扣费
-        if (status === 'pending_payment') {
-            // 🛡️ 计算实际应扣费用（基于实际发送数量）
+        // 🔒 资金已锁定状态的任务，成功时确认扣费（已经扣除了，标记为完成即可）
+        if (status === 'funds_locked') {
+            // 🛡️ 计算实际应扣费用和退款（基于实际发送数量）
             const unitCost = cost / quantity; // 单个礼物的成本
             const actualCost = Math.round(unitCost * (actualQuantity || quantity));
+            const refundAmount = cost - actualCost; // 需要退还的金额
             
-            if (partialSuccess) {
+            if (partialSuccess && refundAmount > 0) {
                 console.log(`⚠️ 任务 ${taskId} 部分成功: 原计划 ${quantity} 个，实际成功 ${actualQuantity} 个`);
-                console.log(`💰 按比例扣费: 原成本 ${cost} 电池，实际扣费 ${actualCost} 电池`);
+                console.log(`💰 资金处理: 锁定 ${cost} 电池，实际消费 ${actualCost} 电池，退还 ${refundAmount} 电池`);
+                
+                // 退还多余的资金
+                await pool.query(
+                    'UPDATE users SET balance = balance + $1 WHERE username = $2',
+                    [refundAmount, username]
+                );
             }
             
-            // 执行真实扣费
+            // 记录最终的扣费日志
             const balanceResult = await BalanceLogger.updateBalance({
                 username: username,
-                amount: -actualCost,
-                operationType: partialSuccess ? 'gift_delivery_partial' : 'gift_delivery_success',
-                description: `礼物发送${partialSuccess ? '部分' : ''}成功扣费: ${gift_name} ${actualQuantity || quantity}/${quantity}`,
+                amount: 0, // 资金已经在兑换时锁定了，这里只是记录
+                operationType: partialSuccess ? 'gift_delivery_partial' : 'gift_delivery_success', 
+                description: `礼物发送${partialSuccess ? '部分' : ''}成功确认: ${gift_name} ${actualQuantity || quantity}/${quantity}${refundAmount > 0 ? `，退还 ${refundAmount} 电池` : ''}`,
                 gameData: { 
                     taskId, 
                     gift_name, 
-                    originalCost: cost,
+                    lockedAmount: cost,
                     actualCost: actualCost,
+                    refundAmount: refundAmount,
                     requestedQuantity: quantity,
                     actualQuantity: actualQuantity || quantity,
                     partialSuccess: partialSuccess || false
                 },
-                requireSufficientBalance: true
+                requireSufficientBalance: false // 不检查余额，因为只是记录
             });
 
-            if (!balanceResult.success) {
-                console.error(`💰 任务 ${taskId} 扣费失败: ${balanceResult.message}`);
-                return res.status(400).json({ 
-                    success: false, 
-                    message: `扣费失败: ${balanceResult.message}` 
-                });
-            }
-
-            console.log(`💰 任务 ${taskId} 成功扣费 ${actualCost} 电池: ${username} 的 ${gift_name}`);
+            console.log(`💰 任务 ${taskId} 资金确认: 锁定 ${cost} 电池，消费 ${actualCost} 电池，退还 ${refundAmount} 电池`);
         }
 
         // 标记任务完成
@@ -2980,7 +3069,52 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
         const taskId = parseInt(req.params.id);
         const errorMessage = req.body.error || '礼物发送失败';
         
-        // 🛡️ 预扣机制：任务失败时不扣费，直接标记为失败
+        // 🛡️ 预扣机制：任务失败时必须退还锁定的资金
+        const taskResult = await pool.query(`
+            SELECT username, gift_name, cost, status, quantity
+            FROM gift_exchanges 
+            WHERE id = $1
+        `, [taskId]);
+        
+        if (taskResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: '任务不存在' });
+        }
+        
+        const { username, gift_name, cost, status, quantity } = taskResult.rows[0];
+        
+        // 🔒 如果资金已锁定，需要退还给用户
+        if (status === 'funds_locked') {
+            console.log(`🔄 任务 ${taskId} 失败，正在退还锁定资金 ${cost} 电币给用户 ${username}`);
+            
+            // 使用 BalanceLogger 安全地退还资金并记录日志
+            const refundResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: cost, // 退还全部锁定资金
+                operationType: 'gift_delivery_failed_refund',
+                description: `礼物发送失败退款: ${gift_name} ${quantity}个，退还 ${cost} 电币 - 原因: ${errorMessage}`,
+                gameData: { 
+                    taskId, 
+                    gift_name, 
+                    originalCost: cost,
+                    refundAmount: cost,
+                    errorMessage: errorMessage,
+                    quantity: quantity
+                },
+                requireSufficientBalance: false // 退款不需要检查余额
+            });
+            
+            if (!refundResult.success) {
+                console.error(`❌ 退款失败: ${refundResult.message}`);
+                return res.status(500).json({ 
+                    success: false, 
+                    message: `任务失败且退款失败: ${refundResult.message}` 
+                });
+            }
+            
+            console.log(`✅ 成功退还 ${cost} 电币给 ${username}，新余额: ${refundResult.balance}`);
+        }
+        
+        // 标记任务为失败
         const result = await pool.query(`
             UPDATE gift_exchanges 
             SET delivery_status = 'failed',
@@ -2989,12 +3123,15 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
             WHERE id = $1
             RETURNING username, gift_name, cost
         `, [taskId]);
-
+        
         if (result.rows.length > 0) {
-            const { username, gift_name, cost } = result.rows[0];
-            console.log(`❌ Windows服务任务失败 ${taskId}: ${username} 的 ${gift_name} - ${errorMessage}`);
-            console.log(`💰 预扣机制: 任务失败，不扣除 ${cost} 电币`);
-            res.json({ success: true, message: '任务标记为失败' });
+            console.log(`❌ 任务 ${taskId} 标记为失败: ${username} 的 ${gift_name} - ${errorMessage}`);
+            if (status === 'funds_locked') {
+                console.log(`💰 资金处理: 已退还锁定的 ${cost} 电币`);
+            } else {
+                console.log(`💰 资金处理: 无需退款（状态: ${status}）`);
+            }
+            res.json({ success: true, message: '任务标记为失败，资金已安全退还' });
         } else {
             res.status(404).json({ success: false, message: '任务不存在' });
         }
@@ -3005,6 +3142,93 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
             success: false, 
             message: '服务器错误' 
         });
+    }
+});
+
+// ====================
+// 游戏记录查看API
+// ====================
+
+// 获取用户游戏记录
+app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const { gameType } = req.params;
+        const { page = 1, limit = 10 } = req.query;
+        const username = req.session.user.username;
+        const offset = (page - 1) * limit;
+
+        let query, params, countQuery, countParams;
+
+        switch (gameType) {
+            case 'quiz':
+                query = `
+                    SELECT id, score, submitted_at as played_at
+                    FROM submissions 
+                    WHERE username = $1 
+                    ORDER BY submitted_at DESC 
+                    LIMIT $2 OFFSET $3
+                `;
+                params = [username, limit, offset];
+                countQuery = 'SELECT COUNT(*) FROM submissions WHERE username = $1';
+                countParams = [username];
+                break;
+
+            case 'slot':
+                query = `
+                    SELECT id, won as result, payout_amount as payout, 
+                           result as amounts, created_at as played_at
+                    FROM slot_results 
+                    WHERE username = $1 
+                    ORDER BY created_at DESC 
+                    LIMIT $2 OFFSET $3
+                `;
+                params = [username, limit, offset];
+                countQuery = 'SELECT COUNT(*) FROM slot_results WHERE username = $1';
+                countParams = [username];
+                break;
+
+            case 'scratch':
+                query = `
+                    SELECT id, reward as result, matches_count, tier_cost, 
+                           winning_numbers, slots, created_at as played_at
+                    FROM scratch_results 
+                    WHERE username = $1 
+                    ORDER BY created_at DESC 
+                    LIMIT $2 OFFSET $3
+                `;
+                params = [username, limit, offset];
+                countQuery = 'SELECT COUNT(*) FROM scratch_results WHERE username = $1';
+                countParams = [username];
+                break;
+
+            default:
+                return res.status(400).json({ success: false, message: '不支持的游戏类型' });
+        }
+
+        const [records, countResult] = await Promise.all([
+            pool.query(query, params),
+            pool.query(countQuery, countParams)
+        ]);
+
+        const total = parseInt(countResult.rows[0].count);
+        const totalPages = Math.ceil(total / limit);
+
+        res.json({
+            success: true,
+            gameType,
+            records: records.rows,
+            pagination: {
+                current: parseInt(page),
+                total: totalPages,
+                count: total,
+                hasNext: page < totalPages,
+                hasPrev: page > 1
+            }
+        });
+
+    } catch (error) {
+        console.error('获取游戏记录失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
     }
 });
 

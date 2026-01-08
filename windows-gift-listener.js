@@ -155,23 +155,40 @@ class WindowsGiftListener {
 
             pythonProcess.stderr.on('data', (data) => {
                 errorOutput += data.toString();
-                console.log(`🐍 Python错误: ${data.toString().trim()}`);
+                console.log(`🐍 Python调试: ${data.toString().trim()}`);
             });
 
             pythonProcess.on('close', (code) => {
                 // 🛡️ 修复：不管exit code，始终解析JSON结果
                 try {
-                    const lines = output.trim().split('\\n');
+                    // 修复JSON解析：使用正确的换行符分割
+                    const lines = output.trim().split('\n'); // 修复：使用单个\n而不是\\n
+                    console.log(`🔍 Python输出调试: 总共 ${lines.length} 行，最后几行:`);
+                    lines.slice(-3).forEach((line, i) => {
+                        console.log(`  ${lines.length - 3 + i}: "${line}"`);
+                    });
+                    
+                    // 从后往前查找JSON结果（Python脚本最后输出JSON）
                     for (const line of lines.reverse()) {
-                        if (line.trim().startsWith('{')) {
-                            const result = JSON.parse(line.trim());
-                            console.log(`📋 解析Python结果: success=${result.success}, error=${result.error || 'N/A'}`);
-                            resolve(result);
-                            return;
+                        const trimmed = line.trim();
+                        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                            try {
+                                const result = JSON.parse(trimmed);
+                                console.log(`📋 解析Python结果成功: success=${result.success}, error=${result.error || 'N/A'}`);
+                                resolve(result);
+                                return;
+                            } catch (jsonError) {
+                                console.log(`⚠️ JSON解析失败: "${trimmed}" - ${jsonError.message}`);
+                                continue; // 继续尝试其他行
+                            }
                         }
                     }
                     
-                    // 没有找到JSON输出，这是异常情况
+                    // 没有找到有效JSON输出，这是异常情况
+                    console.log(`❌ 未找到有效JSON输出，Python脚本输出:`);
+                    console.log(`stdout: "${output}"`);
+                    console.log(`stderr: "${errorOutput}"`);
+                    
                     resolve({
                         success: false,
                         giftId: giftId,
@@ -180,6 +197,7 @@ class WindowsGiftListener {
                     });
                     
                 } catch (parseError) {
+                    console.error(`💥 解析过程异常: ${parseError.message}`);
                     resolve({
                         success: false,
                         giftId: giftId,

@@ -543,11 +543,11 @@
         document.querySelector('.balance-tier-section').style.display = 'none';
         document.getElementById('game-board').style.display = 'block';
         
-        // 显示当前档位信息
+        // 显示当前档位信息（不透露结果）
         const userCount = gameData.slots.length;
         document.getElementById('current-tier-info').innerHTML = `
             <div>当前档位: ${selectedTier.cost} 电币 | 中奖号码: ${gameData.winningNumbers.length} 个 | 我的号码: ${userCount} 个</div>
-            <div>结果: ${gameData.outcome} | 获得: ${gameData.payout} 电币</div>
+            <div style="color: #ffeb3b;">🎯 刮开涂层，点击验证查看中奖结果！</div>
         `;
 
         // 提前初始化 canvas 遮罩，防止号码闪现

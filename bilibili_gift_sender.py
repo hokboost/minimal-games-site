@@ -288,37 +288,33 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             
             safe_print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
             
-            # ⚡ 瞬间并发发送多个礼物，无延时
+            # ⚡ 带0.05秒延时的礼物发送，方便计数
             successful_sends = 1  # 第一次点击已完成
             if quantity > 1:
-                # 一次性发送所有剩余的礼物，无延时
-                rapid_clicks_result = page.evaluate(f'''
-                    () => {{
-                        const giftId = "{gift_id}";
-                        const selector = '.gift-id-' + giftId;
-                        const remainingClicks = {quantity - 1};
-                        let successCount = 0;
-                        
-                        for (let i = 0; i < remainingClicks; i++) {{
+                # 逐个发送剩余礼物，每次间隔0.05秒
+                for i in range(quantity - 1):
+                    time.sleep(0.05)  # 0.05秒延时，方便计数
+                    click_result = page.evaluate(f'''
+                        () => {{
+                            const giftId = "{gift_id}";
+                            const selector = '.gift-id-' + giftId;
                             const el = document.querySelector(selector);
                             if (el) {{
                                 const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
                                 el.dispatchEvent(evt);
-                                successCount++;
-                            }} else {{
-                                break;
+                                return true;
                             }}
+                            return false;
                         }}
-                        
-                        return {{
-                            attempted: remainingClicks,
-                            succeeded: successCount
-                        }};
-                    }}
-                ''')
+                    ''')
+                    
+                    if click_result:
+                        successful_sends += 1
+                    else:
+                        safe_print(f"⚠️ 第{i+2}次点击失败，礼物元素不可用")
+                        break
                 
-                successful_sends += rapid_clicks_result['succeeded']
-                safe_print(f"⚡ 瞬间并发发送: {rapid_clicks_result['succeeded']}/{rapid_clicks_result['attempted']} 次点击成功")
+                safe_print(f"⚡ 带延时发送: {successful_sends - 1}/{quantity - 1} 次额外点击成功")
                 safe_print(f"🎯 总计完成 {successful_sends}/{quantity} 个礼物发送")
             
             # 使用threeserver的完整验证逻辑
@@ -326,8 +322,24 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             result = check_gift_send_result(page, gift_id, max_wait=3)
             
             # 根据验证结果返回适当的响应
-            # 🛡️ 部分成功处理：考虑实际发送数量
-            if result["success"] or successful_sends > 0:
+            # 🛡️ 正确的成功失败判断：余额不足时必须返回失败
+            balance_insufficient = result.get("reason") == "insufficient_balance"
+            
+            if balance_insufficient:
+                # 余额不足时，无论点击了多少次都算失败
+                safe_print(f"❌ 余额不足失败: 尝试 {quantity} 个礼物，余额不足")
+                return {
+                    "success": False, 
+                    "error": "insufficient_balance", 
+                    "balance_insufficient": True,
+                    "gift_id": gift_id, 
+                    "room_id": room_id,
+                    "requested_quantity": quantity,
+                    "actual_quantity": 0,  # 余额不足时实际成功数为0
+                    "partial_success": False
+                }
+            elif result["success"] or successful_sends > 0:
+                # 只有非余额不足的情况下才考虑部分成功
                 verified = "message" in result and result.get("reason") != "assumed_success"
                 is_partial = successful_sends < quantity
                 

@@ -38,9 +38,58 @@
 
         <div class="profile-section">
             <h2>🎮 游戏记录</h2>
-            <div class="game-stats">
-                <p>游戏统计功能正在开发中...</p>
-                <p>您可以在这里查看您的游戏历史记录和成绩。</p>
+            <div class="game-stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">🧠</div>
+                    <div class="stat-content">
+                        <h3>知识问答</h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main">总场次: <%= gameStats.quiz.total %></span>
+                            <span class="stat-sub">最高分: <%= gameStats.quiz.bestScore %></span>
+                        </div>
+                        <button class="view-records-btn" onclick="viewGameRecords('quiz')">查看记录</button>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">🎰</div>
+                    <div class="stat-content">
+                        <h3>幸运老虎机</h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main">总场次: <%= gameStats.slot.total %></span>
+                            <span class="stat-sub">中奖: <%= gameStats.slot.wins %> 次</span>
+                        </div>
+                        <button class="view-records-btn" onclick="viewGameRecords('slot')">查看记录</button>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">🎟️</div>
+                    <div class="stat-content">
+                        <h3>刮刮乐</h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main">总场次: <%= gameStats.scratch.total %></span>
+                            <span class="stat-sub">中奖: <%= gameStats.scratch.wins %> 次</span>
+                        </div>
+                        <button class="view-records-btn" onclick="viewGameRecords('scratch')">查看记录</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 游戏记录模态框 -->
+        <div id="gameRecordsModal" class="modal">
+            <div class="modal-content records-modal">
+                <div class="modal-header">
+                    <h3 id="recordsTitle">🎮 游戏记录</h3>
+                    <span class="close" onclick="closeGameRecordsModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div id="recordsContent">
+                        <div class="loading">加载中...</div>
+                    </div>
+                    <div id="recordsPagination" class="pagination"></div>
+                </div>
             </div>
         </div>
 
@@ -188,6 +237,145 @@
     .game-stats {
         color: #ccc;
         line-height: 1.6;
+    }
+
+    .game-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .stat-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        transition: all 0.3s ease;
+    }
+
+    .stat-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: #00c853;
+        transform: translateY(-2px);
+    }
+
+    .stat-icon {
+        font-size: 3rem;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+
+    .stat-content h3 {
+        color: #00c853;
+        margin: 0 0 1rem 0;
+        text-align: center;
+    }
+
+    .stat-numbers {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .stat-main {
+        color: #fff;
+        font-size: 1.1rem;
+        font-weight: bold;
+    }
+
+    .stat-sub {
+        color: #ccc;
+        font-size: 0.9rem;
+    }
+
+    .view-records-btn {
+        width: 100%;
+        padding: 0.8rem;
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .view-records-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 200, 83, 0.4);
+    }
+
+    .records-modal .modal-content {
+        max-width: 800px;
+        max-height: 80vh;
+        overflow: hidden;
+    }
+
+    .records-modal .modal-body {
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+
+    .records-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1rem;
+    }
+
+    .records-table th,
+    .records-table td {
+        padding: 0.8rem;
+        text-align: left;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .records-table th {
+        background: rgba(0, 200, 83, 0.2);
+        color: #00c853;
+        font-weight: bold;
+    }
+
+    .records-table td {
+        color: #ccc;
+    }
+
+    .records-table tr:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .pagination {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .pagination button {
+        padding: 0.5rem 1rem;
+        background: rgba(255, 255, 255, 0.1);
+        color: #ccc;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 5px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .pagination button:hover,
+    .pagination button.active {
+        background: #00c853;
+        color: #fff;
+    }
+
+    .pagination button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .loading {
+        text-align: center;
+        color: #ccc;
+        padding: 2rem;
     }
 
     .settings-grid {
@@ -487,13 +675,6 @@
         }
     });
 
-    // 点击模态框外部关闭
-    window.onclick = function(event) {
-        const modal = document.getElementById('changePasswordModal');
-        if (event.target === modal) {
-            closeChangePasswordModal();
-        }
-    }
 
     // ESC键关闭模态框
     document.addEventListener('keydown', function(event) {
@@ -504,6 +685,158 @@
 
     function exportData() {
         showToast('数据导出功能开发中...', 'info');
+    }
+
+    // 游戏记录相关功能
+    let currentGameType = null;
+    let currentPage = 1;
+
+    function viewGameRecords(gameType) {
+        currentGameType = gameType;
+        currentPage = 1;
+        
+        const titles = {
+            quiz: '🧠 知识问答记录',
+            slot: '🎰 老虎机记录',
+            scratch: '🎟️ 刮刮乐记录'
+        };
+        
+        document.getElementById('recordsTitle').textContent = titles[gameType];
+        document.getElementById('gameRecordsModal').style.display = 'block';
+        
+        loadGameRecords(gameType, currentPage);
+    }
+
+    function closeGameRecordsModal() {
+        document.getElementById('gameRecordsModal').style.display = 'none';
+    }
+
+    async function loadGameRecords(gameType, page = 1) {
+        const recordsContent = document.getElementById('recordsContent');
+        const recordsPagination = document.getElementById('recordsPagination');
+        
+        recordsContent.innerHTML = '<div class="loading">加载中...</div>';
+        recordsPagination.innerHTML = '';
+        
+        try {
+            const response = await fetch(`/api/game-records/${gameType}?page=${page}&limit=10`);
+            const data = await response.json();
+            
+            if (data.success) {
+                renderGameRecords(data.records, gameType);
+                renderPagination(data.pagination, gameType);
+            } else {
+                recordsContent.innerHTML = `<div class="loading">加载失败: ${data.message}</div>`;
+            }
+        } catch (error) {
+            console.error('加载游戏记录失败:', error);
+            recordsContent.innerHTML = '<div class="loading">网络错误，请稍后重试</div>';
+        }
+    }
+
+    function renderGameRecords(records, gameType) {
+        const recordsContent = document.getElementById('recordsContent');
+        
+        if (records.length === 0) {
+            recordsContent.innerHTML = '<div class="loading">暂无游戏记录</div>';
+            return;
+        }
+        
+        let tableHTML = '<table class="records-table">';
+        
+        // 表头
+        if (gameType === 'quiz') {
+            tableHTML += '<thead><tr><th>游戏时间</th><th>得分</th></tr></thead>';
+        } else if (gameType === 'slot') {
+            tableHTML += '<thead><tr><th>游戏时间</th><th>结果</th><th>获得电币</th><th>转动结果</th></tr></thead>';
+        } else if (gameType === 'scratch') {
+            tableHTML += '<thead><tr><th>游戏时间</th><th>结果</th><th>档位</th><th>匹配数</th></tr></thead>';
+        }
+        
+        tableHTML += '<tbody>';
+        
+        // 表内容
+        records.forEach(record => {
+            const playedAt = new Date(record.played_at).toLocaleString('zh-CN');
+            
+            if (gameType === 'quiz') {
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${record.score} 分</td>
+                    </tr>
+                `;
+            } else if (gameType === 'slot') {
+                const amounts = JSON.parse(record.amounts || '[]');
+                const amountsText = amounts.join(', ');
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${record.result === 'lost' ? '❌ 未中奖' : '✅ 中奖'}</td>
+                        <td>${record.payout || 0} 电币</td>
+                        <td>[${amountsText}]</td>
+                    </tr>
+                `;
+            } else if (gameType === 'scratch') {
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${record.result}</td>
+                        <td>${record.tier_cost} 电币</td>
+                        <td>${record.matches_count} 个</td>
+                    </tr>
+                `;
+            }
+        });
+        
+        tableHTML += '</tbody></table>';
+        recordsContent.innerHTML = tableHTML;
+    }
+
+    function renderPagination(pagination, gameType) {
+        const recordsPagination = document.getElementById('recordsPagination');
+        
+        if (pagination.total <= 1) {
+            return;
+        }
+        
+        let paginationHTML = '';
+        
+        // 上一页
+        if (pagination.hasPrev) {
+            paginationHTML += `<button onclick="changePage(${pagination.current - 1})">上一页</button>`;
+        }
+        
+        // 页码
+        for (let i = 1; i <= pagination.total; i++) {
+            const activeClass = i === pagination.current ? 'active' : '';
+            paginationHTML += `<button class="${activeClass}" onclick="changePage(${i})">${i}</button>`;
+        }
+        
+        // 下一页
+        if (pagination.hasNext) {
+            paginationHTML += `<button onclick="changePage(${pagination.current + 1})">下一页</button>`;
+        }
+        
+        recordsPagination.innerHTML = paginationHTML;
+    }
+
+    function changePage(page) {
+        currentPage = page;
+        loadGameRecords(currentGameType, page);
+    }
+
+    // 点击模态框外部关闭
+    window.onclick = function(event) {
+        const changePasswordModal = document.getElementById('changePasswordModal');
+        const gameRecordsModal = document.getElementById('gameRecordsModal');
+        
+        if (event.target === changePasswordModal) {
+            closeChangePasswordModal();
+        }
+        if (event.target === gameRecordsModal) {
+            closeGameRecordsModal();
+        }
     }
     </script>
 </body>
