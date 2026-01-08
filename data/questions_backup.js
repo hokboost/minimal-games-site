@@ -4098,7 +4098,7 @@ const questions = [
       "薛之谦",
       "林俊杰",
       "李荣浩",
-      "林宥嘉"
+      "杨宗纬"
     ],
     "correct": 3,
     "category": "常识"

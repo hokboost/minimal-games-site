@@ -2389,7 +2389,7 @@ const questions = [
   {
     "id": 342,
     "question": "《洋葱》的原唱是？",
-    "options": ["薛之谦", "林俊杰", "李荣浩", "林宥嘉"],
+    "options": ["薛之谦", "林俊杰", "李荣浩", "杨宗纬"],
     "correct": 3,
     "category": "常识"
   },

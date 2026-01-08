@@ -111,10 +111,9 @@ with sync_playwright() as p:
             // 写入临时文件
             fs.writeFileSync(tempScript, pythonCode, 'utf8');
             
-            // 直接调用Windows Python（通过WSL访问Windows路径）
-            const pythonPath = '/mnt/c/Users/user/AppData/Local/Programs/Python/Python313/python.exe';
-            const scriptPath = '/mnt/c/Users/user/minimal-games-site/bilibili_gift_sender.py';
-            const pythonProcess = spawn(pythonPath, [scriptPath, giftId, roomId], {
+            // 通过WSL bash调用Windows命令
+            const windowsCmd = `cd /mnt/c/Users/user/minimal-games-site && /mnt/c/Users/user/AppData/Local/Programs/Python/Python313/python.exe bilibili_gift_sender.py ${giftId} ${roomId}`;
+            const pythonProcess = spawn('bash', ['-c', windowsCmd], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
