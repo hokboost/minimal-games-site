@@ -220,11 +220,15 @@ with sync_playwright() as p:
             console.log('🍪 加载B站cookies...');
             try {
                 const cookieData = `# Netscape HTTP Cookie File
-.bilibili.com	TRUE	/	FALSE	1780000000	SESSDATA	你的SESSDATA值
-.bilibili.com	TRUE	/	FALSE	1780000000	bili_jct	你的bili_jct值
-.bilibili.com	TRUE	/	FALSE	1780000000	DedeUserID	你的用户ID
-.bilibili.com	TRUE	/	FALSE	1780000000	DedeUserID__ckMd5	你的用户ID的MD5
-.bilibili.com	TRUE	/	FALSE	1780000000	CURRENT_FNVAL	4048`;
+.bilibili.com	TRUE	/	FALSE	1799362426	SESSDATA	4282cb5c%2C1783283626%2C3f494%2A12CjAsqfXC9Or3IjeZY1e07RgiRh8zzrFdyhCDCDjv_0NrId9jxzc3gjf5yGXv-37oj2wSVkV3SXBRLTQyckF5dElWRk9oSlNuRGR4V3JERWVCNmRCeWgxWFYzV2cwVU1VMUdOOHZhcXFnYzRGWElvZFRvdjBsc0dESlVMSDVLS3Q5TzhrcHdOLUlnIIEC
+.bilibili.com	TRUE	/	FALSE	1799362426	bili_jct	141eeb64e472d403d2a8031b87613894
+.bilibili.com	TRUE	/	FALSE	1799362426	buvid3	XY1234567890
+.bilibili.com	TRUE	/	FALSE	1799362426	b_nut	1767826426
+.bilibili.com	TRUE	/	FALSE	1799362426	DedeUserID	123456789
+.bilibili.com	TRUE	/	FALSE	1799362426	DedeUserID__ckMd5	abcdef1234567890
+.bilibili.com	TRUE	/	FALSE	1799362426	sid	abcd1234
+.live.bilibili.com	TRUE	/	FALSE	1799362426	SESSDATA	4282cb5c%2C1783283626%2C3f494%2A12CjAsqfXC9Or3IjeZY1e07RgiRh8zzrFdyhCDCDjv_0NrId9jxzc3gjf5yGXv-37oj2wSVkV3SXBRLTQyckF5dElWRk9oSlNuRGR4V3JERWVCNmRCeWgxWFYzV2cwVU1VMUdOOHZhcXFnYzRGWElvZFRvdjBsc0dESlVMSDVLS3Q5TzhrcHdOLUlnIIEC
+.live.bilibili.com	TRUE	/	FALSE	1799362426	bili_jct	141eeb64e472d403d2a8031b87613894`;
                 
                 const cookies = this.parseCookieString(cookieData);
                 await page.goto('https://www.bilibili.com/');
