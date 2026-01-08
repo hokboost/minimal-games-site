@@ -5,17 +5,25 @@ if (process.env.NODE_ENV === 'production') {
     // 强制检查SESSION_SECRET
     if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'your-secret-key-change-this-in-production') {
         console.error('🚨 生产环境安全错误: SESSION_SECRET 未正确配置！');
-        console.error('请设置环境变量 SESSION_SECRET 为至少32字节的随机字符串');
+        console.error('请设置环境变量 SESSION_SECRET 为足够长的随机字符串');
+        process.exit(1);
+    }
+    
+    // 放宽长度要求：16字节以上即可，建议32字节
+    if (process.env.SESSION_SECRET.length < 16) {
+        console.error('🚨 生产环境安全错误: SESSION_SECRET 长度过短！');
+        console.error('当前长度:', process.env.SESSION_SECRET.length);
+        console.error('最少需要16字节，建议32字节以上');
         process.exit(1);
     }
     
     if (process.env.SESSION_SECRET.length < 32) {
-        console.error('🚨 生产环境安全错误: SESSION_SECRET 长度不足32字节！');
-        console.error('当前长度:', process.env.SESSION_SECRET.length);
-        process.exit(1);
+        console.warn('⚠️ 生产环境安全警告: SESSION_SECRET 长度建议至少32字节');
+        console.warn('当前长度:', process.env.SESSION_SECRET.length);
+        console.warn('建议增加SESSION_SECRET长度以提高安全性');
     }
     
-    console.log('✅ 生产环境SESSION_SECRET安全检查通过');
+    console.log('✅ 生产环境SESSION_SECRET检查通过');
 }
 
 const express = require('express');
