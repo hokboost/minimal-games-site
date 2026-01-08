@@ -92,12 +92,26 @@ class WindowsGiftListener {
             
             if (result.success) {
                 // 任务成功，通知服务器
-                await this.markTaskComplete(task.id);
-                console.log(`✅ 任务 ${task.id} 完成: ${task.giftName} 已发送到房间 ${task.roomId}`);
+                const markResult = await this.markTaskComplete(task.id);
+                if (markResult) {
+                    console.log(`✅ 任务 ${task.id} 完成: ${task.giftName} 已发送到房间 ${task.roomId}`);
+                } else {
+                    console.log(`❌ 任务 ${task.id} 处理成功但标记失败，将在下次轮询重试`);
+                }
             } else {
+                // 检查是否是余额不足
+                if (result.balance_insufficient) {
+                    console.log(`🚫 任务 ${task.id} 失败: 余额不足！请充值后再试。`);
+                    console.log(`⚠️  建议暂停送礼服务直到充值完成`);
+                }
+                
                 // 任务失败，通知服务器
-                await this.markTaskFailed(task.id, result.error);
-                console.log(`❌ 任务 ${task.id} 失败: ${result.error}`);
+                const markResult = await this.markTaskFailed(task.id, result.error);
+                if (markResult) {
+                    console.log(`❌ 任务 ${task.id} 失败: ${result.error}`);
+                } else {
+                    console.log(`❌ 任务 ${task.id} 失败且标记失败，将在下次轮询重试`);
+                }
             }
 
         } catch (error) {
@@ -181,30 +195,36 @@ class WindowsGiftListener {
     // 标记任务完成
     async markTaskComplete(taskId) {
         try {
-            await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/complete`, {}, {
+            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/complete`, {}, {
                 timeout: 5000,
                 headers: {
-                    'X-API-Key': this.apiKey
+                    'X-API-Key': this.apiKey,
+                    'Content-Type': 'application/json'
                 }
             });
+            return response.status === 200 && response.data.success;
         } catch (error) {
             console.error(`❌ 标记任务完成失败 (${taskId}):`, error.message);
+            return false;
         }
     }
 
     // 标记任务失败
     async markTaskFailed(taskId, errorMessage) {
         try {
-            await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/fail`, {
+            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/fail`, {
                 error: errorMessage
             }, {
                 timeout: 5000,
                 headers: {
-                    'X-API-Key': this.apiKey
+                    'X-API-Key': this.apiKey,
+                    'Content-Type': 'application/json'
                 }
             });
+            return response.status === 200 && response.data.success;
         } catch (error) {
             console.error(`❌ 标记任务失败失败 (${taskId}):`, error.message);
+            return false;
         }
     }
 }

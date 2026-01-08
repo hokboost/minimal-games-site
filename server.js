@@ -2561,7 +2561,8 @@ app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
         const result = await pool.query(`
             SELECT id, gift_type, bilibili_room_id, username, gift_name, created_at
             FROM gift_exchanges 
-            WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
+            WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL 
+            AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL '5 minutes')
             ORDER BY created_at ASC 
             LIMIT 10
         `);
@@ -2599,7 +2600,8 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
         const result = await pool.query(`
             UPDATE gift_exchanges 
             SET delivery_status = 'delivered',
-                delivery_message = '礼物发送成功'
+                delivery_message = '礼物发送成功',
+                processed_at = NOW()
             WHERE id = $1
             RETURNING username, gift_name
         `, [taskId]);
@@ -2629,7 +2631,8 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
         const result = await pool.query(`
             UPDATE gift_exchanges 
             SET delivery_status = 'failed',
-                delivery_message = $1
+                delivery_message = $1,
+                processed_at = NOW()
             WHERE id = $2
             RETURNING username, gift_name
         `, [errorMessage, taskId]);

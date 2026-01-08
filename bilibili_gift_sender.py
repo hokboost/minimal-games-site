@@ -31,6 +31,35 @@ def load_cookies_from_txt(file_path):
         print(f"加载cookie文件失败: {e}")
         return []
 
+def check_balance_insufficient(page):
+    """检测页面是否出现余额不足提示，参考threeserver"""
+    try:
+        # 检查常见的余额不足提示
+        insufficient_selectors = [
+            ".insufficient-balance",  # 余额不足类名
+            "[class*='insufficient']",  # 包含insufficient的类名
+            ".toast-message",  # 通用toast消息
+            ".error-message",  # 错误消息
+            ".gift-send-error"  # 送礼错误
+        ]
+        
+        for selector in insufficient_selectors:
+            elements = page.query_selector_all(selector)
+            for element in elements:
+                try:
+                    if element.is_visible():
+                        text_content = element.text_content() or ""
+                        if any(keyword in text_content for keyword in ["余额", "不足", "B币", "充值"]):
+                            print(f"Balance insufficient detected: {text_content}")
+                            return True
+                except:
+                    continue
+        
+        return False
+    except Exception as e:
+        print(f"检测余额状态失败: {e}")
+        return False
+
 def send_gift_simple(gift_id, room_id):
     """简单的礼物发送函数 - 每次独立运行"""
     print(f"Starting gift sending - Gift ID: {gift_id}, Room: {room_id}")
@@ -58,7 +87,11 @@ def send_gift_simple(gift_id, room_id):
         # 等待礼物面板加载
         print("Waiting for gift panel...")
         for _ in range(20):
-            if page.query_selector(".gift-panel"):
+            try:
+                if page.query_selector(".gift-panel"):
+                    break
+            except Exception as e:
+                print(f"Query selector error: {e}")
                 break
             time.sleep(0.5)
 
@@ -109,64 +142,54 @@ def send_gift_simple(gift_id, room_id):
             
             print(f"Gift {gift_id} clicked, waiting for result...")
             
-            # 等待并检查送礼结果
-            verification_success = False
-            for attempt in range(10):  # 最多等待10秒
-                time.sleep(1)
-                
-                # 检查是否出现成功或失败提示
-                result_check = page.evaluate('''
-                    () => {
-                        // 检查成功提示
-                        const successSelectors = [
-                            '.gift-msg',
-                            '.toast-success',
-                            '[class*="success"]',
-                            '.gift-success'
-                        ];
-                        
-                        // 检查失败提示（余额不足等）
-                        const errorSelectors = [
-                            '.gift-error',
-                            '.toast-error', 
-                            '[class*="error"]',
-                            '.insufficient-balance'
-                        ];
-                        
-                        for (const selector of successSelectors) {
-                            const el = document.querySelector(selector);
-                            if (el && el.textContent) {
-                                return {success: true, type: 'success', message: el.textContent};
-                            }
-                        }
-                        
-                        for (const selector of errorSelectors) {
-                            const el = document.querySelector(selector);
-                            if (el && el.textContent) {
-                                return {success: false, type: 'error', message: el.textContent};
-                            }
-                        }
-                        
-                        return {success: null, type: 'waiting', message: 'No result yet'};
-                    }
-                ''')
-                
-                if result_check['success'] is True:
-                    print(f"✅ Gift sending confirmed successful: {result_check['message']}")
-                    verification_success = True
-                    break
-                elif result_check['success'] is False:
-                    print(f"❌ Gift sending failed: {result_check['message']}")
-                    return {"success": False, "error": f"送礼失败: {result_check['message']}", "gift_id": gift_id, "room_id": room_id}
-                
-                print(f"⏳ Waiting for result... attempt {attempt + 1}/10")
+            # 等待3秒让可能的提示出现
+            time.sleep(3)
             
-            if verification_success:
+            # 检查余额不足
+            balance_insufficient = check_balance_insufficient(page)
+            if balance_insufficient:
+                print("Balance insufficient detected")
+                return {"success": False, "error": "余额不足", "balance_insufficient": True, "gift_id": gift_id, "room_id": room_id}
+            
+            # 检查其他错误提示
+            error_check = page.evaluate('''
+                () => {
+                    const errorSelectors = ['.error-tip', '.toast-error', '.gift-error', '[class*="error"]'];
+                    for (const selector of errorSelectors) {
+                        const el = document.querySelector(selector);
+                        if (el && el.style.display !== 'none' && el.textContent.trim()) {
+                            return {hasError: true, message: el.textContent.trim()};
+                        }
+                    }
+                    return {hasError: false};
+                }
+            ''')
+            
+            if error_check['hasError']:
+                print(f"Error detected: {error_check['message']}")
+                return {"success": False, "error": f"送礼失败: {error_check['message']}", "gift_id": gift_id, "room_id": room_id}
+            
+            # 检查成功提示
+            success_check = page.evaluate('''
+                () => {
+                    const successSelectors = ['.gift-success', '.send-success', '[class*="success"]'];
+                    for (const selector of successSelectors) {
+                        const el = document.querySelector(selector);
+                        if (el && el.style.display !== 'none' && el.textContent.trim()) {
+                            return {hasSuccess: true, message: el.textContent.trim()};
+                        }
+                    }
+                    return {hasSuccess: false};
+                }
+            ''')
+            
+            if success_check['hasSuccess']:
+                print(f"Success confirmed: {success_check['message']}")
                 return {"success": True, "gift_id": gift_id, "room_id": room_id, "verified": True}
-            else:
-                # 没有明确的成功/失败提示，保守判断为可能成功
-                print("⚠️ No clear result detected, assuming success")
-                return {"success": True, "gift_id": gift_id, "room_id": room_id, "verified": False, "warning": "送礼结果未明确验证"}
+            
+            # 没有明确错误或成功提示，假设成功（参考threeserver逻辑）
+            print("No clear error detected, assuming success")
+            return {"success": True, "gift_id": gift_id, "room_id": room_id, "verified": False}
                 
         except Exception as e:
             print(f"Gift sending error: {e}")
