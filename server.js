@@ -1805,13 +1805,17 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             console.log(`🔒 用户 ${username} 资金已锁定: ${cost} 电币，剩余余额: ${currentBalance - cost} 电币`);
             
         } catch (error) {
+            console.log('💥 [DEBUG] 事务中发生错误:', error.message);
+            console.log('💥 [DEBUG] 错误堆栈:', error.stack);
             await client.query('ROLLBACK');
+            console.log('🔍 [DEBUG] 事务已回滚');
             console.error('兑换事务失败:', error.message);
             return res.status(400).json({ 
                 success: false, 
                 message: error.message 
             });
         } finally {
+            console.log('🔍 [DEBUG] 释放数据库连接');
             client.release();
         }
 
