@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 class BilibiliGiftSenderSimple {
     constructor() {
@@ -12,7 +13,6 @@ class BilibiliGiftSenderSimple {
             console.log(`🎁 启动独立礼物发送进程，ID: ${giftId}，房间: ${roomId}`);
             
             // 创建临时Python脚本
-            const fs = require('fs');
             const tempScript = path.join(__dirname, `temp_gift_${Date.now()}.py`);
             
             const pythonCode = `# -*- coding: utf-8 -*-
@@ -111,17 +111,9 @@ with sync_playwright() as p:
             // 写入临时文件
             fs.writeFileSync(tempScript, pythonCode, 'utf8');
             
-            // 创建临时批处理文件来调用Python（解决WSL->Windows调用问题）
-            const fs = require('fs');
-            const tempBatFile = `/mnt/c/Users/user/minimal-games-site/temp_gift_${Date.now()}.bat`;
-            const batContent = `@echo off
-cd /d C:\\Users\\user\\minimal-games-site
-C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python313\\python.exe bilibili_gift_sender.py ${giftId} ${roomId}`;
-            
-            fs.writeFileSync(tempBatFile, batContent);
-            
-            // 通过bash执行批处理文件
-            const pythonProcess = spawn('bash', ['-c', `"${tempBatFile.replace('/mnt/c', 'C:').replace(/\//g, '\\\\')}" 2>&1`], {
+            // 直接使用现有的send_gift.bat文件
+            const batFile = 'C:\\Users\\user\\minimal-games-site\\send_gift.bat';
+            const pythonProcess = spawn('bash', ['-c', `"${batFile}" ${giftId} ${roomId} 2>&1`], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
@@ -142,7 +134,6 @@ C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python313\\python.exe bilibil
                 // 清理临时文件
                 try {
                     fs.unlinkSync(tempScript);
-                    fs.unlinkSync(tempBatFile);
                 } catch (e) {}
                 
                 try {
