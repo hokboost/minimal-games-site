@@ -2600,11 +2600,15 @@ app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
             LIMIT 10
         `);
 
+        // 加载礼物配置
+        const fs = require('fs');
+        const giftConfig = JSON.parse(fs.readFileSync('./gift-codes.json', 'utf8'));
+        
         res.json({
             success: true,
             tasks: result.rows.map(row => ({
                 id: row.id,
-                giftId: row.gift_type,
+                giftId: giftConfig.礼物映射[row.gift_type]?.bilibili_id || row.gift_type,
                 roomId: row.bilibili_room_id,
                 username: row.username,
                 giftName: row.gift_name,
@@ -2628,8 +2632,7 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
         
         const result = await pool.query(`
             UPDATE gift_exchanges 
-            SET delivery_status = 'delivered', 
-                delivered_at = NOW(),
+            SET delivery_status = 'delivered',
                 delivery_message = '礼物发送成功'
             WHERE id = $1
             RETURNING username, gift_name

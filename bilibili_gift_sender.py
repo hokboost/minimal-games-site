@@ -89,7 +89,7 @@ def send_gift_simple(gift_id, room_id):
         try:
             result = page.evaluate(f'''
                 () => {{
-                    const giftId = {gift_id};
+                    const giftId = "{gift_id}";
                     const selector = '.gift-id-' + giftId;
                     const el = document.querySelector(selector);
                     if (el) {{
