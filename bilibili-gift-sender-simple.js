@@ -111,14 +111,17 @@ with sync_playwright() as p:
             // 写入临时文件
             fs.writeFileSync(tempScript, pythonCode, 'utf8');
             
-            // 直接使用Windows路径调用cmd.exe
-            const pythonProcess = spawn('C:\\Windows\\System32\\cmd.exe', [
-                '/c', 
-                'cd', '/d', 'C:\\Users\\user\\minimal-games-site',
-                '&&',
-                'C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python313\\python.exe',
-                'bilibili_gift_sender.py', giftId, roomId
-            ], {
+            // 创建临时批处理文件来调用Python（解决WSL->Windows调用问题）
+            const fs = require('fs');
+            const tempBatFile = `/mnt/c/Users/user/minimal-games-site/temp_gift_${Date.now()}.bat`;
+            const batContent = `@echo off
+cd /d C:\\Users\\user\\minimal-games-site
+C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python313\\python.exe bilibili_gift_sender.py ${giftId} ${roomId}`;
+            
+            fs.writeFileSync(tempBatFile, batContent);
+            
+            // 通过bash执行批处理文件
+            const pythonProcess = spawn('bash', ['-c', `"${tempBatFile.replace('/mnt/c', 'C:').replace(/\//g, '\\\\')}" 2>&1`], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
@@ -139,6 +142,7 @@ with sync_playwright() as p:
                 // 清理临时文件
                 try {
                     fs.unlinkSync(tempScript);
+                    fs.unlinkSync(tempBatFile);
                 } catch (e) {}
                 
                 try {
