@@ -1,13 +1,34 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 B站礼物发送服务 - 简单版本
 每次请求独立运行，完全模仿threeserver逻辑
 """
 
+import sys
+import io
+import os
+
+# 🛡️ 修复Windows字符编码问题
+if sys.platform == 'win32':
+    # 设置stdout和stderr为UTF-8编码
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+    # 设置控制台输出为UTF-8
+    os.system('chcp 65001')
+
 from playwright.sync_api import sync_playwright
 import time
 import json
-import sys
+
+def safe_print(text):
+    """安全打印函数，处理编码问题"""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # 回退到ASCII编码，去除emoji和中文
+        safe_text = text.encode('ascii', errors='ignore').decode('ascii')
+        print(f"[ENCODING_ERROR] {safe_text}")
 
 def load_cookies_from_txt(file_path):
     """从cookie.txt文件加载cookies"""
@@ -28,37 +49,37 @@ def load_cookies_from_txt(file_path):
                     })
         return cookies
     except Exception as e:
-        print(f"加载cookie文件失败: {e}")
+        safe_print(f"加载cookie文件失败: {e}")
         return []
 
 def get_current_balance(page):
     """获取当前B币余额，完全参考threeserver.py实现"""
     try:
-        print("[余额检测] 开始查找余额信息...")
+        safe_print("[余额检测] 开始查找余额信息...")
         
         # 首先查找所有包含"余额"文字的元素
         try:
             balance_elements = page.query_selector_all("text=余额")
-            print(f"[余额检测] 找到 {len(balance_elements)} 个包含'余额'的元素")
+            safe_print(f"[余额检测] 找到 {len(balance_elements)} 个包含'余额'的元素")
             
             for i, element in enumerate(balance_elements):
                 try:
                     if element.is_visible():
                         text = element.text_content() or ""
-                        print(f"[余额检测] 余额元素{i}: '{text}'")
+                        safe_print(f"[余额检测] 余额元素{i}: '{text}'")
                         
                         # 尝试提取数字
                         import re
                         match = re.search(r'余额[:\s]*(\d+)', text)
                         if match:
                             balance = int(match.group(1))
-                            print(f"✅ [余额检测] 找到余额: {balance} B币")
+                            safe_print(f"✅ [余额检测] 找到余额: {balance} B币")
                             return balance
                 except Exception as e:
-                    print(f"[余额检测] 处理元素{i}失败: {e}")
+                    safe_print(f"[余额检测] 处理元素{i}失败: {e}")
                     
         except Exception as e:
-            print(f"[余额检测] 查找余额元素失败: {e}")
+            safe_print(f"[余额检测] 查找余额元素失败: {e}")
         
         # 尝试具体选择器
         balance_selectors = [
@@ -72,28 +93,28 @@ def get_current_balance(page):
         for selector in balance_selectors:
             try:
                 elements = page.query_selector_all(selector)
-                print(f"[余额检测] 选择器 '{selector}' 找到 {len(elements)} 个元素")
+                safe_print(f"[余额检测] 选择器 '{selector}' 找到 {len(elements)} 个元素")
                 
                 for i, element in enumerate(elements):
                     if element.is_visible():
                         balance_text = element.text_content() or ""
-                        print(f"[余额检测] 选择器'{selector}' 元素{i}文本: '{balance_text}'")
+                        safe_print(f"[余额检测] 选择器'{selector}' 元素{i}文本: '{balance_text}'")
                         
                         # 提取数字 "余额: 811" -> 811
                         import re
                         match = re.search(r'余额[:\s]*(\d+)', balance_text)
                         if match:
                             balance = int(match.group(1))
-                            print(f"📊 [余额检测] 解析余额成功: {balance} B币")
+                            safe_print(f"📊 [余额检测] 解析余额成功: {balance} B币")
                             return balance
             except Exception as e:
-                print(f"[余额检测] 选择器 '{selector}' 处理失败: {e}")
+                safe_print(f"[余额检测] 选择器 '{selector}' 处理失败: {e}")
         
-        print("[余额检测] ❌ 所有方法都未找到余额信息")
+        safe_print("[余额检测] ❌ 所有方法都未找到余额信息")
         return None
         
     except Exception as e:
-        print(f"[余额检测] 获取余额失败: {e}")
+        safe_print(f"[余额检测] 获取余额失败: {e}")
         return None
 
 def check_balance_insufficient(page):
@@ -103,11 +124,11 @@ def check_balance_insufficient(page):
         balance_info = get_current_balance(page)
         if balance_info is not None:
             current_balance = balance_info
-            print(f"💰 当前余额: {current_balance} B币")
+            safe_print(f"💰 当前余额: {current_balance} B币")
             
             # 如果余额过低（小于1），认为余额不足
             if current_balance < 1:
-                print(f"🚫 余额过低: {current_balance} B币")
+                safe_print(f"🚫 余额过低: {current_balance} B币")
                 return True
         
         # 检查常见的余额不足提示
@@ -129,14 +150,17 @@ def check_balance_insufficient(page):
                     if element.is_visible():
                         text_content = element.text_content() or ""
                         if any(keyword in text_content for keyword in ["余额", "不足", "B币", "充值"]):
-                            print(f"🚫 检测到余额不足提示: {text_content}")
+                            try:
+                                safe_print(f"🚫 检测到余额不足提示: {text_content}")
+                            except UnicodeEncodeError:
+                                safe_print("🚫 检测到余额不足提示 (编码问题)")
                             return True
                 except:
                     continue
         
         return False
     except Exception as e:
-        print(f"检测余额状态失败: {e}")
+        safe_print(f"检测余额状态失败: {e}")
         return False
 
 def check_gift_send_result(page, gift_id, max_wait=3):
@@ -157,7 +181,7 @@ def check_gift_send_result(page, gift_id, max_wait=3):
                 try:
                     if element.is_visible():
                         error_text = element.text_content() or ""
-                        print(f"⚠️ 送礼错误提示: {error_text}")
+                        safe_print(f"⚠️ 送礼错误提示: {error_text}")
                         return {"success": False, "reason": "other_error", "message": error_text}
                 except:
                     continue
@@ -170,7 +194,7 @@ def check_gift_send_result(page, gift_id, max_wait=3):
                 try:
                     if element.is_visible():
                         success_text = element.text_content() or ""
-                        print(f"✅ 送礼成功提示: {success_text}")
+                        safe_print(f"✅ 送礼成功提示: {success_text}")
                         return {"success": True, "message": success_text}
                 except:
                     continue
@@ -179,7 +203,7 @@ def check_gift_send_result(page, gift_id, max_wait=3):
         return {"success": True, "reason": "assumed_success"}
         
     except Exception as e:
-        print(f"检查送礼结果失败: {e}")
+        safe_print(f"检查送礼结果失败: {e}")
         return {"success": False, "reason": "check_failed", "error": str(e)}
 
 def send_gift_simple(gift_id, room_id, quantity=1):
@@ -287,7 +311,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             # 根据验证结果返回适当的响应
             if result["success"]:
                 verified = "message" in result and result.get("reason") != "assumed_success"
-                print(f"✅ Gift sending successful - Verified: {verified}")
+                safe_print(f"✅ Gift sending successful - Verified: {verified}")
                 return {
                     "success": True, 
                     "gift_id": gift_id, 
@@ -300,7 +324,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 error_msg = result.get("message", result.get("reason", "未知错误"))
                 balance_insufficient = result.get("reason") == "insufficient_balance"
                 
-                print(f"❌ Gift sending failed - Reason: {error_msg}")
+                safe_print(f"❌ Gift sending failed - Reason: {error_msg}")
                 return {
                     "success": False, 
                     "error": error_msg, 
@@ -325,5 +349,5 @@ if __name__ == "__main__":
         result = send_gift_simple(gift_id, room_id, quantity)
         print(json.dumps(result, ensure_ascii=False))
     else:
-        print("用法: python bilibili_gift_sender.py gift_id room_id [quantity]")
-        print("例如: python bilibili_gift_sender.py 31164 3929738 5")
+        safe_print("用法: python bilibili_gift_sender.py gift_id room_id [quantity]")
+        safe_print("例如: python bilibili_gift_sender.py 31164 3929738 5")

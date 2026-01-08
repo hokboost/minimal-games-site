@@ -292,7 +292,7 @@
         
         socket.on('connect', () => {
             console.log('🔗 礼物页面WebSocket连接成功');
-            socket.emit('register', currentUser);
+            // 🛡️ 安全修复：不再需要客户端发送register，服务端自动从session验证用户身份
         });
         
         socket.on('security-alert', (event) => {

@@ -23,7 +23,21 @@ if (process.env.NODE_ENV === 'production') {
         console.warn('建议增加SESSION_SECRET长度以提高安全性');
     }
     
-    console.log('✅ 生产环境SESSION_SECRET检查通过');
+    // 🛡️ 安全修复：检查Windows API密钥不能使用默认值
+    if (!process.env.WINDOWS_API_KEY || process.env.WINDOWS_API_KEY === 'your-secret-api-key-2024') {
+        console.error('🚨 生产环境安全错误: WINDOWS_API_KEY 未正确配置或使用默认值！');
+        console.error('请设置环境变量 WINDOWS_API_KEY 为足够长的随机字符串');
+        process.exit(1);
+    }
+    
+    if (process.env.WINDOWS_API_KEY.length < 32) {
+        console.error('🚨 生产环境安全错误: WINDOWS_API_KEY 长度过短！');
+        console.error('当前长度:', process.env.WINDOWS_API_KEY.length);
+        console.error('最少需要32字节的强随机字符串');
+        process.exit(1);
+    }
+    
+    console.log('✅ 生产环境安全检查通过');
 }
 
 const express = require('express');
@@ -72,33 +86,88 @@ const tokens = new csrf();
 
 const app = express();
 const server = http.createServer(app);
+
+// WebSocket session认证中间件
+const sessionStore = new pgSession({
+    pool: pool,
+    tableName: 'user_sessions',
+    pruneSessionInterval: 60,
+    errorLog: console.error
+});
+
 const io = new Server(server, {
     cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
+        origin: process.env.NODE_ENV === 'production' 
+            ? ["https://yourdomain.com"] // 🚨 生产环境请替换为实际域名
+            : ["http://localhost:3000", "http://127.0.0.1:3000"],
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
 // WebSocket连接管理
 const userSockets = new Map(); // username -> Set of socket ids
 
-io.on('connection', (socket) => {
-    console.log('用户连接WebSocket:', socket.id);
-
-    // 修复后：不信任客户端传来的username，需要验证session  
-    socket.on('register', (username) => {
-        // 🚨 安全漏洞已标记：任何人都可以注册成任意用户名
-        // TODO: 应该从authenticated session中获取真实用户名
-        if (username) {
-            console.log(`⚠️ 安全警告: WebSocket注册请求 ${username}，当前未验证真实身份`);
-            if (!userSockets.has(username)) {
-                userSockets.set(username, new Set());
-            }
-            userSockets.get(username).add(socket.id);
-            socket.username = username;
-            console.log(`🔧 临时允许用户 ${username} 注册WebSocket (需要改为session验证): ${socket.id}`);
+// WebSocket session验证中间件
+io.use(async (socket, next) => {
+    try {
+        const cookieHeader = socket.handshake.headers.cookie;
+        if (!cookieHeader) {
+            return next(new Error('No cookies provided'));
         }
-    });
+
+        // 解析session cookie
+        const cookies = {};
+        cookieHeader.split(';').forEach(cookie => {
+            const [name, value] = cookie.trim().split('=');
+            if (name && value) {
+                cookies[name] = decodeURIComponent(value);
+            }
+        });
+
+        const sessionId = cookies['minimal_games_sid'];
+        if (!sessionId) {
+            return next(new Error('No session cookie'));
+        }
+
+        // 从数据库获取session
+        const sessionQuery = 'SELECT sess FROM user_sessions WHERE sid = $1';
+        const result = await pool.query(sessionQuery, [sessionId]);
+        
+        if (result.rows.length === 0) {
+            return next(new Error('Invalid session'));
+        }
+
+        const sessionData = result.rows[0].sess;
+        if (!sessionData.user || !sessionData.user.authorized) {
+            return next(new Error('User not authenticated'));
+        }
+
+        // 将验证过的用户信息附加到socket
+        socket.authenticatedUser = {
+            username: sessionData.user.username,
+            userId: sessionData.user.id,
+            isAdmin: sessionData.user.is_admin || false
+        };
+
+        console.log(`✅ WebSocket认证成功: ${sessionData.user.username}`);
+        next();
+    } catch (error) {
+        console.error('WebSocket认证失败:', error);
+        next(new Error('Authentication failed'));
+    }
+});
+
+io.on('connection', (socket) => {
+    const username = socket.authenticatedUser.username;
+    console.log(`🔗 用户 ${username} 建立WebSocket连接: ${socket.id}`);
+
+    // 🛡️ 安全修复：直接使用已验证的用户名，不再信任客户端
+    if (!userSockets.has(username)) {
+        userSockets.set(username, new Set());
+    }
+    userSockets.get(username).add(socket.id);
+    socket.username = username;
 
     // 处理断开连接
     socket.on('disconnect', () => {
@@ -1174,7 +1243,8 @@ app.get('/', async (req, res) => {
     if (!req.session.initialized) {
         req.session.initialized = true;
         req.session.createdAt = Date.now();
-        req.session.csrfToken = GameLogic.generateToken(16);
+        // 🛡️ 安全修复：统一使用csrf库生成token
+        generateCSRFToken(req);
     }
     
     // 只有已登录且已授权的用户才能获取余额
@@ -1204,7 +1274,8 @@ app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, async
     if (!req.session.initialized) {
         req.session.initialized = true;
         req.session.createdAt = Date.now();
-        req.session.csrfToken = GameLogic.generateToken(16);
+        // 🛡️ 安全修复：统一使用csrf库生成token
+        generateCSRFToken(req);
     }
     
     const username = req.session.user.username;
@@ -1328,7 +1399,8 @@ app.get('/spin', requireLogin, requireAuthorized, security.basicRateLimit, (req,
     if (!req.session.initialized) {
         req.session.initialized = true;
         req.session.createdAt = Date.now();
-        req.session.csrfToken = GameLogic.generateToken(16);
+        // 🛡️ 安全修复：统一使用csrf库生成token
+        generateCSRFToken(req);
     }
     
     const username = req.session.user.username;
@@ -1343,7 +1415,8 @@ app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req,
     if (!req.session.initialized) {
         req.session.initialized = true;
         req.session.createdAt = Date.now();
-        req.session.csrfToken = GameLogic.generateToken(16);
+        // 🛡️ 安全修复：统一使用csrf库生成token
+        generateCSRFToken(req);
     }
     
     const username = req.session.user.username;
@@ -2575,22 +2648,7 @@ app.get('/test-websocket', (req, res) => {
     res.sendFile(path.join(__dirname, 'test-websocket.html'));
 });
 
-// 测试通知API
-app.post('/api/test/notification', (req, res) => {
-    const { username, type } = req.body;
-    
-    const testNotification = {
-        type: type || 'test',
-        title: '测试通知',
-        message: `这是发送给 ${username} 的测试通知`,
-        level: 'info'
-    };
-    
-    notifyUser(username, testNotification);
-    console.log(`📤 发送测试通知给用户: ${username}`);
-    
-    res.json({ success: true, message: '测试通知已发送' });
-});
+// 🚨 安全修复：已删除未鉴权的测试通知API (防止任意用户骚扰推送)
 
 // 危险的测试端点已删除 - 防止未授权用户骚扰推送
 // 管理员安全警告测试API (需要管理员权限)
@@ -2672,19 +2730,15 @@ app.get('/admin/security', requireLogin, requireAdmin, (req, res) => {
     });
 });
 
-// 安全管理接口
-app.post('/admin/security/unblock', (req, res) => {
-    const auth = req.headers.authorization;
-    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-    
-    if (!auth || !auth.startsWith('Bearer ') || auth.split(' ')[1] !== adminPassword) {
-        return res.status(401).json({ message: 'Unauthorized' });
-    }
-    
+// 🛡️ 安全修复：安全管理接口改为使用session认证，不再使用Bearer密码
+app.post('/admin/security/unblock', requireLogin, requireAdmin, security.basicRateLimit, (req, res) => {
     const { ip } = req.body;
+    const adminUsername = req.session.user.username;
+    
     if (ip) {
         security.removeFromBlacklist(ip);
         security.clearUserBehavior(ip);
+        console.log(`🔓 管理员 ${adminUsername} 解除IP封禁: ${ip}`);
         res.json({ success: true, message: `IP ${ip} has been unblocked` });
     } else {
         res.status(400).json({ success: false, message: 'IP address required' });
@@ -2693,12 +2747,21 @@ app.post('/admin/security/unblock', (req, res) => {
 
 // ====== Windows监听服务API ======
 
-// API密钥验证中间件
+// 🛡️ 安全修复：API密钥验证中间件 - 只允许header传key，禁止query参数
 function requireApiKey(req, res, next) {
-    const apiKey = req.headers['x-api-key'] || req.query.api_key;
-    const validApiKey = process.env.WINDOWS_API_KEY || 'your-secret-api-key-2024';
+    const apiKey = req.headers['x-api-key']; // 仅从header获取，不再支持query参数
+    const validApiKey = process.env.WINDOWS_API_KEY || 'INVALID_DEFAULT_KEY';
     
-    if (!apiKey || apiKey !== validApiKey) {
+    // 生产环境不允许默认密钥
+    if (process.env.NODE_ENV === 'production' && validApiKey === 'INVALID_DEFAULT_KEY') {
+        console.error('🚨 生产环境错误: WINDOWS_API_KEY 环境变量未设置');
+        return res.status(500).json({ 
+            success: false, 
+            message: '服务配置错误' 
+        });
+    }
+    
+    if (!apiKey || !validApiKey || apiKey !== validApiKey) {
         return res.status(401).json({ 
             success: false, 
             message: '无效的API密钥' 
@@ -2708,28 +2771,38 @@ function requireApiKey(req, res, next) {
     next();
 }
 
-// 获取待处理的礼物发送任务
+// 🛡️ 安全修复：获取待处理的礼物发送任务 - 使用原子操作防止重复领取
 app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
     try {
-        // 尝试查询包含quantity字段，如果失败则使用不包含quantity的查询
+        // 原子操作：一次完成"领取+返回"，防止并发重复消费
         let result;
         try {
             result = await pool.query(`
-                SELECT id, gift_type, bilibili_room_id, username, gift_name, quantity, created_at
-                FROM gift_exchanges 
-                WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
-                ORDER BY created_at ASC 
-                LIMIT 10
+                UPDATE gift_exchanges 
+                SET delivery_status = 'processing', processed_at = NOW()
+                WHERE id IN (
+                    SELECT id FROM gift_exchanges 
+                    WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
+                    ORDER BY created_at ASC 
+                    LIMIT 10
+                    FOR UPDATE SKIP LOCKED
+                )
+                RETURNING id, gift_type, bilibili_room_id, username, gift_name, quantity, created_at
             `);
         } catch (error) {
             if (error.code === '42703') { // column does not exist
                 console.log('⚠️ quantity字段不存在，使用备用查询');
                 result = await pool.query(`
-                    SELECT id, gift_type, bilibili_room_id, username, gift_name, created_at
-                    FROM gift_exchanges 
-                    WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
-                    ORDER BY created_at ASC 
-                    LIMIT 10
+                    UPDATE gift_exchanges 
+                    SET delivery_status = 'processing', processed_at = NOW()
+                    WHERE id IN (
+                        SELECT id FROM gift_exchanges 
+                        WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
+                        ORDER BY created_at ASC 
+                        LIMIT 10
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING id, gift_type, bilibili_room_id, username, gift_name, created_at
                 `);
             } else {
                 throw error;
