@@ -1755,11 +1755,13 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             deliveryMessage = '，请先绑定B站房间号以发送礼物';
         }
 
+        // 🛡️ 预扣机制：返回当前余额（未扣费）
         res.json({ 
             success: true, 
             message: `兑换成功${deliveryMessage}`,
-            newBalance: balanceResult.balance,
-            deliveryStatus: bilibiliRoomId ? (deliveryMessage.includes('成功') ? 'delivered' : 'failed') : 'no_room'
+            newBalance: currentBalance, // 使用预扣检查时的余额，实际扣费在发送成功后
+            deliveryStatus: bilibiliRoomId ? 'pending' : 'no_room',
+            note: '余额将在礼物发送成功后扣除'
         });
 
     } catch (error) {

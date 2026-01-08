@@ -22,13 +22,13 @@ import time
 import json
 
 def safe_print(text):
-    """安全打印函数，处理编码问题"""
+    """安全打印函数，处理编码问题 (log to stderr; keep stdout clean for JSON)."""
     try:
-        print(text)
+        print(text, file=sys.stderr)
     except UnicodeEncodeError:
-        # 回退到ASCII编码，去除emoji和中文
         safe_text = text.encode('ascii', errors='ignore').decode('ascii')
-        print(f"[ENCODING_ERROR] {safe_text}")
+        print(f"[ENCODING_ERROR] {safe_text}", file=sys.stderr)
+
 
 def load_cookies_from_txt(file_path):
     """从cookie.txt文件加载cookies"""
@@ -208,7 +208,7 @@ def check_gift_send_result(page, gift_id, max_wait=3):
 
 def send_gift_simple(gift_id, room_id, quantity=1):
     """简单的礼物发送函数 - 每次独立运行"""
-    print(f"Starting gift sending - Gift ID: {gift_id}, Room: {room_id}, Quantity: {quantity}")
+    print(f"Starting gift sending for {gift_type} x{quantity} in room {room_id}", file=sys.stderr)
     
     with sync_playwright() as p:
         # 启动浏览器（完全按threeserver的配置）
@@ -288,49 +288,38 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             
             print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
             
-            # 如果需要发送多个，逐个点击并检测余额
+            # ⚡ 瞬间并发发送多个礼物，无延时
             successful_sends = 1  # 第一次点击已完成
             if quantity > 1:
-                for i in range(quantity - 1):  # 已经点击了一次，所以减1
-                    # 每次点击前短暂等待，允许页面状态更新
-                    time.sleep(0.5)
-                    
-                    # 检查当前余额是否还够
-                    current_balance = get_current_balance(page)
-                    if current_balance is not None and current_balance < 1:
-                        safe_print(f"⚠️ 第{i+2}个礼物发送前检测到余额不足: {current_balance} B币")
-                        break
-                    
-                    # 执行点击
-                    click_result = page.evaluate(f'''
-                        () => {{
-                            const giftId = "{gift_id}";
-                            const selector = '.gift-id-' + giftId;
+                # 一次性发送所有剩余的礼物，无延时
+                rapid_clicks_result = page.evaluate(f'''
+                    () => {{
+                        const giftId = "{gift_id}";
+                        const selector = '.gift-id-' + giftId;
+                        const remainingClicks = {quantity - 1};
+                        let successCount = 0;
+                        
+                        for (let i = 0; i < remainingClicks; i++) {{
                             const el = document.querySelector(selector);
                             if (el) {{
                                 const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
                                 el.dispatchEvent(evt);
-                                return true;
+                                successCount++;
+                            }} else {{
+                                break;
                             }}
-                            return false;
                         }}
-                    ''')
-                    
-                    if click_result:
-                        successful_sends += 1
-                        safe_print(f"✅ 第{i+2}个礼物点击成功")
-                    else:
-                        safe_print(f"❌ 第{i+2}个礼物点击失败")
-                        break
-                    
-                    # 快速检查是否出现余额不足提示
-                    time.sleep(0.2)
-                    if check_balance_insufficient(page):
-                        safe_print(f"⚠️ 第{i+2}个礼物发送后检测到余额不足")
-                        successful_sends -= 1  # 当前这次失败了
-                        break
                         
-                safe_print(f"🎯 完成 {successful_sends}/{quantity} 个礼物发送")
+                        return {{
+                            attempted: remainingClicks,
+                            succeeded: successCount
+                        }};
+                    }}
+                ''')
+                
+                successful_sends += rapid_clicks_result['succeeded']
+                safe_print(f"⚡ 瞬间并发发送: {rapid_clicks_result['succeeded']}/{rapid_clicks_result['attempted']} 次点击成功")
+                safe_print(f"🎯 总计完成 {successful_sends}/{quantity} 个礼物发送")
             
             # 使用threeserver的完整验证逻辑
             print("Checking gift send result using threeserver validation logic...")
