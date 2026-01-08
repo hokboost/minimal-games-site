@@ -550,7 +550,7 @@ app.get('/profile', requireLogin, async (req, res) => {
         const gameStats = await Promise.all([
             pool.query('SELECT COUNT(*) as count, MAX(score) as best_score FROM submissions WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN won != \'lost\' THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN matches_count > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username])
+            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username])
         ]);
         
         const stats = {
@@ -1661,22 +1661,28 @@ app.get('/api/balance/logs', requireLogin, requireAuthorized, async (req, res) =
 
 // 礼物兑换
 app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    console.log('🚀 [DEBUG] 礼物兑换API开始执行');
+    console.log('🚀 [DEBUG] 请求体:', JSON.stringify(req.body, null, 2));
+    console.log('🚀 [DEBUG] 用户session:', req.session?.user);
+    
     try {
         const { giftType, cost, quantity = 1 } = req.body;
         const username = req.session.user.username;
         const clientIP = req.clientIP;
         const userAgent = req.userAgent;
 
-        // 调试日志
-        console.log(`🔍 礼物兑换请求参数: giftType=${giftType}, cost=${cost}, quantity=${quantity}, username=${username}`);
+        console.log(`🔍 [DEBUG] 解析后参数: giftType=${giftType}, cost=${cost}, quantity=${quantity}, username=${username}`);
+        console.log(`🔍 [DEBUG] 客户端信息: IP=${clientIP}, UA=${userAgent}`);
 
         // 验证输入参数
         if (!giftType || !cost || quantity < 1) {
+            console.log('❌ [DEBUG] 参数验证失败:', { giftType, cost, quantity });
             return res.status(400).json({ 
                 success: false, 
                 message: '参数不完整或数量无效' 
             });
         }
+        console.log('✅ [DEBUG] 参数验证通过');
 
         // 验证数量上限
         if (quantity > 100) {
@@ -1687,20 +1693,27 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         }
 
         // 从配置文件获取可用的礼物类型
+        console.log('🔍 [DEBUG] giftConfig状态:', { hasConfig: !!giftConfig, hasMapping: !!giftConfig.礼物映射 });
+        
         const availableGifts = {};
         if (giftConfig.礼物映射) {
+            console.log('✅ [DEBUG] 使用配置文件中的礼物映射');
             for (const [key, config] of Object.entries(giftConfig.礼物映射)) {
                 availableGifts[key] = {
                     name: config.名称,
                     cost: config.电币成本,
                     bilibili_id: config.bilibili_id
                 };
+                console.log(`🔍 [DEBUG] 加载礼物: ${key} = ${JSON.stringify(availableGifts[key])}`);
             }
         } else {
+            console.log('⚠️ [DEBUG] 配置文件无效，使用备用配置');
             // 备用配置
             availableGifts.heartbox = { name: '心动盲盒', cost: 150, bilibili_id: '32251' };
             availableGifts.fanlight = { name: '粉丝团灯牌', cost: 1, bilibili_id: '31164' };
         }
+        
+        console.log('🔍 [DEBUG] 最终可用礼物:', availableGifts);
 
         // 验证礼物类型
         if (!availableGifts[giftType]) {
@@ -1720,54 +1733,74 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         }
 
         // 🛡️ 真正的预扣机制：在事务中原子地检查余额、锁住资金并创建任务
+        console.log('🔍 [DEBUG] 开始数据库事务操作');
         const client = await pool.connect();
         let insertResult;
         try {
+            console.log('🔍 [DEBUG] 开始事务');
             await client.query('BEGIN');
             
             // 1. 锁定用户行并检查余额
+            console.log(`🔍 [DEBUG] 查询用户 ${username} 的余额和房间号`);
             const lockResult = await client.query(
                 'SELECT balance, bilibili_room_id FROM users WHERE username = $1 FOR UPDATE',
                 [username]
             );
+            console.log('🔍 [DEBUG] 数据库查询结果:', lockResult.rows);
             
             if (lockResult.rows.length === 0) {
                 throw new Error('用户不存在');
             }
 
             const { balance: currentBalance, bilibili_room_id: bilibiliRoomId } = lockResult.rows[0];
+            console.log(`🔍 [DEBUG] 用户信息: 余额=${currentBalance}, 房间号=${bilibiliRoomId}`);
             
             if (currentBalance < cost) {
+                console.log(`❌ [DEBUG] 余额不足: 当前=${currentBalance}, 需要=${cost}`);
                 throw new Error(`余额不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币`);
             }
+            console.log('✅ [DEBUG] 余额检查通过');
 
             // 2. 检查是否有pending的任务（防止重复兑换）
+            console.log('🔍 [DEBUG] 检查是否有pending任务');
             const pendingResult = await client.query(
                 'SELECT COUNT(*) as count FROM gift_exchanges WHERE username = $1 AND delivery_status IN ($2, $3)',
                 [username, 'pending', 'processing']
             );
+            console.log('🔍 [DEBUG] pending任务查询结果:', pendingResult.rows);
 
             if (parseInt(pendingResult.rows[0].count) > 0) {
+                console.log('❌ [DEBUG] 检测到pending任务，阻止兑换');
                 throw new Error('您有礼物正在发送中，请等待完成后再兑换');
             }
+            console.log('✅ [DEBUG] 无pending任务，可以继续');
 
             // 3. 立即锁住资金（从余额中扣除，但标记为frozen）
+            console.log(`🔍 [DEBUG] 扣除资金: ${cost} 电币`);
             await client.query(
                 'UPDATE users SET balance = balance - $1 WHERE username = $2',
                 [cost, username]
             );
+            console.log('✅ [DEBUG] 资金扣除完成');
 
             // 4. 创建任务记录，标记资金已锁定
+            console.log('🔍 [DEBUG] 创建礼物兑换任务记录');
+            const insertParams = [username, giftType, availableGifts[giftType].name, cost, quantity, bilibiliRoomId, 
+                bilibiliRoomId ? 'pending' : 'no_room'];
+            console.log('🔍 [DEBUG] INSERT参数:', insertParams);
+            
             insertResult = await client.query(`
                 INSERT INTO gift_exchanges (
                     username, gift_type, gift_name, cost, quantity, status, created_at,
                     bilibili_room_id, delivery_status
                 ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7)
                 RETURNING id
-            `, [username, giftType, availableGifts[giftType].name, cost, quantity, bilibiliRoomId, 
-                bilibiliRoomId ? 'pending' : 'no_room']);
+            `, insertParams);
+            console.log('✅ [DEBUG] 任务记录创建成功:', insertResult.rows);
 
+            console.log('🔍 [DEBUG] 提交事务');
             await client.query('COMMIT');
+            console.log('✅ [DEBUG] 事务提交成功');
             
             console.log(`🔒 用户 ${username} 资金已锁定: ${cost} 电币，剩余余额: ${currentBalance - cost} 电币`);
             
@@ -1796,20 +1829,27 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             deliveryMessage = '，请先绑定B站房间号以发送礼物';
         }
 
-        // 🛡️ 预扣机制：返回当前余额（未扣费）
+        // 🛡️ 预扣机制：返回扣费后的余额
         res.json({ 
             success: true, 
             message: `兑换成功${deliveryMessage}`,
-            newBalance: currentBalance, // 使用预扣检查时的余额，实际扣费在发送成功后
+            newBalance: currentBalance - cost, // 返回扣费后的余额
             deliveryStatus: bilibiliRoomId ? 'pending' : 'no_room',
-            note: '余额将在礼物发送成功后扣除'
+            note: '资金已锁定，礼物发送完成后确认扣费'
         });
 
     } catch (error) {
-        console.error('礼物兑换失败:', error);
+        console.error('🚨 礼物兑换严重错误:', {
+            message: error.message,
+            stack: error.stack,
+            username: username || 'unknown',
+            giftType: req.body?.giftType,
+            cost: req.body?.cost,
+            quantity: req.body?.quantity
+        });
         res.status(500).json({ 
             success: false, 
-            message: '服务器错误，请稍后重试' 
+            message: `服务器错误: ${error.message}` 
         });
     }
 });
@@ -2412,7 +2452,7 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             
             // 计算中奖号码匹配情况
             const matches = userSlots.filter(slot => 
-                winningNumbers.includes(slot.num) && slot.prize && slot.prize.includes('电币')
+                winningNumbers.includes(slot.num)
             );
             
             await pool.query(`
@@ -2733,6 +2773,86 @@ app.get('/api/admin/security-events', requireLogin, requireAdmin, async (req, re
 // WebSocket测试页面
 app.get('/test-websocket', (req, res) => {
     res.sendFile(path.join(__dirname, 'test-websocket.html'));
+});
+
+// 管理员工具：重置卡住的礼物任务
+app.post('/api/admin/reset-stuck-gift-tasks', requireLogin, requireAdmin, async (req, res) => {
+    try {
+        const adminUser = req.session.user.username;
+        
+        console.log(`🔧 管理员 ${adminUser} 开始重置卡住的礼物任务`);
+        
+        // 查找卡住的任务（资金已锁定但任务pending超过10分钟）
+        const stuckTasks = await pool.query(`
+            SELECT id, username, gift_name, cost, created_at
+            FROM gift_exchanges 
+            WHERE status = 'funds_locked' 
+              AND delivery_status IN ('pending', 'processing')
+              AND created_at < NOW() - INTERVAL '10 minutes'
+            ORDER BY created_at
+        `);
+        
+        let resetCount = 0;
+        const results = [];
+        
+        for (const task of stuckTasks.rows) {
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                
+                // 退还资金
+                await client.query(
+                    'UPDATE users SET balance = balance + $1 WHERE username = $2',
+                    [task.cost, task.username]
+                );
+                
+                // 标记任务为失败
+                await client.query(
+                    'UPDATE gift_exchanges SET status = $1, delivery_status = $2, processed_at = NOW() WHERE id = $3',
+                    ['failed', 'failed', task.id]
+                );
+                
+                await client.query('COMMIT');
+                
+                console.log(`✅ 重置任务 ${task.id}: 退还 ${task.cost} 电币给 ${task.username}`);
+                resetCount++;
+                results.push({
+                    taskId: task.id,
+                    username: task.username,
+                    giftName: task.gift_name,
+                    refundedAmount: task.cost,
+                    createdAt: task.created_at
+                });
+                
+            } catch (error) {
+                await client.query('ROLLBACK');
+                console.error(`❌ 重置任务 ${task.id} 失败:`, error.message);
+                results.push({
+                    taskId: task.id,
+                    username: task.username,
+                    error: error.message
+                });
+            } finally {
+                client.release();
+            }
+        }
+        
+        console.log(`🔧 管理员 ${adminUser} 重置了 ${resetCount} 个卡住的任务`);
+        
+        res.json({
+            success: true,
+            message: `成功重置 ${resetCount} 个卡住的任务`,
+            resetCount,
+            results
+        });
+        
+    } catch (error) {
+        console.error('重置卡住任务失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '重置失败: ' + error.message 
+        });
+    }
 });
 
 // 🚨 安全修复：已删除未鉴权的测试通知API (防止任意用户骚扰推送)
@@ -3175,7 +3295,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
 
             case 'slot':
                 query = `
-                    SELECT id, won as result, payout_amount as payout, 
+                    SELECT id, won as result, COALESCE(payout_amount, 0) as payout, 
                            result as amounts, created_at as played_at
                     FROM slot_results 
                     WHERE username = $1 
@@ -3189,7 +3309,8 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
 
             case 'scratch':
                 query = `
-                    SELECT id, reward as result, matches_count, tier_cost, 
+                    SELECT id, reward as result, COALESCE(matches_count, 0) as matches_count, 
+                           COALESCE(tier_cost, 5) as tier_cost, 
                            winning_numbers, slots, created_at as played_at
                     FROM scratch_results 
                     WHERE username = $1 
