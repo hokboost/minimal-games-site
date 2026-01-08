@@ -1540,45 +1540,11 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
 
         console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name}，花费 ${cost} 电币`);
 
-        // 如果用户绑定了房间号，尝试发送B站礼物
+        // 礼物将由Windows监听服务处理，无需立即发送
         let deliveryMessage = '';
         if (bilibiliRoomId) {
-            try {
-                console.log(`🎁 开始向房间 ${bilibiliRoomId} 发送礼物 ${availableGifts[giftType].name}...`);
-                
-                // 使用超简单版本 - 每次独立启动playwright
-                const giftSender = getSimpleGiftSender();
-                const giftResult = await giftSender.sendGift(
-                    availableGifts[giftType].bilibili_id, 
-                    bilibiliRoomId
-                );
-                
-                if (giftResult.success) {
-                    // 更新delivery状态为成功
-                    await pool.query(`
-                        UPDATE gift_exchanges 
-                        SET delivery_status = 'delivered', processed_at = NOW() 
-                        WHERE id = $1
-                    `, [exchangeId]);
-                    
-                    console.log(`✅ 礼物发送成功到房间 ${bilibiliRoomId}`);
-                    deliveryMessage = '，礼物已发送到直播间！';
-                } else {
-                    throw new Error(giftResult.error || '礼物发送失败');
-                }
-                
-            } catch (error) {
-                console.error(`❌ 礼物发送失败:`, error.message);
-                
-                // 更新delivery状态为失败
-                await pool.query(`
-                    UPDATE gift_exchanges 
-                    SET delivery_status = 'failed', processed_at = NOW() 
-                    WHERE id = $1
-                `, [exchangeId]);
-                
-                deliveryMessage = `，但礼物发送失败: ${error.message}`;
-            }
+            console.log(`🎁 礼物兑换记录已创建，等待Windows监听服务处理...`);
+            deliveryMessage = '，礼物正在发送中，请稍候...';
         } else {
             console.log(`⚠️ 用户 ${username} 未绑定B站房间号，跳过礼物发送`);
             deliveryMessage = '，请先绑定B站房间号以发送礼物';

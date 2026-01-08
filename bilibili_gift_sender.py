@@ -84,10 +84,11 @@ def send_gift_simple(gift_id, room_id):
         print("Waiting 10 seconds for page to fully load...")
         time.sleep(10)
 
-        # 发送礼物（完全按threeserver逻辑）
+        # 发送礼物并验证结果
         print(f"Sending gift ID: {gift_id}")
         try:
-            result = page.evaluate(f'''
+            # 点击礼物
+            click_result = page.evaluate(f'''
                 () => {{
                     const giftId = "{gift_id}";
                     const selector = '.gift-id-' + giftId;
@@ -102,14 +103,70 @@ def send_gift_simple(gift_id, room_id):
                 }}
             ''')
             
-            if result['success']:
-                print(f"Gift {gift_id} sent successfully")
-                # 等待发送结果
-                time.sleep(3)
-                return {"success": True, "gift_id": gift_id, "room_id": room_id}
-            else:
+            if not click_result['success']:
                 print(f"Gift {gift_id} not found")
                 return {"success": False, "error": "Gift element not found", "gift_id": gift_id, "room_id": room_id}
+            
+            print(f"Gift {gift_id} clicked, waiting for result...")
+            
+            # 等待并检查送礼结果
+            verification_success = False
+            for attempt in range(10):  # 最多等待10秒
+                time.sleep(1)
+                
+                # 检查是否出现成功或失败提示
+                result_check = page.evaluate('''
+                    () => {
+                        // 检查成功提示
+                        const successSelectors = [
+                            '.gift-msg',
+                            '.toast-success',
+                            '[class*="success"]',
+                            '.gift-success'
+                        ];
+                        
+                        // 检查失败提示（余额不足等）
+                        const errorSelectors = [
+                            '.gift-error',
+                            '.toast-error', 
+                            '[class*="error"]',
+                            '.insufficient-balance'
+                        ];
+                        
+                        for (const selector of successSelectors) {
+                            const el = document.querySelector(selector);
+                            if (el && el.textContent) {
+                                return {success: true, type: 'success', message: el.textContent};
+                            }
+                        }
+                        
+                        for (const selector of errorSelectors) {
+                            const el = document.querySelector(selector);
+                            if (el && el.textContent) {
+                                return {success: false, type: 'error', message: el.textContent};
+                            }
+                        }
+                        
+                        return {success: null, type: 'waiting', message: 'No result yet'};
+                    }
+                ''')
+                
+                if result_check['success'] is True:
+                    print(f"✅ Gift sending confirmed successful: {result_check['message']}")
+                    verification_success = True
+                    break
+                elif result_check['success'] is False:
+                    print(f"❌ Gift sending failed: {result_check['message']}")
+                    return {"success": False, "error": f"送礼失败: {result_check['message']}", "gift_id": gift_id, "room_id": room_id}
+                
+                print(f"⏳ Waiting for result... attempt {attempt + 1}/10")
+            
+            if verification_success:
+                return {"success": True, "gift_id": gift_id, "room_id": room_id, "verified": True}
+            else:
+                # 没有明确的成功/失败提示，保守判断为可能成功
+                print("⚠️ No clear result detected, assuming success")
+                return {"success": True, "gift_id": gift_id, "room_id": room_id, "verified": False, "warning": "送礼结果未明确验证"}
                 
         except Exception as e:
             print(f"Gift sending error: {e}")

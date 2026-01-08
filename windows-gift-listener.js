@@ -38,9 +38,7 @@ class WindowsGiftListener {
 
     // 轮询服务器获取任务
     async pollForTasks() {
-        if (this.isProcessing) {
-            return; // 如果正在处理任务，跳过这次轮询
-        }
+        // 移除isProcessing限制，允许查询新任务（但不重复处理相同任务）
 
         try {
             console.log(`🔄 轮询任务... ${new Date().toLocaleTimeString()}`);
@@ -60,10 +58,9 @@ class WindowsGiftListener {
             if (response.data.success && response.data.tasks.length > 0) {
                 console.log(`📦 获取到 ${response.data.tasks.length} 个待处理任务`);
                 
-                // 逐个处理任务
-                for (const task of response.data.tasks) {
-                    await this.processTask(task);
-                }
+                // 并行处理任务，避免阻塞（每个playwright进程独立）
+                const taskPromises = response.data.tasks.map(task => this.processTask(task));
+                await Promise.all(taskPromises);
             } else if (response.data.success && response.data.tasks.length === 0) {
                 console.log(`📭 暂无待处理任务 (${new Date().toLocaleTimeString()})`);
             }
@@ -88,7 +85,6 @@ class WindowsGiftListener {
     // 处理单个任务
     async processTask(task) {
         console.log(`🎁 开始处理任务 ${task.id}: ${task.username} 兑换 ${task.giftName} 到房间 ${task.roomId}`);
-        this.isProcessing = true;
 
         try {
             // 调用Python脚本
@@ -107,8 +103,6 @@ class WindowsGiftListener {
         } catch (error) {
             console.error(`💥 处理任务 ${task.id} 时发生异常:`, error.message);
             await this.markTaskFailed(task.id, error.message);
-        } finally {
-            this.isProcessing = false;
         }
     }
 
