@@ -87,6 +87,13 @@ class WindowsGiftListener {
         console.log(`🎁 开始处理任务 ${task.id}: ${task.username} 兑换 ${task.giftName} 到房间 ${task.roomId}`);
 
         try {
+            // 先标记任务为处理中，防止重复处理
+            const startResult = await this.markTaskStart(task.id);
+            if (!startResult) {
+                console.log(`⚠️ 任务 ${task.id} 已被其他进程处理，跳过`);
+                return;
+            }
+            
             // 调用Python脚本
             const result = await this.callPythonScript(task.giftId, task.roomId);
             
@@ -190,6 +197,27 @@ class WindowsGiftListener {
                 });
             });
         });
+    }
+
+    // 标记任务开始处理
+    async markTaskStart(taskId) {
+        try {
+            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/start`, {}, {
+                timeout: 5000,
+                headers: {
+                    'X-API-Key': this.apiKey,
+                    'Content-Type': 'application/json'
+                }
+            });
+            return response.status === 200 && response.data.success;
+        } catch (error) {
+            if (error.response?.status === 404) {
+                // 任务已被其他进程处理
+                return false;
+            }
+            console.error(`❌ 标记任务开始失败 (${taskId}):`, error.message);
+            return false;
+        }
     }
 
     // 标记任务完成

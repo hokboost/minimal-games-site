@@ -2561,8 +2561,7 @@ app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
         const result = await pool.query(`
             SELECT id, gift_type, bilibili_room_id, username, gift_name, created_at
             FROM gift_exchanges 
-            WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL 
-            AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL '5 minutes')
+            WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
             ORDER BY created_at ASC 
             LIMIT 10
         `);
@@ -2592,6 +2591,31 @@ app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
     }
 });
 
+// 标记任务开始处理
+app.post('/api/gift-tasks/:id/start', requireApiKey, async (req, res) => {
+    try {
+        const taskId = parseInt(req.params.id);
+        
+        const result = await pool.query(`
+            UPDATE gift_exchanges 
+            SET delivery_status = 'processing',
+                processed_at = NOW()
+            WHERE id = $1 AND delivery_status = 'pending'
+            RETURNING username, gift_name
+        `, [taskId]);
+
+        if (result.rows.length > 0) {
+            console.log(`🔄 Windows服务开始处理任务 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name}`);
+            res.json({ success: true, message: '任务开始处理' });
+        } else {
+            res.status(404).json({ success: false, message: '任务未找到或已被处理' });
+        }
+    } catch (error) {
+        console.error('标记任务开始失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误', error: error.message });
+    }
+});
+
 // 标记任务完成
 app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
     try {
@@ -2600,7 +2624,6 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
         const result = await pool.query(`
             UPDATE gift_exchanges 
             SET delivery_status = 'delivered',
-                delivery_message = '礼物发送成功',
                 processed_at = NOW()
             WHERE id = $1
             RETURNING username, gift_name
@@ -2631,11 +2654,10 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
         const result = await pool.query(`
             UPDATE gift_exchanges 
             SET delivery_status = 'failed',
-                delivery_message = $1,
                 processed_at = NOW()
-            WHERE id = $2
+            WHERE id = $1
             RETURNING username, gift_name
-        `, [errorMessage, taskId]);
+        `, [taskId]);
 
         if (result.rows.length > 0) {
             console.log(`❌ Windows服务任务失败 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name} - ${errorMessage}`);
