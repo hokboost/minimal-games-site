@@ -20,13 +20,16 @@ class WindowsGiftListener {
     }
 
     // 启动监听服务
-    start() {
+    async start() {
         console.log('🚀 Windows B站礼物发送监听服务已启动');
         console.log(`📡 监听服务器: ${this.serverUrl}`);
         console.log(`⏰ 轮询间隔: ${this.pollInterval}ms`);
         console.log(`🐍 Python路径: ${this.pythonPath}`);
         console.log(`📜 脚本路径: ${this.pythonScript}`);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
+        // 启动时重置卡住的任务
+        await this.resetStuckTasks();
         
         this.pollForTasks();
         
@@ -199,6 +202,33 @@ class WindowsGiftListener {
         });
     }
 
+    // 重置卡住的任务
+    async resetStuckTasks() {
+        try {
+            console.log('🔄 检查并重置卡住的任务...');
+            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/reset-stuck`, {}, {
+                timeout: 10000,
+                headers: {
+                    'X-API-Key': this.apiKey,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.data.success) {
+                if (response.data.resetTasks.length > 0) {
+                    console.log(`✅ 重置了 ${response.data.resetTasks.length} 个卡住的任务`);
+                    response.data.resetTasks.forEach(task => {
+                        console.log(`   - 任务 ${task.id}: ${task.username} 的 ${task.gift_name}`);
+                    });
+                } else {
+                    console.log('✅ 没有发现卡住的任务');
+                }
+            }
+        } catch (error) {
+            console.error('❌ 重置卡住任务失败:', error.message);
+        }
+    }
+
     // 标记任务开始处理
     async markTaskStart(taskId) {
         try {
@@ -262,7 +292,7 @@ console.log('🔥 Windows B站礼物发送监听服务');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
 const listener = new WindowsGiftListener();
-listener.start();
+listener.start().catch(console.error);
 
 // 优雅关闭
 process.on('SIGINT', () => {

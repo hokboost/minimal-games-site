@@ -2645,6 +2645,36 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
     }
 });
 
+// 重置卡住的任务（超过5分钟的processing任务重置为pending）
+app.post('/api/gift-tasks/reset-stuck', requireApiKey, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            UPDATE gift_exchanges 
+            SET delivery_status = 'pending',
+                processed_at = NULL
+            WHERE delivery_status = 'processing' 
+            AND processed_at < NOW() - INTERVAL '5 minutes'
+            RETURNING id, username, gift_name
+        `);
+
+        const resetCount = result.rows.length;
+        console.log(`🔄 重置了 ${resetCount} 个卡住的任务`);
+        
+        result.rows.forEach(row => {
+            console.log(`  - 任务 ${row.id}: ${row.username} 的 ${row.gift_name}`);
+        });
+
+        res.json({ 
+            success: true, 
+            message: `重置了 ${resetCount} 个卡住的任务`,
+            resetTasks: result.rows
+        });
+    } catch (error) {
+        console.error('重置卡住任务失败:', error);
+        res.status(500).json({ success: false, message: '服务器错误', error: error.message });
+    }
+});
+
 // 标记任务失败
 app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
     try {

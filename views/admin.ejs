@@ -964,7 +964,7 @@
                 return;
             }
             
-            if (!/^\\d{6,12}$/.test(roomId)) {
+            if (!/^\d{6,12}$/.test(roomId)) {
                 showMessage('房间号格式不正确，应为6-12位数字', 'error');
                 return;
             }
