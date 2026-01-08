@@ -264,11 +264,7 @@ app.use((req, res, next) => {
     style-src-elem 'self' 'unsafe-inline';
     font-src 'self';
     img-src 'self' data:;
-    connect-src 'self'
-      https://slot-server-9682.onrender.com
-      https://scratch-server-vmit.onrender.com
-      https://secure-spin-server.onrender.com
-      https://wish-server.onrender.com;
+    connect-src 'self';
   `.replace(/\n/g, ' '));
   next();
 });
@@ -2008,11 +2004,11 @@ app.get('/api/bilibili/cookies/status', requireLogin, requireAdmin, async (req, 
         
         res.json({
             success: true,
-            expired: checkResult.expired,
-            reason: checkResult.reason,
-            lastCheck: giftSender.lastCookieCheck,
-            nextCheck: giftSender.lastCookieCheck + giftSender.cookieCheckInterval,
-            checkInterval: giftSender.cookieCheckInterval
+            expired: checkResult.expired || false,
+            reason: checkResult.reason || 'Windows监听服务管理',
+            lastCheck: Date.now(),
+            nextCheck: Date.now() + 60000, // 1分钟后
+            checkInterval: 60000 // 1分钟间隔
         });
         
     } catch (error) {

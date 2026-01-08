@@ -208,17 +208,17 @@ def check_gift_send_result(page, gift_id, max_wait=3):
 
 def send_gift_simple(gift_id, room_id, quantity=1):
     """简单的礼物发送函数 - 每次独立运行"""
-    print(f"Starting gift sending for {gift_type} x{quantity} in room {room_id}", file=sys.stderr)
+    safe_print(f"Starting gift sending - Gift ID: {gift_id}, Room: {room_id}, Quantity: {quantity}")
     
     with sync_playwright() as p:
         # 启动浏览器（完全按threeserver的配置）
-        print("Starting browser...")
+        safe_print("Starting browser...")
         browser = p.chromium.launch(headless=False, slow_mo=100)
         context = browser.new_context()
         page = context.new_page()
 
         # 加载cookies
-        print("Loading cookies...")
+        safe_print("Loading cookies...")
         cookie_path = 'C:/Users/user/Desktop/jiaobenbili/cookie.txt'
         cookies = load_cookies_from_txt(cookie_path)
         page.goto("https://www.bilibili.com/")
@@ -226,23 +226,23 @@ def send_gift_simple(gift_id, room_id, quantity=1):
         time.sleep(1)
 
         # 进入房间
-        print(f"Entering room {room_id}...")
+        safe_print(f"Entering room {room_id}...")
         page.goto(f"https://live.bilibili.com/{room_id}")
         page.wait_for_load_state("domcontentloaded")
 
         # 等待礼物面板加载
-        print("Waiting for gift panel...")
+        safe_print("Waiting for gift panel...")
         for _ in range(20):
             try:
                 if page.query_selector(".gift-panel"):
                     break
             except Exception as e:
-                print(f"Query selector error: {e}")
+                safe_print(f"Query selector error: {e}")
                 break
             time.sleep(0.5)
 
         # 点击展开箭头（完全按threeserver逻辑）
-        print("Expanding gift panel...")
+        safe_print("Expanding gift panel...")
         try:
             arrow_selector = ".gift-panel-switch"
             page.evaluate(f'''
@@ -255,16 +255,16 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 }}
             ''')
             time.sleep(1.5)
-            print("Gift panel expanded")
+            safe_print("Gift panel expanded")
         except Exception as e:
-            print(f"Arrow click might have failed: {e}")
+            safe_print(f"Arrow click might have failed: {e}")
 
         # 等待10秒（按用户要求）
-        print("Waiting 10 seconds for page to fully load...")
+        safe_print("Waiting 10 seconds for page to fully load...")
         time.sleep(10)
 
         # 发送礼物并验证结果
-        print(f"Sending gift ID: {gift_id}")
+        safe_print(f"Sending gift ID: {gift_id}")
         try:
             # 点击礼物
             click_result = page.evaluate(f'''
@@ -283,10 +283,10 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             ''')
             
             if not click_result['success']:
-                print(f"Gift {gift_id} not found")
+                safe_print(f"Gift {gift_id} not found")
                 return {"success": False, "error": "Gift element not found", "gift_id": gift_id, "room_id": room_id}
             
-            print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
+            safe_print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
             
             # ⚡ 瞬间并发发送多个礼物，无延时
             successful_sends = 1  # 第一次点击已完成
@@ -322,7 +322,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 safe_print(f"🎯 总计完成 {successful_sends}/{quantity} 个礼物发送")
             
             # 使用threeserver的完整验证逻辑
-            print("Checking gift send result using threeserver validation logic...")
+            safe_print("Checking gift send result using threeserver validation logic...")
             result = check_gift_send_result(page, gift_id, max_wait=3)
             
             # 根据验证结果返回适当的响应
@@ -363,7 +363,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 }
                 
         except Exception as e:
-            print(f"Gift sending error: {e}")
+            safe_print(f"Gift sending error: {e}")
             return {"success": False, "error": str(e), "gift_id": gift_id, "room_id": room_id}
 
         # 注意：浏览器会在with语句结束时自动关闭

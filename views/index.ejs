@@ -583,35 +583,13 @@ function createLoadingModal(gameName, iconEmoji, serverUrl) {
 }
 
 function startSlotGame() {
-    const modal = createLoadingModal('幸运老虎机', '🎰', 'https://slot-server-9682.onrender.com');
-    
-    fetch("https://slot-server-9682.onrender.com/ping")
-        .then(() => {
-            setTimeout(() => {
-                window.location.href = "/slot";
-            }, 3000);
-        })
-        .catch(() => {
-            setTimeout(() => {
-                window.location.href = "/slot";
-            }, 15000);
-        });
+    // 🏗️ 架构修复：直接跳转本地路由，无需预热外部服务
+    window.location.href = "/slot";
 }
 
 function startScratchGame() {
-    const modal = createLoadingModal('刮刮乐', '🎟️', 'https://scratch-server-vmit.onrender.com');
-    
-    fetch("https://scratch-server-vmit.onrender.com/ping")
-        .then(() => {
-            setTimeout(() => {
-                window.location.href = "/scratch";
-            }, 3000);
-        })
-        .catch(() => {
-            setTimeout(() => {
-                window.location.href = "/scratch";
-            }, 15000);
-        });
+    // 🏗️ 架构修复：直接跳转本地路由，无需预热外部服务
+    window.location.href = "/scratch";
 }
 
 </script>
