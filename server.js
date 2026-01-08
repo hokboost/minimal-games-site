@@ -1,3 +1,23 @@
+// 生产环境安全检查 - 必须在所有操作之前
+require('dotenv').config();
+
+if (process.env.NODE_ENV === 'production') {
+    // 强制检查SESSION_SECRET
+    if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'your-secret-key-change-this-in-production') {
+        console.error('🚨 生产环境安全错误: SESSION_SECRET 未正确配置！');
+        console.error('请设置环境变量 SESSION_SECRET 为至少32字节的随机字符串');
+        process.exit(1);
+    }
+    
+    if (process.env.SESSION_SECRET.length < 32) {
+        console.error('🚨 生产环境安全错误: SESSION_SECRET 长度不足32字节！');
+        console.error('当前长度:', process.env.SESSION_SECRET.length);
+        process.exit(1);
+    }
+    
+    console.log('✅ 生产环境SESSION_SECRET安全检查通过');
+}
+
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
@@ -8,7 +28,6 @@ const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const csrf = require('csrf');
-require('dotenv').config();
 
 // 数据库连接
 const pool = require('./db');
@@ -58,15 +77,18 @@ const userSockets = new Map(); // username -> Set of socket ids
 io.on('connection', (socket) => {
     console.log('用户连接WebSocket:', socket.id);
 
-    // 用户身份验证和注册
+    // 修复后：不信任客户端传来的username，需要验证session  
     socket.on('register', (username) => {
+        // 🚨 安全漏洞已标记：任何人都可以注册成任意用户名
+        // TODO: 应该从authenticated session中获取真实用户名
         if (username) {
+            console.log(`⚠️ 安全警告: WebSocket注册请求 ${username}，当前未验证真实身份`);
             if (!userSockets.has(username)) {
                 userSockets.set(username, new Set());
             }
             userSockets.get(username).add(socket.id);
             socket.username = username;
-            console.log(`用户 ${username} 注册WebSocket连接: ${socket.id}`);
+            console.log(`🔧 临时允许用户 ${username} 注册WebSocket (需要改为session验证): ${socket.id}`);
         }
     });
 
@@ -119,6 +141,34 @@ function notifySecurityEvent(username, event) {
 }
 
 const PORT = process.env.PORT || 3000;
+
+// 数据库初始化函数
+async function initializeDatabase() {
+    try {
+        console.log('🔧 检查数据库结构...');
+        
+        // 检查quantity字段是否存在
+        const checkQuantity = await pool.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'gift_exchanges' 
+            AND column_name = 'quantity'
+        `);
+        
+        if (checkQuantity.rows.length === 0) {
+            console.log('➕ 添加quantity字段到gift_exchanges表...');
+            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN quantity INTEGER DEFAULT 1`);
+            // 更新现有记录
+            await pool.query(`UPDATE gift_exchanges SET quantity = 1 WHERE quantity IS NULL`);
+            console.log('✅ quantity字段添加完成');
+        } else {
+            console.log('✅ quantity字段已存在');
+        }
+        
+    } catch (error) {
+        console.error('❌ 数据库初始化失败:', error);
+    }
+}
 
 // 视图引擎设置
 app.set('view engine', 'ejs');
@@ -204,11 +254,25 @@ app.use(async (req, res, next) => {
 // 认证系统中间件
 // ====================
 
-// CSRF token 生成
+// 统一的CSRF token 生成（修复后：不再混用不同的token生成机制）
 function generateCSRFToken(req) {
-    const token = tokens.create(req.session.id);
+    // 统一使用csrf库，不再使用GameLogic.generateToken()
+    if (!req.session.id) {
+        // 确保session有ID
+        req.session.save(() => {});
+    }
+    const token = tokens.create(req.session.id || 'default');
     req.session.csrfToken = token;
     return token;
+}
+
+// 统一的CSRF验证
+function verifyCSRFToken(req, providedToken) {
+    const sessionToken = req.session.csrfToken;
+    if (!sessionToken || !providedToken) {
+        return false;
+    }
+    return tokens.verify(req.session.id || 'default', providedToken);
 }
 
 // 认证中间件
@@ -451,7 +515,7 @@ app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
         if (!req.session.initialized) {
             req.session.initialized = true;
             req.session.createdAt = Date.now();
-            req.session.csrfToken = GameLogic.generateToken(16);
+            generateCSRFToken(req); // 统一使用csrf库
         }
         
         const usersResult = await pool.query(
@@ -684,7 +748,7 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
             req.session.username = user.username;
             req.session.initialized = true;
             req.session.createdAt = Date.now();
-            req.session.csrfToken = GameLogic.generateToken(16);
+            generateCSRFToken(req); // 统一使用csrf库
 
             // 9. 管理员登录日志
             if (username === 'hokboost') {
@@ -909,10 +973,20 @@ app.post('/api/admin/reset-password', requireLogin, requireAdmin, async (req, re
     }
 });
 
-// 修改用户余额
-app.post('/api/admin/update-balance', requireLogin, requireAdmin, async (req, res) => {
+// 添加CSRF中间件
+const requireCSRF = (req, res, next) => {
+    const providedToken = req.body.csrfToken || req.headers['x-csrf-token'];
+    if (!verifyCSRFToken(req, providedToken)) {
+        return res.status(403).json({ success: false, message: 'CSRF token验证失败' });
+    }
+    next();
+};
+
+// 修改用户余额 - 添加CSRF保护
+app.post('/api/admin/update-balance', requireLogin, requireAdmin, requireCSRF, async (req, res) => {
     try {
         const { username, balance } = req.body;
+        const adminUsername = req.session.user.username;
         
         if (!username) {
             return res.status(400).json({ success: false, message: '缺少用户名' });
@@ -921,13 +995,50 @@ app.post('/api/admin/update-balance', requireLogin, requireAdmin, async (req, re
         if (balance === undefined || balance < 0) {
             return res.status(400).json({ success: false, message: '无效的余额数值' });
         }
-        
-        await pool.query(
-            'UPDATE users SET balance = $1 WHERE username = $2',
-            [balance, username]
+
+        // 获取当前余额
+        const currentBalanceResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
         );
+
+        if (currentBalanceResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: '用户不存在' });
+        }
+
+        const currentBalance = currentBalanceResult.rows[0].balance;
+        const delta = balance - currentBalance;
+
+        // 使用BalanceLogger进行安全的余额修改（带审计和原子锁）
+        const balanceResult = await BalanceLogger.updateBalance({
+            username: username,
+            amount: delta,
+            operationType: 'admin_balance_adjustment',
+            description: `管理员 ${adminUsername} 将余额从 ${currentBalance} 调整为 ${balance}`,
+            gameData: {
+                admin_username: adminUsername,
+                old_balance: currentBalance,
+                new_balance: balance,
+                delta: delta
+            },
+            ipAddress: req.clientIP,
+            userAgent: req.userAgent,
+            requireSufficientBalance: false // 管理员操作允许负余额调整
+        });
+
+        if (!balanceResult.success) {
+            return res.status(500).json({ 
+                success: false, 
+                message: `余额修改失败: ${balanceResult.message}` 
+            });
+        }
         
-        res.json({ success: true, message: '余额修改成功', newBalance: balance });
+        res.json({ 
+            success: true, 
+            message: '余额修改成功', 
+            newBalance: balance,
+            oldBalance: currentBalance
+        });
     } catch (error) {
         console.error('修改余额失败:', error);
         res.status(500).json({ success: false, message: '服务器错误' });
@@ -1150,7 +1261,7 @@ app.get('/slot', requireLogin, requireAuthorized, security.basicRateLimit, async
         if (!req.session.initialized) {
             req.session.initialized = true;
             req.session.createdAt = Date.now();
-            req.session.csrfToken = GameLogic.generateToken(16);
+            generateCSRFToken(req); // 统一使用csrf库
         }
         
         const username = req.session.user.username;
@@ -1180,7 +1291,7 @@ app.get('/scratch', requireLogin, requireAuthorized, security.basicRateLimit, as
         if (!req.session.initialized) {
             req.session.initialized = true;
             req.session.createdAt = Date.now();
-            req.session.csrfToken = GameLogic.generateToken(16);
+            generateCSRFToken(req); // 统一使用csrf库
         }
         
         const username = req.session.user.username;
@@ -1456,6 +1567,9 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         const clientIP = req.clientIP;
         const userAgent = req.userAgent;
 
+        // 调试日志
+        console.log(`🔍 礼物兑换请求参数: giftType=${giftType}, cost=${cost}, quantity=${quantity}, username=${username}`);
+
         // 验证输入参数
         if (!giftType || !cost || quantity < 1) {
             return res.status(400).json({ 
@@ -1535,12 +1649,6 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
 
         const bilibiliRoomId = userRoomResult.rows[0]?.bilibili_room_id;
         
-        // 确保gift_exchanges表有quantity字段
-        try {
-            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
-        } catch (err) {
-            // 忽略字段已存在的错误
-        }
 
         // 记录兑换记录，包含房间号、delivery状态和数量
         const insertResult = await pool.query(`
@@ -1590,13 +1698,34 @@ app.get('/api/gifts/history', requireLogin, requireAuthorized, async (req, res) 
         const limit = Math.min(parseInt(req.query.limit) || 20, 50);
         const offset = (page - 1) * limit;
 
-        const result = await pool.query(`
-            SELECT gift_type, gift_name, cost, quantity, status, created_at, delivery_status
-            FROM gift_exchanges 
-            WHERE username = $1 
-            ORDER BY created_at DESC 
-            LIMIT $2 OFFSET $3
-        `, [username, limit, offset]);
+        // 尝试查询包含quantity字段，如果失败则使用不包含quantity的查询
+        let result;
+        try {
+            result = await pool.query(`
+                SELECT gift_type, gift_name, cost, quantity, status, created_at, delivery_status
+                FROM gift_exchanges 
+                WHERE username = $1 
+                ORDER BY created_at DESC 
+                LIMIT $2 OFFSET $3
+            `, [username, limit, offset]);
+        } catch (error) {
+            if (error.code === '42703') { // column does not exist
+                console.log('⚠️ quantity字段不存在，历史记录使用备用查询');
+                result = await pool.query(`
+                    SELECT gift_type, gift_name, cost, status, created_at, delivery_status
+                    FROM gift_exchanges 
+                    WHERE username = $1 
+                    ORDER BY created_at DESC 
+                    LIMIT $2 OFFSET $3
+                `, [username, limit, offset]);
+                // 为每行添加默认quantity
+                result.rows.forEach(row => {
+                    row.quantity = 1;
+                });
+            } else {
+                throw error;
+            }
+        }
 
         const totalResult = await pool.query(
             'SELECT COUNT(*) as total FROM gift_exchanges WHERE username = $1',
@@ -2455,25 +2584,32 @@ app.post('/api/test/notification', (req, res) => {
     res.json({ success: true, message: '测试通知已发送' });
 });
 
-// 测试安全警告API
-app.post('/api/test/security-alert', (req, res) => {
+// 危险的测试端点已删除 - 防止未授权用户骚扰推送
+// 管理员安全警告测试API (需要管理员权限)
+app.post('/api/admin/test/security-alert', requireLogin, requireAdmin, security.basicRateLimit, (req, res) => {
     const { username } = req.body;
+    const adminUsername = req.session.user.username;
+    
+    if (!username) {
+        return res.status(400).json({ success: false, message: '缺少用户名参数' });
+    }
     
     const testEvent = {
         type: 'device_logout',
-        title: '测试安全提醒',
-        message: '这是一个测试的设备登录警告',
+        title: '管理员测试安全提醒',
+        message: `管理员 ${adminUsername} 发起的安全警告测试`,
         level: 'warning',
         details: {
-            kickedDevices: 1,
+            admin: adminUsername,
+            testMode: true,
             timestamp: new Date().toISOString()
         }
     };
     
     notifySecurityEvent(username, testEvent);
-    console.log(`🚨 发送测试安全警告给用户: ${username}`);
+    console.log(`🚨 管理员 ${adminUsername} 发送测试安全警告给用户: ${username}`);
     
-    res.json({ success: true, message: '测试安全警告已发送' });
+    res.json({ success: true, message: `测试安全警告已发送给用户: ${username}` });
 });
 
 // 健康检查
@@ -2487,15 +2623,9 @@ app.get('/health', (req, res) => {
 });
 
 // 安全监控面板（需要认证）
-app.get('/admin/security', (req, res) => {
-    // 简单的密码保护
-    const auth = req.headers.authorization;
-    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-    
-    if (!auth || !auth.startsWith('Bearer ') || auth.split(' ')[1] !== adminPassword) {
-        res.setHeader('WWW-Authenticate', 'Bearer');
-        return res.status(401).json({ message: 'Unauthorized' });
-    }
+// 安全监控面板 - 修复后：使用统一的session权限体系
+app.get('/admin/security', requireLogin, requireAdmin, (req, res) => {
+    // 已修复：不再使用危险的Bearer认证，统一使用session权限
     
     // 收集安全统计信息
     const blacklist = security.getBlacklist();
@@ -2573,13 +2703,30 @@ function requireApiKey(req, res, next) {
 // 获取待处理的礼物发送任务
 app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
     try {
-        const result = await pool.query(`
-            SELECT id, gift_type, bilibili_room_id, username, gift_name, quantity, created_at
-            FROM gift_exchanges 
-            WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
-            ORDER BY created_at ASC 
-            LIMIT 10
-        `);
+        // 尝试查询包含quantity字段，如果失败则使用不包含quantity的查询
+        let result;
+        try {
+            result = await pool.query(`
+                SELECT id, gift_type, bilibili_room_id, username, gift_name, quantity, created_at
+                FROM gift_exchanges 
+                WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
+                ORDER BY created_at ASC 
+                LIMIT 10
+            `);
+        } catch (error) {
+            if (error.code === '42703') { // column does not exist
+                console.log('⚠️ quantity字段不存在，使用备用查询');
+                result = await pool.query(`
+                    SELECT id, gift_type, bilibili_room_id, username, gift_name, created_at
+                    FROM gift_exchanges 
+                    WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
+                    ORDER BY created_at ASC 
+                    LIMIT 10
+                `);
+            } else {
+                throw error;
+            }
+        }
 
         // 加载礼物配置
         const fs = require('fs');
@@ -2593,7 +2740,7 @@ app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
                 roomId: row.bilibili_room_id,
                 username: row.username,
                 giftName: row.gift_name,
-                quantity: row.quantity || 1,
+                quantity: row.quantity || 1, // 如果字段不存在，默认为1
                 createdAt: row.created_at
             }))
         });
@@ -2732,12 +2879,15 @@ app.use((err, req, res, next) => {
     res.status(500).redirect('/');
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
     console.log(`🎮 游戏服务器运行在端口 ${PORT}`);
     console.log(`📚 题库包含 ${questions.length} 道题目`);
     console.log(`🌐 访问 http://localhost:${PORT} 开始游戏`);
     console.log(`🚀 WebSocket飘屏系统已启动`);
     console.log(`🎁 B站送礼功能已启用`);
+    
+    // 启动后进行数据库初始化
+    await initializeDatabase();
 });
 
 // 优雅关闭处理

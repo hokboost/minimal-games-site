@@ -142,10 +142,9 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             
             print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
             
-            # 如果需要发送多个，连续点击
+            # 如果需要发送多个，瞬间连续点击（无延时）
             if quantity > 1:
                 for i in range(quantity - 1):  # 已经点击了一次，所以减1
-                    time.sleep(0.5)  # 每次点击间隔0.5秒
                     page.evaluate(f'''
                         () => {{
                             const giftId = "{gift_id}";
@@ -157,7 +156,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                             }}
                         }}
                     ''')
-                print(f"Completed {quantity} gift clicks")
+                print(f"Instantly completed {quantity} gift clicks")
             
             # 等待3秒让可能的提示出现
             time.sleep(3)
