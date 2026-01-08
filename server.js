@@ -1700,28 +1700,28 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             });
         }
 
-        // 使用BalanceLogger进行扣费
-        const balanceResult = await BalanceLogger.updateBalance({
-            username: username,
-            amount: -cost, // 负数表示扣除
-            operationType: 'gift_exchange',
-            description: `兑换礼物: ${availableGifts[giftType].name} x${quantity}`,
-            gameData: {
-                giftType: giftType,
-                giftName: availableGifts[giftType].name,
-                cost: cost
-            },
-            ipAddress: clientIP,
-            userAgent: userAgent,
-            requireSufficientBalance: true
-        });
-
-        if (!balanceResult.success) {
+        // 🛡️ 预扣机制：先检查余额是否足够，但暂时不扣除
+        const checkBalanceResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1', 
+            [username]
+        );
+        
+        if (checkBalanceResult.rows.length === 0) {
             return res.status(400).json({ 
                 success: false, 
-                message: balanceResult.message 
+                message: '用户不存在' 
             });
         }
+
+        const currentBalance = checkBalanceResult.rows[0].balance || 0;
+        if (currentBalance < cost) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `余额不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币` 
+            });
+        }
+
+        console.log(`💰 预扣检查通过: 用户 ${username} 余额 ${currentBalance} 电币，兑换成本 ${cost} 电币`);
 
         // 获取用户的B站房间号
         const userRoomResult = await pool.query(`
@@ -1731,12 +1731,12 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         const bilibiliRoomId = userRoomResult.rows[0]?.bilibili_room_id;
         
 
-        // 记录兑换记录，包含房间号、delivery状态和数量
+        // 🛡️ 预扣机制：创建pending任务，暂不扣除余额
         const insertResult = await pool.query(`
             INSERT INTO gift_exchanges (
                 username, gift_type, gift_name, cost, quantity, status, created_at,
                 bilibili_room_id, delivery_status
-            ) VALUES ($1, $2, $3, $4, $5, 'completed', NOW(), $6, $7)
+            ) VALUES ($1, $2, $3, $4, $5, 'pending_payment', NOW(), $6, $7)
             RETURNING id
         `, [username, giftType, availableGifts[giftType].name, cost, quantity, bilibiliRoomId, 
             bilibiliRoomId ? 'pending' : 'no_room']);
@@ -2865,9 +2865,66 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         
+        // 🛡️ 预扣机制：获取任务信息并执行部分成功的扣费
+        const { actualQuantity, requestedQuantity, partialSuccess } = req.body;
+        
+        const taskResult = await pool.query(`
+            SELECT username, gift_name, cost, status, quantity
+            FROM gift_exchanges 
+            WHERE id = $1
+        `, [taskId]);
+
+        if (taskResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: '任务不存在' });
+        }
+
+        const { username, gift_name, cost, status, quantity } = taskResult.rows[0];
+
+        // 只有pending_payment状态的任务才需要扣费
+        if (status === 'pending_payment') {
+            // 🛡️ 计算实际应扣费用（基于实际发送数量）
+            const unitCost = cost / quantity; // 单个礼物的成本
+            const actualCost = Math.round(unitCost * (actualQuantity || quantity));
+            
+            if (partialSuccess) {
+                console.log(`⚠️ 任务 ${taskId} 部分成功: 原计划 ${quantity} 个，实际成功 ${actualQuantity} 个`);
+                console.log(`💰 按比例扣费: 原成本 ${cost} 电池，实际扣费 ${actualCost} 电池`);
+            }
+            
+            // 执行真实扣费
+            const balanceResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: -actualCost,
+                operationType: partialSuccess ? 'gift_delivery_partial' : 'gift_delivery_success',
+                description: `礼物发送${partialSuccess ? '部分' : ''}成功扣费: ${gift_name} ${actualQuantity || quantity}/${quantity}`,
+                gameData: { 
+                    taskId, 
+                    gift_name, 
+                    originalCost: cost,
+                    actualCost: actualCost,
+                    requestedQuantity: quantity,
+                    actualQuantity: actualQuantity || quantity,
+                    partialSuccess: partialSuccess || false
+                },
+                requireSufficientBalance: true
+            });
+
+            if (!balanceResult.success) {
+                console.error(`💰 任务 ${taskId} 扣费失败: ${balanceResult.message}`);
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `扣费失败: ${balanceResult.message}` 
+                });
+            }
+
+            console.log(`💰 任务 ${taskId} 成功扣费 ${actualCost} 电池: ${username} 的 ${gift_name}`);
+        }
+
+        // 标记任务完成
         const result = await pool.query(`
             UPDATE gift_exchanges 
             SET delivery_status = 'delivered',
+                status = 'completed',
                 processed_at = NOW()
             WHERE id = $1
             RETURNING username, gift_name
@@ -2925,16 +2982,20 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
         const taskId = parseInt(req.params.id);
         const errorMessage = req.body.error || '礼物发送失败';
         
+        // 🛡️ 预扣机制：任务失败时不扣费，直接标记为失败
         const result = await pool.query(`
             UPDATE gift_exchanges 
             SET delivery_status = 'failed',
+                status = 'failed',
                 processed_at = NOW()
             WHERE id = $1
-            RETURNING username, gift_name
+            RETURNING username, gift_name, cost
         `, [taskId]);
 
         if (result.rows.length > 0) {
-            console.log(`❌ Windows服务任务失败 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name} - ${errorMessage}`);
+            const { username, gift_name, cost } = result.rows[0];
+            console.log(`❌ Windows服务任务失败 ${taskId}: ${username} 的 ${gift_name} - ${errorMessage}`);
+            console.log(`💰 预扣机制: 任务失败，不扣除 ${cost} 电币`);
             res.json({ success: true, message: '任务标记为失败' });
         } else {
             res.status(404).json({ success: false, message: '任务不存在' });

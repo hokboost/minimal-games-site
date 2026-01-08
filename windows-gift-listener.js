@@ -90,22 +90,27 @@ class WindowsGiftListener {
         console.log(`🎁 开始处理任务 ${task.id}: ${task.username} 兑换 ${task.giftName} 到房间 ${task.roomId}`);
 
         try {
-            // 先标记任务为处理中，防止重复处理
-            const startResult = await this.markTaskStart(task.id);
-            if (!startResult) {
-                console.log(`⚠️ 任务 ${task.id} 已被其他进程处理，跳过`);
-                return;
-            }
+            // 🛡️ 安全修复：任务已在获取时通过原子操作标记为processing，无需再次标记
+            console.log(`🔄 任务 ${task.id} 已通过原子操作获取，开始执行...`);
             
             // 调用Python脚本，传递数量参数
             const quantity = task.quantity || 1;
             const result = await this.callPythonScript(task.giftId, task.roomId, quantity);
             
             if (result.success) {
-                // 任务成功，通知服务器
-                const markResult = await this.markTaskComplete(task.id);
+                // 🛡️ 部分成功处理：传递实际发送数量
+                const markResult = await this.markTaskComplete(task.id, {
+                    actualQuantity: result.actual_quantity,
+                    requestedQuantity: result.requested_quantity,
+                    partialSuccess: result.partial_success
+                });
+                
                 if (markResult) {
-                    console.log(`✅ 任务 ${task.id} 完成: ${task.giftName} 已发送到房间 ${task.roomId}`);
+                    if (result.partial_success) {
+                        console.log(`⚠️ 任务 ${task.id} 部分完成: ${task.giftName} ${result.actual_quantity}/${result.requested_quantity} 已发送到房间 ${task.roomId}`);
+                    } else {
+                        console.log(`✅ 任务 ${task.id} 完成: ${task.giftName} ${result.actual_quantity}/${result.requested_quantity} 已发送到房间 ${task.roomId}`);
+                    }
                 } else {
                     console.log(`❌ 任务 ${task.id} 处理成功但标记失败，将在下次轮询重试`);
                 }
@@ -154,40 +159,32 @@ class WindowsGiftListener {
             });
 
             pythonProcess.on('close', (code) => {
-                if (code === 0) {
-                    // 尝试解析JSON输出
-                    try {
-                        const lines = output.trim().split('\\n');
-                        for (const line of lines.reverse()) {
-                            if (line.trim().startsWith('{')) {
-                                const result = JSON.parse(line.trim());
-                                resolve(result);
-                                return;
-                            }
+                // 🛡️ 修复：不管exit code，始终解析JSON结果
+                try {
+                    const lines = output.trim().split('\\n');
+                    for (const line of lines.reverse()) {
+                        if (line.trim().startsWith('{')) {
+                            const result = JSON.parse(line.trim());
+                            console.log(`📋 解析Python结果: success=${result.success}, error=${result.error || 'N/A'}`);
+                            resolve(result);
+                            return;
                         }
-                        
-                        // 没有找到JSON输出，但退出码为0，认为成功
-                        resolve({
-                            success: true,
-                            giftId: giftId,
-                            roomId: roomId,
-                            message: 'Python脚本执行成功'
-                        });
-                        
-                    } catch (parseError) {
-                        resolve({
-                            success: true,
-                            giftId: giftId,
-                            roomId: roomId,
-                            message: 'Python脚本执行成功（输出解析失败）'
-                        });
                     }
-                } else {
+                    
+                    // 没有找到JSON输出，这是异常情况
                     resolve({
                         success: false,
                         giftId: giftId,
                         roomId: roomId,
-                        error: `Python脚本执行失败，退出码: ${code}，错误: ${errorOutput || '未知错误'}`
+                        error: `Python脚本未返回有效JSON结果 (exit code: ${code})`
+                    });
+                    
+                } catch (parseError) {
+                    resolve({
+                        success: false,
+                        giftId: giftId,
+                        roomId: roomId,
+                        error: `Python脚本输出解析失败: ${parseError.message}`
                     });
                 }
             });
@@ -252,9 +249,13 @@ class WindowsGiftListener {
     }
 
     // 标记任务完成
-    async markTaskComplete(taskId) {
+    async markTaskComplete(taskId, resultData = {}) {
         try {
-            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/complete`, {}, {
+            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/complete`, {
+                actualQuantity: resultData.actualQuantity,
+                requestedQuantity: resultData.requestedQuantity,
+                partialSuccess: resultData.partialSuccess
+            }, {
                 timeout: 5000,
                 headers: {
                     'X-API-Key': this.apiKey,

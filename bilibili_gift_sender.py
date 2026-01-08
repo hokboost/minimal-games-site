@@ -288,10 +288,21 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             
             print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
             
-            # 如果需要发送多个，瞬间连续点击（无延时）
+            # 如果需要发送多个，逐个点击并检测余额
+            successful_sends = 1  # 第一次点击已完成
             if quantity > 1:
                 for i in range(quantity - 1):  # 已经点击了一次，所以减1
-                    page.evaluate(f'''
+                    # 每次点击前短暂等待，允许页面状态更新
+                    time.sleep(0.5)
+                    
+                    # 检查当前余额是否还够
+                    current_balance = get_current_balance(page)
+                    if current_balance is not None and current_balance < 1:
+                        safe_print(f"⚠️ 第{i+2}个礼物发送前检测到余额不足: {current_balance} B币")
+                        break
+                    
+                    # 执行点击
+                    click_result = page.evaluate(f'''
                         () => {{
                             const giftId = "{gift_id}";
                             const selector = '.gift-id-' + giftId;
@@ -299,26 +310,52 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                             if (el) {{
                                 const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
                                 el.dispatchEvent(evt);
+                                return true;
                             }}
+                            return false;
                         }}
                     ''')
-                print(f"Instantly completed {quantity} gift clicks")
+                    
+                    if click_result:
+                        successful_sends += 1
+                        safe_print(f"✅ 第{i+2}个礼物点击成功")
+                    else:
+                        safe_print(f"❌ 第{i+2}个礼物点击失败")
+                        break
+                    
+                    # 快速检查是否出现余额不足提示
+                    time.sleep(0.2)
+                    if check_balance_insufficient(page):
+                        safe_print(f"⚠️ 第{i+2}个礼物发送后检测到余额不足")
+                        successful_sends -= 1  # 当前这次失败了
+                        break
+                        
+                safe_print(f"🎯 完成 {successful_sends}/{quantity} 个礼物发送")
             
             # 使用threeserver的完整验证逻辑
             print("Checking gift send result using threeserver validation logic...")
             result = check_gift_send_result(page, gift_id, max_wait=3)
             
             # 根据验证结果返回适当的响应
-            if result["success"]:
+            # 🛡️ 部分成功处理：考虑实际发送数量
+            if result["success"] or successful_sends > 0:
                 verified = "message" in result and result.get("reason") != "assumed_success"
-                safe_print(f"✅ Gift sending successful - Verified: {verified}")
+                is_partial = successful_sends < quantity
+                
+                if is_partial:
+                    safe_print(f"⚠️ 部分成功: {successful_sends}/{quantity} 个礼物发送成功")
+                else:
+                    safe_print(f"✅ 全部成功: {successful_sends}/{quantity} 个礼物发送成功")
+                
                 return {
                     "success": True, 
                     "gift_id": gift_id, 
                     "room_id": room_id, 
-                    "quantity": quantity,
+                    "requested_quantity": quantity,
+                    "actual_quantity": successful_sends,
                     "verified": verified,
-                    "message": result.get("message", "送礼成功")
+                    "message": result.get("message", "送礼成功"),
+                    "partial_success": is_partial
                 }
             else:
                 error_msg = result.get("message", result.get("reason", "未知错误"))
@@ -331,7 +368,9 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                     "balance_insufficient": balance_insufficient,
                     "gift_id": gift_id, 
                     "room_id": room_id,
-                    "quantity": quantity
+                    "requested_quantity": quantity,
+                    "actual_quantity": 0,
+                    "partial_success": False
                 }
                 
         except Exception as e:
