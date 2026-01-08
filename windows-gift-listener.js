@@ -1,0 +1,220 @@
+#!/usr/bin/env node
+
+/**
+ * Windows B站礼物发送监听服务
+ * 轮询Render服务器，获取待处理的礼物发送任务，调用Python Playwright脚本处理
+ */
+
+const { spawn } = require('child_process');
+const axios = require('axios');
+
+class WindowsGiftListener {
+    constructor() {
+        // 配置服务器URL（根据实际部署地址修改）
+        this.serverUrl = 'https://minimal-games-site.onrender.com';  // 或者你的实际Render URL
+        this.apiKey = 'bilibili-gift-service-secret-key-2024-secure'; // API密钥
+        this.pollInterval = 2000; // 2秒轮询一次
+        this.isProcessing = false;
+        this.pythonScript = 'C:/Users/user/minimal-games-site/bilibili_gift_sender.py';
+        this.pythonPath = 'python'; // 直接用python命令
+    }
+
+    // 启动监听服务
+    start() {
+        console.log('🚀 Windows B站礼物发送监听服务已启动');
+        console.log(`📡 监听服务器: ${this.serverUrl}`);
+        console.log(`⏰ 轮询间隔: ${this.pollInterval}ms`);
+        console.log(`🐍 Python路径: ${this.pythonPath}`);
+        console.log(`📜 脚本路径: ${this.pythonScript}`);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
+        this.pollForTasks();
+        
+        // 设置定时轮询
+        setInterval(() => {
+            this.pollForTasks();
+        }, this.pollInterval);
+    }
+
+    // 轮询服务器获取任务
+    async pollForTasks() {
+        if (this.isProcessing) {
+            return; // 如果正在处理任务，跳过这次轮询
+        }
+
+        try {
+            const response = await axios.get(`${this.serverUrl}/api/gift-tasks`, {
+                timeout: 10000,
+                headers: {
+                    'X-API-Key': this.apiKey
+                }
+            });
+
+            if (response.data.success && response.data.tasks.length > 0) {
+                console.log(`📦 获取到 ${response.data.tasks.length} 个待处理任务`);
+                
+                // 逐个处理任务
+                for (const task of response.data.tasks) {
+                    await this.processTask(task);
+                }
+            }
+
+        } catch (error) {
+            if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+                console.log('🔍 正在等待服务器连接...');
+            } else if (error.response?.status === 404) {
+                console.log('📭 暂无待处理任务');
+            } else {
+                console.error('❌ 轮询任务失败:', error.message);
+            }
+        }
+    }
+
+    // 处理单个任务
+    async processTask(task) {
+        console.log(`🎁 开始处理任务 ${task.id}: ${task.username} 兑换 ${task.giftName} 到房间 ${task.roomId}`);
+        this.isProcessing = true;
+
+        try {
+            // 调用Python脚本
+            const result = await this.callPythonScript(task.giftId, task.roomId);
+            
+            if (result.success) {
+                // 任务成功，通知服务器
+                await this.markTaskComplete(task.id);
+                console.log(`✅ 任务 ${task.id} 完成: ${task.giftName} 已发送到房间 ${task.roomId}`);
+            } else {
+                // 任务失败，通知服务器
+                await this.markTaskFailed(task.id, result.error);
+                console.log(`❌ 任务 ${task.id} 失败: ${result.error}`);
+            }
+
+        } catch (error) {
+            console.error(`💥 处理任务 ${task.id} 时发生异常:`, error.message);
+            await this.markTaskFailed(task.id, error.message);
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    // 调用Python Playwright脚本
+    async callPythonScript(giftId, roomId) {
+        return new Promise((resolve) => {
+            console.log(`🐍 调用Python脚本: ${this.pythonPath} ${this.pythonScript} ${giftId} ${roomId}`);
+            
+            const pythonProcess = spawn(this.pythonPath, [this.pythonScript, giftId, roomId], {
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+
+            let output = '';
+            let errorOutput = '';
+
+            pythonProcess.stdout.on('data', (data) => {
+                output += data.toString();
+                console.log(`🐍 Python输出: ${data.toString().trim()}`);
+            });
+
+            pythonProcess.stderr.on('data', (data) => {
+                errorOutput += data.toString();
+                console.log(`🐍 Python错误: ${data.toString().trim()}`);
+            });
+
+            pythonProcess.on('close', (code) => {
+                if (code === 0) {
+                    // 尝试解析JSON输出
+                    try {
+                        const lines = output.trim().split('\\n');
+                        for (const line of lines.reverse()) {
+                            if (line.trim().startsWith('{')) {
+                                const result = JSON.parse(line.trim());
+                                resolve(result);
+                                return;
+                            }
+                        }
+                        
+                        // 没有找到JSON输出，但退出码为0，认为成功
+                        resolve({
+                            success: true,
+                            giftId: giftId,
+                            roomId: roomId,
+                            message: 'Python脚本执行成功'
+                        });
+                        
+                    } catch (parseError) {
+                        resolve({
+                            success: true,
+                            giftId: giftId,
+                            roomId: roomId,
+                            message: 'Python脚本执行成功（输出解析失败）'
+                        });
+                    }
+                } else {
+                    resolve({
+                        success: false,
+                        giftId: giftId,
+                        roomId: roomId,
+                        error: `Python脚本执行失败，退出码: ${code}，错误: ${errorOutput || '未知错误'}`
+                    });
+                }
+            });
+
+            pythonProcess.on('error', (error) => {
+                resolve({
+                    success: false,
+                    giftId: giftId,
+                    roomId: roomId,
+                    error: `启动Python进程失败: ${error.message}`
+                });
+            });
+        });
+    }
+
+    // 标记任务完成
+    async markTaskComplete(taskId) {
+        try {
+            await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/complete`, {}, {
+                timeout: 5000,
+                headers: {
+                    'X-API-Key': this.apiKey
+                }
+            });
+        } catch (error) {
+            console.error(`❌ 标记任务完成失败 (${taskId}):`, error.message);
+        }
+    }
+
+    // 标记任务失败
+    async markTaskFailed(taskId, errorMessage) {
+        try {
+            await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/fail`, {
+                error: errorMessage
+            }, {
+                timeout: 5000,
+                headers: {
+                    'X-API-Key': this.apiKey
+                }
+            });
+        } catch (error) {
+            console.error(`❌ 标记任务失败失败 (${taskId}):`, error.message);
+        }
+    }
+}
+
+// 启动服务
+console.log('🔥 Windows B站礼物发送监听服务');
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+const listener = new WindowsGiftListener();
+listener.start();
+
+// 优雅关闭
+process.on('SIGINT', () => {
+    console.log('\\n🛑 收到停止信号，正在关闭监听服务...');
+    console.log('✅ 服务已停止');
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    console.log('🛑 收到终止信号，正在关闭监听服务...');
+    process.exit(0);
+});

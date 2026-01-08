@@ -2583,6 +2583,115 @@ app.use((err, req, res, next) => {
     res.status(500).redirect('/');
 });
 
+// ====== Windows监听服务API ======
+
+// API密钥验证中间件
+function requireApiKey(req, res, next) {
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+    const validApiKey = process.env.WINDOWS_API_KEY || 'your-secret-api-key-2024';
+    
+    if (!apiKey || apiKey !== validApiKey) {
+        return res.status(401).json({ 
+            success: false, 
+            message: '无效的API密钥' 
+        });
+    }
+    
+    next();
+}
+
+// 获取待处理的礼物发送任务
+app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT id, gift_id, room_id, username, gift_name, created_at
+            FROM gift_exchanges 
+            WHERE delivery_status = 'pending' AND room_id IS NOT NULL
+            ORDER BY created_at ASC 
+            LIMIT 10
+        `);
+
+        res.json({
+            success: true,
+            tasks: result.rows.map(row => ({
+                id: row.id,
+                giftId: row.gift_id,
+                roomId: row.room_id,
+                username: row.username,
+                giftName: row.gift_name,
+                createdAt: row.created_at
+            }))
+        });
+
+    } catch (error) {
+        console.error('获取任务队列失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
+// 标记任务完成
+app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
+    try {
+        const taskId = parseInt(req.params.id);
+        
+        const result = await pool.query(`
+            UPDATE gift_exchanges 
+            SET delivery_status = 'delivered', 
+                delivered_at = NOW(),
+                delivery_message = '礼物发送成功'
+            WHERE id = $1
+            RETURNING username, gift_name
+        `, [taskId]);
+
+        if (result.rows.length > 0) {
+            console.log(`✅ Windows服务完成任务 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name}`);
+            res.json({ success: true, message: '任务完成' });
+        } else {
+            res.status(404).json({ success: false, message: '任务不存在' });
+        }
+
+    } catch (error) {
+        console.error('标记任务完成失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
+// 标记任务失败
+app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
+    try {
+        const taskId = parseInt(req.params.id);
+        const errorMessage = req.body.error || '礼物发送失败';
+        
+        const result = await pool.query(`
+            UPDATE gift_exchanges 
+            SET delivery_status = 'failed',
+                delivery_message = $1
+            WHERE id = $2
+            RETURNING username, gift_name
+        `, [errorMessage, taskId]);
+
+        if (result.rows.length > 0) {
+            console.log(`❌ Windows服务任务失败 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name} - ${errorMessage}`);
+            res.json({ success: true, message: '任务标记为失败' });
+        } else {
+            res.status(404).json({ success: false, message: '任务不存在' });
+        }
+
+    } catch (error) {
+        console.error('标记任务失败:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: '服务器错误' 
+        });
+    }
+});
+
 server.listen(PORT, () => {
     console.log(`🎮 游戏服务器运行在端口 ${PORT}`);
     console.log(`📚 题库包含 ${questions.length} 道题目`);
