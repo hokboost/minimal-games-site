@@ -60,9 +60,9 @@ def check_balance_insufficient(page):
         print(f"检测余额状态失败: {e}")
         return False
 
-def send_gift_simple(gift_id, room_id):
+def send_gift_simple(gift_id, room_id, quantity=1):
     """简单的礼物发送函数 - 每次独立运行"""
-    print(f"Starting gift sending - Gift ID: {gift_id}, Room: {room_id}")
+    print(f"Starting gift sending - Gift ID: {gift_id}, Room: {room_id}, Quantity: {quantity}")
     
     with sync_playwright() as p:
         # 启动浏览器（完全按threeserver的配置）
@@ -140,7 +140,24 @@ def send_gift_simple(gift_id, room_id):
                 print(f"Gift {gift_id} not found")
                 return {"success": False, "error": "Gift element not found", "gift_id": gift_id, "room_id": room_id}
             
-            print(f"Gift {gift_id} clicked, waiting for result...")
+            print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
+            
+            # 如果需要发送多个，连续点击
+            if quantity > 1:
+                for i in range(quantity - 1):  # 已经点击了一次，所以减1
+                    time.sleep(0.5)  # 每次点击间隔0.5秒
+                    page.evaluate(f'''
+                        () => {{
+                            const giftId = "{gift_id}";
+                            const selector = '.gift-id-' + giftId;
+                            const el = document.querySelector(selector);
+                            if (el) {{
+                                const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
+                                el.dispatchEvent(evt);
+                            }}
+                        }}
+                    ''')
+                print(f"Completed {quantity} gift clicks")
             
             # 等待3秒让可能的提示出现
             time.sleep(3)
@@ -198,12 +215,13 @@ def send_gift_simple(gift_id, room_id):
         # 注意：浏览器会在with语句结束时自动关闭
 
 if __name__ == "__main__":
-    # 命令行调用: python bilibili_gift_sender.py gift_id room_id
+    # 命令行调用: python bilibili_gift_sender.py gift_id room_id [quantity]
     if len(sys.argv) >= 3:
         gift_id = sys.argv[1]
         room_id = sys.argv[2]
-        result = send_gift_simple(gift_id, room_id)
+        quantity = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+        result = send_gift_simple(gift_id, room_id, quantity)
         print(json.dumps(result, ensure_ascii=False))
     else:
-        print("用法: python bilibili_gift_sender.py gift_id room_id")
-        print("例如: python bilibili_gift_sender.py 31164 3929738")
+        print("用法: python bilibili_gift_sender.py gift_id room_id [quantity]")
+        print("例如: python bilibili_gift_sender.py 31164 3929738 5")

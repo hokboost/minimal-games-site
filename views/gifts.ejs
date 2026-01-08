@@ -176,6 +176,30 @@
         padding: 2rem;
     }
 
+    .quantity-selector {
+        margin: 1rem 0;
+        text-align: center;
+        color: #ccc;
+    }
+
+    .quantity-selector label {
+        font-weight: bold;
+        color: #00c853;
+    }
+
+    .quantity-selector input {
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(0, 200, 83, 0.3);
+        color: white;
+        text-align: center;
+    }
+
+    .quantity-selector input:focus {
+        border-color: #00c853;
+        outline: none;
+        box-shadow: 0 0 10px rgba(0, 200, 83, 0.3);
+    }
+
     @media (max-width: 768px) {
         .container {
             padding: 1rem;
@@ -219,8 +243,13 @@
                     随机获得精美礼品，充满惊喜！<br>
                     适合送给心仪的主播
                 </div>
-                <div class="gift-price">150 电币</div>
-                <button class="gift-button" onclick="exchangeGift('heartbox', 150)">
+                <div class="gift-price">150 电币/个</div>
+                <div class="quantity-selector">
+                    <label>数量:</label>
+                    <input type="number" id="heartbox-quantity" min="1" max="100" value="1" style="width: 80px; padding: 5px; margin: 0 10px; border-radius: 4px; border: 1px solid #ccc;">
+                    <span>总价: <span id="heartbox-total">150</span> 电币</span>
+                </div>
+                <button class="gift-button" onclick="exchangeGiftWithQuantity('heartbox', 150)">
                     立即兑换
                 </button>
             </div>
@@ -233,8 +262,13 @@
                     展示你对主播的支持！<br>
                     成为铁粉的象征
                 </div>
-                <div class="gift-price">1 电币</div>
-                <button class="gift-button" onclick="exchangeGift('fanlight', 1)">
+                <div class="gift-price">1 电币/个</div>
+                <div class="quantity-selector">
+                    <label>数量:</label>
+                    <input type="number" id="fanlight-quantity" min="1" max="100" value="1" style="width: 80px; padding: 5px; margin: 0 10px; border-radius: 4px; border: 1px solid #ccc;">
+                    <span>总价: <span id="fanlight-total">1</span> 电币</span>
+                </div>
+                <button class="gift-button" onclick="exchangeGiftWithQuantity('fanlight', 1)">
                     立即兑换
                 </button>
             </div>
@@ -283,7 +317,66 @@
         });
     <% } %>
 
-    // 礼物兑换功能
+    // 带数量的礼物兑换功能
+    async function exchangeGiftWithQuantity(giftType, unitCost) {
+        const quantity = parseInt(document.getElementById(giftType + '-quantity').value);
+        const totalCost = unitCost * quantity;
+        
+        if (quantity < 1 || quantity > 100) {
+            showMessage('数量必须在1-100之间！', 'error');
+            return;
+        }
+        
+        const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
+        
+        if (currentBalance < totalCost) {
+            showMessage('电币余额不足！', 'error');
+            return;
+        }
+
+        if (!confirm(`确定要花费 ${totalCost} 电币兑换 ${quantity} 个礼物吗？`)) {
+            return;
+        }
+
+        try {
+            showMessage('正在处理兑换...', 'info');
+            
+            const response = await fetch('/api/gifts/exchange', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    giftType: giftType,
+                    cost: totalCost,
+                    quantity: quantity
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                showMessage(`成功兑换 ${quantity} 个礼物！`, 'success');
+                
+                // 更新余额显示
+                document.getElementById('currentBalance').textContent = result.newBalance;
+                
+                // 重置数量为1
+                document.getElementById(giftType + '-quantity').value = 1;
+                updateGiftTotal(giftType, unitCost);
+                
+                // 刷新兑换记录
+                loadExchangeHistory();
+            } else {
+                showMessage(result.message || '兑换失败', 'error');
+            }
+        } catch (error) {
+            console.error('兑换失败:', error);
+            showMessage('网络错误，请稍后重试', 'error');
+        }
+    }
+
+    // 原有的兑换功能（兼容性保留）
     async function exchangeGift(giftType, cost) {
         const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
         
@@ -342,7 +435,7 @@
                     <div class="history-item">
                         <div class="history-gift">
                             <span>${getGiftIcon(item.gift_type)}</span>
-                            <span>${getGiftName(item.gift_type)}</span>
+                            <span>${getGiftName(item.gift_type)} ${item.quantity > 1 ? 'x' + item.quantity : ''}</span>
                             <span style="color: #ff9800;">(-${item.cost} 电币)</span>
                         </div>
                         <div class="history-time">${formatTime(item.created_at)}</div>
@@ -408,9 +501,38 @@
 
     // 房间绑定功能已移至管理后台 (/admin)
 
-    // 页面加载完成后加载兑换记录
+    // 更新礼物总价显示
+    function updateGiftTotal(giftType, unitCost) {
+        const quantityInput = document.getElementById(giftType + '-quantity');
+        const totalSpan = document.getElementById(giftType + '-total');
+        const quantity = parseInt(quantityInput.value) || 1;
+        const total = unitCost * quantity;
+        totalSpan.textContent = total;
+    }
+
+    // 页面加载完成后加载兑换记录并设置事件监听
     document.addEventListener('DOMContentLoaded', function() {
         loadExchangeHistory();
+        
+        // 为数量输入框添加事件监听
+        const heartboxQuantity = document.getElementById('heartbox-quantity');
+        const fanlightQuantity = document.getElementById('fanlight-quantity');
+        
+        heartboxQuantity.addEventListener('input', () => updateGiftTotal('heartbox', 150));
+        heartboxQuantity.addEventListener('change', () => {
+            const value = parseInt(heartboxQuantity.value);
+            if (value < 1) heartboxQuantity.value = 1;
+            if (value > 100) heartboxQuantity.value = 100;
+            updateGiftTotal('heartbox', 150);
+        });
+        
+        fanlightQuantity.addEventListener('input', () => updateGiftTotal('fanlight', 1));
+        fanlightQuantity.addEventListener('change', () => {
+            const value = parseInt(fanlightQuantity.value);
+            if (value < 1) fanlightQuantity.value = 1;
+            if (value > 100) fanlightQuantity.value = 100;
+            updateGiftTotal('fanlight', 1);
+        });
     });
     </script>
 

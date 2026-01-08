@@ -97,8 +97,9 @@ class WindowsGiftListener {
                 return;
             }
             
-            // 调用Python脚本
-            const result = await this.callPythonScript(task.giftId, task.roomId);
+            // 调用Python脚本，传递数量参数
+            const quantity = task.quantity || 1;
+            const result = await this.callPythonScript(task.giftId, task.roomId, quantity);
             
             if (result.success) {
                 // 任务成功，通知服务器
@@ -131,11 +132,11 @@ class WindowsGiftListener {
     }
 
     // 调用Python Playwright脚本
-    async callPythonScript(giftId, roomId) {
+    async callPythonScript(giftId, roomId, quantity = 1) {
         return new Promise((resolve) => {
-            console.log(`🐍 调用Python脚本: ${this.pythonPath} ${this.pythonScript} ${giftId} ${roomId}`);
+            console.log(`🐍 调用Python脚本: ${this.pythonPath} ${this.pythonScript} ${giftId} ${roomId} ${quantity}`);
             
-            const pythonProcess = spawn(this.pythonPath, [this.pythonScript, giftId, roomId], {
+            const pythonProcess = spawn(this.pythonPath, [this.pythonScript, giftId, roomId, quantity], {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 

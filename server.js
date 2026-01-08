@@ -1451,16 +1451,24 @@ app.get('/api/balance/logs', requireLogin, requireAuthorized, async (req, res) =
 // 礼物兑换
 app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
     try {
-        const { giftType, cost } = req.body;
+        const { giftType, cost, quantity = 1 } = req.body;
         const username = req.session.user.username;
         const clientIP = req.clientIP;
         const userAgent = req.userAgent;
 
         // 验证输入参数
-        if (!giftType || !cost) {
+        if (!giftType || !cost || quantity < 1) {
             return res.status(400).json({ 
                 success: false, 
-                message: '参数不完整' 
+                message: '参数不完整或数量无效' 
+            });
+        }
+
+        // 验证数量上限
+        if (quantity > 100) {
+            return res.status(400).json({ 
+                success: false, 
+                message: '单次最多只能兑换100个礼物' 
             });
         }
 
@@ -1488,11 +1496,12 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             });
         }
 
-        // 验证价格
-        if (cost !== availableGifts[giftType].cost) {
+        // 验证价格（考虑数量）
+        const expectedTotalCost = availableGifts[giftType].cost * quantity;
+        if (cost !== expectedTotalCost) {
             return res.status(400).json({ 
                 success: false, 
-                message: '价格不匹配' 
+                message: `价格不匹配，期望价格: ${expectedTotalCost} 电币` 
             });
         }
 
@@ -1501,7 +1510,7 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             username: username,
             amount: -cost, // 负数表示扣除
             operationType: 'gift_exchange',
-            description: `兑换礼物: ${availableGifts[giftType].name}`,
+            description: `兑换礼物: ${availableGifts[giftType].name} x${quantity}`,
             gameData: {
                 giftType: giftType,
                 giftName: availableGifts[giftType].name,
@@ -1526,19 +1535,26 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
 
         const bilibiliRoomId = userRoomResult.rows[0]?.bilibili_room_id;
         
-        // 记录兑换记录，包含房间号和delivery状态
+        // 确保gift_exchanges表有quantity字段
+        try {
+            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
+        } catch (err) {
+            // 忽略字段已存在的错误
+        }
+
+        // 记录兑换记录，包含房间号、delivery状态和数量
         const insertResult = await pool.query(`
             INSERT INTO gift_exchanges (
-                username, gift_type, gift_name, cost, status, created_at,
+                username, gift_type, gift_name, cost, quantity, status, created_at,
                 bilibili_room_id, delivery_status
-            ) VALUES ($1, $2, $3, $4, 'completed', NOW(), $5, $6)
+            ) VALUES ($1, $2, $3, $4, $5, 'completed', NOW(), $6, $7)
             RETURNING id
-        `, [username, giftType, availableGifts[giftType].name, cost, bilibiliRoomId, 
+        `, [username, giftType, availableGifts[giftType].name, cost, quantity, bilibiliRoomId, 
             bilibiliRoomId ? 'pending' : 'no_room']);
 
         const exchangeId = insertResult.rows[0].id;
 
-        console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name}，花费 ${cost} 电币`);
+        console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name} x${quantity}，花费 ${cost} 电币`);
 
         // 礼物将由Windows监听服务处理，无需立即发送
         let deliveryMessage = '';
@@ -1575,7 +1591,7 @@ app.get('/api/gifts/history', requireLogin, requireAuthorized, async (req, res) 
         const offset = (page - 1) * limit;
 
         const result = await pool.query(`
-            SELECT gift_type, gift_name, cost, status, created_at, delivery_status
+            SELECT gift_type, gift_name, cost, quantity, status, created_at, delivery_status
             FROM gift_exchanges 
             WHERE username = $1 
             ORDER BY created_at DESC 
@@ -1744,8 +1760,8 @@ app.post('/api/bilibili/cookies/refresh', requireLogin, requireAdmin, security.b
     try {
         console.log(`🔄 管理员 ${req.session.user.username} 请求刷新B站Cookie`);
         
-        const giftSender = getGiftSender();
-        const refreshResult = await giftSender.refreshCookies();
+        // Cookie现在由Windows监听服务管理
+        const refreshResult = { success: true, message: 'Cookie由Windows监听服务管理' };
         
         if (refreshResult.success) {
             console.log('✅ Cookie刷新成功');
@@ -1775,9 +1791,8 @@ app.get('/api/bilibili/cookies/status', requireLogin, requireAdmin, async (req, 
     try {
         console.log(`🔍 管理员 ${req.session.user.username} 检查Cookie状态`);
         
-        const giftSender = getGiftSender();
-        const cookieManager = giftSender.cookieManager;
-        const checkResult = await cookieManager.checkCookieExpiry();
+        // Cookie现在由Windows监听服务管理
+        const checkResult = { valid: true, message: 'Cookie由Windows监听服务管理' };
         
         res.json({
             success: true,
@@ -2559,7 +2574,7 @@ function requireApiKey(req, res, next) {
 app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT id, gift_type, bilibili_room_id, username, gift_name, created_at
+            SELECT id, gift_type, bilibili_room_id, username, gift_name, quantity, created_at
             FROM gift_exchanges 
             WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
             ORDER BY created_at ASC 
@@ -2578,6 +2593,7 @@ app.get('/api/gift-tasks', requireApiKey, async (req, res) => {
                 roomId: row.bilibili_room_id,
                 username: row.username,
                 giftName: row.gift_name,
+                quantity: row.quantity || 1,
                 createdAt: row.created_at
             }))
         });
@@ -2729,9 +2745,7 @@ process.on('SIGINT', async () => {
     console.log('\n🔄 正在优雅关闭服务器...');
     
     try {
-        // 清理B站送礼浏览器资源
-        const giftSender = getGiftSender();
-        await giftSender.cleanup();
+        // Windows监听服务独立运行，无需清理
         
         // 关闭数据库连接池
         if (pool) {
@@ -2751,8 +2765,7 @@ process.on('SIGTERM', async () => {
     console.log('🔄 收到SIGTERM信号，正在关闭...');
     
     try {
-        const giftSender = getGiftSender();
-        await giftSender.cleanup();
+        // Windows监听服务独立运行，无需清理
         
         if (pool) {
             await pool.end();
