@@ -2749,6 +2749,15 @@ const duelRewards = {
     iron: { name: '铁心奖', reward: 200 }
 };
 
+function calculateDuelCost(giftType, power) {
+    if (giftType === 'crown') {
+        return Math.round(310 * power + 1);
+    }
+    const reward = duelRewards[giftType]?.reward || 0;
+    const ratio = reward / 30000;
+    return Math.round(310 * ratio * power + 1);
+}
+
 function shuffleArray(list) {
     const arr = list.slice();
     for (let i = arr.length - 1; i > 0; i -= 1) {
@@ -3822,7 +3831,7 @@ app.post('/api/duel/play', requireLogin, requireAuthorized, security.basicRateLi
             return res.status(400).json({ success: false, message: '功力范围为1-80' });
         }
 
-        const cost = Math.round(52 * power);
+        const cost = calculateDuelCost(giftType, power);
         const successRate = power / 100;
 
         const balanceResult = await BalanceLogger.updateBalance({
@@ -4948,7 +4957,9 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
         switch (gameType) {
             case 'quiz':
                 query = `
-                    SELECT id, score, submitted_at as played_at
+                    SELECT id,
+                           score,
+                           to_char(submitted_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM submissions 
                     WHERE username = $1 
                     ORDER BY submitted_at DESC 
@@ -4965,7 +4976,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                            won as result,
                            COALESCE(payout_amount, 0) as payout,
                            game_details->>'amounts' as amounts,
-                          created_at as played_at
+                           to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM slot_results 
                     WHERE username = $1 
                     ORDER BY created_at DESC 
@@ -4981,7 +4992,8 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                 query = `
                     SELECT id, reward as result, COALESCE(matches_count, 0) as matches_count, 
                            COALESCE(tier_cost, 5) as tier_cost, 
-                           winning_numbers, slots, created_at as played_at
+                           winning_numbers, slots,
+                           to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM scratch_results 
                     WHERE username = $1 
                     ORDER BY created_at DESC 
@@ -5000,7 +5012,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                            success_count,
                            total_reward_value,
                            gift_name,
-                           created_at as played_at
+                           to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM wish_sessions
                     WHERE username = $1
                     ORDER BY created_at DESC
@@ -5020,7 +5032,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                            slot_index,
                            before_slots,
                            after_slots,
-                           created_at as played_at
+                           to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM stone_logs
                     WHERE username = $1
                     ORDER BY created_at DESC
@@ -5039,7 +5051,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                            good_count,
                            bad_count,
                            ended,
-                           created_at as played_at
+                           to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM flip_logs
                     WHERE username = $1 AND action_type = 'end'
                     ORDER BY created_at DESC
@@ -5058,7 +5070,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                            power,
                            cost,
                            success,
-                           created_at as played_at
+                           to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM duel_logs
                     WHERE username = $1
                     ORDER BY created_at DESC

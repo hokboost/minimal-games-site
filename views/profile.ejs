@@ -920,7 +920,7 @@
         
         // 表内容
         records.forEach(record => {
-            const playedAt = new Date(record.played_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+            const playedAt = record.played_at || '';
             
             if (gameType === 'quiz') {
                 tableHTML += `

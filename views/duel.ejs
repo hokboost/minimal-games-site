@@ -224,7 +224,7 @@
                     <input type="number" id="powerInput" min="1" max="80" value="20">
                 </div>
                 <div class="summary-box">
-                    成功率：<strong id="successRate">20%</strong><br>
+                    功力：<strong id="powerValue">20%</strong><br>
                     消耗电币：<strong id="costValue">1040</strong>
                 </div>
                 <div class="action-row">
@@ -240,7 +240,6 @@
         const rewardList = document.getElementById('rewardList');
         const powerRange = document.getElementById('powerRange');
         const powerInput = document.getElementById('powerInput');
-        const successRateEl = document.getElementById('successRate');
         const costValueEl = document.getElementById('costValue');
         const duelBtn = document.getElementById('duelBtn');
         const resultBox = document.getElementById('resultBox');
@@ -266,6 +265,7 @@
                 item.addEventListener('click', () => {
                     activeReward = reward;
                     renderRewards();
+                    updatePower(powerInput.value);
                 });
                 rewardList.appendChild(item);
             });
@@ -275,8 +275,16 @@
             const power = Math.min(80, Math.max(1, Number(value)));
             powerRange.value = power;
             powerInput.value = power;
-            successRateEl.textContent = `${power}%`;
-            costValueEl.textContent = Math.round(52 * power);
+            document.getElementById('powerValue').textContent = `${power}%`;
+            costValueEl.textContent = calculateCost(power);
+        }
+
+        function calculateCost(power) {
+            if (activeReward.key === 'crown') {
+                return Math.round(310 * power + 1);
+            }
+            const ratio = activeReward.reward / 30000;
+            return Math.round(310 * ratio * power + 1);
         }
 
         powerRange.addEventListener('input', (event) => updatePower(event.target.value));
