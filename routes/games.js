@@ -745,7 +745,9 @@ module.exports = function registerGameRoutes(app, deps) {
                     .digest('hex');
 
                 await pool.query(
-                    'INSERT INTO scratch_results (username, reward, matches_count, tier_cost, winning_numbers, slots, proof) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                    `INSERT INTO scratch_results (
+                        username, reward, matches_count, tier_cost, winning_numbers, slots, proof, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
                     [username, payout, matchedCount, tier, JSON.stringify(winningNumbers), JSON.stringify(userSlots), proof]
                 );
             } catch (dbError) {

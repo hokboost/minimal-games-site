@@ -1369,16 +1369,16 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false 
         );
 
         const bilibiliRoomId = userResult.rows.length > 0 ? userResult.rows[0].bilibili_room_id : null;
-        if (!bilibiliRoomId) {
-            if (isAuto) {
-                await client.query(`
-                    UPDATE wish_inventory
-                    SET status = 'stored',
-                        expires_at = NULL,
-                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-                    WHERE id = $1
-                `, [inventoryId]);
-                await client.query('COMMIT');
+            if (!bilibiliRoomId) {
+                if (isAuto) {
+                    await client.query(`
+                        UPDATE wish_inventory
+                        SET status = 'stored',
+                            expires_at = 'infinity'::timestamptz,
+                            updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                        WHERE id = $1
+                    `, [inventoryId]);
+                    await client.query('COMMIT');
                 return { success: false, message: '未绑定房间号，暂不送出' };
             }
 
@@ -1442,7 +1442,7 @@ async function autoSendExpiredWishRewards() {
             if (!row.bilibili_room_id) {
                 await pool.query(`
                     UPDATE wish_inventory
-                    SET expires_at = NULL,
+                    SET expires_at = 'infinity'::timestamptz,
                         updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                     WHERE id = $1
                 `, [row.id]);
@@ -1469,7 +1469,7 @@ async function autoSendWishInventoryOnBind(username) {
             FROM wish_inventory
             WHERE username = $1
               AND status = 'stored'
-              AND expires_at IS NULL
+              AND (expires_at IS NULL OR expires_at = 'infinity'::timestamptz)
             ORDER BY created_at ASC
             LIMIT 50
         `, [username]);

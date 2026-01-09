@@ -102,7 +102,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
             // 判断是否成功
             const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
-        const randomSuccess = randomFloat() < successRate;
+            const randomSuccess = randomFloat() < successRate;
             const success = isGuaranteed || randomSuccess;
 
             let reward = null;
@@ -120,7 +120,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     const roomId = roomResult.rows[0]?.bilibili_room_id || null;
                     const expiresAt = roomId
                         ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
-                        : 'NULL';
+                        : "'infinity'::timestamptz";
 
                     await pool.query(`
                         INSERT INTO wish_inventory (
@@ -350,7 +350,7 @@ module.exports = function registerWishRoutes(app, deps) {
                        gift_name,
                        status,
                        gift_exchange_id,
-                       CASE WHEN expires_at IS NULL THEN NULL
+                       CASE WHEN expires_at IS NULL OR expires_at = 'infinity'::timestamptz THEN NULL
                             ELSE to_char(expires_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS')
                        END as expires_at,
                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at
@@ -500,7 +500,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
                 // 判断是否成功
                 const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
-            const randomSuccess = randomFloat() < successRate;
+                const randomSuccess = randomFloat() < successRate;
                 const success = isGuaranteed || randomSuccess;
 
                 let reward = null;
@@ -516,7 +516,7 @@ module.exports = function registerWishRoutes(app, deps) {
                         const roomId = roomResult.rows[0]?.bilibili_room_id || null;
                         const expiresAt = roomId
                             ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
-                            : 'NULL';
+                            : "'infinity'::timestamptz";
 
                         await pool.query(`
                             INSERT INTO wish_inventory (
