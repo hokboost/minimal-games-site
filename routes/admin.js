@@ -1,0 +1,978 @@
+module.exports = function registerAdminRoutes(app, deps) {
+    const {
+        pool,
+        bcrypt,
+        BalanceLogger,
+        generateCSRFToken,
+        requireLogin,
+        requireAdmin,
+        requireAuthorized,
+        requireCSRF,
+        security,
+        autoSendWishInventoryOnBind,
+        IPManager,
+        SessionManager,
+        notifySecurityEvent,
+        path
+    } = deps;
+
+    // 管理员后台
+    app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
+        try {
+            // 初始化session
+            if (!req.session.initialized) {
+                req.session.initialized = true;
+                req.session.createdAt = Date.now();
+                generateCSRFToken(req); // 统一使用csrf库
+            }
+
+            const usersResult = await pool.query(
+                'SELECT username, balance, spins_allowed, authorized, is_admin, login_failures, last_failure_time, locked_until FROM users ORDER BY username'
+            );
+
+            const users = usersResult.rows.map(user => ({
+                ...user,
+                is_locked: user.locked_until && new Date(user.locked_until) > new Date(),
+                lock_minutes: user.locked_until ? Math.ceil((new Date(user.locked_until) - new Date()) / 60000) : 0
+            }));
+
+            res.render('admin', {
+                title: '管理后台 - Minimal Games',
+                user: req.session.user,
+                userLoggedIn: req.session.user?.username,
+                users: users,
+                csrfToken: req.session.csrfToken
+            });
+        } catch (err) {
+            console.error('❌ 管理员页面加载失败:', err);
+            res.status(500).send('后台加载失败');
+        }
+    });
+
+    // 添加电币
+    app.post('/api/admin/add-electric-coin', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username, amount } = req.body;
+
+            if (!username || !amount || amount <= 0) {
+                return res.status(400).json({ success: false, message: '参数错误：用户名和电币数量必须有效' });
+            }
+
+            if (amount > 100000) {
+                return res.status(400).json({ success: false, message: '单次添加不能超过100,000电币' });
+            }
+
+            // 使用余额日志系统进行管理员充值
+            const balanceResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: parseFloat(amount),
+                operationType: 'admin_add',
+                description: `管理员充值：添加 ${amount} 电币`,
+                gameData: {
+                    admin_user: req.session.user.username,
+                    amount: amount,
+                    type: 'manual_recharge'
+                },
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                requireSufficientBalance: false
+            });
+
+            if (!balanceResult.success) {
+                return res.status(400).json({ success: false, message: balanceResult.message });
+            }
+
+            res.json({
+                success: true,
+                newBalance: balanceResult.balance,
+                addedAmount: parseFloat(amount)
+            });
+        } catch (error) {
+            console.error('添加电币失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 授权用户
+    app.post('/api/admin/authorize-user', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username } = req.body;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '缺少用户名' });
+            }
+
+            await pool.query(
+                'UPDATE users SET authorized = true WHERE username = $1',
+                [username]
+            );
+
+            res.json({ success: true, message: '授权成功' });
+        } catch (error) {
+            console.error('授权失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 取消授权
+    app.post('/api/admin/unauthorize-user', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username } = req.body;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '缺少用户名' });
+            }
+
+            await pool.query(
+                'UPDATE users SET authorized = false WHERE username = $1',
+                [username]
+            );
+
+            res.json({ success: true, message: '取消授权成功' });
+        } catch (error) {
+            console.error('取消授权失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 重置密码
+    app.post('/api/admin/reset-password', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username, newPassword = '123456' } = req.body;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '缺少用户名' });
+            }
+
+            const hashedPassword = await bcrypt.hash(newPassword, 12);
+            await pool.query(
+                'UPDATE users SET password_hash = $1 WHERE username = $2',
+                [hashedPassword, username]
+            );
+
+            res.json({ success: true, message: '密码重置成功' });
+        } catch (error) {
+            console.error('重置密码失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 修改用户余额 - 添加CSRF保护
+    app.post('/api/admin/update-balance', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username, balance } = req.body;
+            const adminUsername = req.session.user.username;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '缺少用户名' });
+            }
+
+            if (balance === undefined || balance < 0) {
+                return res.status(400).json({ success: false, message: '无效的余额数值' });
+            }
+
+            // 获取当前余额
+            const currentBalanceResult = await pool.query(
+                'SELECT balance FROM users WHERE username = $1',
+                [username]
+            );
+
+            if (currentBalanceResult.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
+
+            const currentBalance = currentBalanceResult.rows[0].balance;
+            const delta = balance - currentBalance;
+
+            // 使用BalanceLogger进行安全的余额修改（带审计和原子锁）
+            const balanceResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: delta,
+                operationType: 'admin_balance_adjustment',
+                description: `管理员 ${adminUsername} 将余额从 ${currentBalance} 调整为 ${balance}`,
+                gameData: {
+                    admin_username: adminUsername,
+                    old_balance: currentBalance,
+                    new_balance: balance,
+                    delta: delta
+                },
+                ipAddress: req.clientIP,
+                userAgent: req.userAgent,
+                requireSufficientBalance: false // 管理员操作允许负余额调整
+            });
+
+            if (!balanceResult.success) {
+                return res.status(500).json({
+                    success: false,
+                    message: `余额修改失败: ${balanceResult.message}`
+                });
+            }
+
+            res.json({
+                success: true,
+                message: '余额修改成功',
+                newBalance: balance,
+                oldBalance: currentBalance
+            });
+        } catch (error) {
+            console.error('修改余额失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 删除账户
+    app.post('/api/admin/delete-account', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username } = req.body;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '缺少用户名' });
+            }
+
+            // 防止删除管理员账户
+            const userResult = await pool.query(
+                'SELECT is_admin FROM users WHERE username = $1',
+                [username]
+            );
+
+            if (userResult.rows[0]?.is_admin) {
+                return res.status(403).json({ success: false, message: '不能删除管理员账户' });
+            }
+
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+
+                const sessionResult = await client.query(
+                    'SELECT session_id FROM active_sessions WHERE username = $1',
+                    [username]
+                );
+                const sessionIds = sessionResult.rows.map(row => row.session_id);
+                if (sessionIds.length > 0) {
+                    await client.query(
+                        'DELETE FROM user_sessions WHERE sid = ANY($1)',
+                        [sessionIds]
+                    );
+                }
+
+                await client.query('DELETE FROM active_sessions WHERE username = $1', [username]);
+                await client.query('DELETE FROM ip_activities WHERE username = $1', [username]);
+                await client.query('DELETE FROM login_logs WHERE username = $1', [username]);
+                await client.query('DELETE FROM security_events WHERE username = $1', [username]);
+                await client.query('DELETE FROM balance_logs WHERE username = $1', [username]);
+                await client.query('DELETE FROM gift_exchanges WHERE username = $1', [username]);
+
+                await client.query(
+                    'DELETE FROM submission_details WHERE submission_id IN (SELECT id FROM submissions WHERE username = $1)',
+                    [username]
+                );
+                await client.query('DELETE FROM submissions WHERE username = $1', [username]);
+                await client.query('DELETE FROM slot_results WHERE username = $1', [username]);
+                await client.query('DELETE FROM scratch_results WHERE username = $1', [username]);
+
+                await client.query('DELETE FROM wish_results WHERE username = $1', [username]);
+                await client.query('DELETE FROM wish_sessions WHERE username = $1', [username]);
+                await client.query('DELETE FROM wish_progress WHERE username = $1', [username]);
+                await client.query('DELETE FROM wish_inventory WHERE username = $1', [username]);
+
+                await client.query('DELETE FROM stone_logs WHERE username = $1', [username]);
+                await client.query('DELETE FROM stone_states WHERE username = $1', [username]);
+                await client.query('DELETE FROM flip_logs WHERE username = $1', [username]);
+                await client.query('DELETE FROM flip_states WHERE username = $1', [username]);
+                await client.query('DELETE FROM duel_logs WHERE username = $1', [username]);
+
+                await client.query('DELETE FROM users WHERE username = $1', [username]);
+                await client.query('COMMIT');
+            } catch (error) {
+                await client.query('ROLLBACK');
+                throw error;
+            } finally {
+                client.release();
+            }
+
+            res.json({ success: true, message: '账户删除成功' });
+        } catch (error) {
+            console.error('删除账户失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 解锁账户
+    app.post('/api/admin/unlock-account', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username } = req.body;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '缺少用户名' });
+            }
+
+            await pool.query(
+                'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
+                [username]
+            );
+
+            res.json({ success: true, message: '账户解锁成功' });
+        } catch (error) {
+            console.error('解锁账户失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 清除失败记录
+    app.post('/api/admin/clear-failures', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username } = req.body;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '缺少用户名' });
+            }
+
+            await pool.query(
+                'UPDATE users SET login_failures = 0, last_failure_time = NULL WHERE username = $1',
+                [username]
+            );
+
+            res.json({ success: true, message: '失败记录清除成功' });
+        } catch (error) {
+            console.error('清除失败记录失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 管理员修改自己密码
+    app.post('/api/admin/change-self-password', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { oldPassword, newPassword } = req.body;
+            const username = req.session.user.username;
+
+            if (!oldPassword || !newPassword) {
+                return res.status(400).json({ success: false, message: '缺少必要参数' });
+            }
+
+            if (newPassword.length < 6) {
+                return res.status(400).json({ success: false, message: '新密码长度至少需要6位' });
+            }
+
+            // 验证当前密码
+            const userResult = await pool.query('SELECT password FROM users WHERE username = $1', [username]);
+
+            if (userResult.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
+
+            const isOldPasswordValid = await bcrypt.compare(oldPassword, userResult.rows[0].password);
+
+            if (!isOldPasswordValid) {
+                return res.status(400).json({ success: false, message: '当前密码错误' });
+            }
+
+            // 加密新密码
+            const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+
+            // 更新密码
+            await pool.query(
+                'UPDATE users SET password = $1 WHERE username = $2',
+                [hashedNewPassword, username]
+            );
+
+            res.json({ success: true, message: '密码修改成功' });
+        } catch (error) {
+            console.error('修改密码失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 获取房间号绑定状态 (管理员可查看所有用户，普通用户只能查看自己)
+    app.get('/api/bilibili/room', requireLogin, requireAuthorized, async (req, res) => {
+        try {
+            const username = req.session.user.username;
+            const isAdmin = req.session.user.is_admin;
+            const targetUsername = req.query.username; // 管理员可通过查询参数指定用户
+
+            // 普通用户只能查看自己的信息
+            const usernameToQuery = (isAdmin && targetUsername) ? targetUsername : username;
+
+            // 如果是管理员且未指定用户，返回所有用户的房间绑定信息
+            if (isAdmin && !targetUsername) {
+                const result = await pool.query(`
+                    SELECT username, bilibili_room_id, created_at as bind_time
+                    FROM users 
+                    WHERE bilibili_room_id IS NOT NULL
+                    ORDER BY username
+                `);
+
+                return res.json({
+                    success: true,
+                    isAdminView: true,
+                    allBindings: result.rows.map(row => ({
+                        username: row.username,
+                        roomId: row.bilibili_room_id,
+                        bindTime: row.bind_time
+                    }))
+                });
+            }
+
+            const result = await pool.query(`
+                SELECT bilibili_room_id, created_at as bind_time
+                FROM users 
+                WHERE username = $1
+            `, [usernameToQuery]);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: '用户不存在'
+                });
+            }
+
+            const roomInfo = result.rows[0];
+
+            res.json({
+                success: true,
+                username: usernameToQuery,
+                roomId: roomInfo.bilibili_room_id || null,
+                bindTime: roomInfo.bind_time,
+                isBound: !!roomInfo.bilibili_room_id,
+                isAdminView: isAdmin && targetUsername
+            });
+
+        } catch (error) {
+            console.error('获取房间号失败:', error);
+            res.status(500).json({
+                success: false,
+                message: '服务器错误'
+            });
+        }
+    });
+
+    // 绑定或更新B站房间号 (仅管理员)
+    app.post('/api/bilibili/room', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+        try {
+            const { roomId, targetUsername } = req.body;
+            const adminUsername = req.session.user.username;
+            const usernameToUpdate = targetUsername || adminUsername; // 允许管理员为其他用户设置房间号
+
+            // 验证房间号格式（数字，6-12位）
+            if (!roomId || !/^\d{6,12}$/.test(roomId.toString())) {
+                return res.status(400).json({
+                    success: false,
+                    message: '房间号格式不正确，应为6-12位数字'
+                });
+            }
+
+            // 如果指定了目标用户，验证用户是否存在
+            if (targetUsername) {
+                const userExistsResult = await pool.query(`
+                    SELECT username FROM users WHERE username = $1
+                `, [targetUsername]);
+
+                if (userExistsResult.rows.length === 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `用户 ${targetUsername} 不存在`
+                    });
+                }
+            }
+
+            // 检查房间号是否已被其他用户绑定
+            const existingResult = await pool.query(`
+                SELECT username FROM users 
+                WHERE bilibili_room_id = $1 AND username != $2
+            `, [roomId, usernameToUpdate]);
+
+            if (existingResult.rows.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `房间号 ${roomId} 已被用户 ${existingResult.rows[0].username} 绑定`
+                });
+            }
+
+            // 更新用户的房间号
+            await pool.query(`
+                UPDATE users 
+                SET bilibili_room_id = $1 
+                WHERE username = $2
+            `, [roomId, usernameToUpdate]);
+
+            autoSendWishInventoryOnBind(usernameToUpdate).catch((error) => {
+                console.error('绑定后自动送出任务失败:', error);
+            });
+
+            console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功绑定B站房间号: ${roomId}`);
+
+            res.json({
+                success: true,
+                message: `成功为用户 ${usernameToUpdate} 绑定B站房间号: ${roomId}`,
+                roomId: roomId,
+                targetUser: usernameToUpdate
+            });
+
+        } catch (error) {
+            console.error('绑定房间号失败:', error);
+            res.status(500).json({
+                success: false,
+                message: '服务器错误'
+            });
+        }
+    });
+
+    // 手动刷新B站Cookie (仅管理员)
+    app.post('/api/bilibili/cookies/refresh', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+        try {
+            console.log(`🔄 管理员 ${req.session.user.username} 请求刷新B站Cookie`);
+
+            // Cookie现在由Windows监听服务管理
+            const refreshResult = { success: true, message: 'Cookie由Windows监听服务管理' };
+
+            if (refreshResult.success) {
+                console.log('✅ Cookie刷新成功');
+                res.json({
+                    success: true,
+                    message: refreshResult.message
+                });
+            } else {
+                console.log('❌ Cookie刷新失败');
+                res.status(500).json({
+                    success: false,
+                    message: refreshResult.error || 'Cookie刷新失败'
+                });
+            }
+
+        } catch (error) {
+            console.error('❌ 刷新Cookie API失败:', error);
+            res.status(500).json({
+                success: false,
+                message: '服务器错误'
+            });
+        }
+    });
+
+    // 检查B站Cookie状态 (仅管理员)
+    app.get('/api/bilibili/cookies/status', requireLogin, requireAdmin, async (req, res) => {
+        try {
+            console.log(`🔍 管理员 ${req.session.user.username} 检查Cookie状态`);
+
+            // Cookie现在由Windows监听服务管理
+            const checkResult = { valid: true, message: 'Cookie由Windows监听服务管理' };
+
+            res.json({
+                success: true,
+                expired: checkResult.expired || false,
+                reason: checkResult.reason || 'Windows监听服务管理',
+                lastCheck: Date.now(),
+                nextCheck: Date.now() + 60000, // 1分钟后
+                checkInterval: 60000 // 1分钟间隔
+            });
+
+        } catch (error) {
+            console.error('❌ 检查Cookie状态失败:', error);
+            res.status(500).json({
+                success: false,
+                message: '服务器错误'
+            });
+        }
+    });
+
+    // 解除房间号绑定 (仅管理员)
+    app.delete('/api/bilibili/room', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+        try {
+            const { targetUsername } = req.body;
+            const adminUsername = req.session.user.username;
+            const usernameToUpdate = targetUsername || adminUsername; // 允许管理员为其他用户解除绑定
+
+            // 如果指定了目标用户，验证用户是否存在
+            if (targetUsername) {
+                const userExistsResult = await pool.query(`
+                    SELECT username FROM users WHERE username = $1
+                `, [targetUsername]);
+
+                if (userExistsResult.rows.length === 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `用户 ${targetUsername} 不存在`
+                    });
+                }
+            }
+
+            await pool.query(`
+                UPDATE users 
+                SET bilibili_room_id = NULL 
+                WHERE username = $1
+            `, [usernameToUpdate]);
+
+            console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功解除B站房间号绑定`);
+
+            res.json({
+                success: true,
+                message: `成功为用户 ${usernameToUpdate} 解除房间号绑定`,
+                targetUser: usernameToUpdate
+            });
+
+        } catch (error) {
+            console.error('解除房间号绑定失败:', error);
+            res.status(500).json({
+                success: false,
+                message: '服务器错误'
+            });
+        }
+    });
+
+    // 管理员查看所有余额记录 API
+    app.get('/api/admin/balance/logs', requireLogin, requireAdmin, async (req, res) => {
+        try {
+            const page = parseInt(req.query.page) || 1;
+            const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+            const offset = (page - 1) * limit;
+            const operationType = req.query.type || null;
+
+            const logs = await BalanceLogger.getAllBalanceLogs(limit, offset, operationType);
+
+            res.json({
+                success: true,
+                logs: logs,
+                page: page,
+                limit: limit,
+                operationType: operationType
+            });
+        } catch (error) {
+            console.error('Admin balance logs error:', error);
+            res.status(500).json({ success: false, message: '获取记录失败' });
+        }
+    });
+
+    // 获取IP风险信息
+    app.get('/api/admin/ip/:ip', requireLogin, requireAdmin, async (req, res) => {
+        try {
+            const ip = req.params.ip;
+            const [riskData, stats] = await Promise.all([
+                IPManager.getIPRiskScore(ip),
+                IPManager.getIPStats(ip)
+            ]);
+
+            res.json({
+                success: true,
+                ip,
+                riskData,
+                stats
+            });
+        } catch (error) {
+            console.error('获取IP信息失败:', error);
+            res.status(500).json({ success: false, message: '获取IP信息失败' });
+        }
+    });
+
+    // 添加IP到黑名单
+    app.post('/api/admin/ip/blacklist', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { ip, reason } = req.body;
+            const adminUser = req.session.user.username;
+
+            if (!ip || !reason) {
+                return res.status(400).json({ success: false, message: 'IP和原因不能为空' });
+            }
+
+            const success = await IPManager.addToBlacklist(ip, reason, adminUser);
+
+            if (success) {
+                console.log(`管理员 ${adminUser} 将IP ${ip} 添加到黑名单: ${reason}`);
+                res.json({ success: true, message: 'IP已添加到黑名单' });
+            } else {
+                res.status(500).json({ success: false, message: '添加黑名单失败' });
+            }
+        } catch (error) {
+            console.error('添加IP黑名单失败:', error);
+            res.status(500).json({ success: false, message: '系统错误' });
+        }
+    });
+
+    // 添加IP到白名单
+    app.post('/api/admin/ip/whitelist', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { ip, reason } = req.body;
+            const adminUser = req.session.user.username;
+
+            if (!ip || !reason) {
+                return res.status(400).json({ success: false, message: 'IP和原因不能为空' });
+            }
+
+            const success = await IPManager.addToWhitelist(ip, reason, adminUser);
+
+            if (success) {
+                console.log(`管理员 ${adminUser} 将IP ${ip} 添加到白名单: ${reason}`);
+                res.json({ success: true, message: 'IP已添加到白名单' });
+            } else {
+                res.status(500).json({ success: false, message: '添加白名单失败' });
+            }
+        } catch (error) {
+            console.error('添加IP白名单失败:', error);
+            res.status(500).json({ success: false, message: '系统错误' });
+        }
+    });
+
+    // 移除IP黑名单
+    app.post('/api/admin/ip/remove-blacklist', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { ip } = req.body;
+            const adminUser = req.session.user.username;
+
+            if (!ip) {
+                return res.status(400).json({ success: false, message: 'IP不能为空' });
+            }
+
+            const success = await IPManager.removeFromBlacklist(ip);
+
+            if (success) {
+                console.log(`管理员 ${adminUser} 将IP ${ip} 从黑名单移除`);
+                res.json({ success: true, message: 'IP已从黑名单移除' });
+            } else {
+                res.status(500).json({ success: false, message: '移除黑名单失败' });
+            }
+        } catch (error) {
+            console.error('移除IP黑名单失败:', error);
+            res.status(500).json({ success: false, message: '系统错误' });
+        }
+    });
+
+    // 强制踢出用户所有会话
+    app.post('/api/admin/force-logout', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const { username } = req.body;
+            const adminUser = req.session.user.username;
+
+            if (!username) {
+                return res.status(400).json({ success: false, message: '用户名不能为空' });
+            }
+
+            // 特别保护hokboost管理员账号
+            if (username === 'hokboost') {
+                console.log(`⚠️ 管理员 ${adminUser} 试图强制注销hokboost - 已拒绝`);
+                return res.status(403).json({
+                    success: false,
+                    message: '不能对hokboost管理员账号执行此操作'
+                });
+            }
+
+            const sessionCount = await SessionManager.forceLogoutUser(username, 'admin_force_logout');
+
+            console.log(`管理员 ${adminUser} 强制注销用户 ${username} 的 ${sessionCount} 个会话`);
+            res.json({
+                success: true,
+                message: `已强制注销用户 ${username} 的 ${sessionCount} 个会话`
+            });
+        } catch (error) {
+            console.error('强制注销失败:', error);
+            res.status(500).json({ success: false, message: '强制注销失败' });
+        }
+    });
+
+    // 获取活跃会话列表
+    app.get('/api/admin/sessions', requireLogin, requireAdmin, async (req, res) => {
+        try {
+            const stats = await SessionManager.getSessionStats();
+
+            const activeSessions = await pool.query(`
+                SELECT username, ip_address, user_agent, created_at, last_activity
+                FROM active_sessions 
+                WHERE is_active = true 
+                ORDER BY last_activity DESC 
+                LIMIT 50
+            `);
+
+            res.json({
+                success: true,
+                stats,
+                sessions: activeSessions.rows
+            });
+        } catch (error) {
+            console.error('获取会话列表失败:', error);
+            res.status(500).json({ success: false, message: '获取会话列表失败' });
+        }
+    });
+
+    // 获取安全事件列表
+    app.get('/api/admin/security-events', requireLogin, requireAdmin, async (req, res) => {
+        try {
+            const events = await pool.query(`
+                SELECT id, event_type, username, ip_address, description, severity, 
+                       handled, handled_by, created_at
+                FROM security_events 
+                ORDER BY created_at DESC 
+                LIMIT 100
+            `);
+
+            res.json({
+                success: true,
+                events: events.rows
+            });
+        } catch (error) {
+            console.error('获取安全事件失败:', error);
+            res.status(500).json({ success: false, message: '获取安全事件失败' });
+        }
+    });
+
+    // WebSocket测试页面
+    app.get('/test-websocket', requireLogin, requireAdmin, (req, res) => {
+        res.sendFile(path.join(__dirname, '../test-websocket.html'));
+    });
+
+    // 管理员工具：重置卡住的礼物任务
+    app.post('/api/admin/reset-stuck-gift-tasks', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+        try {
+            const adminUser = req.session.user.username;
+
+            console.log(`🔧 管理员 ${adminUser} 开始重置卡住的礼物任务`);
+
+            // 查找卡住的任务（资金已锁定但任务pending超过10分钟）
+            const stuckTasks = await pool.query(`
+                SELECT id, username, gift_name, cost, created_at
+                FROM gift_exchanges 
+                WHERE status = 'funds_locked' 
+                  AND delivery_status IN ('pending', 'processing')
+                  AND created_at < NOW() - INTERVAL '10 minutes'
+                ORDER BY created_at
+            `);
+
+            let resetCount = 0;
+            const results = [];
+
+            for (const task of stuckTasks.rows) {
+                const client = await pool.connect();
+                try {
+                    await client.query('BEGIN');
+
+                    // 退还资金
+                    await client.query(
+                        'UPDATE users SET balance = balance + $1 WHERE username = $2',
+                        [task.cost, task.username]
+                    );
+
+                    // 标记任务为失败
+                    await client.query(
+                        'UPDATE gift_exchanges SET status = $1, delivery_status = $2, processed_at = NOW() WHERE id = $3',
+                        ['failed', 'failed', task.id]
+                    );
+
+                    await client.query('COMMIT');
+
+                    console.log(`✅ 重置任务 ${task.id}: 退还 ${task.cost} 电币给 ${task.username}`);
+                    resetCount++;
+                    results.push({
+                        taskId: task.id,
+                        username: task.username,
+                        giftName: task.gift_name,
+                        refundedAmount: task.cost,
+                        createdAt: task.created_at
+                    });
+
+                } catch (error) {
+                    await client.query('ROLLBACK');
+                    console.error(`❌ 重置任务 ${task.id} 失败:`, error.message);
+                    results.push({
+                        taskId: task.id,
+                        username: task.username,
+                        error: error.message
+                    });
+                } finally {
+                    client.release();
+                }
+            }
+
+            console.log(`🔧 管理员 ${adminUser} 重置了 ${resetCount} 个卡住的任务`);
+
+            res.json({
+                success: true,
+                message: `成功重置 ${resetCount} 个卡住的任务`,
+                resetCount,
+                results
+            });
+
+        } catch (error) {
+            console.error('重置卡住任务失败:', error);
+            res.status(500).json({
+                success: false,
+                message: '重置失败: ' + error.message
+            });
+        }
+    });
+
+    // 管理员安全警告测试API (需要管理员权限)
+    app.post('/api/admin/test/security-alert', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, (req, res) => {
+        const { username } = req.body;
+        const adminUsername = req.session.user.username;
+
+        if (!username) {
+            return res.status(400).json({ success: false, message: '缺少用户名参数' });
+        }
+
+        const testEvent = {
+            type: 'device_logout',
+            title: '管理员测试安全提醒',
+            message: `管理员 ${adminUsername} 发起的安全警告测试`,
+            level: 'warning',
+            details: {
+                admin: adminUsername,
+                testMode: true,
+                timestamp: new Date().toISOString()
+            }
+        };
+
+        notifySecurityEvent(username, testEvent);
+        console.log(`🚨 管理员 ${adminUsername} 发送测试安全警告给用户: ${username}`);
+
+        res.json({ success: true, message: `测试安全警告已发送给用户: ${username}` });
+    });
+
+    // 安全监控面板 - 修复后：使用统一的session权限体系
+    app.get('/admin/security', requireLogin, requireAdmin, (req, res) => {
+        // 收集安全统计信息
+        const blacklist = security.getBlacklist();
+        const behaviorStats = [];
+
+        // 获取行为统计（最多显示100个）
+        let count = 0;
+        for (const [ip, behavior] of Object.entries({})) {
+            if (count >= 100) break;
+
+            const userBehavior = security.getUserBehavior(ip);
+            if (userBehavior) {
+                behaviorStats.push({
+                    ip,
+                    totalRequests: userBehavior.totalRequests,
+                    suspicionScore: userBehavior.suspicionScore,
+                    avgInterval: Math.round(userBehavior.patterns?.avgInterval || 0),
+                    minInterval: userBehavior.patterns?.minInterval || 0,
+                    lastSeen: new Date(userBehavior.lastRequestTime).toISOString()
+                });
+            }
+            count++;
+        }
+
+        res.json({
+            timestamp: new Date().toISOString(),
+            security: {
+                blacklistedIPs: blacklist.length,
+                blacklist: blacklist.slice(0, 20), // 只显示前20个
+                activeUsers: behaviorStats.length,
+                suspiciousUsers: behaviorStats.filter(u => u.suspicionScore > 30).length,
+                recentBehavior: behaviorStats
+                    .sort((a, b) => b.suspicionScore - a.suspicionScore)
+                    .slice(0, 20)
+            }
+        });
+    });
+
+    // 安全管理解除封禁
+    app.post('/admin/security/unblock', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, (req, res) => {
+        const { ip } = req.body;
+        const adminUsername = req.session.user.username;
+
+        if (ip) {
+            security.removeFromBlacklist(ip);
+            security.clearUserBehavior(ip);
+            console.log(`🔓 管理员 ${adminUsername} 解除IP封禁: ${ip}`);
+            res.json({ success: true, message: `IP ${ip} has been unblocked` });
+        } else {
+            res.status(400).json({ success: false, message: 'IP address required' });
+        }
+    });
+};

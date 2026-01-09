@@ -151,54 +151,7 @@
     }
     </style>
     
-    <!-- WebSocket连接用于接收踢出通知 -->
     <script src="/socket.io/socket.io.js"></script>
-    <script>
-    // 如果用户已登录，建立WebSocket连接
-    <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
-        const socket = io();
-        const currentUser = '<%= req.session.user.username %>';
-        
-        socket.on('connect', () => {
-            console.log('🔗 登录页WebSocket连接成功');
-            socket.emit('register', currentUser);
-        });
-        
-        socket.on('security-alert', (event) => {
-            console.log('🚨 登录页收到安全警告:', event);
-            
-            if (event.type === 'device_logout') {
-                // 在登录页直接显示被踢出提示
-                const alertDiv = document.createElement('div');
-                alertDiv.style.cssText = `
-                    position: fixed;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    background: rgba(255, 68, 68, 0.95);
-                    color: white;
-                    padding: 2rem;
-                    border-radius: 12px;
-                    font-size: 1.1rem;
-                    font-weight: bold;
-                    z-index: 10000;
-                    text-align: center;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-                `;
-                alertDiv.innerHTML = `
-                    <div>⚠️ 账号安全提醒</div>
-                    <div style="margin-top: 1rem; font-size: 0.9rem;">您的账号已在其他设备登录</div>
-                `;
-                
-                document.body.appendChild(alertDiv);
-                
-                // 3秒后跳转并显示踢出提示
-                setTimeout(() => {
-                    window.location.href = '/login?kicked=true';
-                }, 3000);
-            }
-        });
-    <% } %>
-    </script>
+    <script src="/security-alerts.js"></script>
 </body>
 </html>

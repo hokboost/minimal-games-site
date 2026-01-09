@@ -6,7 +6,7 @@
     <title>幸运老虎机</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
     <div class="container">
         <div class="header">
             <h1>🎰 幸运老虎机</h1>
@@ -272,158 +272,9 @@
     }
     </style>
 
-    <script>
-    const username = "<%= username %>";
-    const r1 = document.getElementById('r1');
-    const r2 = document.getElementById('r2');
-    const r3 = document.getElementById('r3');
-    const btn = document.getElementById('spinBtn');
-    const result = document.getElementById('rewardResult');
-
-    // 根据投注金额生成对应的数字
-    function generateSpinNumbers(betAmount) {
-        const baseNumbers = [50, 100, 150, 200];
-        return baseNumbers.map(num => Math.round(num * betAmount / 100));
-    }
-
-    // 动画逻辑
-    function animateSpin(finalReels, payout, callback) {
-        const betAmount = parseInt(document.getElementById('bet-amount').value) || 10;
-        const spinNumbers = generateSpinNumbers(betAmount);
-        
-        let steps = 38;
-        const interval = setInterval(() => {
-            r1.textContent = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
-            r2.textContent = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
-            r3.textContent = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
-            steps--;
-            if (steps <= 0) {
-                clearInterval(interval);
-                [r1.textContent, r2.textContent, r3.textContent] = finalReels;
-
-                const [a, b, c] = finalReels;
-                // 检查是否三个数字相同（获胜）
-                const isWin = (a === b && b === c);
-                // 检查是否有两个数字相同（差一点）
-                const isClose = !isWin && (a === b || b === c || a === c);
-                
-                if (isWin && payout > 0) {
-                    result.textContent = `🎉 恭喜中奖！获得 ${payout} 电币`;
-                    result.className = 'result-text big';
-                    r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1.4)';
-                    setTimeout(() => {
-                        r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1)';
-                    }, 500);
-                } else if (isClose) {
-                    result.textContent = '😭 差一点点就中了！继续努力';
-                    result.className = 'result-text narrow';
-                } else {
-                    result.textContent = '😅 三个数字不同，未中奖';
-                    result.className = 'result-text narrow';
-                }
-
-                callback();
-            }
-        }, 70);
-    }
-
-    function generateNonce(length = 16) {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    }
-
-    async function playSlot() {
-        // 检查投注金额
-        const betAmount = parseInt(document.getElementById('bet-amount').value);
-        const currentBalance = parseInt(document.getElementById('current-balance').textContent);
-        
-        if (!betAmount || betAmount < 1 || betAmount > 1000) {
-            alert('请输入有效的投注金额 (1-1000电币)');
-            return;
-        }
-        
-        if (currentBalance < betAmount) {
-            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${betAmount} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`);
-            return;
-        }
-        
-        btn.disabled = true;
-        result.textContent = '🎰 游戏中...';
-        result.className = 'result-text';
-        
-        try {
-            // 扣除电币
-            const response = await fetch('/api/slot/play', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': '<%= csrfToken %>'
-                },
-                body: JSON.stringify({ 
-                    username: username,
-                    betAmount: betAmount
-                })
-            });
-            
-            const data = await response.json();
-            if (!data.success) {
-                result.textContent = `❌ 游戏失败：${data.message}`;
-                return;
-            }
-            
-            // 更新余额显示
-            document.getElementById('current-balance').textContent = data.newBalance;
-            
-            // 显示游戏结果
-            const { outcome, multiplier, payout, finalBalance } = data;
-            
-            // 模拟老虎机动画
-            const reels = Array.isArray(data.reels) && data.reels.length === 3
-                ? data.reels.map(value => value.toString())
-                : generateReelsForOutcome(outcome, payout);
-            animateSpin(reels, payout, () => {
-                // 显示详细结果
-                let resultMessage;
-                if (outcome === '不亏不赚') {
-                    resultMessage = `🎯 ${outcome}！投注: ${betAmount} 电币，返还: ${payout} 电币`;
-                } else if (outcome === '归零') {
-                    resultMessage = `💸 ${outcome}！投注: ${betAmount} 电币，损失全部投注`;
-                } else {
-                    resultMessage = `🎉 ${outcome}！投注: ${betAmount} 电币，获得: ${payout} 电币`;
-                }
-                result.textContent = `${resultMessage} | 余额: ${finalBalance} 电币`;
-                
-                // 更新最终余额
-                document.getElementById('current-balance').textContent = finalBalance;
-            });
-            
-        } catch (error) {
-            console.error('Slot play error:', error);
-            result.textContent = '⚠️ 网络错误，请稍后重试';
-        } finally {
-            btn.disabled = false;
-        }
-    }
-    
-    function generateReelsForOutcome(outcome, payout) {
-        const betAmount = parseInt(document.getElementById('bet-amount').value) || 10;
-        const spinNumbers = generateSpinNumbers(betAmount);
-        
-        if (outcome === '不亏不赚' || outcome.includes('×') || outcome.includes('中奖')) {
-            // 显示三个相同数字表示获胜
-            const number = Number.isFinite(payout) ? payout : spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
-            return [number.toString(), number.toString(), number.toString()];
-        } else {
-            // 显示三个不同数字表示失败
-            const shuffled = [...spinNumbers].sort(() => Math.random() - 0.5);
-            return [shuffled[0].toString(), shuffled[1].toString(), shuffled[2].toString()];
-        }
-    }
-
-    btn.addEventListener('click', playSlot);
-    </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/security-alerts.js"></script>
+    <script src="/js/slot.js"></script>
 
 </body>
 </html>

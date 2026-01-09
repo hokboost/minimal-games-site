@@ -211,7 +211,7 @@
     }
     </style>
 </head>
-<body>
+<body data-authorized="<%= user && user.authorized ? 'true' : 'false' %>" data-username="<%= user ? user.username : '' %>">
     <div class="container">
         <!-- 所有用户都能看到的头部导航 -->
         <div class="header">
@@ -251,14 +251,14 @@
                     <span class="game-status status-hot">🔥 热门</span>
                 </a>
                 
-                <a href="javascript:void(0)" onclick="startSlotGame()" class="game-card">
+                <a href="/slot" class="game-card">
                     <span class="game-icon">🎰</span>
                     <h2 class="game-title">幸运老虎机</h2>
                     <p class="game-description">经典老虎机游戏，三个相同图案即可获胜</p>
                     <span class="game-status status-classic">⭐ 经典</span>
                 </a>
                 
-                <a href="javascript:void(0)" onclick="startScratchGame()" class="game-card">
+                <a href="/scratch" class="game-card">
                     <span class="game-icon">🎟️</span>
                     <h2 class="game-title">刮刮乐</h2>
                     <p class="game-description">刮开涂层，发现隐藏的奖励，简单又刺激</p>
@@ -343,277 +343,9 @@
     </div>
 
 <% if (typeof user !== 'undefined' && user && user.authorized) { %>
-<!-- Socket.IO客户端 -->
 <script src="/socket.io/socket.io.js"></script>
-<script>
-// WebSocket连接和通知系统
-const socket = io();
-const currentUser = '<%= user.username %>';
-
-// 调试WebSocket连接
-socket.on('connect', () => {
-    console.log('🔗 WebSocket连接成功:', socket.id);
-    // 注册用户WebSocket连接
-    socket.emit('register', currentUser);
-});
-
-socket.on('disconnect', () => {
-    console.log('❌ WebSocket连接断开');
-});
-
-socket.on('connect_error', (error) => {
-    console.error('🚨 WebSocket连接失败:', error);
-});
-
-// 监听通知
-socket.on('notification', (notification) => {
-    console.log('📨 收到通知:', notification);
-    showNotification(notification);
-});
-
-// 监听安全警告
-socket.on('security-alert', (event) => {
-    console.log('🚨 收到安全警告:', event);
-    
-    // 如果是被踢出事件，立即跳转到登录页
-    if (event.type === 'device_logout') {
-        console.log('🔄 检测到账号在其他设备登录，即将跳转到登录页');
-        
-        // 显示简短提示后跳转
-        const alertDiv = document.createElement('div');
-        alertDiv.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 68, 68, 0.95);
-            color: white;
-            padding: 2rem;
-            border-radius: 12px;
-            font-size: 1.1rem;
-            font-weight: bold;
-            z-index: 10000;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        `;
-        alertDiv.innerHTML = `
-            <div>⚠️ 账号安全提醒</div>
-            <div style="margin-top: 1rem; font-size: 0.9rem;">您的账号已在其他设备登录</div>
-            <div style="margin-top: 0.5rem; font-size: 0.8rem;">即将跳转到登录页...</div>
-        `;
-        
-        document.body.appendChild(alertDiv);
-        
-        // 2秒后跳转到登录页
-        setTimeout(() => {
-            window.location.href = '/login?kicked=true';
-        }, 2000);
-        
-        return; // 不执行常规的安全警告显示
-    }
-    
-    // 其他类型的安全警告正常显示
-    showSecurityAlert(event);
-});
-
-// 显示通用通知
-function showNotification(notification) {
-    const notificationDiv = document.createElement('div');
-    notificationDiv.className = 'notification';
-    notificationDiv.innerHTML = `
-        <div class="notification-content">
-            <div class="notification-header">
-                <strong>${notification.title || '系统通知'}</strong>
-                <span class="notification-close">&times;</span>
-            </div>
-            <div class="notification-body">
-                ${notification.message}
-            </div>
-        </div>
-    `;
-    
-    // 添加样式
-    notificationDiv.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: #fff;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        z-index: 10000;
-        max-width: 350px;
-        animation: slideIn 0.3s ease;
-    `;
-
-    document.body.appendChild(notificationDiv);
-    
-    // 自动关闭
-    setTimeout(() => {
-        notificationDiv.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notificationDiv.remove(), 300);
-    }, 5000);
-    
-    // 点击关闭
-    notificationDiv.querySelector('.notification-close').onclick = () => {
-        notificationDiv.remove();
-    };
-}
-
-// 显示安全警告
-function showSecurityAlert(event) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = 'security-alert';
-    
-    let alertStyle = '';
-    let alertIcon = '';
-    
-    switch(event.level) {
-        case 'warning':
-            alertStyle = 'background: #fff3cd; border-color: #ffeaa7; color: #856404;';
-            alertIcon = '⚠️';
-            break;
-        case 'danger':
-            alertStyle = 'background: #f8d7da; border-color: #f5c6cb; color: #721c24;';
-            alertIcon = '🚨';
-            break;
-        default:
-            alertStyle = 'background: #d4edda; border-color: #c3e6cb; color: #155724;';
-            alertIcon = 'ℹ️';
-    }
-    
-    alertDiv.innerHTML = `
-        <div class="alert-content">
-            <div class="alert-header">
-                ${alertIcon} <strong>${event.title}</strong>
-                <span class="alert-close">&times;</span>
-            </div>
-            <div class="alert-body">
-                ${event.message}
-                ${event.details ? `<div class="alert-details">设备数量: ${event.details.kickedDevices}</div>` : ''}
-            </div>
-        </div>
-    `;
-    
-    alertDiv.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        border: 1px solid;
-        border-radius: 8px;
-        padding: 15px;
-        z-index: 10001;
-        max-width: 400px;
-        animation: slideIn 0.3s ease;
-        ${alertStyle}
-    `;
-
-    document.body.appendChild(alertDiv);
-    
-    // 手动关闭
-    alertDiv.querySelector('.alert-close').onclick = () => {
-        alertDiv.remove();
-    };
-    
-    // 安全警告不自动关闭，需要用户确认
-}
-
-// 添加CSS动画
-if (!document.querySelector('#notification-styles')) {
-    const style = document.createElement('style');
-    style.id = 'notification-styles';
-    style.textContent = `
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        @keyframes slideOut {
-            from { transform: translateX(0); opacity: 1; }
-            to { transform: translateX(100%); opacity: 0; }
-        }
-        .notification-content, .alert-content {
-            padding: 12px;
-        }
-        .notification-header, .alert-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .notification-close, .alert-close {
-            cursor: pointer;
-            font-size: 18px;
-            line-height: 1;
-            opacity: 0.6;
-        }
-        .notification-close:hover, .alert-close:hover {
-            opacity: 1;
-        }
-        .alert-details {
-            margin-top: 8px;
-            font-size: 0.9em;
-            opacity: 0.8;
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-function createLoadingModal(gameName, iconEmoji, serverUrl) {
-    const loadingModal = document.createElement('div');
-    loadingModal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.8);
-        z-index: 9999;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        color: white;
-        font-size: 1.5rem;
-    `;
-    loadingModal.innerHTML = `
-        <div style="text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 15px; backdrop-filter: blur(10px);">
-            <div style="font-size: 2rem; margin-bottom: 20px;">${iconEmoji}</div>
-            <div>正在启动${gameName}...</div>
-            <div style="margin-top: 15px; font-size: 1.1rem; color: #aaa;">Render免费版启动需要30-60秒，请耐心等待</div>
-            <div style="margin-top: 20px;">
-                <div class="loading-spinner"></div>
-            </div>
-        </div>
-        <style>
-            .loading-spinner {
-                width: 30px;
-                height: 30px;
-                border: 3px solid rgba(255,255,255,0.3);
-                border-top: 3px solid white;
-                border-radius: 50%;
-                animation: spin 1s linear infinite;
-                margin: 0 auto;
-            }
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-        </style>
-    `;
-    document.body.appendChild(loadingModal);
-    return loadingModal;
-}
-
-function startSlotGame() {
-    // 🏗️ 架构修复：直接跳转本地路由，无需预热外部服务
-    window.location.href = "/slot";
-}
-
-function startScratchGame() {
-    // 🏗️ 架构修复：直接跳转本地路由，无需预热外部服务
-    window.location.href = "/scratch";
-}
-
-</script>
+<script src="/security-alerts.js"></script>
+<script src="/js/index.js"></script>
 <% } %>
 
 </body>
