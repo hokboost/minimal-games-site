@@ -356,6 +356,12 @@
                 alert(result.message || '开始失败');
                 return;
             }
+            if (typeof result.newBalance === 'number') {
+                updateBalance(result.newBalance);
+            }
+            if (result.previousReward > 0) {
+                alert(`上一轮自动结算：获得 ${result.previousReward} 电币`);
+            }
             await loadState();
         });
 

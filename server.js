@@ -353,8 +353,41 @@ function verifyCSRFToken(req, providedToken) {
 }
 
 // 认证中间件
-const requireLogin = (req, res, next) => {
+const requireLogin = async (req, res, next) => {
     if (!req.session.user) {
+        const cookieHeader = req.headers.cookie || '';
+        const cookies = {};
+        cookieHeader.split(';').forEach((cookie) => {
+            const [name, value] = cookie.trim().split('=');
+            if (name && value) {
+                cookies[name] = decodeURIComponent(value);
+            }
+        });
+
+        const sessionId = cookies['minimal_games_sid'];
+        if (sessionId) {
+            try {
+                const result = await pool.query(
+                    `SELECT is_active, termination_reason
+                     FROM active_sessions
+                     WHERE session_id = $1
+                     ORDER BY terminated_at DESC NULLS LAST
+                     LIMIT 1`,
+                    [sessionId]
+                );
+
+                const sessionRow = result.rows[0];
+                if (sessionRow && sessionRow.is_active === false && sessionRow.termination_reason === 'new_device_login') {
+                    if (req.path.startsWith('/api/')) {
+                        return res.status(401).json({ success: false, message: '账号已在其他设备登录' });
+                    }
+                    return res.redirect('/login?kicked=true');
+                }
+            } catch (error) {
+                console.error('Session lookup error:', error);
+            }
+        }
+
         // 检查是否是API请求
         if (req.path.startsWith('/api/')) {
             return res.status(401).json({ success: false, message: '请先登录' });
@@ -389,14 +422,14 @@ const requireAdmin = (req, res, next) => {
 // 未授权用户只允许进入开发中页面或退出登录
 app.use((req, res, next) => {
     if (req.session.user && !req.session.user.authorized) {
-        const allowedPaths = new Set(['/logout', '/unauthorized']);
+        const allowedPaths = new Set(['/logout', '/coming-soon']);
         if (allowedPaths.has(req.path)) {
             return next();
         }
         if (req.path.startsWith('/api/')) {
             return res.status(403).json({ success: false, message: '未授权访问' });
         }
-        return res.redirect('/unauthorized');
+        return res.redirect('/coming-soon');
     }
     next();
 });
@@ -552,14 +585,14 @@ app.get('/register', (req, res) => {
     });
 });
 
-app.get('/unauthorized', requireLogin, (req, res) => {
-    res.render('unauthorized');
+app.get('/coming-soon', requireLogin, (req, res) => {
+    res.render('coming-soon');
 });
 
 // 个人资料页面
 app.get('/profile', requireLogin, (req, res, next) => {
     if (!req.session.user?.authorized) {
-        return res.redirect('/unauthorized');
+        return res.redirect('/coming-soon');
     }
     next();
 }, async (req, res) => {
@@ -2383,6 +2416,19 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
         
         // 计算奖励
         const payout = Math.floor(betAmount * outcome.multiplier);
+
+        // 生成三个金额转动结果（用于前端显示，保证显示与奖励一致）
+        const baseAmounts = [50, 100, 150, 200];
+        const amounts = baseAmounts.map((num) => Math.max(1, Math.round(num * betAmount / 100)));
+        const randomAmount = () => amounts[Math.floor(Math.random() * amounts.length)];
+        const isLose = payout <= 0;
+        let slotResults = isLose ? [randomAmount(), randomAmount(), randomAmount()] : [payout, payout, payout];
+        if (isLose) {
+            // 避免出现三格相同导致误判中奖
+            while (slotResults[0] === slotResults[1] && slotResults[1] === slotResults[2]) {
+                slotResults = [randomAmount(), randomAmount(), randomAmount()];
+            }
+        }
         
         // 发放奖励电币
         let finalBalance = currentBalance;
@@ -2414,17 +2460,6 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
             const proof = crypto.createHash('sha256')
                 .update(`${username}-${Date.now()}-${Math.random()}`)
                 .digest('hex');
-                
-            // 生成三个金额转动结果（符合老虎机逻辑）
-            const amounts = [5, 10, 20, 50, 100, 200, 500];
-            const slot1 = amounts[Math.floor(Math.random() * amounts.length)];
-            const slot2 = amounts[Math.floor(Math.random() * amounts.length)];
-            const slot3 = amounts[Math.floor(Math.random() * amounts.length)];
-            
-            // 如果是中奖，让显示的金额与实际payout一致；否则随机三格
-            const isLose = payout <= 0;
-            const displayAmount = payout; // bet=5且“不亏不赚” => payout=5 => 显示[5,5,5]
-            const slotResults = isLose ? [slot1, slot2, slot3] : [displayAmount, displayAmount, displayAmount];
 
             await pool.query(`
                 INSERT INTO slot_results (
@@ -2458,6 +2493,7 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
             outcome: outcome.type,
             multiplier: outcome.multiplier,
             payout: payout,
+            reels: slotResults,
             newBalance: currentBalance,
             finalBalance: finalBalance
         });
@@ -3678,6 +3714,42 @@ app.get('/api/flip/state', requireLogin, requireAuthorized, security.basicRateLi
 app.post('/api/flip/start', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
     try {
         const username = req.session.user.username;
+        const previousState = await getFlipState(username);
+        let previousReward = 0;
+        let newBalance = null;
+
+        if (!previousState.ended && previousState.bad_count === 0 && previousState.good_count > 0) {
+            previousReward = flipCashoutRewards[previousState.good_count] || 0;
+            previousState.ended = true;
+            await saveFlipState(username, previousState);
+
+            if (previousReward > 0) {
+                const rewardResult = await BalanceLogger.updateBalance({
+                    username,
+                    amount: previousReward,
+                    operationType: 'flip_cashout',
+                    description: `翻卡牌开始新一轮自动结算 ${previousReward} 电币`,
+                    ipAddress: req.ip,
+                    userAgent: req.get('User-Agent'),
+                    requireSufficientBalance: false
+                });
+
+                if (!rewardResult.success) {
+                    return res.status(400).json({ success: false, message: rewardResult.message });
+                }
+                newBalance = rewardResult.balance;
+            }
+
+            await logFlipAction({
+                username,
+                actionType: 'end',
+                reward: previousReward,
+                goodCount: previousState.good_count,
+                badCount: previousState.bad_count,
+                ended: true
+            });
+        }
+
         const board = createFlipBoard();
         const flipped = Array(9).fill(false);
         const state = {
@@ -3691,7 +3763,11 @@ app.post('/api/flip/start', requireLogin, requireAuthorized, security.basicRateL
 
         res.json({
             success: true,
-            nextCost: flipCosts[0]
+            nextCost: flipCosts[0],
+            previousReward,
+            previousGood: previousState.good_count,
+            previousBad: previousState.bad_count,
+            newBalance
         });
     } catch (error) {
         console.error('Flip start error:', error);

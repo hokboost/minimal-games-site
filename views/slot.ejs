@@ -287,7 +287,7 @@
     }
 
     // 动画逻辑
-    function animateSpin(finalReels, reward, callback) {
+    function animateSpin(finalReels, payout, callback) {
         const betAmount = parseInt(document.getElementById('bet-amount').value) || 10;
         const spinNumbers = generateSpinNumbers(betAmount);
         
@@ -307,8 +307,8 @@
                 // 检查是否有两个数字相同（差一点）
                 const isClose = !isWin && (a === b || b === c || a === c);
                 
-                if (isWin && reward !== '0') {
-                    result.textContent = `🎉 恭喜中奖！获得 ${reward} 电币`;
+                if (isWin && payout > 0) {
+                    result.textContent = `🎉 恭喜中奖！获得 ${payout} 电币`;
                     result.className = 'result-text big';
                     r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1.4)';
                     setTimeout(() => {
@@ -378,8 +378,10 @@
             const { outcome, multiplier, payout, finalBalance } = data;
             
             // 模拟老虎机动画
-            const reels = generateReelsForOutcome(outcome);
-            animateSpin(reels, `${outcome} | 获得: ${payout} 电币`, () => {
+            const reels = Array.isArray(data.reels) && data.reels.length === 3
+                ? data.reels.map(value => value.toString())
+                : generateReelsForOutcome(outcome, payout);
+            animateSpin(reels, payout, () => {
                 // 显示详细结果
                 let resultMessage;
                 if (outcome === '不亏不赚') {
@@ -403,13 +405,13 @@
         }
     }
     
-    function generateReelsForOutcome(outcome) {
+    function generateReelsForOutcome(outcome, payout) {
         const betAmount = parseInt(document.getElementById('bet-amount').value) || 10;
         const spinNumbers = generateSpinNumbers(betAmount);
         
         if (outcome === '不亏不赚' || outcome.includes('×') || outcome.includes('中奖')) {
             // 显示三个相同数字表示获胜
-            const number = spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
+            const number = Number.isFinite(payout) ? payout : spinNumbers[Math.floor(Math.random() * spinNumbers.length)];
             return [number.toString(), number.toString(), number.toString()];
         } else {
             // 显示三个不同数字表示失败

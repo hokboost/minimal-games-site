@@ -176,9 +176,16 @@
             transition: all 0.3s ease;
         }
 
+        .reward-btn.ready {
+            filter: brightness(1.1);
+            box-shadow: 0 0 12px rgba(0, 200, 83, 0.35);
+        }
+
         .reward-btn:disabled {
             background: #95a5a6;
             cursor: not-allowed;
+            box-shadow: none;
+            filter: none;
         }
 
         .action-row {
@@ -203,9 +210,16 @@
             background: linear-gradient(135deg, #1e88e5, #1565c0);
         }
 
+        .action-btn.ready {
+            filter: brightness(1.1);
+            box-shadow: 0 0 12px rgba(255, 107, 107, 0.35);
+        }
+
         .action-btn:disabled {
             background: #95a5a6;
             cursor: not-allowed;
+            box-shadow: none;
+            filter: none;
         }
 
         .replace-panel {
@@ -362,10 +376,17 @@
 
             document.getElementById('rewardAmount').textContent = isFull ? `${reward} 电币` : '--';
             document.getElementById('sameCount').textContent = `同色 ${maxSame}`;
-            document.getElementById('redeemBtn').disabled = !isFull;
+            const redeemBtn = document.getElementById('redeemBtn');
+            redeemBtn.disabled = !isFull;
+            redeemBtn.classList.toggle('ready', !redeemBtn.disabled);
 
-            document.getElementById('addOneBtn').disabled = isFull;
-            document.getElementById('fillBtn').disabled = state.slots.some(slot => slot);
+            const addOneBtn = document.getElementById('addOneBtn');
+            addOneBtn.disabled = isFull;
+            addOneBtn.classList.toggle('ready', !addOneBtn.disabled);
+
+            const fillBtn = document.getElementById('fillBtn');
+            fillBtn.disabled = state.slots.some(slot => slot);
+            fillBtn.classList.toggle('ready', !fillBtn.disabled);
 
             const replaceCost = state.replaceCost;
             document.getElementById('replaceCost').textContent = replaceCost ? `${replaceCost} 电币` : '不可更换';
@@ -376,7 +397,9 @@
                 document.querySelectorAll('.stone-slot').forEach((item) => item.classList.remove('selected'));
             }
 
-            document.getElementById('replaceBtn').disabled = !(state.canReplace && selectedSlot !== null);
+            const replaceBtn = document.getElementById('replaceBtn');
+            replaceBtn.disabled = !(state.canReplace && selectedSlot !== null);
+            replaceBtn.classList.toggle('ready', !replaceBtn.disabled);
         }
 
         async function loadState(highlightIndex = null) {
@@ -438,7 +461,9 @@
                 slot.classList.add('selected');
                 selectedSlot = Number(slot.dataset.index);
                 document.getElementById('selectedSlot').textContent = selectedSlot + 1;
-                document.getElementById('replaceBtn').disabled = !(currentState.canReplace && selectedSlot !== null);
+                const replaceBtn = document.getElementById('replaceBtn');
+                replaceBtn.disabled = !(currentState.canReplace && selectedSlot !== null);
+                replaceBtn.classList.toggle('ready', !replaceBtn.disabled);
             });
         });
 
