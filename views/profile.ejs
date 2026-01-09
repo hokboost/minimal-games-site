@@ -74,6 +74,18 @@
                         <button class="view-records-btn" onclick="viewGameRecords('scratch')">查看记录</button>
                     </div>
                 </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">🌟</div>
+                    <div class="stat-content">
+                        <h3>幸运祈愿</h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main">总场次: <%= gameStats.wish.total %></span>
+                            <span class="stat-sub">成功: <%= gameStats.wish.wins %> 次</span>
+                        </div>
+                        <button class="view-records-btn" onclick="viewGameRecords('wish')">查看记录</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -698,7 +710,8 @@
         const titles = {
             quiz: '🧠 知识问答记录',
             slot: '🎰 老虎机记录',
-            scratch: '🎟️ 刮刮乐记录'
+            scratch: '🎟️ 刮刮乐记录',
+            wish: '🌟 祈愿记录'
         };
         
         document.getElementById('recordsTitle').textContent = titles[gameType];
@@ -751,6 +764,8 @@
             tableHTML += '<thead><tr><th>游戏时间</th><th>结果</th><th>获得电币</th><th>转动结果</th></tr></thead>';
         } else if (gameType === 'scratch') {
             tableHTML += '<thead><tr><th>游戏时间</th><th>结果</th><th>档位</th><th>匹配数</th></tr></thead>';
+        } else if (gameType === 'wish') {
+            tableHTML += '<thead><tr><th>祈愿时间</th><th>次数</th><th>消耗电币</th><th>结果</th></tr></thead>';
         }
         
         tableHTML += '<tbody>';
@@ -784,6 +799,20 @@
                         <td>${record.result}</td>
                         <td>${record.tier_cost} 电币</td>
                         <td>${record.matches_count} 个</td>
+                    </tr>
+                `;
+            } else if (gameType === 'wish') {
+                const successCount = Number(record.success_count || 0);
+                const rewardValue = Number(record.total_reward_value || 0);
+                const resultText = successCount > 0
+                    ? `✅ 成功 ${successCount} 次，奖励 ${rewardValue} 电币`
+                    : '❌ 未中奖';
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${record.batch_count}</td>
+                        <td>${record.total_cost} 电币</td>
+                        <td>${resultText}</td>
                     </tr>
                 `;
             }

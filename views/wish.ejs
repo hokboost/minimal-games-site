@@ -6,16 +6,77 @@
     <title>幸运祈愿</title>
     <link rel="stylesheet" href="/styles.css">
     <style>
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            color: #fff;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #00c853;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #00c853;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            color: #ccc;
+        }
+
+        .nav-links a {
+            color: #fff;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .nav-links a:hover {
+            background: rgba(0, 200, 83, 0.2);
+            transform: translateY(-2px);
+        }
+
         .wish-container {
             text-align: center;
-            max-width: 600px;
+            max-width: 800px;
             margin: 0 auto;
-            padding: 20px;
+        }
+
+        .balance-wish-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .balance-info {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .balance-info h3 {
+            color: #ffeb3b;
+            margin: 0;
         }
 
         .wish-progress {
             margin: 30px 0;
-            background: #f0f0f0;
+            background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             overflow: hidden;
             height: 40px;
@@ -34,7 +95,7 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #333;
+            color: #fff;
             font-weight: bold;
             font-size: 14px;
         }
@@ -67,9 +128,9 @@
         .wish-stats {
             margin: 30px 0;
             padding: 20px;
-            background: #f8f9fa;
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
-            border: 2px solid #dee2e6;
+            border: 2px solid rgba(255, 255, 255, 0.1);
         }
 
         .stats-row {
@@ -80,12 +141,12 @@
         }
 
         .guarantee-notice {
-            background: #fff3cd;
-            border: 2px solid #ffc107;
+            background: rgba(255, 193, 7, 0.12);
+            border: 2px solid rgba(255, 193, 7, 0.5);
             border-radius: 10px;
             padding: 15px;
             margin: 20px 0;
-            color: #856404;
+            color: #f8e08e;
         }
 
         /* 全屏弹窗样式 */
@@ -179,6 +240,15 @@
         }
 
         @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
             .modal-content {
                 font-size: 2.5rem;
             }
@@ -207,76 +277,87 @@
     </style>
 </head>
 <body>
-    <a href="/" class="back-button">← 返回</a>
-    <div class="wish-container">
-        <h1>🌟 幸运祈愿</h1>
-        <p>玩家：<%= username %></p>
-        <p style="color: #666;">祈愿深海歌姬，500电币/次，成功率1.4%</p>
-        
-        <div style="text-align: center; margin: 20px 0;">
-            <h2 style="color: #667eea; margin: 10px 0;">🧜‍♀️ 深海歌姬</h2>
-            <p style="color: #f39c12; font-size: 18px; font-weight: bold;">价值: 30000 电币</p>
+    <div class="container">
+        <div class="header">
+            <h1>🌟 KingBoost 幸运祈愿</h1>
+            <div class="nav-links">
+                <span>用户：<%= username %></span>
+                <a href="/">🏠 返回首页</a>
+                <a href="/profile">👤 个人中心</a>
+            </div>
         </div>
-        
-        <div class="wish-progress">
-            <div class="progress-bar" id="progressBar"></div>
-            <div class="progress-text" id="progressText">0 / 148 (保底)</div>
-        </div>
-        
-        <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 900px; margin: 0 auto;">
-            <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
-            <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
-            <button id="wishHundredButton" class="wish-button" onclick="makeWishHundred()" style="background: linear-gradient(45deg, #f39c12 0%, #e67e22 100%);">🔥 祈愿百次</button>
-            <button id="wishThousandButton" class="wish-button" onclick="makeWishThousand()" style="background: linear-gradient(45deg, #e74c3c 0%, #c0392b 100%);">🚀 祈愿千次</button>
-            <button id="wishTenThousandButton" class="wish-button" onclick="makeWishTenThousand()" style="background: linear-gradient(45deg, #8e44ad 0%, #2c3e50 100%);">⚡ 祈愿万次</button>
-            <button id="wishHundredThousandButton" class="wish-button" onclick="makeWishHundredThousand()" style="background: linear-gradient(45deg, #2c3e50 0%, #000000 100%);">💀 祈愿十万</button>
-        </div>
-        
-        <div class="wish-stats">
-            <h3>📊 祈愿统计</h3>
-            <div class="stats-row">
-                <span>总祈愿次数:</span>
-                <span id="totalWishes">0</span>
+
+        <div class="balance-wish-section">
+            <div class="balance-info">
+                <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
             </div>
-            <div class="stats-row">
-                <span>成功次数:</span>
-                <span id="successCount">0</span>
-            </div>
-            <div class="stats-row">
-                <span>个人中奖率:</span>
-                <span id="personalRate">0.00%</span>
-            </div>
-            <div class="stats-row">
-                <span>全服综合率:</span>
-                <span id="globalRate">1.60%</span>
-            </div>
-            <div class="stats-row">
-                <span>当前进度:</span>
-                <span id="currentProgress">0 / 148</span>
+            <div class="wish-container">
+                <p style="color: #ccc;">祈愿深海歌姬，500电币/次，成功率1.4%</p>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <h2 style="color: #00c853; margin: 10px 0;">🧜‍♀️ 深海歌姬</h2>
+                    <p style="color: #ffeb3b; font-size: 18px; font-weight: bold;">价值: 30000 电币</p>
+                </div>
             </div>
         </div>
         
-        <div class="guarantee-notice">
-            <h4>🎯 祈愿规则</h4>
-            <p>• 系统保证全服综合中奖率为 1.35%</p>
-            <p>• 概率会根据全服统计动态调整</p>
-            <p>• 连续147次未中奖后，第148次必定成功</p>
-            <p>• 每次成功后重置个人进度计数</p>
-        </div>
-        
-        <!-- 免责声明 -->
-        <div style="
-            max-width: 760px;
-            margin: 2rem auto 0;
-            padding: 1rem;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            font-size: 0.85rem;
-            color: #ccc;
-            line-height: 1.5;
-            text-align: center;
-        ">
-            ⚠️ <strong>免责声明：</strong>本许愿功能仅供娱乐消遣，祈愿结果为随机娱乐内容，不涉及任何迷信或超自然因素。平台内所有积分、进度均为虚拟娱乐道具，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。严禁未满18周岁用户使用，请理性娱乐。
+        <div class="wish-container">
+            <div class="wish-progress">
+                <div class="progress-bar" id="progressBar"></div>
+                <div class="progress-text" id="progressText">0 / 148 (保底)</div>
+            </div>
+            
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 900px; margin: 0 auto;">
+                <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
+                <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
+            </div>
+            
+            <div class="wish-stats">
+                <h3>📊 祈愿统计</h3>
+                <div class="stats-row">
+                    <span>总祈愿次数:</span>
+                    <span id="totalWishes">0</span>
+                </div>
+                <div class="stats-row">
+                    <span>成功次数:</span>
+                    <span id="successCount">0</span>
+                </div>
+                <div class="stats-row">
+                    <span>个人中奖率:</span>
+                    <span id="personalRate">0.00%</span>
+                </div>
+                <div class="stats-row">
+                    <span>全服综合率:</span>
+                    <span id="globalRate">1.60%</span>
+                </div>
+                <div class="stats-row">
+                    <span>当前进度:</span>
+                    <span id="currentProgress">0 / 148</span>
+                </div>
+            </div>
+            
+            <div class="guarantee-notice">
+                <h4>🎯 祈愿规则</h4>
+                <p>• 系统保证全服综合中奖率为 1.35%</p>
+                <p>• 概率会根据全服统计动态调整</p>
+                <p>• 连续147次未中奖后，第148次必定成功</p>
+                <p>• 每次成功后重置个人进度计数</p>
+            </div>
+            
+            <!-- 免责声明 -->
+            <div style="
+                max-width: 760px;
+                margin: 2rem auto 0;
+                padding: 1rem;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 8px;
+                font-size: 0.85rem;
+                color: #ccc;
+                line-height: 1.5;
+                text-align: center;
+            ">
+                ⚠️ <strong>免责声明：</strong>本许愿功能仅供娱乐消遣，祈愿结果为随机娱乐内容，不涉及任何迷信或超自然因素。平台内所有积分、进度均为虚拟娱乐道具，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。严禁未满18周岁用户使用，请理性娱乐。
+            </div>
         </div>
     </div>
 
@@ -373,6 +454,10 @@
                     // 更新本地进度数据
                     wishProgress = result.progress;
                     wishProgress.total_spent = result.progress.total_wishes * 500; // 计算总花费
+                    
+                    if (typeof result.newBalance === 'number') {
+                        document.getElementById('current-balance').textContent = result.newBalance;
+                    }
                     
                     // 显示结果
                     if (result.wishSuccess) {
@@ -533,36 +618,12 @@
             await batchWish(10, 'wishTenButton', '🙏 祈愿十次');
         }
 
-        // 祈愿百次功能
-        async function makeWishHundred() {
-            await batchWish(100, 'wishHundredButton', '🔥 祈愿百次');
-        }
-
-        // 祈愿千次功能
-        async function makeWishThousand() {
-            await batchWish(1000, 'wishThousandButton', '🚀 祈愿千次');
-        }
-
-        // 祈愿万次功能
-        async function makeWishTenThousand() {
-            await batchWish(10000, 'wishTenThousandButton', '⚡ 祈愿万次');
-        }
-
-        // 祈愿十万次功能
-        async function makeWishHundredThousand() {
-            await batchWish(100000, 'wishHundredThousandButton', '💀 祈愿十万');
-        }
-
         // 批量祈愿通用函数
         async function batchWish(count, buttonId, buttonText) {
             const button = document.getElementById(buttonId);
             const allButtons = [
                 document.getElementById('wishButton'),
-                document.getElementById('wishTenButton'),
-                document.getElementById('wishHundredButton'),
-                document.getElementById('wishThousandButton'),
-                document.getElementById('wishTenThousandButton'),
-                document.getElementById('wishHundredThousandButton')
+                document.getElementById('wishTenButton')
             ];
             
             // 禁用所有按钮
@@ -578,8 +639,6 @@
                         'X-CSRF-Token': csrfToken
                     },
                     body: JSON.stringify({ 
-                        username,
-                        currentCount: wishData.current,
                         batchCount: count
                     })
                 });
@@ -587,13 +646,14 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    // 更新本地数据
-                    wishData.total += count;
-                    wishData.success += result.successCount;
-                    wishData.current = result.newCurrentCount;
+                    if (result.progress) {
+                        wishProgress = result.progress;
+                        updateDisplayNew();
+                    }
                     
-                    saveWishData();
-                    updateDisplay({globalRate: result.globalRate});
+                    if (typeof result.newBalance === 'number') {
+                        document.getElementById('current-balance').textContent = result.newBalance;
+                    }
                     
                     // 显示结果
                     const modal = document.getElementById('fullscreenModal');

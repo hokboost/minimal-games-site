@@ -31,11 +31,25 @@ CREATE TABLE IF NOT EXISTS wish_progress (
     FOREIGN KEY (username) REFERENCES users(username)
 );
 
+-- 创建祈愿记录汇总表（按次记录：单次或十连）
+CREATE TABLE IF NOT EXISTS wish_sessions (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    batch_count INTEGER NOT NULL DEFAULT 1, -- 本次祈愿次数（1或10）
+    total_cost INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    total_reward_value INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (username) REFERENCES users(username)
+);
+
 -- 创建索引提高查询性能
 CREATE INDEX IF NOT EXISTS idx_wish_results_username_created ON wish_results(username, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_wish_results_success ON wish_results(success, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_wish_progress_username ON wish_progress(username);
 CREATE INDEX IF NOT EXISTS idx_wish_progress_consecutive_fails ON wish_progress(consecutive_fails DESC);
+CREATE INDEX IF NOT EXISTS idx_wish_sessions_username_created ON wish_sessions(username, created_at DESC);
 
 -- 插入默认配置
 INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)

@@ -550,7 +550,8 @@ app.get('/profile', requireLogin, async (req, res) => {
         const gameStats = await Promise.all([
             pool.query('SELECT COUNT(*) as count, MAX(score) as best_score FROM submissions WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN won != \'lost\' THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username])
+            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username])
         ]);
         
         const stats = {
@@ -565,6 +566,10 @@ app.get('/profile', requireLogin, async (req, res) => {
             scratch: {
                 total: parseInt(gameStats[2].rows[0].count) || 0,
                 wins: parseInt(gameStats[2].rows[0].wins) || 0
+            },
+            wish: {
+                total: parseInt(gameStats[3].rows[0].count) || 0,
+                wins: parseInt(gameStats[3].rows[0].wins) || 0
             }
         };
         
@@ -1439,9 +1444,25 @@ app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req,
     }
     
     const username = req.session.user.username;
-    res.render('wish', { 
-        username,
-        csrfToken: req.session.csrfToken
+    let balance = 0;
+    
+    pool.query(
+        'SELECT balance FROM users WHERE username = $1',
+        [username]
+    ).then((result) => {
+        balance = result.rows.length > 0 ? parseFloat(result.rows[0].balance) : 0;
+        res.render('wish', { 
+            username,
+            balance,
+            csrfToken: req.session.csrfToken
+        });
+    }).catch((dbError) => {
+        console.error('Database query error:', dbError);
+        res.render('wish', { 
+            username,
+            balance,
+            csrfToken: req.session.csrfToken
+        });
     });
 });
 
@@ -2658,6 +2679,24 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
             console.error('祈愿记录存储失败:', dbError);
         }
 
+        // 记录祈愿会话（单次）
+        try {
+            await pool.query(`
+                INSERT INTO wish_sessions (
+                    username, batch_count, total_cost, success_count, total_reward_value
+                )
+                VALUES ($1, $2, $3, $4, $5)
+            `, [
+                username,
+                1,
+                wishCost,
+                success ? 1 : 0,
+                success ? rewardValue : 0
+            ]);
+        } catch (dbError) {
+            console.error('祈愿会话记录失败:', dbError);
+        }
+
         res.json({
             success: true,
             wishSuccess: success,
@@ -2667,6 +2706,8 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
             progress: {
                 total_wishes: newTotalWishes,
                 consecutive_fails: newConsecutiveFails,
+                total_spent: newTotalSpent,
+                total_rewards_value: newTotalRewardsValue,
                 progress_percentage: Math.min((newConsecutiveFails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1),
                 wishes_until_guarantee: Math.max(0, guaranteeThreshold + 1 - newConsecutiveFails)
             },
@@ -2807,46 +2848,204 @@ app.post('/api/wish',
     }
 });
 
-// 批量祈愿API - 瞬时处理
+// 批量祈愿API - 仅支持10次，逐次记录
 app.post('/api/wish-batch', 
+    requireLogin,
+    requireAuthorized,
     security.basicRateLimit,
     security.csrfProtection,
-    (req, res) => {
+    async (req, res) => {
     try {
-        const { currentCount = 0, username, batchCount = 10 } = req.body;
+        const username = req.session.user.username;
+        const batchCount = Number(req.body.batchCount || 10);
+        const wishCost = 500; // 固定500电币每次祈愿
+        const successRate = 0.014; // 1.4%成功率
+        const guaranteeThreshold = 147; // 147次失败后第148次必出
+        const rewardName = "深海歌姬";
+        const rewardValue = 30000;
         
-        // 限制批量数量，防止滥用
-        if (batchCount > 100000) {
-            return res.status(400).json({ success: false, message: '批量数量过大' });
+        if (batchCount !== 10) {
+            return res.status(400).json({ success: false, message: '仅支持10次祈愿' });
         }
         
-        let successCount = 0;
-        let newCurrentCount = currentCount;
-        let lastResult;
+        // 获取用户余额，提前校验
+        const balanceResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+        if (balanceResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: '用户不存在' });
+        }
         
-        // 批量执行祈愿
-        for (let i = 0; i < batchCount; i++) {
-            lastResult = GameLogic.wish.makeWish(newCurrentCount);
+        const currentBalance = parseFloat(balanceResult.rows[0].balance);
+        const totalCost = wishCost * batchCount;
+        if (currentBalance < totalCost) {
+            return res.status(400).json({ success: false, message: '余额不足，无法进行10次祈愿' });
+        }
+        
+        // 获取用户当前祈愿进度
+        let progressResult = await pool.query(
+            'SELECT * FROM wish_progress WHERE username = $1',
+            [username]
+        );
+
+        // 如果用户没有祈愿记录，创建一个
+        if (progressResult.rows.length === 0) {
+            await pool.query(`
+                INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                VALUES ($1, 0, 0, 0, 0)
+            `, [username]);
             
-            if (lastResult.isWin) {
-                successCount++;
-                newCurrentCount = 0; // 重置保底计数
-                
-                // 只在成功时触发飘屏（避免刷屏）
-                if (username && Math.random() < 0.1) { // 10%概率显示飘屏
-                    broadcastDanmaku(username, 'wish', true);
-                }
-            } else {
-                newCurrentCount++;
+            progressResult = await pool.query(
+                'SELECT * FROM wish_progress WHERE username = $1',
+                [username]
+            );
+        }
+
+        let progress = progressResult.rows[0];
+        let successCount = 0;
+        let balanceAfter = currentBalance;
+
+        for (let i = 0; i < batchCount; i++) {
+            // 扣除祈愿费用
+            const betResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: -wishCost,
+                operationType: 'wish_bet',
+                description: `幸运祈愿：${wishCost} 电币`,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+            });
+
+            if (!betResult.success) {
+                return res.status(400).json({ success: false, message: betResult.message });
             }
+
+            const balanceBefore = betResult.balance + wishCost;
+            balanceAfter = betResult.balance;
+
+            // 判断是否成功
+            const isGuaranteed = progress.consecutive_fails >= guaranteeThreshold;
+            const randomSuccess = Math.random() < successRate;
+            const success = isGuaranteed || randomSuccess;
+
+            let reward = null;
+            if (success) {
+                reward = rewardName;
+
+                const winResult = await BalanceLogger.updateBalance({
+                    username: username,
+                    amount: rewardValue,
+                    operationType: 'wish_win',
+                    description: `祈愿成功获得：${rewardName} (${rewardValue} 电币)`,
+                    ipAddress: req.ip,
+                    userAgent: req.get('User-Agent')
+                });
+
+                if (winResult.success) {
+                    balanceAfter = winResult.balance;
+                }
+            }
+
+            // 更新祈愿进度
+            const newTotalWishes = progress.total_wishes + 1;
+            const newConsecutiveFails = success ? 0 : progress.consecutive_fails + 1;
+            const newTotalSpent = progress.total_spent + wishCost;
+            const newTotalRewardsValue = progress.total_rewards_value + (success ? rewardValue : 0);
+
+            await pool.query(`
+                UPDATE wish_progress 
+                SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
+                    last_success_at = $5, updated_at = CURRENT_TIMESTAMP
+                WHERE username = $6
+            `, [
+                newTotalWishes,
+                newConsecutiveFails,
+                newTotalSpent,
+                newTotalRewardsValue,
+                success ? new Date() : progress.last_success_at,
+                username
+            ]);
+
+            // 保存祈愿记录
+            try {
+                const crypto = require('crypto');
+                const proof = crypto.createHash('sha256')
+                    .update(`${username}-wish-${Date.now()}-${Math.random()}`)
+                    .digest('hex');
+
+                await pool.query(`
+                    INSERT INTO wish_results (
+                        username, cost, success, reward, reward_value, balance_before, balance_after,
+                        wishes_count, is_guaranteed, game_details, created_at
+                    ) 
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                `, [
+                    username,
+                    wishCost,
+                    success,
+                    reward,
+                    success ? rewardValue : null,
+                    balanceBefore,
+                    balanceAfter,
+                    newTotalWishes,
+                    isGuaranteed,
+                    JSON.stringify({
+                        success_rate: successRate,
+                        is_guaranteed: isGuaranteed,
+                        consecutive_fails_before: progress.consecutive_fails,
+                        proof: proof,
+                        timestamp: new Date().toISOString()
+                    })
+                ]);
+            } catch (dbError) {
+                console.error('祈愿记录存储失败:', dbError);
+            }
+
+            if (success) {
+                successCount += 1;
+            }
+
+            progress = {
+                ...progress,
+                total_wishes: newTotalWishes,
+                consecutive_fails: newConsecutiveFails,
+                total_spent: newTotalSpent,
+                total_rewards_value: newTotalRewardsValue,
+                last_success_at: success ? new Date() : progress.last_success_at
+            };
+        }
+
+        // 记录祈愿会话（十连）
+        try {
+            await pool.query(`
+                INSERT INTO wish_sessions (
+                    username, batch_count, total_cost, success_count, total_reward_value
+                )
+                VALUES ($1, $2, $3, $4, $5)
+            `, [
+                username,
+                batchCount,
+                wishCost * batchCount,
+                successCount,
+                successCount * rewardValue
+            ]);
+        } catch (dbError) {
+            console.error('祈愿会话记录失败:', dbError);
         }
         
         res.json({
             success: true,
             successCount,
-            newCurrentCount,
-            globalRate: lastResult.globalRate,
-            actualRate: ((successCount / batchCount) * 100).toFixed(4)
+            newBalance: balanceAfter,
+            progress: {
+                total_wishes: progress.total_wishes,
+                consecutive_fails: progress.consecutive_fails,
+                total_spent: progress.total_spent,
+                total_rewards_value: progress.total_rewards_value,
+                progress_percentage: Math.min((progress.consecutive_fails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1),
+                wishes_until_guarantee: Math.max(0, guaranteeThreshold + 1 - progress.consecutive_fails)
+            }
         });
         
     } catch (error) {
@@ -3609,6 +3808,24 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                 `;
                 params = [username, limit, offset];
                 countQuery = 'SELECT COUNT(*) FROM scratch_results WHERE username = $1';
+                countParams = [username];
+                break;
+
+            case 'wish':
+                query = `
+                    SELECT id,
+                           batch_count,
+                           total_cost,
+                           success_count,
+                           total_reward_value,
+                           created_at as played_at
+                    FROM wish_sessions
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                `;
+                params = [username, limit, offset];
+                countQuery = 'SELECT COUNT(*) FROM wish_sessions WHERE username = $1';
                 countParams = [username];
                 break;
 
