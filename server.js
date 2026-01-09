@@ -386,18 +386,17 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-// 未授权用户只允许退出登录
+// 未授权用户只允许进入开发中页面或退出登录
 app.use((req, res, next) => {
     if (req.session.user && !req.session.user.authorized) {
-        if (req.path === '/logout') {
+        const allowedPaths = new Set(['/logout', '/unauthorized']);
+        if (allowedPaths.has(req.path)) {
             return next();
         }
         if (req.path.startsWith('/api/')) {
-            return req.session.destroy(() => {
-                res.status(403).json({ success: false, message: '未授权，请重新登录' });
-            });
+            return res.status(403).json({ success: false, message: '未授权访问' });
         }
-        return res.redirect('/logout');
+        return res.redirect('/unauthorized');
     }
     next();
 });
@@ -553,10 +552,14 @@ app.get('/register', (req, res) => {
     });
 });
 
+app.get('/unauthorized', requireLogin, (req, res) => {
+    res.render('unauthorized');
+});
+
 // 个人资料页面
 app.get('/profile', requireLogin, (req, res, next) => {
     if (!req.session.user?.authorized) {
-        return res.redirect('/logout');
+        return res.redirect('/unauthorized');
     }
     next();
 }, async (req, res) => {
