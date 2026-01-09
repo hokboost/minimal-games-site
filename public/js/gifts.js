@@ -1,3 +1,5 @@
+    const csrfToken = document.body.dataset.csrfToken || '';
+
     // 带数量的礼物兑换功能
     async function exchangeGiftWithQuantity(giftType, unitCost) {
         const quantity = parseInt(document.getElementById(giftType + '-quantity').value);
@@ -25,7 +27,8 @@
             const response = await fetch('/api/gifts/exchange', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
                 },
                 body: JSON.stringify({
                     giftType: giftType,
@@ -76,7 +79,8 @@
             const response = await fetch('/api/gifts/exchange', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
                 },
                 body: JSON.stringify({
                     giftType: giftType,

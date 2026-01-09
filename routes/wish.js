@@ -346,21 +346,26 @@ module.exports = function registerWishRoutes(app, deps) {
         try {
             const username = req.session.user.username;
             const result = await pool.query(`
-                SELECT id,
-                       gift_name,
-                       status,
-                       gift_exchange_id,
-                       last_failure_reason,
-                       CASE WHEN expires_at IS NULL OR expires_at = 'infinity'::timestamptz THEN NULL
-                            ELSE to_char(expires_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS')
+                SELECT wi.id,
+                       wi.gift_name,
+                       wi.status,
+                       wi.gift_exchange_id,
+                       wi.last_failure_reason,
+                       CASE
+                           WHEN u.bilibili_room_id IS NULL THEN NULL
+                           WHEN wi.expires_at IS NULL OR wi.expires_at = 'infinity'::timestamptz THEN NULL
+                           ELSE to_char(wi.expires_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS')
                        END as expires_at,
-                       CASE WHEN expires_at IS NULL OR expires_at = 'infinity'::timestamptz THEN '绑定房间号后自动送出'
-                            ELSE NULL
+                       CASE
+                           WHEN u.bilibili_room_id IS NULL THEN '绑定房间号后自动送出'
+                           WHEN wi.expires_at IS NULL OR wi.expires_at = 'infinity'::timestamptz THEN '绑定房间号后自动送出'
+                           ELSE NULL
                        END as expires_note,
-                       to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at
-                FROM wish_inventory
-                WHERE username = $1
-                ORDER BY created_at DESC
+                       to_char(wi.created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at
+                FROM wish_inventory wi
+                JOIN users u ON u.username = wi.username
+                WHERE wi.username = $1
+                ORDER BY wi.created_at DESC
                 LIMIT 100
             `, [username]);
 

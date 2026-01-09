@@ -471,6 +471,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         try {
             const { username, betAmount } = req.body;
+            const betValue = Number(betAmount);
 
             // 验证用户名
             if (username !== req.session.user.username) {
@@ -478,16 +479,16 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             // 验证投注金额
-            if (!betAmount || betAmount < 1 || betAmount > 1000) {
+            if (!Number.isFinite(betValue) || betValue < 1 || betValue > 1000) {
                 return res.status(400).json({ success: false, message: '投注金额必须在1-1000电币之间' });
             }
 
             // 扣除投注电币
             const betResult = await BalanceLogger.updateBalance({
                 username: username,
-                amount: -betAmount,
+                amount: -betValue,
                 operationType: 'slot_bet',
-                description: `老虎机投注：${betAmount} 电币`,
+                description: `老虎机投注：${betValue} 电币`,
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent')
             });
@@ -511,11 +512,11 @@ module.exports = function registerGameRoutes(app, deps) {
             const outcome = outcomes[randomIndex];
 
             // 计算奖励
-            const payout = Math.floor(betAmount * outcome.multiplier);
+            const payout = Math.floor(betValue * outcome.multiplier);
 
             // 生成三个金额转动结果（用于前端显示，保证显示与奖励一致）
             const baseAmounts = [50, 100, 150, 200];
-            const amounts = baseAmounts.map((num) => Math.max(1, Math.round(num * betAmount / 100)));
+            const amounts = baseAmounts.map((num) => Math.max(1, Math.round(num * betValue / 100)));
             const randomAmount = () => amounts[randomInt(0, amounts.length)];
             const isLose = payout <= 0;
             let slotResults = isLose ? [randomAmount(), randomAmount(), randomAmount()] : [payout, payout, payout];
@@ -568,7 +569,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     JSON.stringify(slotResults), // result: 三个金额转动结果
                     outcome.type,                // won: 你现在存的是 outcome.type（先不动）
                     proof,
-                    betAmount,                   // $5 bet_amount ✅
+                    betValue,                    // $5 bet_amount ✅
                     payout,                      // $6 payout_amount ✅
                     currentBalance + betAmount,  // $7 balance_before ✅（下注前余额）
                     finalBalance,                // $8 balance_after ✅

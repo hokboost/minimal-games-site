@@ -7,12 +7,16 @@
 
 const { spawn } = require('child_process');
 const axios = require('axios');
+const crypto = require('crypto');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 class WindowsGiftListener {
     constructor() {
         // 配置服务器URL（根据实际部署地址修改）
         this.serverUrl = 'https://minimal-games-site.onrender.com';  // 或者你的实际Render URL
-        this.apiKey = 'bilibili-gift-service-secret-key-2024-secure'; // API密钥
+        this.apiKey = process.env.WINDOWS_API_KEY || 'bilibili-gift-service-secret-key-2024-secure'; // API密钥
+        this.hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || ''; // 签名密钥
         this.pollInterval = 2000; // 2秒轮询一次
         this.isProcessing = false;
         this.pythonScript = 'C:/Users/user/minimal-games-site/bilibili_gift_sender.py';
@@ -21,6 +25,9 @@ class WindowsGiftListener {
 
     // 启动监听服务
     async start() {
+        if (!this.hmacSecret) {
+            throw new Error('缺少GIFT_TASKS_HMAC_SECRET环境变量，无法进行签名请求');
+        }
         console.log('🚀 Windows B站礼物发送监听服务已启动');
         console.log(`📡 监听服务器: ${this.serverUrl}`);
         console.log(`⏰ 轮询间隔: ${this.pollInterval}ms`);
@@ -45,11 +52,12 @@ class WindowsGiftListener {
 
         try {
             console.log(`🔄 轮询任务... ${new Date().toLocaleTimeString()}`);
-            
-            const response = await axios.get(`${this.serverUrl}/api/gift-tasks`, {
+            const path = '/api/gift-tasks';
+            const headers = this.buildSignedHeaders('GET', path, null);
+            const response = await axios.get(`${this.serverUrl}${path}`, {
                 timeout: 10000,
                 headers: {
-                    'X-API-Key': this.apiKey,
+                    ...headers,
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 }
@@ -74,7 +82,7 @@ class WindowsGiftListener {
             } else if (error.response?.status === 404) {
                 console.log('📭 暂无待处理任务');
             } else if (error.response?.status === 401) {
-                console.error('❌ API密钥验证失败，请检查密钥设置');
+                console.error('❌ API鉴权失败，请检查密钥/签名设置');
             } else {
                 console.error('❌ 轮询任务失败:', {
                     message: error.message,
@@ -222,10 +230,13 @@ class WindowsGiftListener {
     async resetStuckTasks() {
         try {
             console.log('🔄 检查并重置卡住的任务...');
-            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/reset-stuck`, {}, {
+            const path = '/api/gift-tasks/reset-stuck';
+            const payload = {};
+            const headers = this.buildSignedHeaders('POST', path, payload);
+            const response = await axios.post(`${this.serverUrl}${path}`, payload, {
                 timeout: 10000,
                 headers: {
-                    'X-API-Key': this.apiKey,
+                    ...headers,
                     'Content-Type': 'application/json'
                 }
             });
@@ -248,10 +259,13 @@ class WindowsGiftListener {
     // 标记任务开始处理
     async markTaskStart(taskId) {
         try {
-            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/start`, {}, {
+            const path = `/api/gift-tasks/${taskId}/start`;
+            const payload = {};
+            const headers = this.buildSignedHeaders('POST', path, payload);
+            const response = await axios.post(`${this.serverUrl}${path}`, payload, {
                 timeout: 5000,
                 headers: {
-                    'X-API-Key': this.apiKey,
+                    ...headers,
                     'Content-Type': 'application/json'
                 }
             });
@@ -269,14 +283,17 @@ class WindowsGiftListener {
     // 标记任务完成
     async markTaskComplete(taskId, resultData = {}) {
         try {
-            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/complete`, {
+            const path = `/api/gift-tasks/${taskId}/complete`;
+            const payload = {
                 actual_quantity: resultData.actualQuantity,
                 requested_quantity: resultData.requestedQuantity,
                 partial_success: resultData.partialSuccess
-            }, {
+            };
+            const headers = this.buildSignedHeaders('POST', path, payload);
+            const response = await axios.post(`${this.serverUrl}${path}`, payload, {
                 timeout: 5000,
                 headers: {
-                    'X-API-Key': this.apiKey,
+                    ...headers,
                     'Content-Type': 'application/json'
                 }
             });
@@ -290,30 +307,68 @@ class WindowsGiftListener {
     // 标记任务失败
     async markTaskFailed(taskId, errorMessage, result = {}) {
         try {
-            const response = await axios.post(
-                `${this.serverUrl}/api/gift-tasks/${taskId}/fail`,
-                {
-                    error: errorMessage,
+            const path = `/api/gift-tasks/${taskId}/fail`;
+            const payload = {
+                error: errorMessage,
 
-                    // ✅【新增】把 Python 的结果一并传给后端
-                    actual_quantity: result.actual_quantity,
-                    requested_quantity: result.requested_quantity,
-                    partial_success: result.partial_success
-                },
-                {
-                    timeout: 5000,
-                    headers: {
-                        'X-API-Key': this.apiKey,
-                        'Content-Type': 'application/json'
-                    }
+                // ✅【新增】把 Python 的结果一并传给后端
+                actual_quantity: result.actual_quantity,
+                requested_quantity: result.requested_quantity,
+                partial_success: result.partial_success
+            };
+            const headers = this.buildSignedHeaders('POST', path, payload);
+            const response = await axios.post(`${this.serverUrl}${path}`, payload, {
+                timeout: 5000,
+                headers: {
+                    ...headers,
+                    'Content-Type': 'application/json'
                 }
-            );
+            });
             return response.status === 200 && response.data.success;
         } catch (error) {
             console.error(`❌ 标记任务失败失败 (${taskId}):`, error.message);
             return false;
         }
     }      
+
+    buildSignedHeaders(method, path, body) {
+        const timestamp = Date.now().toString();
+        const nonce = crypto.randomBytes(8).toString('hex');
+        const canonicalBody = stableStringifyBody(body);
+        const payload = `${timestamp}.${method.toUpperCase()}.${path}.${canonicalBody}`;
+        const signature = crypto.createHmac('sha256', this.hmacSecret).update(payload).digest('hex');
+
+        return {
+            'X-API-Key': this.apiKey,
+            'X-Timestamp': timestamp,
+            'X-Nonce': nonce,
+            'X-Signature': signature
+        };
+    }
+}
+
+function stableStringifyBody(body) {
+    if (!body || typeof body !== 'object' || (Array.isArray(body) && body.length === 0)) {
+        return '';
+    }
+    if (Object.keys(body).length === 0) {
+        return '';
+    }
+    return stableStringify(body);
+}
+
+function stableStringify(value) {
+    if (value === undefined || typeof value === 'function') {
+        return 'null';
+    }
+    if (value === null || typeof value !== 'object') {
+        return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+    }
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
 }
 
 

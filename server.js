@@ -1523,6 +1523,10 @@ app.get('/health', (req, res) => {
 function requireApiKey(req, res, next) {
     const apiKey = req.headers['x-api-key']; // 仅从header获取，不再支持query参数
     const validApiKey = process.env.WINDOWS_API_KEY || 'INVALID_DEFAULT_KEY';
+    const ipWhitelist = process.env.GIFT_TASKS_IP_WHITELIST || '';
+    const hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || '';
+    const clientIpRaw = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for']?.split(',')[0] || '';
+    const clientIp = clientIpRaw.startsWith('::ffff:') ? clientIpRaw.slice(7) : clientIpRaw;
     
     // 生产环境不允许默认密钥
     if (process.env.NODE_ENV === 'production' && validApiKey === 'INVALID_DEFAULT_KEY') {
@@ -1539,8 +1543,120 @@ function requireApiKey(req, res, next) {
             message: '无效的API密钥' 
         });
     }
+
+    if (!hmacSecret) {
+        return res.status(500).json({
+            success: false,
+            message: '服务配置错误'
+        });
+    }
+
+    if (ipWhitelist) {
+        const whitelist = ipWhitelist.split(',').map((ip) => ip.trim()).filter(Boolean);
+        if (!whitelist.includes(clientIp)) {
+            return res.status(403).json({
+                success: false,
+                message: 'IP未授权'
+            });
+        }
+    }
+
+    const timestampHeader = req.headers['x-timestamp'];
+    const signatureHeader = req.headers['x-signature'];
+    const nonceHeader = req.headers['x-nonce'];
+
+    if (!timestampHeader || !signatureHeader || !nonceHeader) {
+        return res.status(401).json({
+            success: false,
+            message: '缺少签名头'
+        });
+    }
+
+    const timestampRaw = Number(timestampHeader);
+    if (!Number.isFinite(timestampRaw)) {
+        return res.status(401).json({
+            success: false,
+            message: '无效时间戳'
+        });
+    }
+
+    const now = Date.now();
+    const timestampMs = timestampRaw < 1e12 ? timestampRaw * 1000 : timestampRaw;
+    if (Math.abs(now - timestampMs) > 5 * 60 * 1000) {
+        return res.status(401).json({
+            success: false,
+            message: '签名过期'
+        });
+    }
+
+    if (nonceHeader.length < 8) {
+        return res.status(401).json({
+            success: false,
+            message: '无效随机串'
+        });
+    }
+
+    if (!requireApiKey.nonceCache) {
+        requireApiKey.nonceCache = new Map();
+    }
+
+    const nonceCache = requireApiKey.nonceCache;
+    if (nonceCache.has(nonceHeader)) {
+        return res.status(401).json({
+            success: false,
+            message: '重复请求'
+        });
+    }
+
+    nonceCache.set(nonceHeader, timestampMs);
+    for (const [key, time] of nonceCache.entries()) {
+        if (now - time > 10 * 60 * 1000) {
+            nonceCache.delete(key);
+        }
+    }
+
+    const canonicalBody = stableStringifyBody(req.body);
+    const payload = `${timestampHeader}.${req.method}.${req.path}.${canonicalBody}`;
+    const expectedSignature = crypto
+        .createHmac('sha256', hmacSecret)
+        .update(payload)
+        .digest('hex');
+
+    const signatureBuffer = Buffer.from(String(signatureHeader), 'hex');
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+        return res.status(401).json({
+            success: false,
+            message: '签名不匹配'
+        });
+    }
     
     next();
+}
+
+function stableStringifyBody(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) && body.length === 0) {
+        return '';
+    }
+    const keys = Object.keys(body);
+    if (keys.length === 0) {
+        return '';
+    }
+    return stableStringify(body);
+}
+
+function stableStringify(value) {
+    if (value === undefined || typeof value === 'function') {
+        return 'null';
+    }
+    if (value === null || typeof value !== 'object') {
+        return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+    }
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
 }
 
 // ====================
@@ -1571,7 +1687,8 @@ registerGiftRoutes(app, {
     requireLogin,
     requireAuthorized,
     requireApiKey,
-    security
+    security,
+    generateCSRFToken
 });
 
 registerWishRoutes(app, {

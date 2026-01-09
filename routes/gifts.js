@@ -6,12 +6,18 @@ module.exports = function registerGiftRoutes(app, deps) {
         requireLogin,
         requireAuthorized,
         requireApiKey,
-        security
+        security,
+        generateCSRFToken
     } = deps;
 
     // 礼物兑换页面
     app.get('/gifts', requireLogin, requireAuthorized, async (req, res) => {
         try {
+            if (!req.session.initialized) {
+                req.session.initialized = true;
+                req.session.createdAt = Date.now();
+                generateCSRFToken(req);
+            }
             const username = req.session.user.username;
             const userResult = await pool.query(
                 'SELECT balance FROM users WHERE username = $1',
@@ -23,7 +29,8 @@ module.exports = function registerGiftRoutes(app, deps) {
             res.render('gifts', {
                 title: '礼物兑换 - Minimal Games',
                 user: req.session.user,
-                balance: balance
+                balance: balance,
+                csrfToken: req.session.csrfToken
             });
 
         } catch (err) {
@@ -33,7 +40,7 @@ module.exports = function registerGiftRoutes(app, deps) {
     });
 
     // 礼物兑换
-    app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         console.log('🚀 [DEBUG] 礼物兑换API开始执行');
         console.log('🚀 [DEBUG] 请求体:', JSON.stringify(req.body, null, 2));
         console.log('🚀 [DEBUG] 用户session:', req.session?.user);
