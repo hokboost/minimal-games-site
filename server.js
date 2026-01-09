@@ -3211,9 +3211,11 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
         const taskId = parseInt(req.params.id);
         const errorMessage = req.body.error || '礼物发送失败';
 
-        // ✅ [最小新增] 支持部分成功时精准退款（Windows 可传 actualQuantity / partialSuccess）
-        const actualQuantity = Number.isFinite(Number(req.body.actualQuantity)) ? parseInt(req.body.actualQuantity) : null;
-        const partialSuccess = !!req.body.partialSuccess;
+        // ✅ 兼容 Windows(Python) snake_case 与 JS camelCase
+        const actualQuantityVal = (req.body.actualQuantity ?? req.body.actual_quantity);
+        const partialSuccessVal = (req.body.partialSuccess ?? req.body.partial_success);
+        const actualQuantity = Number.isFinite(Number(actualQuantityVal)) ? parseInt(actualQuantityVal, 10) : null;
+        const partialSuccess = !!partialSuccessVal;
 
         // 🛡️ 预扣机制：任务失败时必须退还锁定的资金
         const taskResult = await pool.query(`
@@ -3230,7 +3232,7 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
 
         // 🔒 如果资金已锁定，需要退还给用户
         if (status === 'funds_locked') {
-            // ✅ [最小新增] 计算实际应退款金额
+            // ✅ 计算实际应退款金额
             let refundAmount = cost; // 默认全退（保持你原有行为）
             let descExtra = '';
 
@@ -3246,23 +3248,20 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
             // 使用 BalanceLogger 安全地退还资金并记录日志
             const refundResult = await BalanceLogger.updateBalance({
                 username: username,
-                amount: refundAmount, // ✅ 这里从 cost 改成 refundAmount
+                amount: refundAmount,
                 operationType: 'gift_delivery_failed_refund',
                 description: `礼物发送失败退款: ${gift_name} ${quantity}个，退还 ${refundAmount} 电币 - 原因: ${errorMessage}${descExtra}`,
                 gameData: {
                     taskId,
                     gift_name,
                     originalCost: cost,
-                    refundAmount: refundAmount,      // ✅ 记录真实退款
+                    refundAmount: refundAmount,
                     errorMessage: errorMessage,
                     quantity: quantity,
-                    const actualQuantityVal = (req.body.actualQuantity ?? req.body.actual_quantity);
-                    const partialSuccessVal = (req.body.partialSuccess ?? req.body.partial_success);
-                    const actualQuantity = Number.isFinite(Number(actualQuantityVal)) ? parseInt(actualQuantityVal, 10) : null;
-                    const partialSuccess = !!partialSuccessVal;
-
+                    actualQuantity: actualQuantity,
+                    partialSuccess: partialSuccess
                 },
-                requireSufficientBalance: false // 退款不需要检查余额
+                requireSufficientBalance: false
             });
 
             if (!refundResult.success) {
