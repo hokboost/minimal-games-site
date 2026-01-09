@@ -1278,7 +1278,8 @@ module.exports = function registerGameRoutes(app, deps) {
             const success = randomFloat() < successRate;
             const reward = success ? duelRewards[giftType].reward : 0;
 
-            let newBalance = balanceResult.balance;
+            const balanceAfterBet = balanceResult.balance;
+            let newBalance = balanceAfterBet;
             if (success) {
                 const rewardResult = await BalanceLogger.updateBalance({
                     username,
@@ -1319,6 +1320,9 @@ module.exports = function registerGameRoutes(app, deps) {
                 success: true,
                 reward,
                 success,
+                cost,
+                balanceAfterBet,
+                balanceAfterReward: newBalance,
                 newBalance
             });
         } catch (error) {

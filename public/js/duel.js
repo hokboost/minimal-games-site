@@ -89,7 +89,11 @@
                 return;
             }
 
-            if (Number.isFinite(result.newBalance)) {
+            if (result.reward > 0 && Number.isFinite(result.balanceAfterReward)) {
+                balanceEl.textContent = result.balanceAfterReward;
+            } else if (Number.isFinite(result.balanceAfterBet)) {
+                balanceEl.textContent = result.balanceAfterBet;
+            } else if (Number.isFinite(result.newBalance)) {
                 balanceEl.textContent = result.newBalance;
             }
             if (result.reward > 0) {
