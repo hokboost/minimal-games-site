@@ -2524,6 +2524,243 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
     }
 });
 
+// ====================
+// 幸运祈愿 Wish 游戏API
+// ====================
+
+app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const wishCost = 500; // 固定500电币每次祈愿
+        const successRate = 0.014; // 1.4%成功率
+        const guaranteeThreshold = 147; // 147次失败后第148次必出
+        const rewardName = "深海歌姬";
+        const rewardValue = 30000;
+
+        // 获取用户当前祈愿进度
+        let progressResult = await pool.query(
+            'SELECT * FROM wish_progress WHERE username = $1',
+            [username]
+        );
+
+        // 如果用户没有祈愿记录，创建一个
+        if (progressResult.rows.length === 0) {
+            await pool.query(`
+                INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                VALUES ($1, 0, 0, 0, 0)
+            `, [username]);
+            
+            progressResult = await pool.query(
+                'SELECT * FROM wish_progress WHERE username = $1',
+                [username]
+            );
+        }
+
+        const progress = progressResult.rows[0];
+
+        // 扣除祈愿费用
+        const betResult = await BalanceLogger.updateBalance({
+            username: username,
+            amount: -wishCost,
+            operationType: 'wish_bet',
+            description: `幸运祈愿：${wishCost} 电币`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        if (!betResult.success) {
+            return res.status(400).json({ success: false, message: betResult.message });
+        }
+
+        const balanceBefore = betResult.balance + wishCost;
+        let balanceAfter = betResult.balance;
+
+        // 判断是否成功
+        const isGuaranteed = progress.consecutive_fails >= guaranteeThreshold;
+        const randomSuccess = Math.random() < successRate;
+        const success = isGuaranteed || randomSuccess;
+
+        let payout = 0;
+        let reward = null;
+        
+        if (success) {
+            // 成功获得深海歌姬
+            reward = rewardName;
+            payout = rewardValue;
+            
+            // 发放奖励
+            const winResult = await BalanceLogger.updateBalance({
+                username: username,
+                amount: payout,
+                operationType: 'wish_win',
+                description: `祈愿成功获得：${rewardName} (${rewardValue} 电币)`,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+            });
+
+            if (winResult.success) {
+                balanceAfter = winResult.balance;
+            }
+        }
+
+        // 更新祈愿进度
+        const newTotalWishes = progress.total_wishes + 1;
+        const newConsecutiveFails = success ? 0 : progress.consecutive_fails + 1;
+        const newTotalSpent = progress.total_spent + wishCost;
+        const newTotalRewardsValue = progress.total_rewards_value + (success ? rewardValue : 0);
+
+        await pool.query(`
+            UPDATE wish_progress 
+            SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
+                last_success_at = $5, updated_at = CURRENT_TIMESTAMP
+            WHERE username = $6
+        `, [
+            newTotalWishes,
+            newConsecutiveFails,
+            newTotalSpent,
+            newTotalRewardsValue,
+            success ? new Date() : progress.last_success_at,
+            username
+        ]);
+
+        // 保存祈愿记录
+        try {
+            const crypto = require('crypto');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-wish-${Date.now()}-${Math.random()}`)
+                .digest('hex');
+
+            await pool.query(`
+                INSERT INTO wish_results (
+                    username, cost, success, reward, reward_value, balance_before, balance_after,
+                    wishes_count, is_guaranteed, game_details, created_at
+                ) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+            `, [
+                username,
+                wishCost,
+                success,
+                reward,
+                success ? rewardValue : null,
+                balanceBefore,
+                balanceAfter,
+                newTotalWishes,
+                isGuaranteed,
+                JSON.stringify({
+                    success_rate: successRate,
+                    is_guaranteed: isGuaranteed,
+                    consecutive_fails_before: progress.consecutive_fails,
+                    proof: proof,
+                    timestamp: new Date().toISOString()
+                })
+            ]);
+        } catch (dbError) {
+            console.error('祈愿记录存储失败:', dbError);
+        }
+
+        res.json({
+            success: true,
+            wishSuccess: success,
+            reward: reward,
+            rewardValue: success ? rewardValue : 0,
+            newBalance: balanceAfter,
+            progress: {
+                total_wishes: newTotalWishes,
+                consecutive_fails: newConsecutiveFails,
+                progress_percentage: Math.min((newConsecutiveFails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1),
+                wishes_until_guarantee: Math.max(0, guaranteeThreshold + 1 - newConsecutiveFails)
+            },
+            isGuaranteed: isGuaranteed
+        });
+
+    } catch (error) {
+        console.error('Wish play error:', error);
+        res.status(500).json({ success: false, message: '祈愿失败，请稍后重试' });
+    }
+});
+
+// 获取祈愿历史记录
+app.get('/api/wish/history', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+        const offset = (page - 1) * limit;
+
+        const result = await pool.query(`
+            SELECT * FROM wish_results 
+            WHERE username = $1 
+            ORDER BY created_at DESC 
+            LIMIT $2 OFFSET $3
+        `, [username, limit, offset]);
+
+        const countResult = await pool.query(
+            'SELECT COUNT(*) FROM wish_results WHERE username = $1',
+            [username]
+        );
+
+        res.json({
+            success: true,
+            history: result.rows,
+            pagination: {
+                page: page,
+                limit: limit,
+                total: parseInt(countResult.rows[0].count),
+                hasMore: (page * limit) < parseInt(countResult.rows[0].count)
+            }
+        });
+
+    } catch (error) {
+        console.error('获取祈愿历史失败:', error);
+        res.status(500).json({ success: false, message: '获取历史记录失败' });
+    }
+});
+
+// 获取祈愿进度
+app.get('/api/wish/progress', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        
+        let result = await pool.query(
+            'SELECT * FROM wish_progress WHERE username = $1',
+            [username]
+        );
+
+        // 如果用户没有祈愿记录，创建一个
+        if (result.rows.length === 0) {
+            await pool.query(`
+                INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                VALUES ($1, 0, 0, 0, 0)
+            `, [username]);
+            
+            result = await pool.query(
+                'SELECT * FROM wish_progress WHERE username = $1',
+                [username]
+            );
+        }
+
+        const progress = result.rows[0];
+        const guaranteeThreshold = 147;
+
+        res.json({
+            success: true,
+            progress: {
+                total_wishes: progress.total_wishes,
+                consecutive_fails: progress.consecutive_fails,
+                total_spent: progress.total_spent,
+                total_rewards_value: progress.total_rewards_value,
+                last_success_at: progress.last_success_at,
+                progress_percentage: Math.min((progress.consecutive_fails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1),
+                wishes_until_guarantee: Math.max(0, guaranteeThreshold + 1 - progress.consecutive_fails),
+                next_is_guaranteed: progress.consecutive_fails >= guaranteeThreshold
+            }
+        });
+
+    } catch (error) {
+        console.error('获取祈愿进度失败:', error);
+        res.status(500).json({ success: false, message: '获取进度失败' });
+    }
+});
 
 
 // Spin API 路由

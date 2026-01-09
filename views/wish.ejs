@@ -211,11 +211,16 @@
     <div class="wish-container">
         <h1>🌟 幸运祈愿</h1>
         <p>玩家：<%= username %></p>
-        <p style="color: #666;">向幸运女神许下心愿，祈求好运降临！</p>
+        <p style="color: #666;">祈愿深海歌姬，500电币/次，成功率1.4%</p>
+        
+        <div style="text-align: center; margin: 20px 0;">
+            <h2 style="color: #667eea; margin: 10px 0;">🧜‍♀️ 深海歌姬</h2>
+            <p style="color: #f39c12; font-size: 18px; font-weight: bold;">价值: 30000 电币</p>
+        </div>
         
         <div class="wish-progress">
             <div class="progress-bar" id="progressBar"></div>
-            <div class="progress-text" id="progressText">0 / 148</div>
+            <div class="progress-text" id="progressText">0 / 148 (保底)</div>
         </div>
         
         <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 900px; margin: 0 auto;">
@@ -321,15 +326,20 @@
         }
         
 
-        function showModal(isSuccess) {
+        function showModal(isSuccess, reward = null, rewardValue = 0, isGuaranteed = false) {
             const modal = document.getElementById('fullscreenModal');
             const content = document.getElementById('modalContent');
             
             if (isSuccess) {
-                content.textContent = '祈愿成功';
+                content.innerHTML = `
+                    <div>🎉 祈愿成功！</div>
+                    <div style="font-size: 2rem; margin: 15px 0;">🧜‍♀️ ${reward || '深海歌姬'}</div>
+                    <div style="font-size: 1.5rem; color: #f39c12;">价值: ${rewardValue || 30000} 电币</div>
+                    ${isGuaranteed ? '<div style="font-size: 1rem; color: #e74c3c; margin-top: 10px;">保底出货</div>' : ''}
+                `;
                 content.className = 'modal-content modal-success';
             } else {
-                content.textContent = '祈愿失败';
+                content.textContent = '😢 祈愿失败，再接再厉！';
                 content.className = 'modal-content modal-failure';
             }
             
@@ -349,34 +359,29 @@
             button.textContent = '祈愿中...';
             
             try {
-                const response = await fetch('/api/wish', {
+                const response = await fetch('/api/wish/play', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify({ 
-                        username,
-                        currentCount: wishData.current
-                    })
+                    }
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    wishData.total++;
+                    // 更新本地进度数据
+                    wishProgress = result.progress;
+                    wishProgress.total_spent = result.progress.total_wishes * 500; // 计算总花费
                     
-                    if (result.isWin) {
-                        wishData.success++;
-                        wishData.current = 0; // 重置进度
-                        showModal(true);
+                    // 显示结果
+                    if (result.wishSuccess) {
+                        showModal(true, result.reward, result.rewardValue, result.isGuaranteed);
                     } else {
-                        wishData.current++;
                         showModal(false);
                     }
                     
-                    saveWishData();
-                    updateDisplay(result);
+                    updateDisplayNew();
                 } else {
                     alert('祈愿失败：' + result.message);
                 }
@@ -389,8 +394,55 @@
             }
         }
         
+        // 页面加载时获取祈愿进度
+        async function loadWishProgress() {
+            try {
+                const response = await fetch('/api/wish/progress');
+                const result = await response.json();
+                
+                if (result.success) {
+                    wishProgress = result.progress;
+                    updateDisplayNew();
+                }
+            } catch (error) {
+                console.error('加载祈愿进度失败:', error);
+                updateDisplay(); // fallback到原来的显示
+            }
+        }
+
+        function updateDisplayNew() {
+            const progress = (wishProgress.consecutive_fails / 148) * 100;
+            document.getElementById('progressBar').style.width = Math.min(progress, 100) + '%';
+            document.getElementById('progressText').textContent = 
+                `${wishProgress.consecutive_fails} / 148 (保底)`;
+            
+            document.getElementById('totalWishes').textContent = wishProgress.total_wishes;
+            document.getElementById('successCount').textContent = 
+                Math.floor(wishProgress.total_rewards_value / 30000); // 根据获得奖励计算成功次数
+            
+            const failCount = wishProgress.total_wishes - Math.floor(wishProgress.total_rewards_value / 30000);
+            if (document.getElementById('failCount')) {
+                document.getElementById('failCount').textContent = failCount;
+            }
+            
+            const successRate = wishProgress.total_wishes > 0 ? 
+                (Math.floor(wishProgress.total_rewards_value / 30000) / wishProgress.total_wishes * 100).toFixed(1) : '0.0';
+            if (document.getElementById('successRate')) {
+                document.getElementById('successRate').textContent = successRate + '%';
+            }
+            
+            // 如果即将保底，改变进度条颜色
+            if (wishProgress.consecutive_fails >= 147) {
+                document.getElementById('progressBar').style.background = 
+                    'linear-gradient(45deg, #f39c12, #e67e22)'; // 金色，表示即将保底
+            } else {
+                document.getElementById('progressBar').style.background = 
+                    'linear-gradient(45deg, #ff6b6b, #ee5a24)';
+            }
+        }
+        
         // 初始化显示
-        updateDisplay();
+        loadWishProgress();
         
         // 飘屏管理器
         class DanmakuManager {
