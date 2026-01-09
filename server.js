@@ -1665,17 +1665,27 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
     console.log('🚀 [DEBUG] 请求体:', JSON.stringify(req.body, null, 2));
     console.log('🚀 [DEBUG] 用户session:', req.session?.user);
     
+    // ✅ FIX: 提前声明，避免外层catch作用域拿不到
+    let username = 'unknown';
+    // ✅ FIX: 事务内拿到的值需要在事务外继续用
+    let currentBalance;
+    let bilibiliRoomId;
+
     try {
         const { giftType, cost, quantity = 1 } = req.body;
-        const username = req.session.user.username;
+        username = req.session.user.username; // ✅ FIX: 不再用const，赋值到外层变量
         const clientIP = req.clientIP;
         const userAgent = req.userAgent;
 
         console.log(`🔍 [DEBUG] 解析后参数: giftType=${giftType}, cost=${cost}, quantity=${quantity}, username=${username}`);
         console.log(`🔍 [DEBUG] 客户端信息: IP=${clientIP}, UA=${userAgent}`);
 
+        // ✅ FIX: 统一把 cost / quantity 转成数字，避免 "150" !== 150
+        const costNum = Number(cost);
+        const quantityNum = Number(quantity);
+
         // 验证输入参数
-        if (!giftType || !cost || quantity < 1) {
+        if (!giftType || !Number.isFinite(costNum) || quantityNum < 1) { // ✅ FIX
             console.log('❌ [DEBUG] 参数验证失败:', { giftType, cost, quantity });
             return res.status(400).json({ 
                 success: false, 
@@ -1685,7 +1695,7 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         console.log('✅ [DEBUG] 参数验证通过');
 
         // 验证数量上限
-        if (quantity > 100) {
+        if (quantityNum > 100) { // ✅ FIX
             return res.status(400).json({ 
                 success: false, 
                 message: '单次最多只能兑换100个礼物' 
@@ -1724,8 +1734,8 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         }
 
         // 验证价格（考虑数量）
-        const expectedTotalCost = availableGifts[giftType].cost * quantity;
-        if (cost !== expectedTotalCost) {
+        const expectedTotalCost = availableGifts[giftType].cost * quantityNum; // ✅ FIX
+        if (costNum !== expectedTotalCost) { // ✅ FIX
             return res.status(400).json({ 
                 success: false, 
                 message: `价格不匹配，期望价格: ${expectedTotalCost} 电币` 
@@ -1752,12 +1762,15 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
                 throw new Error('用户不存在');
             }
 
-            const { balance: currentBalance, bilibili_room_id: bilibiliRoomId } = lockResult.rows[0];
+            // ✅ FIX: 去掉const解构，写入外层变量供事务外使用
+            currentBalance = Number(lockResult.rows[0].balance);
+            bilibiliRoomId = lockResult.rows[0].bilibili_room_id;
+
             console.log(`🔍 [DEBUG] 用户信息: 余额=${currentBalance}, 房间号=${bilibiliRoomId}`);
             
-            if (currentBalance < cost) {
-                console.log(`❌ [DEBUG] 余额不足: 当前=${currentBalance}, 需要=${cost}`);
-                throw new Error(`余额不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币`);
+            if (currentBalance < costNum) { // ✅ FIX
+                console.log(`❌ [DEBUG] 余额不足: 当前=${currentBalance}, 需要=${costNum}`); // ✅ FIX
+                throw new Error(`余额不足！当前余额: ${currentBalance} 电币，需要: ${costNum} 电币`); // ✅ FIX
             }
             console.log('✅ [DEBUG] 余额检查通过');
 
@@ -1776,16 +1789,16 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             console.log('✅ [DEBUG] 无pending任务，可以继续');
 
             // 3. 立即锁住资金（从余额中扣除，但标记为frozen）
-            console.log(`🔍 [DEBUG] 扣除资金: ${cost} 电币`);
+            console.log(`🔍 [DEBUG] 扣除资金: ${costNum} 电币`); // ✅ FIX
             await client.query(
                 'UPDATE users SET balance = balance - $1 WHERE username = $2',
-                [cost, username]
+                [costNum, username] // ✅ FIX
             );
             console.log('✅ [DEBUG] 资金扣除完成');
 
             // 4. 创建任务记录，标记资金已锁定
             console.log('🔍 [DEBUG] 创建礼物兑换任务记录');
-            const insertParams = [username, giftType, availableGifts[giftType].name, cost, quantity, bilibiliRoomId, 
+            const insertParams = [username, giftType, availableGifts[giftType].name, costNum, quantityNum, bilibiliRoomId,  // ✅ FIX
                 bilibiliRoomId ? 'pending' : 'no_room'];
             console.log('🔍 [DEBUG] INSERT参数:', insertParams);
             
@@ -1802,7 +1815,7 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
             await client.query('COMMIT');
             console.log('✅ [DEBUG] 事务提交成功');
             
-            console.log(`🔒 用户 ${username} 资金已锁定: ${cost} 电币，剩余余额: ${currentBalance - cost} 电币`);
+            console.log(`🔒 用户 ${username} 资金已锁定: ${costNum} 电币，剩余余额: ${currentBalance - costNum} 电币`); // ✅ FIX
             
         } catch (error) {
             console.log('💥 [DEBUG] 事务中发生错误:', error.message);
@@ -1821,7 +1834,7 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
 
         const exchangeId = insertResult.rows[0].id;
 
-        console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name} x${quantity}，花费 ${cost} 电币`);
+        console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name} x${quantityNum}，花费 ${costNum} 电币`); // ✅ FIX
 
         // 礼物将由Windows监听服务处理，无需立即发送
         let deliveryMessage = '';
@@ -1837,7 +1850,7 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         res.json({ 
             success: true, 
             message: `兑换成功${deliveryMessage}`,
-            newBalance: currentBalance - cost, // 返回扣费后的余额
+            newBalance: currentBalance - costNum, // ✅ FIX
             deliveryStatus: bilibiliRoomId ? 'pending' : 'no_room',
             note: '资金已锁定，礼物发送完成后确认扣费'
         });
@@ -1846,7 +1859,7 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         console.error('🚨 礼物兑换严重错误:', {
             message: error.message,
             stack: error.stack,
-            username: username || 'unknown',
+            username: username || 'unknown', // ✅ FIX: 现在不会ReferenceError
             giftType: req.body?.giftType,
             cost: req.body?.cost,
             quantity: req.body?.quantity
@@ -1857,6 +1870,7 @@ app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicR
         });
     }
 });
+
 
 // 获取兑换历史
 app.get('/api/gifts/history', requireLogin, requireAuthorized, async (req, res) => {
