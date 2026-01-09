@@ -97,15 +97,17 @@
                 return;
             }
 
+            const payoutValue = data.payout ?? data.reward ?? 0;
+            const outcomeText = data.outcome ?? ((payoutValue > 0) ? `中奖 ${payoutValue} 电币` : '未中奖');
             const normalized = {
-                reward: data.reward ?? 0,
-                payout: data.reward ?? 0,
-                outcome: (data.reward ?? 0) > 0 ? `中奖 ${data.reward} 电币` : '未中奖',
+                reward: data.reward ?? payoutValue,
+                payout: payoutValue,
+                outcome: outcomeText,
                 winningNumbers: data.winningNumbers || data.winning_numbers || [],
                 slots: data.slots || [],
                 matchesCount: data.matchesCount ?? data.matches_count ?? 0,
-                balance: data.balance ?? data.newBalance,
-                finalBalance: data.balance ?? data.newBalance
+                balance: data.balance ?? data.finalBalance ?? data.newBalance,
+                finalBalance: data.balance ?? data.finalBalance ?? data.newBalance
             };
 
             currentGameData = normalized;

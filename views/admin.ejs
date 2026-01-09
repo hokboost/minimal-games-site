@@ -142,7 +142,11 @@
                 <tbody>
                     <% users.forEach(user => { %>
                         <tr>
-                            <td><%= user.username %></td>
+                            <td>
+                                <a class="user-link" href="/admin/users/<%= encodeURIComponent(user.username) %>/records">
+                                    <%= user.username %>
+                                </a>
+                            </td>
                             <td class="balance">
                                 <span class="balance-display">⚡<%= user.balance || 0 %> 电币</span>
                                 <button class="edit-balance-btn" data-action="edit-balance" data-username="<%= user.username %>" data-balance="<%= user.balance || 0 %>">
@@ -359,6 +363,16 @@
 
     .users-table tr:hover {
         background: rgba(255, 255, 255, 0.05);
+    }
+
+    .user-link {
+        color: #ffeb3b;
+        text-decoration: none;
+        font-weight: bold;
+    }
+
+    .user-link:hover {
+        text-decoration: underline;
     }
 
     .spins {

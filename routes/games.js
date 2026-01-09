@@ -718,7 +718,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     matchedCount++;
                 } else {
                     num = randomInt(1, 101);
-                    prize = `￥${tierRewards[randomInt(0, tierRewards.length)]}`;
+                    prize = `${tierRewards[randomInt(0, tierRewards.length)]} 电币`;
                 }
 
                 userSlots.push({

@@ -176,6 +176,131 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
+    app.get('/admin/users/:username/records', requireLogin, requireAdmin, async (req, res) => {
+        try {
+            const targetUsername = req.params.username;
+            const userResult = await pool.query(
+                'SELECT username FROM users WHERE username = $1',
+                [targetUsername]
+            );
+
+            if (userResult.rows.length === 0) {
+                return res.status(404).send('用户不存在');
+            }
+
+            const [
+                quizResult,
+                slotResult,
+                scratchResult,
+                wishResult,
+                stoneResult,
+                flipResult,
+                duelResult
+            ] = await Promise.all([
+                pool.query(`
+                    SELECT score,
+                           to_char(submitted_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM submissions
+                    WHERE username = $1
+                    ORDER BY submitted_at DESC
+                    LIMIT 200
+                `, [targetUsername]),
+                pool.query(`
+                    SELECT won as result,
+                           COALESCE(payout_amount, 0) as payout,
+                           COALESCE(bet_amount, 0) as bet_amount,
+                           COALESCE(multiplier, 0) as multiplier,
+                           COALESCE(game_details->>'amounts', '') as amounts,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM slot_results
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                `, [targetUsername]),
+                pool.query(`
+                    SELECT COALESCE(reward::text, '0') as reward,
+                           COALESCE(matches_count, 0) as matches_count,
+                           COALESCE(tier_cost, 0) as tier_cost,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM scratch_results
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                `, [targetUsername]),
+                pool.query(`
+                    SELECT gift_type,
+                           cost,
+                           success,
+                           reward,
+                           wishes_count,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM wish_results
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                `, [targetUsername]),
+                pool.query(`
+                    SELECT action_type,
+                           COALESCE(cost, 0) as cost,
+                           COALESCE(reward, 0) as reward,
+                           slot_index,
+                           before_slots,
+                           after_slots,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM stone_logs
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                `, [targetUsername]),
+                pool.query(`
+                    SELECT action_type,
+                           COALESCE(cost, 0) as cost,
+                           COALESCE(reward, 0) as reward,
+                           card_index,
+                           card_type,
+                           good_count,
+                           bad_count,
+                           ended,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM flip_logs
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                `, [targetUsername]),
+                pool.query(`
+                    SELECT gift_type,
+                           power,
+                           cost,
+                           success,
+                           COALESCE(reward, 0) as reward,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM duel_logs
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                `, [targetUsername])
+            ]);
+
+            res.render('admin-user-records', {
+                title: `用户记录 - ${targetUsername}`,
+                user: req.session.user,
+                targetUsername,
+                records: {
+                    quiz: quizResult.rows,
+                    slot: slotResult.rows,
+                    scratch: scratchResult.rows,
+                    wish: wishResult.rows,
+                    stone: stoneResult.rows,
+                    flip: flipResult.rows,
+                    duel: duelResult.rows
+                }
+            });
+        } catch (error) {
+            console.error('管理员用户记录加载失败:', error);
+            res.status(500).send('记录加载失败');
+        }
+    });
+
     // 添加电币
     app.post('/api/admin/add-electric-coin', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
         try {
