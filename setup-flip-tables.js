@@ -20,7 +20,7 @@ async function setupFlipTables() {
             SELECT table_name 
             FROM information_schema.tables 
             WHERE table_schema = 'public' 
-            AND table_name IN ('flip_states')
+            AND table_name IN ('flip_states', 'flip_logs')
         `);
 
         console.log('📊 创建的表:', result.rows.map(row => row.table_name));

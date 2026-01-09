@@ -98,6 +98,18 @@
                         <button class="view-records-btn" onclick="viewGameRecords('stone')">查看记录</button>
                     </div>
                 </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">🃏</div>
+                    <div class="stat-content">
+                        <h3>翻卡牌</h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main">记录数: <%= gameStats.flip.total %></span>
+                            <span class="stat-sub">翻牌与结算日志</span>
+                        </div>
+                        <button class="view-records-btn" onclick="viewGameRecords('flip')">查看记录</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -738,7 +750,8 @@
             slot: '🎰 老虎机记录',
             scratch: '🎟️ 刮刮乐记录',
             wish: '🌟 祈愿记录',
-            stone: '🪨 合石头记录'
+            stone: '🪨 合石头记录',
+            flip: '🃏 翻卡牌记录'
         };
         
         document.getElementById('recordsTitle').textContent = titles[gameType];
@@ -884,6 +897,8 @@
             tableHTML += '<thead><tr><th>祈愿时间</th><th>次数</th><th>消耗电币</th><th>结果</th></tr></thead>';
         } else if (gameType === 'stone') {
             tableHTML += '<thead><tr><th>操作时间</th><th>操作</th><th>花费</th><th>变化</th></tr></thead>';
+        } else if (gameType === 'flip') {
+            tableHTML += '<thead><tr><th>操作时间</th><th>动作</th><th>成本/奖励</th><th>结果</th></tr></thead>';
         }
         
         tableHTML += '<tbody>';
@@ -942,6 +957,18 @@
                         <td>${formatStoneAction(record.action_type)}</td>
                         <td>${costText} 电币</td>
                         <td>${beforeSlots} → ${afterSlots}</td>
+                    </tr>
+                `;
+            } else if (gameType === 'flip') {
+                const actionText = formatFlipAction(record.action_type);
+                const amountText = record.reward > 0 ? `+${record.reward}` : '0';
+                const resultText = `好牌${record.good_count || 0}，坏牌${record.bad_count || 0}`;
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${actionText}</td>
+                        <td>${amountText} 电币</td>
+                        <td>${resultText}</td>
                     </tr>
                 `;
             }
@@ -1006,6 +1033,13 @@
             purple: '紫'
         };
         return (slots || []).map(color => colors[color] || '空').join('');
+    }
+
+    function formatFlipAction(actionType) {
+        const map = {
+            end: '本局结果'
+        };
+        return map[actionType] || actionType;
     }
 
     function changePage(page) {

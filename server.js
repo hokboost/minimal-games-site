@@ -552,7 +552,8 @@ app.get('/profile', requireLogin, async (req, res) => {
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN won != \'lost\' THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count FROM stone_logs WHERE username = $1', [username])
+            pool.query('SELECT COUNT(*) as count FROM stone_logs WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count FROM flip_logs WHERE username = $1', [username])
         ]);
         
         const stats = {
@@ -574,6 +575,9 @@ app.get('/profile', requireLogin, async (req, res) => {
             },
             stone: {
                 total: parseInt(gameStats[4].rows[0].count) || 0
+            },
+            flip: {
+                total: parseInt(gameStats[5].rows[0].count) || 0
             }
         };
         
@@ -2640,7 +2644,7 @@ const wishConfigs = {
         name: '梦游仙境',
         bilibiliGiftId: '31932',
         cost: 150,
-        successRate: 0.0425,
+        successRate: 0.0405,
         guaranteeCount: 41,
         rewardValue: 3000
     },
@@ -2649,7 +2653,7 @@ const wishConfigs = {
         name: '纯白花嫁',
         bilibiliGiftId: '34428',
         cost: 75,
-        successRate: 0.049,
+        successRate: 0.047,
         guaranteeCount: 34,
         rewardValue: 1314
     },
@@ -2667,7 +2671,7 @@ const wishConfigs = {
         name: '啵啵',
         bilibiliGiftId: '33668',
         cost: 50,
-        successRate: 0.106,
+        successRate: 0.104,
         guaranteeCount: 16,
         rewardValue: 399
     }
@@ -2769,6 +2773,40 @@ async function saveFlipState(username, state) {
             username
         ]
     );
+}
+
+async function logFlipAction({
+    username,
+    actionType,
+    cost = 0,
+    reward = 0,
+    cardIndex = null,
+    cardType = null,
+    goodCount = 0,
+    badCount = 0,
+    ended = false
+}) {
+    try {
+        await pool.query(
+            `INSERT INTO flip_logs (
+                username, action_type, cost, reward, card_index, card_type,
+                good_count, bad_count, ended, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+            [
+                username,
+                actionType,
+                cost,
+                reward,
+                cardIndex,
+                cardType,
+                goodCount,
+                badCount,
+                ended
+            ]
+        );
+    } catch (error) {
+        console.error('Flip log error:', error);
+    }
 }
 
 function randomStoneColor() {
@@ -3648,6 +3686,16 @@ app.post('/api/flip/flip', requireLogin, requireAuthorized, security.basicRateLi
         }
 
         await saveFlipState(username, state);
+        if (state.ended) {
+            await logFlipAction({
+                username,
+                actionType: 'end',
+                reward,
+                goodCount: state.good_count,
+                badCount: state.bad_count,
+                ended: true
+            });
+        }
 
         res.json({
             success: true,
@@ -3695,6 +3743,15 @@ app.post('/api/flip/cashout', requireLogin, requireAuthorized, security.basicRat
         if (!rewardResult.success) {
             return res.status(400).json({ success: false, message: rewardResult.message });
         }
+
+        await logFlipAction({
+            username,
+            actionType: 'end',
+            reward,
+            goodCount: state.good_count,
+            badCount: state.bad_count,
+            ended: true
+        });
 
         res.json({
             success: true,
@@ -4849,6 +4906,25 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                 `;
                 params = [username, limit, offset];
                 countQuery = 'SELECT COUNT(*) FROM stone_logs WHERE username = $1';
+                countParams = [username];
+                break;
+
+            case 'flip':
+                query = `
+                    SELECT id,
+                           action_type,
+                           reward,
+                           good_count,
+                           bad_count,
+                           ended,
+                           created_at as played_at
+                    FROM flip_logs
+                    WHERE username = $1 AND action_type = 'end'
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                `;
+                params = [username, limit, offset];
+                countQuery = "SELECT COUNT(*) FROM flip_logs WHERE username = $1 AND action_type = 'end'";
                 countParams = [username];
                 break;
 
