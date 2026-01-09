@@ -110,6 +110,18 @@
                         <button class="view-records-btn" onclick="viewGameRecords('flip')">查看记录</button>
                     </div>
                 </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">⚔️</div>
+                    <div class="stat-content">
+                        <h3>决斗挑战</h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main">记录数: <%= gameStats.duel.total %></span>
+                            <span class="stat-sub">挑战记录</span>
+                        </div>
+                        <button class="view-records-btn" onclick="viewGameRecords('duel')">查看记录</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -751,7 +763,8 @@
             scratch: '🎟️ 刮刮乐记录',
             wish: '🌟 祈愿记录',
             stone: '🪨 合石头记录',
-            flip: '🃏 翻卡牌记录'
+            flip: '🃏 翻卡牌记录',
+            duel: '⚔️ 决斗挑战记录'
         };
         
         document.getElementById('recordsTitle').textContent = titles[gameType];
@@ -899,6 +912,8 @@
             tableHTML += '<thead><tr><th>操作时间</th><th>操作</th><th>花费</th><th>变化</th></tr></thead>';
         } else if (gameType === 'flip') {
             tableHTML += '<thead><tr><th>操作时间</th><th>动作</th><th>成本/奖励</th><th>结果</th></tr></thead>';
+        } else if (gameType === 'duel') {
+            tableHTML += '<thead><tr><th>挑战时间</th><th>礼物</th><th>功力</th><th>消耗</th><th>结果</th></tr></thead>';
         }
         
         tableHTML += '<tbody>';
@@ -971,6 +986,18 @@
                         <td>${resultText}</td>
                     </tr>
                 `;
+            } else if (gameType === 'duel') {
+                const giftName = formatDuelGift(record.gift_type);
+                const resultText = record.success ? `✅ 成功 +${record.reward}` : '❌ 失败';
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${giftName}</td>
+                        <td>${record.power}%</td>
+                        <td>-${record.cost}</td>
+                        <td>${resultText}</td>
+                    </tr>
+                `;
             }
         });
         
@@ -1040,6 +1067,18 @@
             end: '本局结果'
         };
         return map[actionType] || actionType;
+    }
+
+    function formatDuelGift(giftType) {
+        const map = {
+            crown: '至尊奖 30000',
+            dragon: '龙魂奖 13140',
+            phoenix: '凤羽奖 5000',
+            jade: '玉阶奖 1000',
+            bronze: '青铜奖 500',
+            iron: '铁心奖 200'
+        };
+        return map[giftType] || giftType;
     }
 
     function changePage(page) {

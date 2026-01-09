@@ -553,7 +553,8 @@ app.get('/profile', requireLogin, async (req, res) => {
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count FROM stone_logs WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count FROM flip_logs WHERE username = $1', [username])
+            pool.query('SELECT COUNT(*) as count FROM flip_logs WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count FROM duel_logs WHERE username = $1', [username])
         ]);
         
         const stats = {
@@ -578,6 +579,9 @@ app.get('/profile', requireLogin, async (req, res) => {
             },
             flip: {
                 total: parseInt(gameStats[5].rows[0].count) || 0
+            },
+            duel: {
+                total: parseInt(gameStats[6].rows[0].count) || 0
             }
         };
         
@@ -1524,6 +1528,33 @@ app.get('/flip', requireLogin, requireAuthorized, security.basicRateLimit, async
         });
     } catch (error) {
         console.error('Flip page error:', error);
+        res.status(500).send('服务器错误');
+    }
+});
+
+app.get('/duel', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            generateCSRFToken(req);
+        }
+
+        const username = req.session.user.username;
+        const userResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+
+        const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+
+        res.render('duel', {
+            username,
+            balance,
+            csrfToken: req.session.csrfToken
+        });
+    } catch (error) {
+        console.error('Duel page error:', error);
         res.status(500).send('服务器错误');
     }
 });
@@ -2653,7 +2684,7 @@ const wishConfigs = {
         name: '纯白花嫁',
         bilibiliGiftId: '34428',
         cost: 75,
-        successRate: 0.047,
+        successRate: 0.046,
         guaranteeCount: 34,
         rewardValue: 1314
     },
@@ -2707,6 +2738,15 @@ const flipCashoutRewards = {
     5: 3000,
     6: 8000,
     7: 30000
+};
+
+const duelRewards = {
+    crown: { name: '至尊奖', reward: 30000 },
+    dragon: { name: '龙魂奖', reward: 13140 },
+    phoenix: { name: '凤羽奖', reward: 5000 },
+    jade: { name: '玉阶奖', reward: 1000 },
+    bronze: { name: '青铜奖', reward: 500 },
+    iron: { name: '铁心奖', reward: 200 }
 };
 
 function shuffleArray(list) {
@@ -3764,6 +3804,88 @@ app.post('/api/flip/cashout', requireLogin, requireAuthorized, security.basicRat
     }
 });
 
+// ====================
+// 决斗挑战 Duel 游戏API
+// ====================
+
+app.post('/api/duel/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const giftType = req.body.giftType;
+        const power = Number(req.body.power);
+
+        if (!duelRewards[giftType]) {
+            return res.status(400).json({ success: false, message: '无效的奖品档位' });
+        }
+
+        if (!Number.isFinite(power) || power < 1 || power > 80) {
+            return res.status(400).json({ success: false, message: '功力范围为1-80' });
+        }
+
+        const cost = Math.round(52 * power);
+        const successRate = power / 100;
+
+        const balanceResult = await BalanceLogger.updateBalance({
+            username,
+            amount: -cost,
+            operationType: 'duel_bet',
+            description: `决斗挑战：功力${power}%`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
+        }
+
+        const success = Math.random() < successRate;
+        const reward = success ? duelRewards[giftType].reward : 0;
+
+        let newBalance = balanceResult.balance;
+        if (success) {
+            const rewardResult = await BalanceLogger.updateBalance({
+                username,
+                amount: reward,
+                operationType: 'duel_win',
+                description: `决斗挑战获胜：${duelRewards[giftType].name} ${reward} 电币`,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                requireSufficientBalance: false
+            });
+
+            if (!rewardResult.success) {
+                return res.status(400).json({ success: false, message: rewardResult.message });
+            }
+
+            newBalance = rewardResult.balance;
+        }
+
+        await pool.query(
+            `INSERT INTO duel_logs (
+                username, gift_type, reward, power, cost, success, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+            [
+                username,
+                giftType,
+                reward,
+                power,
+                cost,
+                success
+            ]
+        );
+
+        res.json({
+            success: true,
+            reward,
+            success,
+            newBalance
+        });
+    } catch (error) {
+        console.error('Duel play error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
 
 // Spin API 路由
 app.post('/api/spin', 
@@ -4382,7 +4504,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'stone', 'flip'],
+        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'stone', 'flip', 'duel'],
         questions: questions.length
     });
 });
@@ -4925,6 +5047,25 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                 `;
                 params = [username, limit, offset];
                 countQuery = "SELECT COUNT(*) FROM flip_logs WHERE username = $1 AND action_type = 'end'";
+                countParams = [username];
+                break;
+
+            case 'duel':
+                query = `
+                    SELECT id,
+                           gift_type,
+                           reward,
+                           power,
+                           cost,
+                           success,
+                           created_at as played_at
+                    FROM duel_logs
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                `;
+                params = [username, limit, offset];
+                countQuery = "SELECT COUNT(*) FROM duel_logs WHERE username = $1";
                 countParams = [username];
                 break;
 
