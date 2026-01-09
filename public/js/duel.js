@@ -34,6 +34,18 @@
         });
     }
 
+    function parseBalance(value) {
+        if (typeof value === 'number') {
+            return value;
+        }
+        if (typeof value === 'string') {
+            const cleaned = value.replace(/[^\d.-]/g, '');
+            const num = Number(cleaned);
+            return Number.isFinite(num) ? num : null;
+        }
+        return null;
+    }
+
     function updatePower(value) {
         const power = Math.min(80, Math.max(1, Number(value)));
         powerRange.value = power;
@@ -58,13 +70,13 @@
         resultBox.textContent = '挑战中...';
         const power = Number(powerInput.value);
         const cost = calculateCost(power);
-        const currentBalance = Number(balanceEl.textContent);
-        if (Number.isFinite(currentBalance) && currentBalance < cost) {
+        const currentBalance = parseBalance(balanceEl.textContent);
+        if (currentBalance !== null && currentBalance < cost) {
             resultBox.textContent = '电币不足，无法挑战';
             duelBtn.disabled = false;
             return;
         }
-        if (Number.isFinite(currentBalance) && Number.isFinite(cost)) {
+        if (currentBalance !== null && Number.isFinite(cost)) {
             balanceEl.textContent = currentBalance - cost;
         }
         try {
@@ -89,12 +101,15 @@
                 return;
             }
 
-            if (result.reward > 0 && Number.isFinite(result.balanceAfterReward)) {
-                balanceEl.textContent = result.balanceAfterReward;
-            } else if (Number.isFinite(result.balanceAfterBet)) {
-                balanceEl.textContent = result.balanceAfterBet;
-            } else if (Number.isFinite(result.newBalance)) {
-                balanceEl.textContent = result.newBalance;
+            const balanceAfterReward = parseBalance(result.balanceAfterReward);
+            const balanceAfterBet = parseBalance(result.balanceAfterBet);
+            const newBalance = parseBalance(result.newBalance);
+            if (result.reward > 0 && balanceAfterReward !== null) {
+                balanceEl.textContent = balanceAfterReward;
+            } else if (balanceAfterBet !== null) {
+                balanceEl.textContent = balanceAfterBet;
+            } else if (newBalance !== null) {
+                balanceEl.textContent = newBalance;
             }
             if (result.reward > 0) {
                 resultBox.textContent = `🎉 挑战成功！获得 ${activeReward.reward} 电币`;
