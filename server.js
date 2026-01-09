@@ -2476,7 +2476,8 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
             await pool.query(`
                 INSERT INTO scratch_results (
                     username, winning_numbers, slots, reward, proof, reward_list,
-                    tier_cost, tier_config, balance_before, balance_after, matches_count, game_details
+                    tier_cost, tier_config, balance_before, balance_after, matches_count, game_details,
+                    created_at
                 ) 
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             `, [
@@ -3313,13 +3314,17 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
 
             case 'slot':
                 query = `
-                    SELECT id, won as result, COALESCE(payout_amount, 0) as payout, 
-                           result as amounts, created_at as played_at
+                    SELECT id,
+                           won as result,
+                           COALESCE(payout_amount, 0) as payout,
+                           game_details->>'amounts' as amounts,
+                          created_at as played_at
                     FROM slot_results 
                     WHERE username = $1 
                     ORDER BY created_at DESC 
                     LIMIT $2 OFFSET $3
                 `;
+
                 params = [username, limit, offset];
                 countQuery = 'SELECT COUNT(*) FROM slot_results WHERE username = $1';
                 countParams = [username];
