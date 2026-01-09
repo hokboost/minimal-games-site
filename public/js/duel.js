@@ -104,10 +104,15 @@
             const balanceAfterReward = parseBalance(result.balanceAfterReward);
             const balanceAfterBet = parseBalance(result.balanceAfterBet);
             const newBalance = parseBalance(result.newBalance);
+            const computedBalance = (currentBalance !== null && Number.isFinite(cost))
+                ? currentBalance - cost + (Number(result.reward) || 0)
+                : null;
             if (result.reward > 0 && balanceAfterReward !== null) {
                 balanceEl.textContent = balanceAfterReward;
             } else if (balanceAfterBet !== null) {
                 balanceEl.textContent = balanceAfterBet;
+            } else if (computedBalance !== null) {
+                balanceEl.textContent = computedBalance;
             } else if (newBalance !== null) {
                 balanceEl.textContent = newBalance;
             }
