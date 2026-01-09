@@ -1007,80 +1007,6 @@ app.post('/api/change-password', requireLogin, async (req, res) => {
 });
 
 // ====================
-// 路由注册
-// ====================
-
-registerAdminRoutes(app, {
-    pool,
-    bcrypt,
-    BalanceLogger,
-    generateCSRFToken,
-    requireLogin,
-    requireAdmin,
-    requireAuthorized,
-    requireCSRF,
-    security,
-    autoSendWishInventoryOnBind,
-    IPManager,
-    SessionManager,
-    notifySecurityEvent,
-    path
-});
-
-registerGiftRoutes(app, {
-    pool,
-    giftConfig,
-    BalanceLogger,
-    requireLogin,
-    requireAuthorized,
-    requireApiKey,
-    security
-});
-
-registerWishRoutes(app, {
-    pool,
-    BalanceLogger,
-    GameLogic,
-    getWishConfig,
-    requireLogin,
-    requireAuthorized,
-    security,
-    generateCSRFToken,
-    broadcastDanmaku,
-    enqueueWishInventorySend
-});
-
-registerGameRoutes(app, {
-    pool,
-    BalanceLogger,
-    GameLogic,
-    questions,
-    generateCSRFToken,
-    generateUsername,
-    requireLogin,
-    requireAuthorized,
-    security,
-    userSessions,
-    questionMap,
-    randomStoneColor,
-    normalizeStoneSlots,
-    getMaxSameCount,
-    getStoneState,
-    saveStoneState,
-    logStoneAction,
-    stoneRewards,
-    stoneReplaceCosts,
-    flipCosts,
-    flipCashoutRewards,
-    createFlipBoard,
-    getFlipState,
-    saveFlipState,
-    logFlipAction,
-    duelRewards,
-    calculateDuelCost
-});
-
-// ====================
 // 页面路由
 // ====================
 app.get('/', async (req, res) => {
@@ -1594,6 +1520,80 @@ function requireApiKey(req, res, next) {
     
     next();
 }
+
+// ====================
+// 路由注册
+// ====================
+
+registerAdminRoutes(app, {
+    pool,
+    bcrypt,
+    BalanceLogger,
+    generateCSRFToken,
+    requireLogin,
+    requireAdmin,
+    requireAuthorized,
+    requireCSRF,
+    security,
+    autoSendWishInventoryOnBind,
+    IPManager,
+    SessionManager,
+    notifySecurityEvent,
+    path
+});
+
+registerGiftRoutes(app, {
+    pool,
+    giftConfig,
+    BalanceLogger,
+    requireLogin,
+    requireAuthorized,
+    requireApiKey,
+    security
+});
+
+registerWishRoutes(app, {
+    pool,
+    BalanceLogger,
+    GameLogic,
+    getWishConfig,
+    requireLogin,
+    requireAuthorized,
+    security,
+    generateCSRFToken,
+    broadcastDanmaku,
+    enqueueWishInventorySend
+});
+
+registerGameRoutes(app, {
+    pool,
+    BalanceLogger,
+    GameLogic,
+    questions,
+    generateCSRFToken,
+    generateUsername,
+    requireLogin,
+    requireAuthorized,
+    security,
+    userSessions,
+    questionMap,
+    randomStoneColor,
+    normalizeStoneSlots,
+    getMaxSameCount,
+    getStoneState,
+    saveStoneState,
+    logStoneAction,
+    stoneRewards,
+    stoneReplaceCosts,
+    flipCosts,
+    flipCashoutRewards,
+    createFlipBoard,
+    getFlipState,
+    saveFlipState,
+    logFlipAction,
+    duelRewards,
+    calculateDuelCost
+});
 
 // 404 处理（必须在所有API路由之后）
 app.use('*', (req, res) => {
