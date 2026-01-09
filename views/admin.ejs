@@ -133,10 +133,6 @@
                     <tr>
                         <th>用户名</th>
                         <th>电币余额</th>
-                        <th>最新 Quiz</th>
-                        <th>最新 Slot</th>
-                        <th>最新 Spin</th>
-                        <th>最新 Scratch</th>
                         <th>操作</th>
                         <th>密码管理</th>
                         <th>账号管理</th>
@@ -153,10 +149,6 @@
                                     ✏️ 修改
                                 </button>
                             </td>
-                            <td>-</td>
-                            <td>-</td>
-                            <td>-</td>
-                            <td>-</td>
                             <td>
                                 <button class="btn-add" data-action="add-coin" data-username="<%= user.username %>">⚡ 加电币</button>
                                 <% if (user.authorized) { %>
@@ -203,6 +195,42 @@
                     <% }) %>
                 </tbody>
             </table>
+
+            <div class="recent-records">
+                <h2>🧾 最近游戏记录</h2>
+                <div class="records-table-wrap">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th>用户名</th>
+                                <th>Quiz</th>
+                                <th>Slot</th>
+                                <th>Scratch</th>
+                                <th>Wish</th>
+                                <th>Stone</th>
+                                <th>Flip</th>
+                                <th>Duel</th>
+                                <th>Spin</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% users.forEach(user => { %>
+                                <tr>
+                                    <td><%= user.username %></td>
+                                    <td><%= latestRecords?.[user.username]?.quiz || '-' %></td>
+                                    <td><%= latestRecords?.[user.username]?.slot || '-' %></td>
+                                    <td><%= latestRecords?.[user.username]?.scratch || '-' %></td>
+                                    <td><%= latestRecords?.[user.username]?.wish || '-' %></td>
+                                    <td><%= latestRecords?.[user.username]?.stone || '-' %></td>
+                                    <td><%= latestRecords?.[user.username]?.flip || '-' %></td>
+                                    <td><%= latestRecords?.[user.username]?.duel || '-' %></td>
+                                    <td><%= latestRecords?.[user.username]?.spin || '-' %></td>
+                                </tr>
+                            <% }) %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -260,6 +288,50 @@
         overflow-x: auto;
     }
 
+    .recent-records {
+        margin-top: 2rem;
+    }
+
+    .recent-records h2 {
+        margin-bottom: 0.8rem;
+        color: #ffeb3b;
+    }
+
+    .records-table-wrap {
+        overflow-x: auto;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 12px;
+        padding: 0.5rem;
+    }
+
+    .records-table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 1100px;
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    .records-table th {
+        background: linear-gradient(135deg, #ffb300, #f57c00);
+        color: #fff;
+        padding: 0.7rem 0.5rem;
+        text-align: left;
+        font-weight: bold;
+        font-size: 0.85rem;
+    }
+
+    .records-table td {
+        padding: 0.6rem 0.5rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 0.85rem;
+        color: #ddd;
+        white-space: nowrap;
+    }
+
+    .records-table tr:hover {
+        background: rgba(255, 255, 255, 0.04);
+    }
+
     .users-table {
         width: 100%;
         border-collapse: collapse;
@@ -272,16 +344,17 @@
     .users-table th {
         background: linear-gradient(135deg, #00c853, #00bfa5);
         color: #fff;
-        padding: 1rem 0.5rem;
+        padding: 0.7rem 0.4rem;
         text-align: left;
         font-weight: bold;
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
 
     .users-table td {
-        padding: 1rem 0.5rem;
+        padding: 0.7rem 0.4rem;
         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         vertical-align: top;
+        font-size: 0.85rem;
     }
 
     .users-table tr:hover {

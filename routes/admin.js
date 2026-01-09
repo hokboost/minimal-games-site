@@ -36,11 +36,138 @@ module.exports = function registerAdminRoutes(app, deps) {
                 lock_minutes: user.locked_until ? Math.ceil((new Date(user.locked_until) - new Date()) / 60000) : 0
             }));
 
+            const [quizResult, slotResult, scratchResult, wishResult, stoneResult, flipResult, duelResult] = await Promise.all([
+                pool.query(`
+                    SELECT DISTINCT ON (username)
+                        username,
+                        score,
+                        to_char(submitted_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM submissions
+                    ORDER BY username, submitted_at DESC
+                `),
+                pool.query(`
+                    SELECT DISTINCT ON (username)
+                        username,
+                        COALESCE(payout_amount, 0) as payout,
+                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM slot_results
+                    ORDER BY username, created_at DESC
+                `),
+                pool.query(`
+                    SELECT DISTINCT ON (username)
+                        username,
+                        COALESCE(reward, 0) as reward,
+                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM scratch_results
+                    ORDER BY username, created_at DESC
+                `),
+                pool.query(`
+                    SELECT DISTINCT ON (username)
+                        username,
+                        reward,
+                        success,
+                        cost,
+                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM wish_results
+                    ORDER BY username, created_at DESC
+                `),
+                pool.query(`
+                    SELECT DISTINCT ON (username)
+                        username,
+                        action_type,
+                        COALESCE(reward, 0) as reward,
+                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM stone_logs
+                    ORDER BY username, created_at DESC
+                `),
+                pool.query(`
+                    SELECT DISTINCT ON (username)
+                        username,
+                        good_count,
+                        bad_count,
+                        COALESCE(reward, 0) as reward,
+                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM flip_logs
+                    WHERE action_type = 'end'
+                    ORDER BY username, created_at DESC
+                `),
+                pool.query(`
+                    SELECT DISTINCT ON (username)
+                        username,
+                        gift_type,
+                        success,
+                        COALESCE(reward, 0) as reward,
+                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                    FROM duel_logs
+                    ORDER BY username, created_at DESC
+                `)
+            ]);
+
+            const latestRecords = {};
+            users.forEach((user) => {
+                latestRecords[user.username] = {
+                    quiz: '-',
+                    slot: '-',
+                    scratch: '-',
+                    wish: '-',
+                    stone: '-',
+                    flip: '-',
+                    duel: '-',
+                    spin: '未记录'
+                };
+            });
+
+            quizResult.rows.forEach((row) => {
+                if (latestRecords[row.username]) {
+                    latestRecords[row.username].quiz = `${row.played_at} | 分数 ${row.score}`;
+                }
+            });
+
+            slotResult.rows.forEach((row) => {
+                if (latestRecords[row.username]) {
+                    latestRecords[row.username].slot = `${row.played_at} | ${row.payout}电币`;
+                }
+            });
+
+            scratchResult.rows.forEach((row) => {
+                if (latestRecords[row.username]) {
+                    latestRecords[row.username].scratch = `${row.played_at} | ${row.reward}电币`;
+                }
+            });
+
+            wishResult.rows.forEach((row) => {
+                if (latestRecords[row.username]) {
+                    const rewardText = row.success ? (row.reward || '中奖') : '未中奖';
+                    latestRecords[row.username].wish = `${row.played_at} | ${rewardText}`;
+                }
+            });
+
+            stoneResult.rows.forEach((row) => {
+                if (latestRecords[row.username]) {
+                    latestRecords[row.username].stone = `${row.played_at} | ${row.action_type} | ${row.reward}电币`;
+                }
+            });
+
+            flipResult.rows.forEach((row) => {
+                if (latestRecords[row.username]) {
+                    latestRecords[row.username].flip = `${row.played_at} | 好${row.good_count}坏${row.bad_count} | ${row.reward}电币`;
+                }
+            });
+
+            duelResult.rows.forEach((row) => {
+                if (latestRecords[row.username]) {
+                    const giftLabel = row.gift_type ? row.gift_type : '礼物';
+                    const resultLabel = row.success ? '成功' : '失败';
+                    latestRecords[row.username].duel = `${row.played_at} | ${giftLabel} | ${resultLabel} | ${row.reward}电币`;
+                }
+            });
+
             res.render('admin', {
                 title: '管理后台 - Minimal Games',
                 user: req.session.user,
                 userLoggedIn: req.session.user?.username,
                 users: users,
+                latestRecords: latestRecords,
                 csrfToken: req.session.csrfToken
             });
         } catch (err) {
