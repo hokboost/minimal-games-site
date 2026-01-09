@@ -97,7 +97,7 @@ class WindowsGiftListener {
             const quantity = task.quantity || 1;
             const result = await this.callPythonScript(task.giftId, task.roomId, quantity);
             
-            if (result.success) {
+            if (result.success || result.partial_success) {
                 // 🛡️ 部分成功处理：传递实际发送数量
                 const markResult = await this.markTaskComplete(task.id, {
                     actualQuantity: result.actual_quantity,
@@ -270,9 +270,9 @@ class WindowsGiftListener {
     async markTaskComplete(taskId, resultData = {}) {
         try {
             const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/complete`, {
-                actualQuantity: resultData.actualQuantity,
-                requestedQuantity: resultData.requestedQuantity,
-                partialSuccess: resultData.partialSuccess
+                actual_quantity: resultData.actualQuantity,
+                requested_quantity: resultData.requestedQuantity,
+                partial_success: resultData.partialSuccess
             }, {
                 timeout: 5000,
                 headers: {
@@ -296,9 +296,9 @@ class WindowsGiftListener {
                     error: errorMessage,
 
                     // ✅【新增】把 Python 的结果一并传给后端
-                    actualQuantity: result.actual_quantity,
-                    requestedQuantity: result.requested_quantity,
-                    partialSuccess: result.partial_success
+                    actual_quantity: result.actual_quantity,
+                    requested_quantity: result.requested_quantity,
+                    partial_success: result.partial_success
                 },
                 {
                     timeout: 5000,
@@ -314,6 +314,7 @@ class WindowsGiftListener {
             return false;
         }
     }      
+}
 
 
 // 启动服务

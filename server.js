@@ -3095,7 +3095,13 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
         const taskId = parseInt(req.params.id);
         
         // 🛡️ 预扣机制：获取任务信息并执行部分成功的扣费
-        const { actualQuantity, requestedQuantity, partialSuccess } = req.body;
+        // ✅ 兼容 Windows(Python) snake_case 与 JS camelCase  
+        const actualQuantityVal = (req.body.actualQuantity ?? req.body.actual_quantity);
+        const requestedQuantityVal = (req.body.requestedQuantity ?? req.body.requested_quantity);
+        const partialSuccessVal = (req.body.partialSuccess ?? req.body.partial_success);
+        const actualQuantity = Number.isFinite(Number(actualQuantityVal)) ? parseInt(actualQuantityVal, 10) : null;
+        const requestedQuantity = Number.isFinite(Number(requestedQuantityVal)) ? parseInt(requestedQuantityVal, 10) : null;
+        const partialSuccess = !!partialSuccessVal;
         
         const taskResult = await pool.query(`
             SELECT username, gift_name, cost, status, quantity
