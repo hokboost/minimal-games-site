@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>翻卡牌</title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            color: #fff;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #00c853;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #00c853;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            color: #ccc;
+        }
+
+        .nav-links a {
+            color: #fff;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .nav-links a:hover {
+            background: rgba(0, 200, 83, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .balance-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .balance-section h3 {
+            color: #ffeb3b;
+            margin: 0;
+        }
+
+        .flip-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .flip-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 110px);
+            gap: 1rem;
+        }
+
+        .flip-card {
+            width: 110px;
+            height: 140px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .flip-card:hover:not(.flipped):not(.disabled) {
+            transform: translateY(-4px);
+            box-shadow: 0 6px 20px rgba(255, 255, 255, 0.15);
+        }
+
+        .flip-card.flipped.good {
+            background: linear-gradient(135deg, rgba(0, 200, 83, 0.6), rgba(0, 200, 83, 0.2));
+            border-color: rgba(0, 200, 83, 0.8);
+        }
+
+        .flip-card.flipped.bad {
+            background: linear-gradient(135deg, rgba(244, 67, 54, 0.6), rgba(244, 67, 54, 0.2));
+            border-color: rgba(244, 67, 54, 0.8);
+        }
+
+        .flip-card.disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .flip-card .card-label {
+            text-align: center;
+            font-size: 1rem;
+            color: #fff;
+        }
+
+        .status-panel {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .status-box {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            min-width: 180px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-box h4 {
+            margin: 0 0 0.5rem;
+            color: #ccc;
+        }
+
+        .status-box span {
+            font-size: 1.2rem;
+            color: #ffeb3b;
+            font-weight: bold;
+        }
+
+        .action-row {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .action-btn {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 0.8rem 1.4rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .action-btn.secondary {
+            background: linear-gradient(135deg, #00c853, #00bfa5);
+        }
+
+        .action-btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .hint-text {
+            color: #ccc;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .flip-grid {
+                grid-template-columns: repeat(3, 90px);
+                gap: 0.8rem;
+            }
+
+            .flip-card {
+                width: 90px;
+                height: 120px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🃏 翻卡牌</h1>
+            <div class="nav-links">
+                <span>用户：<%= username %></span>
+                <a href="/">🏠 返回首页</a>
+                <a href="/profile">👤 个人中心</a>
+            </div>
+        </div>
+
+        <div class="balance-section">
+            <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+        </div>
+
+        <div class="flip-layout">
+            <div class="status-panel">
+                <div class="status-box">
+                    <h4>下一张花费</h4>
+                    <span id="nextCost">--</span>
+                </div>
+                <div class="status-box">
+                    <h4>已翻好牌</h4>
+                    <span id="goodCount">0</span>
+                </div>
+                <div class="status-box">
+                    <h4>当前退出奖励</h4>
+                    <span id="cashoutReward">0</span>
+                </div>
+            </div>
+
+            <div class="flip-grid" id="flipGrid"></div>
+
+            <div class="action-row">
+                <button class="action-btn secondary" id="startBtn">开始新一轮</button>
+                <button class="action-btn" id="cashoutBtn">立即退出</button>
+            </div>
+
+            <div class="hint-text">
+                翻到坏牌会立刻结束并获得安慰奖 50 电币。翻满 7 张好牌自动获得 30000 电币。
+            </div>
+        </div>
+
+        <div style="
+            max-width: 760px;
+            margin: 2rem auto 0;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #ccc;
+            line-height: 1.5;
+            text-align: center;
+        ">
+            ⚠️ <strong>免责声明：</strong>本功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。虚拟电币无法兑换真实货币。严禁未满18周岁用户使用，请理性娱乐。
+        </div>
+    </div>
+
+    <script>
+        const csrfToken = "<%= csrfToken %>";
+        const grid = document.getElementById('flipGrid');
+        const nextCostEl = document.getElementById('nextCost');
+        const goodCountEl = document.getElementById('goodCount');
+        const cashoutRewardEl = document.getElementById('cashoutReward');
+        const startBtn = document.getElementById('startBtn');
+        const cashoutBtn = document.getElementById('cashoutBtn');
+        const balanceEl = document.getElementById('current-balance');
+
+        let state = null;
+
+        function updateBalance(balance) {
+            if (typeof balance === 'number') {
+                balanceEl.textContent = balance;
+            }
+        }
+
+        function renderBoard(board, ended) {
+            grid.innerHTML = '';
+            board.forEach((card, index) => {
+                const cardEl = document.createElement('div');
+                cardEl.className = 'flip-card';
+                if (card.flipped) {
+                    cardEl.classList.add('flipped');
+                    cardEl.classList.add(card.type === 'good' ? 'good' : 'bad');
+                    cardEl.textContent = card.type === 'good' ? '好' : '坏';
+                } else {
+                    cardEl.innerHTML = '<span class="card-label">翻开</span>';
+                }
+
+                if (ended || card.flipped) {
+                    cardEl.classList.add('disabled');
+                }
+
+                cardEl.addEventListener('click', () => {
+                    if (card.flipped || ended) return;
+                    flipCard(index);
+                });
+
+                grid.appendChild(cardEl);
+            });
+        }
+
+        function updateState(data) {
+            state = data;
+            renderBoard(data.board, data.ended);
+            nextCostEl.textContent = data.nextCost ? `${data.nextCost} 电币` : '--';
+            goodCountEl.textContent = data.goodCount || 0;
+            cashoutRewardEl.textContent = `${data.cashoutReward || 0} 电币`;
+            cashoutBtn.disabled = data.ended || data.goodCount === 0;
+        }
+
+        async function loadState() {
+            const response = await fetch('/api/flip/state');
+            const data = await response.json();
+            if (data.success) {
+                updateState(data);
+            }
+        }
+
+        async function flipCard(index) {
+            const response = await fetch('/api/flip/flip', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                },
+                body: JSON.stringify({ cardIndex: index })
+            });
+            const result = await response.json();
+            if (!result.success) {
+                alert(result.message || '翻牌失败');
+                return;
+            }
+            updateBalance(result.newBalance);
+            await loadState();
+
+            if (result.reward > 0) {
+                alert(`本轮结束！获得 ${result.reward} 电币`);
+            }
+        }
+
+        startBtn.addEventListener('click', async () => {
+            const response = await fetch('/api/flip/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                }
+            });
+            const result = await response.json();
+            if (!result.success) {
+                alert(result.message || '开始失败');
+                return;
+            }
+            await loadState();
+        });
+
+        cashoutBtn.addEventListener('click', async () => {
+            const response = await fetch('/api/flip/cashout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                }
+            });
+            const result = await response.json();
+            if (!result.success) {
+                alert(result.message || '退出失败');
+                return;
+            }
+            updateBalance(result.newBalance);
+            await loadState();
+            alert(`退出成功，获得 ${result.reward} 电币`);
+        });
+
+        loadState();
+    </script>
+</body>
+</html>

@@ -1497,6 +1497,33 @@ app.get('/stone', requireLogin, requireAuthorized, security.basicRateLimit, asyn
     }
 });
 
+app.get('/flip', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            generateCSRFToken(req);
+        }
+
+        const username = req.session.user.username;
+        const userResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+
+        const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+
+        res.render('flip', {
+            username,
+            balance,
+            csrfToken: req.session.csrfToken
+        });
+    } catch (error) {
+        console.error('Flip page error:', error);
+        res.status(500).send('服务器错误');
+    }
+});
+
 // Quiz API 路由
 app.get('/api/user-info', security.basicRateLimit, (req, res) => {
     const username = generateUsername();
@@ -2604,7 +2631,7 @@ const wishConfigs = {
         name: '原地求婚',
         bilibiliGiftId: '34999',
         cost: 208,
-        successRate: 0.0335,
+        successRate: 0.0325,
         guaranteeCount: 52,
         rewardValue: 5200
     },
@@ -2613,7 +2640,7 @@ const wishConfigs = {
         name: '梦游仙境',
         bilibiliGiftId: '31932',
         cost: 150,
-        successRate: 0.0445,
+        successRate: 0.0425,
         guaranteeCount: 41,
         rewardValue: 3000
     },
@@ -2622,7 +2649,7 @@ const wishConfigs = {
         name: '纯白花嫁',
         bilibiliGiftId: '34428',
         cost: 75,
-        successRate: 0.051,
+        successRate: 0.049,
         guaranteeCount: 34,
         rewardValue: 1314
     },
@@ -2666,6 +2693,83 @@ const stoneRewards = {
     5: 3000,
     6: 30000
 };
+
+const flipCosts = [50, 112, 172, 316, 620, 1025, 2033];
+const flipCashoutRewards = {
+    1: 50,
+    2: 200,
+    3: 500,
+    4: 1200,
+    5: 3000,
+    6: 8000,
+    7: 30000
+};
+
+function shuffleArray(list) {
+    const arr = list.slice();
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function createFlipBoard() {
+    const board = [
+        'good', 'good', 'good', 'good', 'good', 'good', 'good',
+        'bad', 'bad'
+    ];
+    return shuffleArray(board);
+}
+
+async function getFlipState(username) {
+    const result = await pool.query(
+        'SELECT * FROM flip_states WHERE username = $1',
+        [username]
+    );
+
+    if (result.rows.length === 0) {
+        const board = createFlipBoard();
+        const flipped = Array(9).fill(false);
+        await pool.query(
+            `INSERT INTO flip_states (username, board, flipped, created_at, updated_at)
+             VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+            [username, JSON.stringify(board), JSON.stringify(flipped)]
+        );
+        return {
+            board,
+            flipped,
+            good_count: 0,
+            bad_count: 0,
+            ended: false
+        };
+    }
+
+    return {
+        board: result.rows[0].board,
+        flipped: result.rows[0].flipped,
+        good_count: result.rows[0].good_count,
+        bad_count: result.rows[0].bad_count,
+        ended: result.rows[0].ended
+    };
+}
+
+async function saveFlipState(username, state) {
+    await pool.query(
+        `UPDATE flip_states
+         SET board = $1, flipped = $2, good_count = $3, bad_count = $4, ended = $5,
+             updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+         WHERE username = $6`,
+        [
+            JSON.stringify(state.board),
+            JSON.stringify(state.flipped),
+            state.good_count,
+            state.bad_count,
+            state.ended,
+            username
+        ]
+    );
+}
 
 function randomStoneColor() {
     return stoneColors[Math.floor(Math.random() * stoneColors.length)];
@@ -3361,7 +3465,8 @@ app.post('/api/stone/replace', requireLogin, requireAuthorized, security.basicRa
         res.json({
             success: true,
             slots,
-            newBalance: balanceResult.balance
+            newBalance: balanceResult.balance,
+            replacedSlot: slotIndex
         });
     } catch (error) {
         console.error('Stone replace error:', error);
@@ -3416,6 +3521,188 @@ app.post('/api/stone/redeem', requireLogin, requireAuthorized, security.basicRat
         });
     } catch (error) {
         console.error('Stone redeem error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+// ====================
+// 翻卡牌 Flip 游戏API
+// ====================
+
+app.get('/api/flip/state', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const state = await getFlipState(username);
+        const flips = state.flipped.filter(Boolean).length;
+        const nextCost = flips < flipCosts.length ? flipCosts[flips] : null;
+        const canFlip = !state.ended && flips < flipCosts.length;
+        const cashoutReward = flipCashoutRewards[state.good_count] || 0;
+
+        res.json({
+            success: true,
+            board: state.flipped.map((isFlipped, index) => ({
+                flipped: isFlipped,
+                type: isFlipped ? state.board[index] : null
+            })),
+            goodCount: state.good_count,
+            badCount: state.bad_count,
+            ended: state.ended,
+            nextCost,
+            canFlip,
+            cashoutReward
+        });
+    } catch (error) {
+        console.error('Flip state error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+app.post('/api/flip/start', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const board = createFlipBoard();
+        const flipped = Array(9).fill(false);
+        const state = {
+            board,
+            flipped,
+            good_count: 0,
+            bad_count: 0,
+            ended: false
+        };
+        await saveFlipState(username, state);
+
+        res.json({
+            success: true,
+            nextCost: flipCosts[0]
+        });
+    } catch (error) {
+        console.error('Flip start error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+app.post('/api/flip/flip', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const cardIndex = Number(req.body.cardIndex);
+
+        if (!Number.isInteger(cardIndex) || cardIndex < 0 || cardIndex > 8) {
+            return res.status(400).json({ success: false, message: '卡牌索引无效' });
+        }
+
+        const state = await getFlipState(username);
+        const flips = state.flipped.filter(Boolean).length;
+        if (state.ended || flips >= flipCosts.length) {
+            return res.status(400).json({ success: false, message: '本轮已结束' });
+        }
+
+        if (state.flipped[cardIndex]) {
+            return res.status(400).json({ success: false, message: '该卡牌已翻开' });
+        }
+
+        const cost = flipCosts[flips];
+        const balanceResult = await BalanceLogger.updateBalance({
+            username,
+            amount: -cost,
+            operationType: 'flip_card',
+            description: `翻卡牌：翻开第${flips + 1}张`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
+        }
+
+        state.flipped[cardIndex] = true;
+        const cardType = state.board[cardIndex];
+        if (cardType === 'good') {
+            state.good_count += 1;
+        } else {
+            state.bad_count += 1;
+            state.ended = true;
+        }
+
+        let reward = 0;
+        if (state.bad_count > 0) {
+            reward = 50;
+        } else if (state.good_count >= 7) {
+            reward = 30000;
+            state.ended = true;
+        }
+
+        if (reward > 0) {
+            const rewardResult = await BalanceLogger.updateBalance({
+                username,
+                amount: reward,
+                operationType: 'flip_reward',
+                description: `翻卡牌奖励 ${reward} 电币`,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                requireSufficientBalance: false
+            });
+
+            if (!rewardResult.success) {
+                return res.status(400).json({ success: false, message: rewardResult.message });
+            }
+        }
+
+        await saveFlipState(username, state);
+
+        res.json({
+            success: true,
+            cardIndex,
+            cardType,
+            goodCount: state.good_count,
+            badCount: state.bad_count,
+            ended: state.ended,
+            reward,
+            newBalance: balanceResult.balance + reward
+        });
+    } catch (error) {
+        console.error('Flip card error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+app.post('/api/flip/cashout', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const state = await getFlipState(username);
+
+        if (state.ended) {
+            return res.status(400).json({ success: false, message: '本轮已结束' });
+        }
+
+        if (state.bad_count > 0) {
+            return res.status(400).json({ success: false, message: '坏牌已出现，无法退出' });
+        }
+
+        const reward = flipCashoutRewards[state.good_count] || 0;
+        state.ended = true;
+        await saveFlipState(username, state);
+
+        const rewardResult = await BalanceLogger.updateBalance({
+            username,
+            amount: reward,
+            operationType: 'flip_cashout',
+            description: `翻卡牌退出奖励 ${reward} 电币`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent'),
+            requireSufficientBalance: false
+        });
+
+        if (!rewardResult.success) {
+            return res.status(400).json({ success: false, message: rewardResult.message });
+        }
+
+        res.json({
+            success: true,
+            reward,
+            newBalance: rewardResult.balance
+        });
+    } catch (error) {
+        console.error('Flip cashout error:', error);
         res.status(500).json({ success: false, message: '服务器错误' });
     }
 });
@@ -4038,7 +4325,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'stone'],
+        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'stone', 'flip'],
         questions: questions.length
     });
 });
