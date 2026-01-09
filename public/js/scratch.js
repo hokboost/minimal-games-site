@@ -143,7 +143,11 @@
 
         const all = [
             ...gameData.winningNumbers.map((n) => ({ num: n, prize: '中奖号码', isWinning: true })),
-            ...gameData.slots.map((s) => ({ ...s, isWinning: false }))
+            ...gameData.slots.map((s) => ({
+                num: s.number,
+                prize: s.prize,
+                isWinning: false
+            }))
         ];
 
         const container = document.getElementById('scratchContent');
