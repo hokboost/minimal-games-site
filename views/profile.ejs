@@ -89,6 +89,14 @@
             </div>
         </div>
 
+        <div class="profile-section">
+            <h2>🎒 礼物背包</h2>
+            <div class="backpack-toolbar">
+                <button class="view-records-btn" onclick="loadWishBackpack()">刷新背包</button>
+            </div>
+            <div id="backpackContent" class="loading">加载中...</div>
+        </div>
+
         <!-- 游戏记录模态框 -->
         <div id="gameRecordsModal" class="modal">
             <div class="modal-content records-modal">
@@ -354,6 +362,12 @@
 
     .records-table tr:hover {
         background: rgba(255, 255, 255, 0.05);
+    }
+
+    .backpack-toolbar {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 1rem;
     }
 
     .pagination {
@@ -747,6 +761,95 @@
         }
     }
 
+    async function loadWishBackpack() {
+        const container = document.getElementById('backpackContent');
+        container.innerHTML = '<div class="loading">加载中...</div>';
+        
+        try {
+            const response = await fetch('/api/wish/backpack');
+            const data = await response.json();
+            
+            if (!data.success) {
+                container.innerHTML = `<div class="loading">加载失败: ${data.message}</div>`;
+                return;
+            }
+
+            if (!data.items || data.items.length === 0) {
+                container.innerHTML = '<div class="loading">背包暂无礼物</div>';
+                return;
+            }
+
+            let tableHTML = '<table class="records-table">';
+            tableHTML += '<thead><tr><th>获得时间</th><th>礼物</th><th>到期时间</th><th>状态</th><th>操作</th></tr></thead>';
+            tableHTML += '<tbody>';
+
+            data.items.forEach(item => {
+                const createdAt = new Date(item.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+                const expiresAt = new Date(item.expires_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+                const statusText = formatBackpackStatus(item.status, item.expires_at);
+                const canSend = item.status === 'stored';
+                const actionBtn = canSend
+                    ? `<button class="view-records-btn" onclick="sendBackpackItem(${item.id})">送出</button>`
+                    : '-';
+
+                tableHTML += `
+                    <tr>
+                        <td>${createdAt}</td>
+                        <td>${item.gift_name}</td>
+                        <td>${expiresAt}</td>
+                        <td>${statusText}</td>
+                        <td>${actionBtn}</td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += '</tbody></table>';
+            container.innerHTML = tableHTML;
+        } catch (error) {
+            console.error('加载背包失败:', error);
+            container.innerHTML = '<div class="loading">网络错误，请稍后重试</div>';
+        }
+    }
+
+    function formatBackpackStatus(status, expiresAt) {
+        if (status === 'stored') {
+            const now = new Date();
+            const expireTime = new Date(expiresAt);
+            if (expireTime <= now) {
+                return '⏳ 到期自动送出中';
+            }
+            return '📦 待发送';
+        }
+        if (status === 'queued') return '🚚 发送中';
+        if (status === 'sent') return '✅ 已发送';
+        if (status === 'failed') return '❌ 发送失败';
+        if (status === 'expired') return '⌛ 已过期';
+        return status;
+    }
+
+    async function sendBackpackItem(id) {
+        try {
+            const response = await fetch('/api/wish/backpack/send', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ inventoryId: id })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                showToast('礼物已加入发送队列', 'success');
+                loadWishBackpack();
+            } else {
+                showToast(result.message || '送出失败', 'error');
+            }
+        } catch (error) {
+            console.error('送出失败:', error);
+            showToast('网络错误，请稍后重试', 'error');
+        }
+    }
+
     function renderGameRecords(records, gameType) {
         const recordsContent = document.getElementById('recordsContent');
         
@@ -867,6 +970,9 @@
             closeGameRecordsModal();
         }
     }
+
+    // 初始化背包
+    loadWishBackpack();
     </script>
 </body>
 </html>

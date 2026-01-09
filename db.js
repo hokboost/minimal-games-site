@@ -36,7 +36,10 @@ pool.on('error', (err) => {
   process.exit(-1);
 });
 
-pool.on('connect', () => {
+pool.on('connect', (client) => {
+  client.query("SET TIME ZONE 'Asia/Shanghai'").catch((error) => {
+    console.error('设置数据库时区失败:', error);
+  });
   console.log('Minimal-Games-Site 连接到共享数据库成功');
 });
 

@@ -2601,26 +2601,28 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
         const randomSuccess = Math.random() < successRate;
         const success = isGuaranteed || randomSuccess;
 
-        let payout = 0;
         let reward = null;
         
         if (success) {
             // 成功获得深海歌姬
             reward = rewardName;
-            payout = rewardValue;
             
-            // 发放奖励
-            const winResult = await BalanceLogger.updateBalance({
-                username: username,
-                amount: payout,
-                operationType: 'wish_win',
-                description: `祈愿成功获得：${rewardName} (${rewardValue} 电币)`,
-                ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
-            });
-
-            if (winResult.success) {
-                balanceAfter = winResult.balance;
+            // 写入背包奖励
+            try {
+                await pool.query(`
+                    INSERT INTO wish_inventory (
+                        username, gift_type, gift_name, bilibili_gift_id, status, expires_at,
+                        created_at, updated_at
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, 'stored',
+                        (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
+                        (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                        (NOW() AT TIME ZONE 'Asia/Shanghai')
+                    )
+                `, [username, 'deepsea_singer', rewardName, '35082']);
+            } catch (dbError) {
+                console.error('祈愿背包记录存储失败:', dbError);
             }
         }
 
@@ -2633,14 +2635,15 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
         await pool.query(`
             UPDATE wish_progress 
             SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
-                last_success_at = $5, updated_at = CURRENT_TIMESTAMP
+                last_success_at = CASE WHEN $5 THEN (NOW() AT TIME ZONE 'Asia/Shanghai') ELSE last_success_at END,
+                updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
             WHERE username = $6
         `, [
             newTotalWishes,
             newConsecutiveFails,
             newTotalSpent,
             newTotalRewardsValue,
-            success ? new Date() : progress.last_success_at,
+            success,
             username
         ]);
 
@@ -2656,7 +2659,7 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
                     username, cost, success, reward, reward_value, balance_before, balance_after,
                     wishes_count, is_guaranteed, game_details, created_at
                 ) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, (NOW() AT TIME ZONE 'Asia/Shanghai'))
             `, [
                 username,
                 wishCost,
@@ -2683,9 +2686,9 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
         try {
             await pool.query(`
                 INSERT INTO wish_sessions (
-                    username, batch_count, total_cost, success_count, total_reward_value
+                    username, batch_count, total_cost, success_count, total_reward_value, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5)
+                VALUES ($1, $2, $3, $4, $5, (NOW() AT TIME ZONE 'Asia/Shanghai'))
             `, [
                 username,
                 1,
@@ -2800,6 +2803,164 @@ app.get('/api/wish/progress', requireLogin, requireAuthorized, async (req, res) 
     } catch (error) {
         console.error('获取祈愿进度失败:', error);
         res.status(500).json({ success: false, message: '获取进度失败' });
+    }
+});
+
+// ====================
+// 祈愿背包 API
+// ====================
+
+async function enqueueWishInventorySend({ inventoryId, username, isAuto = false }) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const inventoryResult = await client.query(`
+            SELECT id, username, gift_type, gift_name, bilibili_gift_id, status, expires_at
+            FROM wish_inventory
+            WHERE id = $1 AND username = $2
+            FOR UPDATE
+        `, [inventoryId, username]);
+
+        if (inventoryResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return { success: false, message: '背包物品不存在' };
+        }
+
+        const item = inventoryResult.rows[0];
+        if (item.status !== 'stored') {
+            await client.query('ROLLBACK');
+            return { success: false, message: '该物品已处理' };
+        }
+
+        const userResult = await client.query(
+            'SELECT bilibili_room_id FROM users WHERE username = $1',
+            [username]
+        );
+
+        const bilibiliRoomId = userResult.rows.length > 0 ? userResult.rows[0].bilibili_room_id : null;
+        if (!bilibiliRoomId) {
+            if (isAuto) {
+                await client.query(`
+                    UPDATE wish_inventory
+                    SET status = 'expired',
+                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                    WHERE id = $1
+                `, [inventoryId]);
+                await client.query('COMMIT');
+                return { success: false, message: '未绑定房间号，已标记过期' };
+            }
+
+            await client.query('ROLLBACK');
+            return { success: false, message: '请先绑定B站房间号再送出礼物' };
+        }
+
+        const exchangeResult = await client.query(`
+            INSERT INTO gift_exchanges (
+                username, gift_type, gift_name, cost, quantity, status, created_at,
+                bilibili_room_id, delivery_status
+            ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', (NOW() AT TIME ZONE 'Asia/Shanghai'), $6, 'pending')
+            RETURNING id
+        `, [
+            username,
+            item.gift_type,
+            item.gift_name,
+            0,
+            1,
+            bilibiliRoomId
+        ]);
+
+        await client.query(`
+            UPDATE wish_inventory
+            SET status = 'queued',
+                gift_exchange_id = $1,
+                updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+            WHERE id = $2
+        `, [exchangeResult.rows[0].id, inventoryId]);
+
+        await client.query('COMMIT');
+        return { success: true, exchangeId: exchangeResult.rows[0].id };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('背包礼物入队失败:', error);
+        return { success: false, message: '送出失败，请稍后重试' };
+    } finally {
+        client.release();
+    }
+}
+
+let isWishAutoSendRunning = false;
+async function autoSendExpiredWishRewards() {
+    if (isWishAutoSendRunning) {
+        return;
+    }
+    isWishAutoSendRunning = true;
+
+    try {
+        const expiredItems = await pool.query(`
+            SELECT id, username
+            FROM wish_inventory
+            WHERE status = 'stored'
+              AND expires_at <= (NOW() AT TIME ZONE 'Asia/Shanghai')
+            ORDER BY expires_at ASC
+            LIMIT 20
+        `);
+
+        for (const row of expiredItems.rows) {
+            await enqueueWishInventorySend({
+                inventoryId: row.id,
+                username: row.username,
+                isAuto: true
+            });
+        }
+    } catch (error) {
+        console.error('自动发送祈愿礼物失败:', error);
+    } finally {
+        isWishAutoSendRunning = false;
+    }
+}
+
+setInterval(autoSendExpiredWishRewards, 60 * 1000);
+
+app.get('/api/wish/backpack', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const result = await pool.query(`
+            SELECT id, gift_name, status, expires_at, created_at, gift_exchange_id
+            FROM wish_inventory
+            WHERE username = $1
+            ORDER BY created_at DESC
+            LIMIT 100
+        `, [username]);
+
+        res.json({
+            success: true,
+            items: result.rows
+        });
+    } catch (error) {
+        console.error('获取背包失败:', error);
+        res.status(500).json({ success: false, message: '获取背包失败' });
+    }
+});
+
+app.post('/api/wish/backpack/send', requireLogin, requireAuthorized, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const inventoryId = Number(req.body.inventoryId);
+
+        if (!Number.isFinite(inventoryId)) {
+            return res.status(400).json({ success: false, message: '参数无效' });
+        }
+
+        const result = await enqueueWishInventorySend({ inventoryId, username, isAuto: false });
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.message });
+        }
+
+        res.json({ success: true, message: '礼物已加入发送队列' });
+    } catch (error) {
+        console.error('背包送出失败:', error);
+        res.status(500).json({ success: false, message: '送出失败' });
     }
 });
 
@@ -2933,17 +3094,22 @@ app.post('/api/wish-batch',
             if (success) {
                 reward = rewardName;
 
-                const winResult = await BalanceLogger.updateBalance({
-                    username: username,
-                    amount: rewardValue,
-                    operationType: 'wish_win',
-                    description: `祈愿成功获得：${rewardName} (${rewardValue} 电币)`,
-                    ipAddress: req.ip,
-                    userAgent: req.get('User-Agent')
-                });
-
-                if (winResult.success) {
-                    balanceAfter = winResult.balance;
+                // 写入背包奖励
+                try {
+                    await pool.query(`
+                        INSERT INTO wish_inventory (
+                            username, gift_type, gift_name, bilibili_gift_id, status, expires_at,
+                            created_at, updated_at
+                        )
+                        VALUES (
+                            $1, $2, $3, $4, 'stored',
+                            (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
+                            (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                            (NOW() AT TIME ZONE 'Asia/Shanghai')
+                        )
+                    `, [username, 'deepsea_singer', rewardName, '35082']);
+                } catch (dbError) {
+                    console.error('祈愿背包记录存储失败:', dbError);
                 }
             }
 
@@ -2956,14 +3122,15 @@ app.post('/api/wish-batch',
             await pool.query(`
                 UPDATE wish_progress 
                 SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
-                    last_success_at = $5, updated_at = CURRENT_TIMESTAMP
+                    last_success_at = CASE WHEN $5 THEN (NOW() AT TIME ZONE 'Asia/Shanghai') ELSE last_success_at END,
+                    updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                 WHERE username = $6
             `, [
                 newTotalWishes,
                 newConsecutiveFails,
                 newTotalSpent,
                 newTotalRewardsValue,
-                success ? new Date() : progress.last_success_at,
+                success,
                 username
             ]);
 
@@ -2979,7 +3146,7 @@ app.post('/api/wish-batch',
                         username, cost, success, reward, reward_value, balance_before, balance_after,
                         wishes_count, is_guaranteed, game_details, created_at
                     ) 
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, (NOW() AT TIME ZONE 'Asia/Shanghai'))
                 `, [
                     username,
                     wishCost,
@@ -3020,9 +3187,9 @@ app.post('/api/wish-batch',
         try {
             await pool.query(`
                 INSERT INTO wish_sessions (
-                    username, batch_count, total_cost, success_count, total_reward_value
+                    username, batch_count, total_cost, success_count, total_reward_value, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5)
+                VALUES ($1, $2, $3, $4, $5, (NOW() AT TIME ZONE 'Asia/Shanghai'))
             `, [
                 username,
                 batchCount,
@@ -3603,6 +3770,18 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
         `, [taskId, finalDeliveryStatus]);
 
         if (result.rows.length > 0) {
+            try {
+                await pool.query(`
+                    UPDATE wish_inventory
+                    SET status = 'sent',
+                        sent_at = (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                    WHERE gift_exchange_id = $1
+                `, [taskId]);
+            } catch (dbError) {
+                console.error('更新背包发送状态失败:', dbError);
+            }
+
             console.log(`✅ Windows服务完成任务 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name}`);
             res.json({ success: true, message: '任务完成' });
         } else {
@@ -3729,6 +3908,17 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
         `, [taskId]);
 
         if (result.rows.length > 0) {
+            try {
+                await pool.query(`
+                    UPDATE wish_inventory
+                    SET status = 'failed',
+                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                    WHERE gift_exchange_id = $1
+                `, [taskId]);
+            } catch (dbError) {
+                console.error('更新背包失败状态失败:', dbError);
+            }
+
             console.log(`❌ 任务 ${taskId} 标记为失败: ${username} 的 ${gift_name} - ${errorMessage}`);
             if (status === 'funds_locked') {
                 console.log(`💰 资金处理: 已按规则退还（可能为差额退款）`);

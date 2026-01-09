@@ -326,23 +326,22 @@
                     <span>个人中奖率:</span>
                     <span id="personalRate">0.00%</span>
                 </div>
-                <div class="stats-row">
-                    <span>全服综合率:</span>
-                    <span id="globalRate">1.60%</span>
-                </div>
+            <div class="stats-row">
+                <span>综合中奖率:</span>
+                <span>1.60%</span>
+            </div>
                 <div class="stats-row">
                     <span>当前进度:</span>
                     <span id="currentProgress">0 / 148</span>
                 </div>
             </div>
             
-            <div class="guarantee-notice">
-                <h4>🎯 祈愿规则</h4>
-                <p>• 系统保证全服综合中奖率为 1.35%</p>
-                <p>• 概率会根据全服统计动态调整</p>
-                <p>• 连续147次未中奖后，第148次必定成功</p>
-                <p>• 每次成功后重置个人进度计数</p>
-            </div>
+        <div class="guarantee-notice">
+            <h4>🎯 祈愿规则</h4>
+            <p>• 综合中奖率为 1.6%</p>
+            <p>• 连续147次未中奖后，第148次必定成功</p>
+            <p>• 每次成功后重置个人进度计数</p>
+        </div>
             
             <!-- 免责声明 -->
             <div style="
@@ -372,41 +371,8 @@
     <script>
         const username = "<%= username %>";
         const csrfToken = "<%= csrfToken %>";
+        let wishProgress = { total_wishes: 0, consecutive_fails: 0, total_spent: 0, total_rewards_value: 0 };
         
-        // 从localStorage获取祈愿数据
-        let wishData = JSON.parse(localStorage.getItem('wishData_' + username) || '{"total": 0, "success": 0, "current": 0}');
-        
-        // 全服综合率初始值
-        let lastGlobalRate = 1.35;
-        
-        function updateDisplay(serverData = null) {
-            document.getElementById('totalWishes').textContent = wishData.total;
-            document.getElementById('successCount').textContent = wishData.success;
-            document.getElementById('currentProgress').textContent = `${wishData.current} / 148`;
-            
-            // 更新个人中奖率
-            const personalRate = wishData.total > 0 ? (wishData.success / wishData.total * 100) : 0;
-            document.getElementById('personalRate').textContent = personalRate.toFixed(2) + '%';
-            
-            // 更新全服综合率（如果有服务器数据）
-            if (serverData && serverData.globalRate !== undefined) {
-                lastGlobalRate = serverData.globalRate;
-                const globalRate = (serverData.globalRate * 100).toFixed(2);
-                document.getElementById('globalRate').textContent = globalRate + '%';
-            } else {
-                document.getElementById('globalRate').textContent = (lastGlobalRate * 100).toFixed(2) + '%';
-            }
-            
-            const progressPercent = (wishData.current / 148) * 100;
-            document.getElementById('progressBar').style.width = progressPercent + '%';
-            document.getElementById('progressText').textContent = `${wishData.current} / 148`;
-        }
-        
-        function saveWishData() {
-            localStorage.setItem('wishData_' + username, JSON.stringify(wishData));
-        }
-        
-
         function showModal(isSuccess, reward = null, rewardValue = 0, isGuaranteed = false) {
             const modal = document.getElementById('fullscreenModal');
             const content = document.getElementById('modalContent');
@@ -416,6 +382,7 @@
                     <div>🎉 祈愿成功！</div>
                     <div style="font-size: 2rem; margin: 15px 0;">🧜‍♀️ ${reward || '深海歌姬'}</div>
                     <div style="font-size: 1.5rem; color: #f39c12;">价值: ${rewardValue || 30000} 电币</div>
+                    <div style="font-size: 1rem; color: #ccc; margin-top: 8px;">已放入背包，可在个人资料中送出</div>
                     ${isGuaranteed ? '<div style="font-size: 1rem; color: #e74c3c; margin-top: 10px;">保底出货</div>' : ''}
                 `;
                 content.className = 'modal-content modal-success';
@@ -491,7 +458,6 @@
                 }
             } catch (error) {
                 console.error('加载祈愿进度失败:', error);
-                updateDisplay(); // fallback到原来的显示
             }
         }
 
@@ -609,9 +575,6 @@
         document.addEventListener('DOMContentLoaded', function() {
             initSocket();
         });
-        
-        // 初始化显示
-        updateDisplay();
         
         // 祈愿十次功能
         async function makeWishTen() {

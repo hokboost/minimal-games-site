@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS wish_results (
     wishes_count INTEGER DEFAULT 1, -- 当前是第几次祈愿
     is_guaranteed BOOLEAN DEFAULT FALSE, -- 是否是保底出货
     game_details JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
     
     FOREIGN KEY (username) REFERENCES users(username)
 );
@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS wish_progress (
     last_success_at TIMESTAMP,
     total_spent INTEGER DEFAULT 0,
     total_rewards_value INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+    updated_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
     
     FOREIGN KEY (username) REFERENCES users(username)
 );
@@ -39,7 +39,24 @@ CREATE TABLE IF NOT EXISTS wish_sessions (
     total_cost INTEGER NOT NULL DEFAULT 0,
     success_count INTEGER NOT NULL DEFAULT 0,
     total_reward_value INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+    
+    FOREIGN KEY (username) REFERENCES users(username)
+);
+
+-- 创建祈愿奖励背包表
+CREATE TABLE IF NOT EXISTS wish_inventory (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    gift_type VARCHAR(50) NOT NULL,
+    gift_name VARCHAR(100) NOT NULL,
+    bilibili_gift_id VARCHAR(50) NOT NULL,
+    status VARCHAR(20) DEFAULT 'stored', -- stored/queued/sent/failed/expired
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+    updated_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+    sent_at TIMESTAMP,
+    gift_exchange_id INTEGER,
     
     FOREIGN KEY (username) REFERENCES users(username)
 );
@@ -50,6 +67,8 @@ CREATE INDEX IF NOT EXISTS idx_wish_results_success ON wish_results(success, cre
 CREATE INDEX IF NOT EXISTS idx_wish_progress_username ON wish_progress(username);
 CREATE INDEX IF NOT EXISTS idx_wish_progress_consecutive_fails ON wish_progress(consecutive_fails DESC);
 CREATE INDEX IF NOT EXISTS idx_wish_sessions_username_created ON wish_sessions(username, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wish_inventory_username_created ON wish_inventory(username, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wish_inventory_status ON wish_inventory(status, expires_at);
 
 -- 插入默认配置
 INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)

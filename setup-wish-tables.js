@@ -26,7 +26,7 @@ async function setupWishTables() {
             SELECT table_name 
             FROM information_schema.tables 
             WHERE table_schema = 'public' 
-            AND table_name IN ('wish_results', 'wish_progress')
+            AND table_name IN ('wish_results', 'wish_progress', 'wish_sessions', 'wish_inventory')
         `);
         
         console.log('📊 创建的表:', result.rows.map(row => row.table_name));
