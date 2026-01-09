@@ -56,7 +56,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 pool.query(`
                     SELECT DISTINCT ON (username)
                         username,
-                        COALESCE(reward, 0) as reward,
+                        COALESCE(reward::text, '0') as reward_text,
                         to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM scratch_results
                     ORDER BY username, created_at DESC
@@ -131,7 +131,7 @@ module.exports = function registerAdminRoutes(app, deps) {
 
             scratchResult.rows.forEach((row) => {
                 if (latestRecords[row.username]) {
-                    latestRecords[row.username].scratch = `${row.played_at} | ${row.reward}电币`;
+                    latestRecords[row.username].scratch = `${row.played_at} | ${row.reward_text}电币`;
                 }
             });
 

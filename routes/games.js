@@ -757,8 +757,12 @@ module.exports = function registerGameRoutes(app, deps) {
             res.json({
                 success: true,
                 reward: payout,
+                payout: payout,
+                outcome: outcomeType,
                 matches_count: matchedCount,
+                matchesCount: matchedCount,
                 winning_numbers: winningNumbers,
+                winningNumbers: winningNumbers,
                 slots: userSlots,
                 balance: finalBalance
             });
