@@ -277,12 +277,15 @@
         return status;
     }
 
+    const profileCsrfToken = document.body.dataset.csrfToken || '';
+
     async function sendBackpackItem(id) {
         try {
             const response = await fetch('/api/wish/backpack/send', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': profileCsrfToken
                 },
                 body: JSON.stringify({ inventoryId: id })
             });

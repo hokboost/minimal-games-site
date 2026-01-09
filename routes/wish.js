@@ -379,7 +379,7 @@ module.exports = function registerWishRoutes(app, deps) {
         }
     });
 
-    app.post('/api/wish/backpack/send', requireLogin, requireAuthorized, async (req, res) => {
+    app.post('/api/wish/backpack/send', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         try {
             const username = req.session.user.username;
             const inventoryId = Number(req.body.inventoryId);

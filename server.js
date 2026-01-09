@@ -655,6 +655,11 @@ app.get('/profile', requireLogin, (req, res, next) => {
     next();
 }, async (req, res) => {
     try {
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            generateCSRFToken(req);
+        }
         const username = req.session.user.username;
         const userResult = await pool.query(
             'SELECT username, authorized, balance FROM users WHERE username = $1',
@@ -709,7 +714,8 @@ app.get('/profile', requireLogin, (req, res, next) => {
         res.render('profile', {
             title: '个人资料 - Minimal Games',
             user: user,
-            gameStats: stats
+            gameStats: stats,
+            csrfToken: req.session.csrfToken
         });
     } catch (error) {
         console.error('获取用户数据失败:', error);
