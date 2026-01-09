@@ -852,6 +852,14 @@ module.exports = function registerAdminRoutes(app, deps) {
                 WHERE username = $1
             `, [usernameToUpdate]);
 
+            await pool.query(`
+                UPDATE wish_inventory
+                SET expires_at = 'infinity'::timestamptz,
+                    updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                WHERE username = $1
+                  AND status = 'stored'
+            `, [usernameToUpdate]);
+
             console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功解除B站房间号绑定`);
 
             res.json({
