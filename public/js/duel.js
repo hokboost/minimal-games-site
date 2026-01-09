@@ -95,7 +95,9 @@
             const result = await response.json();
             if (!result.success) {
                 resultBox.textContent = result.message || '挑战失败';
-                if (Number.isFinite(currentBalance)) {
+                if (Number.isFinite(result.balanceAfterBet)) {
+                    balanceEl.textContent = result.balanceAfterBet;
+                } else if (Number.isFinite(currentBalance)) {
                     balanceEl.textContent = currentBalance;
                 }
                 return;
@@ -116,7 +118,7 @@
             } else if (newBalance !== null) {
                 balanceEl.textContent = newBalance;
             }
-            if (result.reward > 0) {
+            if (result.duelSuccess) {
                 resultBox.textContent = `🎉 挑战成功！获得 ${activeReward.reward} 电币`;
             } else {
                 resultBox.textContent = '😢 挑战失败，再接再厉';

@@ -1322,8 +1322,8 @@ module.exports = function registerGameRoutes(app, deps) {
 
             res.json({
                 success: true,
+                duelSuccess: success,
                 reward,
-                success,
                 cost,
                 balanceAfterBet,
                 balanceAfterReward: newBalance,
