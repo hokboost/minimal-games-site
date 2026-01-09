@@ -2549,31 +2549,106 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
 // 幸运祈愿 Wish 游戏API
 // ====================
 
+const wishConfigs = {
+    deepsea_singer: {
+        giftType: 'deepsea_singer',
+        name: '深海歌姬',
+        bilibiliGiftId: '35082',
+        cost: 500,
+        successRate: 0.016,
+        guaranteeCount: 148,
+        rewardValue: 30000
+    },
+    sky_throne: {
+        giftType: 'sky_throne',
+        name: '飞天转椅',
+        bilibiliGiftId: '34382',
+        cost: 250,
+        successRate: 0.0202,
+        guaranteeCount: 83,
+        rewardValue: 10000
+    },
+    proposal: {
+        giftType: 'proposal',
+        name: '原地求婚',
+        bilibiliGiftId: '34999',
+        cost: 208,
+        successRate: 0.0385,
+        guaranteeCount: 52,
+        rewardValue: 5200
+    },
+    wonderland: {
+        giftType: 'wonderland',
+        name: '梦游仙境',
+        bilibiliGiftId: '31932',
+        cost: 150,
+        successRate: 0.0515,
+        guaranteeCount: 41,
+        rewardValue: 3000
+    },
+    white_bride: {
+        giftType: 'white_bride',
+        name: '纯白花嫁',
+        bilibiliGiftId: '34428',
+        cost: 75,
+        successRate: 0.064,
+        guaranteeCount: 34,
+        rewardValue: 1314
+    },
+    crystal_ball: {
+        giftType: 'crystal_ball',
+        name: '水晶球',
+        bilibiliGiftId: '31122',
+        cost: 66,
+        successRate: 0.055,
+        guaranteeCount: 32,
+        rewardValue: 1000
+    },
+    bobo: {
+        giftType: 'bobo',
+        name: '啵啵',
+        bilibiliGiftId: '33668',
+        cost: 50,
+        successRate: 0.106,
+        guaranteeCount: 16,
+        rewardValue: 399
+    }
+};
+
+function getWishConfig(giftType) {
+    return wishConfigs[giftType] || null;
+}
+
 app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
     try {
         const username = req.session.user.username;
-        const wishCost = 500; // 固定500电币每次祈愿
-        const successRate = 0.014; // 1.4%成功率
-        const guaranteeThreshold = 147; // 147次失败后第148次必出
-        const rewardName = "深海歌姬";
-        const rewardValue = 30000;
+        const giftType = req.body.giftType || 'deepsea_singer';
+        const config = getWishConfig(giftType);
+        if (!config) {
+            return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
+        }
+        const wishCost = config.cost;
+        const successRate = config.successRate;
+        const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
+        const rewardName = config.name;
+        const rewardValue = config.rewardValue;
 
         // 获取用户当前祈愿进度
         let progressResult = await pool.query(
-            'SELECT * FROM wish_progress WHERE username = $1',
-            [username]
+            'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+            [username, giftType]
         );
 
         // 如果用户没有祈愿记录，创建一个
         if (progressResult.rows.length === 0) {
             await pool.query(`
-                INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)
-                VALUES ($1, 0, 0, 0, 0)
-            `, [username]);
+                INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                VALUES ($1, $2, 0, 0, 0, 0)
+            `, [username, giftType]);
             
             progressResult = await pool.query(
-                'SELECT * FROM wish_progress WHERE username = $1',
-                [username]
+                'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+                [username, giftType]
             );
         }
 
@@ -2597,7 +2672,7 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
         let balanceAfter = betResult.balance;
 
         // 判断是否成功
-        const isGuaranteed = progress.consecutive_fails >= guaranteeThreshold;
+        const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
         const randomSuccess = Math.random() < successRate;
         const success = isGuaranteed || randomSuccess;
 
@@ -2620,7 +2695,7 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
                         (NOW() AT TIME ZONE 'Asia/Shanghai'),
                         (NOW() AT TIME ZONE 'Asia/Shanghai')
                     )
-                `, [username, 'deepsea_singer', rewardName, '35082']);
+                `, [username, giftType, rewardName, config.bilibiliGiftId]);
             } catch (dbError) {
                 console.error('祈愿背包记录存储失败:', dbError);
             }
@@ -2637,14 +2712,15 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
             SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
                 last_success_at = CASE WHEN $5 THEN (NOW() AT TIME ZONE 'Asia/Shanghai') ELSE last_success_at END,
                 updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-            WHERE username = $6
+            WHERE username = $6 AND gift_type = $7
         `, [
             newTotalWishes,
             newConsecutiveFails,
             newTotalSpent,
             newTotalRewardsValue,
             success,
-            username
+            username,
+            giftType
         ]);
 
         // 保存祈愿记录
@@ -2656,12 +2732,13 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
 
             await pool.query(`
                 INSERT INTO wish_results (
-                    username, cost, success, reward, reward_value, balance_before, balance_after,
+                    username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
                     wishes_count, is_guaranteed, game_details, created_at
                 ) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
             `, [
                 username,
+                giftType,
                 wishCost,
                 success,
                 reward,
@@ -2686,11 +2763,13 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
         try {
             await pool.query(`
                 INSERT INTO wish_sessions (
-                    username, batch_count, total_cost, success_count, total_reward_value, created_at
+                    username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
             `, [
                 username,
+                giftType,
+                rewardName,
                 1,
                 wishCost,
                 success ? 1 : 0,
@@ -2711,10 +2790,16 @@ app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLi
                 consecutive_fails: newConsecutiveFails,
                 total_spent: newTotalSpent,
                 total_rewards_value: newTotalRewardsValue,
-                progress_percentage: Math.min((newConsecutiveFails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1),
-                wishes_until_guarantee: Math.max(0, guaranteeThreshold + 1 - newConsecutiveFails)
+                progress_percentage: Number.isFinite(guaranteeThreshold)
+                    ? Math.min((newConsecutiveFails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1)
+                    : null,
+                wishes_until_guarantee: Number.isFinite(guaranteeThreshold)
+                    ? Math.max(0, guaranteeThreshold + 1 - newConsecutiveFails)
+                    : null,
+                guarantee_count: config.guaranteeCount
             },
-            isGuaranteed: isGuaranteed
+            isGuaranteed: isGuaranteed,
+            giftName: rewardName
         });
 
     } catch (error) {
@@ -2764,27 +2849,32 @@ app.get('/api/wish/history', requireLogin, requireAuthorized, async (req, res) =
 app.get('/api/wish/progress', requireLogin, requireAuthorized, async (req, res) => {
     try {
         const username = req.session.user.username;
+        const giftType = req.query.giftType || 'deepsea_singer';
+        const config = getWishConfig(giftType);
+        if (!config) {
+            return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
+        }
+        const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
         
         let result = await pool.query(
-            'SELECT * FROM wish_progress WHERE username = $1',
-            [username]
+            'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+            [username, giftType]
         );
 
         // 如果用户没有祈愿记录，创建一个
         if (result.rows.length === 0) {
             await pool.query(`
-                INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)
-                VALUES ($1, 0, 0, 0, 0)
-            `, [username]);
+                INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                VALUES ($1, $2, 0, 0, 0, 0)
+            `, [username, giftType]);
             
             result = await pool.query(
-                'SELECT * FROM wish_progress WHERE username = $1',
-                [username]
+                'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+                [username, giftType]
             );
         }
 
         const progress = result.rows[0];
-        const guaranteeThreshold = 147;
 
         res.json({
             success: true,
@@ -2794,9 +2884,17 @@ app.get('/api/wish/progress', requireLogin, requireAuthorized, async (req, res) 
                 total_spent: progress.total_spent,
                 total_rewards_value: progress.total_rewards_value,
                 last_success_at: progress.last_success_at,
-                progress_percentage: Math.min((progress.consecutive_fails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1),
-                wishes_until_guarantee: Math.max(0, guaranteeThreshold + 1 - progress.consecutive_fails),
-                next_is_guaranteed: progress.consecutive_fails >= guaranteeThreshold
+                progress_percentage: Number.isFinite(guaranteeThreshold)
+                    ? Math.min((progress.consecutive_fails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1)
+                    : null,
+                wishes_until_guarantee: Number.isFinite(guaranteeThreshold)
+                    ? Math.max(0, guaranteeThreshold + 1 - progress.consecutive_fails)
+                    : null,
+                next_is_guaranteed: Number.isFinite(guaranteeThreshold)
+                    ? progress.consecutive_fails >= guaranteeThreshold
+                    : false,
+                guarantee_count: config.guaranteeCount,
+                gift_name: config.name
             }
         });
 
@@ -2843,12 +2941,13 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false 
             if (isAuto) {
                 await client.query(`
                     UPDATE wish_inventory
-                    SET status = 'expired',
+                    SET status = 'stored',
+                        expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
                         updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                     WHERE id = $1
                 `, [inventoryId]);
                 await client.query('COMMIT');
-                return { success: false, message: '未绑定房间号，已标记过期' };
+                return { success: false, message: '未绑定房间号，已延期' };
             }
 
             await client.query('ROLLBACK');
@@ -3019,11 +3118,16 @@ app.post('/api/wish-batch',
     try {
         const username = req.session.user.username;
         const batchCount = Number(req.body.batchCount || 10);
-        const wishCost = 500; // 固定500电币每次祈愿
-        const successRate = 0.014; // 1.4%成功率
-        const guaranteeThreshold = 147; // 147次失败后第148次必出
-        const rewardName = "深海歌姬";
-        const rewardValue = 30000;
+        const giftType = req.body.giftType || 'deepsea_singer';
+        const config = getWishConfig(giftType);
+        if (!config) {
+            return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
+        }
+        const wishCost = config.cost;
+        const successRate = config.successRate;
+        const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
+        const rewardName = config.name;
+        const rewardValue = config.rewardValue;
         
         if (batchCount !== 10) {
             return res.status(400).json({ success: false, message: '仅支持10次祈愿' });
@@ -3046,20 +3150,20 @@ app.post('/api/wish-batch',
         
         // 获取用户当前祈愿进度
         let progressResult = await pool.query(
-            'SELECT * FROM wish_progress WHERE username = $1',
-            [username]
+            'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+            [username, giftType]
         );
 
         // 如果用户没有祈愿记录，创建一个
         if (progressResult.rows.length === 0) {
             await pool.query(`
-                INSERT INTO wish_progress (username, total_wishes, consecutive_fails, total_spent, total_rewards_value)
-                VALUES ($1, 0, 0, 0, 0)
-            `, [username]);
+                INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                VALUES ($1, $2, 0, 0, 0, 0)
+            `, [username, giftType]);
             
             progressResult = await pool.query(
-                'SELECT * FROM wish_progress WHERE username = $1',
-                [username]
+                'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+                [username, giftType]
             );
         }
 
@@ -3086,7 +3190,7 @@ app.post('/api/wish-batch',
             balanceAfter = betResult.balance;
 
             // 判断是否成功
-            const isGuaranteed = progress.consecutive_fails >= guaranteeThreshold;
+            const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
             const randomSuccess = Math.random() < successRate;
             const success = isGuaranteed || randomSuccess;
 
@@ -3107,7 +3211,7 @@ app.post('/api/wish-batch',
                             (NOW() AT TIME ZONE 'Asia/Shanghai'),
                             (NOW() AT TIME ZONE 'Asia/Shanghai')
                         )
-                    `, [username, 'deepsea_singer', rewardName, '35082']);
+                    `, [username, giftType, rewardName, config.bilibiliGiftId]);
                 } catch (dbError) {
                     console.error('祈愿背包记录存储失败:', dbError);
                 }
@@ -3124,14 +3228,15 @@ app.post('/api/wish-batch',
                 SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
                     last_success_at = CASE WHEN $5 THEN (NOW() AT TIME ZONE 'Asia/Shanghai') ELSE last_success_at END,
                     updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-                WHERE username = $6
+                WHERE username = $6 AND gift_type = $7
             `, [
                 newTotalWishes,
                 newConsecutiveFails,
                 newTotalSpent,
                 newTotalRewardsValue,
                 success,
-                username
+                username,
+                giftType
             ]);
 
             // 保存祈愿记录
@@ -3143,12 +3248,13 @@ app.post('/api/wish-batch',
 
                 await pool.query(`
                     INSERT INTO wish_results (
-                        username, cost, success, reward, reward_value, balance_before, balance_after,
+                        username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
                         wishes_count, is_guaranteed, game_details, created_at
                     ) 
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
                 `, [
                     username,
+                    giftType,
                     wishCost,
                     success,
                     reward,
@@ -3187,11 +3293,13 @@ app.post('/api/wish-batch',
         try {
             await pool.query(`
                 INSERT INTO wish_sessions (
-                    username, batch_count, total_cost, success_count, total_reward_value, created_at
+                    username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
             `, [
                 username,
+                giftType,
+                rewardName,
                 batchCount,
                 wishCost * batchCount,
                 successCount,
@@ -3210,14 +3318,72 @@ app.post('/api/wish-batch',
                 consecutive_fails: progress.consecutive_fails,
                 total_spent: progress.total_spent,
                 total_rewards_value: progress.total_rewards_value,
-                progress_percentage: Math.min((progress.consecutive_fails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1),
-                wishes_until_guarantee: Math.max(0, guaranteeThreshold + 1 - progress.consecutive_fails)
+                progress_percentage: Number.isFinite(guaranteeThreshold)
+                    ? Math.min((progress.consecutive_fails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1)
+                    : null,
+                wishes_until_guarantee: Number.isFinite(guaranteeThreshold)
+                    ? Math.max(0, guaranteeThreshold + 1 - progress.consecutive_fails)
+                    : null,
+                guarantee_count: config.guaranteeCount
             }
         });
         
     } catch (error) {
         console.error('Batch wish error:', error);
         res.status(500).json({ success: false, message: '批量祈愿系统故障' });
+    }
+});
+
+// 祈愿概率模拟（管理员测试，无余额/数据库影响）
+app.post('/api/wish/simulate',
+    requireLogin,
+    requireAuthorized,
+    security.basicRateLimit,
+    security.csrfProtection,
+    async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        if (username !== 'hokboost') {
+            return res.status(403).json({ success: false, message: '无权限' });
+        }
+
+        const giftType = req.body.giftType || 'deepsea_singer';
+        const count = Number(req.body.count || 100000);
+        const config = getWishConfig(giftType);
+        if (!config) {
+            return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
+        }
+
+        if (!Number.isFinite(count) || count < 1 || count > 100000) {
+            return res.status(400).json({ success: false, message: '次数无效' });
+        }
+
+        const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
+        let consecutiveFails = 0;
+        let successCount = 0;
+
+        for (let i = 0; i < count; i++) {
+            const isGuaranteed = Number.isFinite(guaranteeThreshold) && consecutiveFails >= guaranteeThreshold;
+            const randomSuccess = Math.random() < config.successRate;
+            const success = isGuaranteed || randomSuccess;
+            if (success) {
+                successCount += 1;
+                consecutiveFails = 0;
+            } else {
+                consecutiveFails += 1;
+            }
+        }
+
+        res.json({
+            success: true,
+            giftName: config.name,
+            count,
+            successCount,
+            rate: ((successCount / count) * 100).toFixed(4) + '%'
+        });
+    } catch (error) {
+        console.error('祈愿模拟失败:', error);
+        res.status(500).json({ success: false, message: '模拟失败' });
     }
 });
 
@@ -3911,12 +4077,14 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
             try {
                 await pool.query(`
                     UPDATE wish_inventory
-                    SET status = 'failed',
+                    SET status = 'stored',
+                        gift_exchange_id = NULL,
+                        expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
                         updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                     WHERE gift_exchange_id = $1
                 `, [taskId]);
             } catch (dbError) {
-                console.error('更新背包失败状态失败:', dbError);
+                console.error('更新背包失败回退失败:', dbError);
             }
 
             console.log(`❌ 任务 ${taskId} 标记为失败: ${username} 的 ${gift_name} - ${errorMessage}`);
@@ -4008,6 +4176,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                            total_cost,
                            success_count,
                            total_reward_value,
+                           gift_name,
                            created_at as played_at
                     FROM wish_sessions
                     WHERE username = $1

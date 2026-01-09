@@ -74,6 +74,22 @@
             margin: 0;
         }
 
+        .wish-progress-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            color: #ccc;
+            font-weight: bold;
+        }
+
         .wish-progress {
             margin: 30px 0;
             background: rgba(255, 255, 255, 0.1);
@@ -140,13 +156,20 @@
             font-size: 16px;
         }
 
-        .guarantee-notice {
-            background: rgba(255, 193, 7, 0.12);
-            border: 2px solid rgba(255, 193, 7, 0.5);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 20px 0;
-            color: #f8e08e;
+        .probability-button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ccc;
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .probability-button:hover {
+            background: rgba(0, 200, 83, 0.2);
+            color: #fff;
         }
 
         /* 全屏弹窗样式 */
@@ -274,6 +297,79 @@
                 max-width: 110px;
             }
         }
+
+        .wish-gift-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .gift-card {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            padding: 1.5rem;
+            text-align: left;
+        }
+
+        .gift-card-large {
+            grid-column: span 2;
+            border: 2px solid rgba(0, 200, 83, 0.4);
+            background: rgba(0, 200, 83, 0.08);
+        }
+
+        .gift-title {
+            font-size: 1.4rem;
+            color: #fff;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+        }
+
+        .gift-meta {
+            color: #ccc;
+            font-size: 0.9rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .gift-actions {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .gift-action-btn {
+            background: linear-gradient(135deg, #00c853, #00bfa5);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: bold;
+            padding: 0.6rem 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .gift-action-btn.secondary {
+            background: linear-gradient(135deg, #1e88e5, #1565c0);
+        }
+
+        .gift-action-btn.test {
+            background: linear-gradient(135deg, #8e44ad, #2c3e50);
+        }
+
+        .gift-action-btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 768px) {
+            .wish-gift-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .gift-card-large {
+                grid-column: span 1;
+            }
+        }
     </style>
 </head>
 <body>
@@ -292,24 +388,92 @@
                 <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
             </div>
             <div class="wish-container">
-                <p style="color: #ccc;">祈愿深海歌姬，500电币/次，成功率1.4%</p>
-                
-                <div style="text-align: center; margin: 20px 0;">
-                    <h2 style="color: #00c853; margin: 10px 0;">🧜‍♀️ 深海歌姬</h2>
-                    <p style="color: #ffeb3b; font-size: 18px; font-weight: bold;">价值: 30000 电币</p>
-                </div>
+                <p style="color: #ccc;">请选择礼物档位进行祈愿，成功后礼物进入背包。</p>
             </div>
         </div>
         
         <div class="wish-container">
-            <div class="wish-progress">
-                <div class="progress-bar" id="progressBar"></div>
-                <div class="progress-text" id="progressText">0 / 148 (保底)</div>
+            <div class="wish-progress-section">
+                <div class="progress-header">
+                    <span>当前祈愿：<span id="currentGiftName">深海歌姬</span></span>
+                    <span id="currentGiftRule">保底 148 次</span>
+                </div>
+                <div class="wish-progress">
+                    <div class="progress-bar" id="progressBar"></div>
+                    <div class="progress-text" id="progressText">0 / 148 (保底)</div>
+                </div>
             </div>
-            
-            <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 900px; margin: 0 auto;">
-                <button id="wishButton" class="wish-button" onclick="makeWish()">🙏 许愿祈祷</button>
-                <button id="wishTenButton" class="wish-button" onclick="makeWishTen()" style="background: linear-gradient(45deg, #9b59b6 0%, #8e44ad 100%);">🙏 祈愿十次</button>
+
+            <div class="wish-gift-grid">
+                <div class="gift-card gift-card-large" data-gift="deepsea_singer">
+                    <div class="gift-title">🧜‍♀️ 深海歌姬</div>
+                    <div class="gift-meta">价值 30000 电币 · 500 电币/次 · 保底 148 次 · 综合中奖率 1.6%</div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" onclick="makeWish('deepsea_singer', 1)">抽一次</button>
+                        <button class="gift-action-btn secondary" onclick="makeWish('deepsea_singer', 10)">十连</button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="deepsea_singer" style="display: none;">10万次测试</button>
+                    </div>
+                </div>
+
+                <div class="gift-card" data-gift="sky_throne">
+                    <div class="gift-title">💺 飞天转椅</div>
+                    <div class="gift-meta">价值 10000 电币 · 250 电币/次 · 保底 83 次 · 基础概率 2.02%</div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" onclick="makeWish('sky_throne', 1)">抽一次</button>
+                        <button class="gift-action-btn secondary" onclick="makeWish('sky_throne', 10)">十连</button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="sky_throne" style="display: none;">10万次测试</button>
+                    </div>
+                </div>
+
+                <div class="gift-card" data-gift="proposal">
+                    <div class="gift-title">💍 原地求婚</div>
+                    <div class="gift-meta">价值 5200 电币 · 208 电币/次 · 保底 52 次 · 基础概率 3.85%</div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" onclick="makeWish('proposal', 1)">抽一次</button>
+                        <button class="gift-action-btn secondary" onclick="makeWish('proposal', 10)">十连</button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="proposal" style="display: none;">10万次测试</button>
+                    </div>
+                </div>
+
+                <div class="gift-card" data-gift="wonderland">
+                    <div class="gift-title">🌙 梦游仙境</div>
+                    <div class="gift-meta">价值 3000 电币 · 150 电币/次 · 保底 41 次 · 基础概率 5.15%</div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" onclick="makeWish('wonderland', 1)">抽一次</button>
+                        <button class="gift-action-btn secondary" onclick="makeWish('wonderland', 10)">十连</button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="wonderland" style="display: none;">10万次测试</button>
+                    </div>
+                </div>
+
+                <div class="gift-card" data-gift="white_bride">
+                    <div class="gift-title">🤍 纯白花嫁</div>
+                    <div class="gift-meta">价值 1314 电币 · 75 电币/次 · 保底 34 次 · 基础概率 6.4%</div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" onclick="makeWish('white_bride', 1)">抽一次</button>
+                        <button class="gift-action-btn secondary" onclick="makeWish('white_bride', 10)">十连</button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="white_bride" style="display: none;">10万次测试</button>
+                    </div>
+                </div>
+
+                <div class="gift-card" data-gift="crystal_ball">
+                    <div class="gift-title">🔮 水晶球</div>
+                    <div class="gift-meta">价值 1000 电币 · 66 电币/次 · 保底 32 次 · 基础概率 5.5%</div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" onclick="makeWish('crystal_ball', 1)">抽一次</button>
+                        <button class="gift-action-btn secondary" onclick="makeWish('crystal_ball', 10)">十连</button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="crystal_ball" style="display: none;">10万次测试</button>
+                    </div>
+                </div>
+
+                <div class="gift-card" data-gift="bobo">
+                    <div class="gift-title">🫧 啵啵</div>
+                    <div class="gift-meta">价值 399 电币 · 50 电币/次 · 保底 16 次 · 基础概率 10.6%</div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" onclick="makeWish('bobo', 1)">抽一次</button>
+                        <button class="gift-action-btn secondary" onclick="makeWish('bobo', 10)">十连</button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="bobo" style="display: none;">10万次测试</button>
+                    </div>
+                </div>
             </div>
             
             <div class="wish-stats">
@@ -326,22 +490,19 @@
                     <span>个人中奖率:</span>
                     <span id="personalRate">0.00%</span>
                 </div>
-            <div class="stats-row">
-                <span>综合中奖率:</span>
-                <span>1.60%</span>
-            </div>
+                <div class="stats-row">
+                    <span>综合中奖率:</span>
+                    <span id="displayRate">1.60%</span>
+                </div>
                 <div class="stats-row">
                     <span>当前进度:</span>
                     <span id="currentProgress">0 / 148</span>
                 </div>
             </div>
-            
-        <div class="guarantee-notice">
-            <h4>🎯 祈愿规则</h4>
-            <p>• 综合中奖率为 1.6%</p>
-            <p>• 连续147次未中奖后，第148次必定成功</p>
-            <p>• 每次成功后重置个人进度计数</p>
-        </div>
+
+            <div style="text-align: center; margin: 1rem 0;">
+                <button class="probability-button" onclick="openProbabilityModal()">概率公示</button>
+            </div>
             
             <!-- 免责声明 -->
             <div style="
@@ -368,10 +529,34 @@
         <div id="modalContent" class="modal-content"></div>
     </div>
 
+    <!-- 概率公示弹窗 -->
+    <div id="probabilityModal" class="fullscreen-modal">
+        <div class="modal-content" style="font-size: 1.2rem; max-width: 680px;">
+            <div style="font-size: 1.6rem; margin-bottom: 1rem;">📢 概率公示</div>
+            <div id="probabilityList" style="text-align: left;"></div>
+            <div style="margin-top: 1rem;">
+                <button class="probability-button" onclick="closeProbabilityModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const username = "<%= username %>";
         const csrfToken = "<%= csrfToken %>";
         let wishProgress = { total_wishes: 0, consecutive_fails: 0, total_spent: 0, total_rewards_value: 0 };
+        const isAdminTester = username === 'hokboost';
+
+        const giftConfigs = {
+            deepsea_singer: { name: '深海歌姬', cost: 500, rateText: '1.6%', guaranteeCount: 148, rewardValue: 30000 },
+            sky_throne: { name: '飞天转椅', cost: 250, rateText: '2.02%', guaranteeCount: 83, rewardValue: 10000 },
+            proposal: { name: '原地求婚', cost: 208, rateText: '3.85%', guaranteeCount: 52, rewardValue: 5200 },
+            wonderland: { name: '梦游仙境', cost: 150, rateText: '5.15%', guaranteeCount: 41, rewardValue: 3000 },
+            white_bride: { name: '纯白花嫁', cost: 75, rateText: '6.4%', guaranteeCount: 34, rewardValue: 1314 },
+            crystal_ball: { name: '水晶球', cost: 66, rateText: '5.5%', guaranteeCount: 32, rewardValue: 1000 },
+            bobo: { name: '啵啵', cost: 50, rateText: '10.6%', guaranteeCount: 16, rewardValue: 399 }
+        };
+
+        let currentGiftType = 'deepsea_singer';
         
         function showModal(isSuccess, reward = null, rewardValue = 0, isGuaranteed = false) {
             const modal = document.getElementById('fullscreenModal');
@@ -401,18 +586,48 @@
             }, 3000);
         }
         
-        async function makeWish() {
-            const button = document.getElementById('wishButton');
-            button.disabled = true;
-            button.textContent = '祈愿中...';
+        function setCurrentGift(giftType) {
+            currentGiftType = giftType;
+            const config = giftConfigs[giftType];
+            if (!config) return;
+            document.getElementById('currentGiftName').textContent = config.name;
+            document.getElementById('displayRate').textContent = config.rateText;
+            document.getElementById('currentGiftRule').textContent = config.guaranteeCount
+                ? `保底 ${config.guaranteeCount} 次`
+                : '无保底';
+        }
+
+        async function selectGift(giftType) {
+            setCurrentGift(giftType);
+            await loadWishProgress();
+        }
+
+        async function makeWish(giftType, count) {
+            setCurrentGift(giftType);
+            const config = giftConfigs[giftType];
+            const totalCost = config.cost * count;
+            const currentBalance = parseInt(document.getElementById('current-balance').textContent);
+
+            if (currentBalance < totalCost) {
+                alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${totalCost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`);
+                return;
+            }
+
+            const buttonLabel = count === 10 ? '十连' : '抽一次';
+            const buttons = document.querySelectorAll(`.gift-card[data-gift="${giftType}"] .gift-action-btn`);
+            buttons.forEach(btn => btn.disabled = true);
             
             try {
-                const response = await fetch('/api/wish/play', {
+                const response = await fetch(count === 10 ? '/api/wish-batch' : '/api/wish/play', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRF-Token': csrfToken
-                    }
+                    },
+                    body: JSON.stringify({
+                        giftType: giftType,
+                        batchCount: count === 10 ? 10 : undefined
+                    })
                 });
                 
                 const result = await response.json();
@@ -420,14 +635,23 @@
                 if (result.success) {
                     // 更新本地进度数据
                     wishProgress = result.progress;
-                    wishProgress.total_spent = result.progress.total_wishes * 500; // 计算总花费
                     
                     if (typeof result.newBalance === 'number') {
                         document.getElementById('current-balance').textContent = result.newBalance;
                     }
                     
                     // 显示结果
-                    if (result.wishSuccess) {
+                    if (count === 10) {
+                        const modal = document.getElementById('fullscreenModal');
+                        const content = document.getElementById('modalContent');
+                        const rate = ((result.successCount / count) * 100).toFixed(2);
+                        content.textContent = `${config.name} 十连完成！成功${result.successCount}次 (${rate}%)`;
+                        content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
+                        modal.style.display = 'flex';
+                        setTimeout(() => {
+                            modal.style.display = 'none';
+                        }, 3000);
+                    } else if (result.wishSuccess) {
                         showModal(true, result.reward, result.rewardValue, result.isGuaranteed);
                     } else {
                         showModal(false);
@@ -441,19 +665,21 @@
                 console.error('Error:', error);
                 alert('网络错误，请重试');
             } finally {
-                button.disabled = false;
-                button.textContent = '🙏 许愿祈祷';
+                buttons.forEach(btn => btn.disabled = false);
             }
         }
         
         // 页面加载时获取祈愿进度
         async function loadWishProgress() {
             try {
-                const response = await fetch('/api/wish/progress');
+                const response = await fetch(`/api/wish/progress?giftType=${currentGiftType}`);
                 const result = await response.json();
                 
                 if (result.success) {
                     wishProgress = result.progress;
+                    if (result.progress && result.progress.gift_name) {
+                        setCurrentGift(currentGiftType);
+                    }
                     updateDisplayNew();
                 }
             } catch (error) {
@@ -462,28 +688,37 @@
         }
 
         function updateDisplayNew() {
-            const progress = (wishProgress.consecutive_fails / 148) * 100;
-            document.getElementById('progressBar').style.width = Math.min(progress, 100) + '%';
-            document.getElementById('progressText').textContent = 
-                `${wishProgress.consecutive_fails} / 148 (保底)`;
+            const config = giftConfigs[currentGiftType];
+            if (config && config.guaranteeCount) {
+                const progress = (wishProgress.consecutive_fails / config.guaranteeCount) * 100;
+                document.getElementById('progressBar').style.width = Math.min(progress, 100) + '%';
+                document.getElementById('progressText').textContent = 
+                    `${wishProgress.consecutive_fails} / ${config.guaranteeCount} (保底)`;
+                document.getElementById('currentProgress').textContent = `${wishProgress.consecutive_fails} / ${config.guaranteeCount}`;
+            } else {
+                document.getElementById('progressBar').style.width = '0%';
+                document.getElementById('progressText').textContent = '无保底';
+                document.getElementById('currentProgress').textContent = '无保底';
+            }
             
             document.getElementById('totalWishes').textContent = wishProgress.total_wishes;
+            const rewardValue = config ? config.rewardValue : 0;
             document.getElementById('successCount').textContent = 
-                Math.floor(wishProgress.total_rewards_value / 30000); // 根据获得奖励计算成功次数
+                rewardValue > 0 ? Math.floor(wishProgress.total_rewards_value / rewardValue) : 0;
             
-            const failCount = wishProgress.total_wishes - Math.floor(wishProgress.total_rewards_value / 30000);
+            const failCount = wishProgress.total_wishes - (rewardValue > 0 ? Math.floor(wishProgress.total_rewards_value / rewardValue) : 0);
             if (document.getElementById('failCount')) {
                 document.getElementById('failCount').textContent = failCount;
             }
             
             const successRate = wishProgress.total_wishes > 0 ? 
-                (Math.floor(wishProgress.total_rewards_value / 30000) / wishProgress.total_wishes * 100).toFixed(1) : '0.0';
+                ((rewardValue > 0 ? Math.floor(wishProgress.total_rewards_value / rewardValue) : 0) / wishProgress.total_wishes * 100).toFixed(1) : '0.0';
             if (document.getElementById('successRate')) {
                 document.getElementById('successRate').textContent = successRate + '%';
             }
             
             // 如果即将保底，改变进度条颜色
-            if (wishProgress.consecutive_fails >= 147) {
+            if (config && config.guaranteeCount && wishProgress.consecutive_fails >= (config.guaranteeCount - 1)) {
                 document.getElementById('progressBar').style.background = 
                     'linear-gradient(45deg, #f39c12, #e67e22)'; // 金色，表示即将保底
             } else {
@@ -493,6 +728,7 @@
         }
         
         // 初始化显示
+        setCurrentGift(currentGiftType);
         loadWishProgress();
         
         // 飘屏管理器
@@ -576,75 +812,81 @@
             initSocket();
         });
         
-        // 祈愿十次功能
-        async function makeWishTen() {
-            await batchWish(10, 'wishTenButton', '🙏 祈愿十次');
-        }
-
-        // 批量祈愿通用函数
-        async function batchWish(count, buttonId, buttonText) {
-            const button = document.getElementById(buttonId);
-            const allButtons = [
-                document.getElementById('wishButton'),
-                document.getElementById('wishTenButton')
-            ];
-            
-            // 禁用所有按钮
-            allButtons.forEach(btn => btn.disabled = true);
-            button.textContent = '祈愿中...';
-            
+        async function simulateWish(giftType) {
+            if (!isAdminTester) return;
             try {
-                // 发送批量请求
-                const response = await fetch('/api/wish-batch', {
+                const response = await fetch('/api/wish/simulate', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRF-Token': csrfToken
                     },
-                    body: JSON.stringify({ 
-                        batchCount: count
+                    body: JSON.stringify({
+                        giftType: giftType,
+                        count: 100000
                     })
                 });
-                
+
                 const result = await response.json();
-                
-                if (result.success) {
-                    if (result.progress) {
-                        wishProgress = result.progress;
-                        updateDisplayNew();
-                    }
-                    
-                    if (typeof result.newBalance === 'number') {
-                        document.getElementById('current-balance').textContent = result.newBalance;
-                    }
-                    
-                    // 显示结果
-                    const modal = document.getElementById('fullscreenModal');
-                    const content = document.getElementById('modalContent');
-                    const rate = ((result.successCount / count) * 100).toFixed(2);
-                    content.textContent = `${count}次祈愿完成！成功${result.successCount}次 (${rate}%)`;
-                    content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
-                    modal.style.display = 'flex';
-                    
-                    setTimeout(() => {
-                        modal.style.display = 'none';
-                    }, 4000);
-                } else {
-                    alert('批量祈愿失败：' + result.message);
+                if (!result.success) {
+                    alert(result.message || '测试失败');
+                    return;
                 }
+
+                const modal = document.getElementById('fullscreenModal');
+                const content = document.getElementById('modalContent');
+                content.textContent = `${result.giftName} 10万次测试：成功${result.successCount}次，命中率 ${result.rate}`;
+                content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
+                modal.style.display = 'flex';
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                }, 4000);
             } catch (error) {
-                console.error('批量祈愿失败:', error);
+                console.error('测试失败:', error);
                 alert('网络错误，请重试');
-            } finally {
-                // 恢复所有按钮
-                allButtons.forEach(btn => btn.disabled = false);
-                button.textContent = buttonText;
             }
+        }
+
+        function openProbabilityModal() {
+            const list = document.getElementById('probabilityList');
+            const entries = Object.values(giftConfigs).map(item => {
+                const guaranteeText = item.guaranteeCount ? `保底 ${item.guaranteeCount} 次` : '无保底';
+                return `• ${item.name}：基础概率 ${item.rateText}，${guaranteeText}`;
+            }).join('<br>');
+            list.innerHTML = entries;
+            document.getElementById('probabilityModal').style.display = 'flex';
+        }
+
+        function closeProbabilityModal() {
+            document.getElementById('probabilityModal').style.display = 'none';
         }
 
         // 点击弹窗直接关闭
         document.getElementById('fullscreenModal').addEventListener('click', function() {
             this.style.display = 'none';
+        });
+
+        document.getElementById('probabilityModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeProbabilityModal();
+            }
+        });
+
+        // 显示管理员测试按钮
+        if (isAdminTester) {
+            document.querySelectorAll('.admin-test-btn').forEach((btn) => {
+                btn.style.display = 'inline-block';
+                btn.addEventListener('click', () => simulateWish(btn.dataset.gift));
+            });
+        }
+
+        document.querySelectorAll('.gift-card').forEach((card) => {
+            card.addEventListener('click', (event) => {
+                if (event.target.closest('button')) {
+                    return;
+                }
+                selectGift(card.dataset.gift);
+            });
         });
     </script>
     

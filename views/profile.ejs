@@ -875,7 +875,7 @@
         
         // 表内容
         records.forEach(record => {
-            const playedAt = new Date(record.played_at).toLocaleString('zh-CN');
+            const playedAt = new Date(record.played_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
             
             if (gameType === 'quiz') {
                 tableHTML += `
@@ -906,9 +906,8 @@
                 `;
             } else if (gameType === 'wish') {
                 const successCount = Number(record.success_count || 0);
-                const rewardValue = Number(record.total_reward_value || 0);
                 const resultText = successCount > 0
-                    ? `✅ 成功 ${successCount} 次，奖励 ${rewardValue} 电币`
+                    ? `✅ ${record.gift_name || '礼物'} x${successCount}`
                     : '❌ 未中奖';
                 tableHTML += `
                     <tr>
