@@ -260,7 +260,7 @@ module.exports = function registerGiftRoutes(app, deps) {
             try {
                 result = await pool.query(`
                     SELECT gift_type, gift_name, cost, quantity, status,
-                           to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at,
                            delivery_status
                     FROM gift_exchanges 
                     WHERE username = $1 
@@ -272,7 +272,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                     console.log('⚠️ quantity字段不存在，历史记录使用备用查询');
                     result = await pool.query(`
                         SELECT gift_type, gift_name, cost, status,
-                               to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at,
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at,
                                delivery_status
                         FROM gift_exchanges 
                         WHERE username = $1 

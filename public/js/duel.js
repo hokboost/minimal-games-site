@@ -56,8 +56,18 @@
     duelBtn.addEventListener('click', async () => {
         duelBtn.disabled = true;
         resultBox.textContent = '挑战中...';
+        const power = Number(powerInput.value);
+        const cost = calculateCost(power);
+        const currentBalance = Number(balanceEl.textContent);
+        if (Number.isFinite(currentBalance) && currentBalance < cost) {
+            resultBox.textContent = '电币不足，无法挑战';
+            duelBtn.disabled = false;
+            return;
+        }
+        if (Number.isFinite(currentBalance) && Number.isFinite(cost)) {
+            balanceEl.textContent = currentBalance - cost;
+        }
         try {
-            const power = Number(powerInput.value);
             const response = await fetch('/api/duel/play', {
                 method: 'POST',
                 headers: {
@@ -73,10 +83,15 @@
             const result = await response.json();
             if (!result.success) {
                 resultBox.textContent = result.message || '挑战失败';
+                if (Number.isFinite(currentBalance)) {
+                    balanceEl.textContent = currentBalance;
+                }
                 return;
             }
 
-            balanceEl.textContent = result.newBalance;
+            if (Number.isFinite(result.newBalance)) {
+                balanceEl.textContent = result.newBalance;
+            }
             if (result.reward > 0) {
                 resultBox.textContent = `🎉 挑战成功！获得 ${activeReward.reward} 电币`;
             } else {

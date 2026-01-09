@@ -1009,14 +1009,19 @@ module.exports = function registerGameRoutes(app, deps) {
             const canFlip = !state.ended && flips < flipCosts.length;
             const cashoutReward = flipCashoutRewards[state.good_count] || 0;
 
+            const boardTypes = Array.isArray(state.board) ? state.board : [];
+            const flipped = Array.isArray(state.flipped) ? state.flipped : [];
+            const board = boardTypes.map((type, index) => ({
+                type,
+                flipped: !!flipped[index]
+            }));
+
             res.json({
                 success: true,
-                state: {
-                    flipped: state.flipped,
-                    good_count: state.good_count,
-                    bad_count: state.bad_count,
-                    ended: state.ended
-                },
+                board,
+                ended: state.ended,
+                goodCount: state.good_count,
+                badCount: state.bad_count,
                 nextCost,
                 canFlip,
                 cashoutReward
@@ -1353,7 +1358,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     query = `
                         SELECT id,
                                score,
-                               to_char(submitted_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                               to_char(submitted_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                         FROM submissions 
                         WHERE username = $1 
                         ORDER BY submitted_at DESC 
@@ -1370,7 +1375,7 @@ module.exports = function registerGameRoutes(app, deps) {
                                won as result,
                                COALESCE(payout_amount, 0) as payout,
                                game_details->>'amounts' as amounts,
-                               to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                         FROM slot_results 
                         WHERE username = $1 
                         ORDER BY created_at DESC 
@@ -1387,7 +1392,7 @@ module.exports = function registerGameRoutes(app, deps) {
                         SELECT id, reward as result, COALESCE(matches_count, 0) as matches_count, 
                                COALESCE(tier_cost, 5) as tier_cost, 
                                winning_numbers, slots,
-                               to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                         FROM scratch_results 
                         WHERE username = $1 
                         ORDER BY created_at DESC 
@@ -1406,7 +1411,7 @@ module.exports = function registerGameRoutes(app, deps) {
                                success_count,
                                total_reward_value,
                                gift_name,
-                               to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                         FROM wish_sessions
                         WHERE username = $1
                         ORDER BY created_at DESC
@@ -1426,7 +1431,7 @@ module.exports = function registerGameRoutes(app, deps) {
                                slot_index,
                                before_slots,
                                after_slots,
-                               to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                         FROM stone_logs
                         WHERE username = $1
                         ORDER BY created_at DESC
@@ -1445,7 +1450,7 @@ module.exports = function registerGameRoutes(app, deps) {
                                good_count,
                                bad_count,
                                ended,
-                               to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                         FROM flip_logs
                         WHERE username = $1 AND action_type = 'end'
                         ORDER BY created_at DESC
@@ -1464,7 +1469,7 @@ module.exports = function registerGameRoutes(app, deps) {
                                power,
                                cost,
                                success,
-                               to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
                         FROM duel_logs
                         WHERE username = $1
                         ORDER BY created_at DESC

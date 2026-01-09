@@ -343,17 +343,17 @@
         });
     
 
-        const openProbabilityBtn = document.getElementById(open-probability);
+        const openProbabilityBtn = document.getElementById('open-probability');
         if (openProbabilityBtn) {
-            openProbabilityBtn.addEventListener(click, openProbabilityModal);
+            openProbabilityBtn.addEventListener('click', openProbabilityModal);
         }
-        const closeProbabilityBtn = document.getElementById(close-probability);
+        const closeProbabilityBtn = document.getElementById('close-probability');
         if (closeProbabilityBtn) {
-            closeProbabilityBtn.addEventListener(click, closeProbabilityModal);
+            closeProbabilityBtn.addEventListener('click', closeProbabilityModal);
         }
 
-        document.querySelectorAll(.gift-action-btn[data-count]).forEach((btn) => {
-            btn.addEventListener(click, (event) => {
+        document.querySelectorAll('.gift-action-btn[data-count]').forEach((btn) => {
+            btn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 makeWish(btn.dataset.gift, Number(btn.dataset.count));
             });

@@ -349,9 +349,9 @@ module.exports = function registerWishRoutes(app, deps) {
                        status,
                        gift_exchange_id,
                        CASE WHEN expires_at IS NULL THEN NULL
-                            ELSE to_char(expires_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS')
+                            ELSE to_char(expires_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS')
                        END as expires_at,
-                       to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at
+                       to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at
                 FROM wish_inventory
                 WHERE username = $1
                 ORDER BY created_at DESC

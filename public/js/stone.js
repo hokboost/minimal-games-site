@@ -112,7 +112,7 @@
                 alert('请选择一个槽位');
                 return;
             }
-            postAction('/api/stone/replace', { slotIndex: selectedSlot });
+            postAction('/api/stone/replace', { index: selectedSlot });
         });
 
         document.getElementById('redeemBtn').addEventListener('click', async () => {
