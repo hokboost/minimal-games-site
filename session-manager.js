@@ -87,7 +87,7 @@ class SessionManager {
                             timestamp: new Date().toISOString()
                         },
                         level: 'warning'
-                    });
+                    }, currentSessionId);
                 }
 
                 // 3. 标记数据库中的其他会话为非活跃

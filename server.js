@@ -147,7 +147,8 @@ io.use(async (socket, next) => {
         socket.authenticatedUser = {
             username: sessionData.user.username,
             userId: sessionData.user.id,
-            isAdmin: sessionData.user.is_admin || false
+            isAdmin: sessionData.user.is_admin || false,
+            sessionId
         };
 
         console.log(`✅ WebSocket认证成功: ${sessionData.user.username}`);
@@ -196,7 +197,7 @@ function notifyUser(username, notification) {
 }
 
 // 发送安全警告的辅助函数
-function notifySecurityEvent(username, event) {
+function notifySecurityEvent(username, event, excludeSessionId = null) {
     console.log(`🔔 尝试发送安全警告给用户 ${username}: ${event.type}`);
     
     if (userSockets.has(username)) {
@@ -207,6 +208,9 @@ function notifySecurityEvent(username, event) {
         for (const socketId of socketIds) {
             const socket = io.sockets.sockets.get(socketId);
             if (socket) {
+                if (excludeSessionId && socket.authenticatedUser?.sessionId === excludeSessionId) {
+                    continue;
+                }
                 socket.emit('security-alert', event);
                 sentCount++;
             }
