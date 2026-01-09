@@ -551,7 +551,8 @@ app.get('/profile', requireLogin, async (req, res) => {
             pool.query('SELECT COUNT(*) as count, MAX(score) as best_score FROM submissions WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN won != \'lost\' THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username])
+            pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count FROM stone_logs WHERE username = $1', [username])
         ]);
         
         const stats = {
@@ -570,6 +571,9 @@ app.get('/profile', requireLogin, async (req, res) => {
             wish: {
                 total: parseInt(gameStats[3].rows[0].count) || 0,
                 wins: parseInt(gameStats[3].rows[0].wins) || 0
+            },
+            stone: {
+                total: parseInt(gameStats[4].rows[0].count) || 0
             }
         };
         
@@ -1464,6 +1468,33 @@ app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req,
             csrfToken: req.session.csrfToken
         });
     });
+});
+
+app.get('/stone', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            generateCSRFToken(req);
+        }
+
+        const username = req.session.user.username;
+        const userResult = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+
+        const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+
+        res.render('stone', {
+            username,
+            balance,
+            csrfToken: req.session.csrfToken
+        });
+    } catch (error) {
+        console.error('Stone page error:', error);
+        res.status(500).send('服务器错误');
+    }
 });
 
 // Quiz API 路由
@@ -2573,7 +2604,7 @@ const wishConfigs = {
         name: '原地求婚',
         bilibiliGiftId: '34999',
         cost: 208,
-        successRate: 0.0355,
+        successRate: 0.0335,
         guaranteeCount: 52,
         rewardValue: 5200
     },
@@ -2582,7 +2613,7 @@ const wishConfigs = {
         name: '梦游仙境',
         bilibiliGiftId: '31932',
         cost: 150,
-        successRate: 0.0475,
+        successRate: 0.0445,
         guaranteeCount: 41,
         rewardValue: 3000
     },
@@ -2591,7 +2622,7 @@ const wishConfigs = {
         name: '纯白花嫁',
         bilibiliGiftId: '34428',
         cost: 75,
-        successRate: 0.054,
+        successRate: 0.051,
         guaranteeCount: 34,
         rewardValue: 1314
     },
@@ -2617,6 +2648,102 @@ const wishConfigs = {
 
 function getWishConfig(giftType) {
     return wishConfigs[giftType] || null;
+}
+
+const stoneColors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple'];
+const stoneReplaceCosts = {
+    1: 28,
+    2: 28,
+    3: 78,
+    4: 315,
+    5: 3860
+};
+const stoneRewards = {
+    1: 50,
+    2: 120,
+    3: 250,
+    4: 800,
+    5: 3000,
+    6: 30000
+};
+
+function randomStoneColor() {
+    return stoneColors[Math.floor(Math.random() * stoneColors.length)];
+}
+
+function normalizeStoneSlots(slots) {
+    const normalized = Array.isArray(slots) ? slots.slice(0, 6) : [];
+    while (normalized.length < 6) {
+        normalized.push(null);
+    }
+    return normalized;
+}
+
+function getMaxSameCount(slots) {
+    const counts = {};
+    slots.forEach((color) => {
+        if (!color) return;
+        counts[color] = (counts[color] || 0) + 1;
+    });
+    const values = Object.values(counts);
+    return values.length ? Math.max(...values) : 0;
+}
+
+async function getStoneState(username) {
+    const result = await pool.query(
+        'SELECT slots FROM stone_states WHERE username = $1',
+        [username]
+    );
+
+    if (result.rows.length === 0) {
+        const slots = normalizeStoneSlots([]);
+        await pool.query(
+            `INSERT INTO stone_states (username, slots, created_at, updated_at)
+             VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+            [username, JSON.stringify(slots)]
+        );
+        return slots;
+    }
+
+    return normalizeStoneSlots(result.rows[0].slots);
+}
+
+async function saveStoneState(username, slots) {
+    await pool.query(
+        `UPDATE stone_states
+         SET slots = $1, updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+         WHERE username = $2`,
+        [JSON.stringify(slots), username]
+    );
+}
+
+async function logStoneAction({
+    username,
+    actionType,
+    cost = 0,
+    reward = 0,
+    slotIndex = null,
+    beforeSlots,
+    afterSlots
+}) {
+    try {
+        await pool.query(
+            `INSERT INTO stone_logs (
+                username, action_type, cost, reward, slot_index, before_slots, after_slots, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+            [
+                username,
+                actionType,
+                cost,
+                reward,
+                slotIndex,
+                JSON.stringify(beforeSlots || []),
+                JSON.stringify(afterSlots || [])
+            ]
+        );
+    } catch (error) {
+        console.error('Stone log error:', error);
+    }
 }
 
 app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
@@ -3060,6 +3187,236 @@ app.post('/api/wish/backpack/send', requireLogin, requireAuthorized, async (req,
     } catch (error) {
         console.error('背包送出失败:', error);
         res.status(500).json({ success: false, message: '送出失败' });
+    }
+});
+
+// ====================
+// 合石头 Stone 游戏API
+// ====================
+
+app.get('/api/stone/state', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const slots = await getStoneState(username);
+        const isFull = slots.every((slot) => slot);
+        const maxSame = getMaxSameCount(slots);
+        const reward = isFull ? (stoneRewards[maxSame] || 0) : 0;
+        const replaceCost = isFull ? (stoneReplaceCosts[maxSame] || null) : null;
+
+        res.json({
+            success: true,
+            slots,
+            isFull,
+            maxSame,
+            reward,
+            replaceCost,
+            canReplace: isFull && maxSame < 6 && replaceCost !== null
+        });
+    } catch (error) {
+        console.error('Stone state error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+app.post('/api/stone/add', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const slots = await getStoneState(username);
+        const beforeSlots = slots.slice();
+
+        const emptyIndex = slots.findIndex((slot) => !slot);
+        if (emptyIndex === -1) {
+            return res.status(400).json({ success: false, message: '槽位已满' });
+        }
+
+        const balanceResult = await BalanceLogger.updateBalance({
+            username,
+            amount: -30,
+            operationType: 'stone_add',
+            description: '合石头：放入一颗石头',
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
+        }
+
+        slots[emptyIndex] = randomStoneColor();
+        await saveStoneState(username, slots);
+        await logStoneAction({
+            username,
+            actionType: 'add',
+            cost: 30,
+            beforeSlots,
+            afterSlots: slots
+        });
+
+        res.json({
+            success: true,
+            slots,
+            newBalance: balanceResult.balance
+        });
+    } catch (error) {
+        console.error('Stone add error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+app.post('/api/stone/fill', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const slots = await getStoneState(username);
+        const beforeSlots = slots.slice();
+        const hasAny = slots.some((slot) => slot);
+
+        if (hasAny) {
+            return res.status(400).json({ success: false, message: '仅支持空槽位一键放满' });
+        }
+
+        const balanceResult = await BalanceLogger.updateBalance({
+            username,
+            amount: -180,
+            operationType: 'stone_fill',
+            description: '合石头：一键放满',
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
+        }
+
+        const newSlots = Array.from({ length: 6 }, () => randomStoneColor());
+        await saveStoneState(username, newSlots);
+        await logStoneAction({
+            username,
+            actionType: 'fill',
+            cost: 180,
+            beforeSlots,
+            afterSlots: newSlots
+        });
+
+        res.json({
+            success: true,
+            slots: newSlots,
+            newBalance: balanceResult.balance
+        });
+    } catch (error) {
+        console.error('Stone fill error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+app.post('/api/stone/replace', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const slotIndex = Number(req.body.slotIndex);
+
+        if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 5) {
+            return res.status(400).json({ success: false, message: '槽位无效' });
+        }
+
+        const slots = await getStoneState(username);
+        const beforeSlots = slots.slice();
+        const isFull = slots.every((slot) => slot);
+        if (!isFull) {
+            return res.status(400).json({ success: false, message: '槽位未满，无法更换' });
+        }
+
+        const maxSame = getMaxSameCount(slots);
+        if (maxSame >= 6) {
+            return res.status(400).json({ success: false, message: '已满6同色，无需更换' });
+        }
+
+        const replaceCost = stoneReplaceCosts[maxSame];
+        if (!replaceCost) {
+            return res.status(400).json({ success: false, message: '无法计算更换费用' });
+        }
+
+        const balanceResult = await BalanceLogger.updateBalance({
+            username,
+            amount: -replaceCost,
+            operationType: 'stone_replace',
+            description: `合石头：更换槽位 ${slotIndex + 1}`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
+        }
+
+        slots[slotIndex] = randomStoneColor();
+        await saveStoneState(username, slots);
+        await logStoneAction({
+            username,
+            actionType: 'replace',
+            cost: replaceCost,
+            slotIndex,
+            beforeSlots,
+            afterSlots: slots
+        });
+
+        res.json({
+            success: true,
+            slots,
+            newBalance: balanceResult.balance
+        });
+    } catch (error) {
+        console.error('Stone replace error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
+    }
+});
+
+app.post('/api/stone/redeem', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    try {
+        const username = req.session.user.username;
+        const slots = await getStoneState(username);
+        const beforeSlots = slots.slice();
+        const isFull = slots.every((slot) => slot);
+
+        if (!isFull) {
+            return res.status(400).json({ success: false, message: '槽位未满，无法兑换' });
+        }
+
+        const maxSame = getMaxSameCount(slots);
+        const reward = stoneRewards[maxSame] || 0;
+
+        const balanceResult = await BalanceLogger.updateBalance({
+            username,
+            amount: reward,
+            operationType: 'stone_redeem',
+            description: `合石头：兑换奖励 ${reward} 电币`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent'),
+            requireSufficientBalance: false
+        });
+
+        if (!balanceResult.success) {
+            return res.status(400).json({ success: false, message: balanceResult.message });
+        }
+
+        const emptySlots = normalizeStoneSlots([]);
+        await saveStoneState(username, emptySlots);
+        await logStoneAction({
+            username,
+            actionType: 'redeem',
+            cost: 0,
+            reward,
+            beforeSlots,
+            afterSlots: emptySlots
+        });
+
+        res.json({
+            success: true,
+            slots: emptySlots,
+            reward,
+            newBalance: balanceResult.balance
+        });
+    } catch (error) {
+        console.error('Stone redeem error:', error);
+        res.status(500).json({ success: false, message: '服务器错误' });
     }
 });
 
@@ -3681,7 +4038,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        games: ['quiz', 'slot', 'scratch', 'spin', 'wish'],
+        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'stone'],
         questions: questions.length
     });
 });
@@ -4185,6 +4542,26 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                 `;
                 params = [username, limit, offset];
                 countQuery = 'SELECT COUNT(*) FROM wish_sessions WHERE username = $1';
+                countParams = [username];
+                break;
+
+            case 'stone':
+                query = `
+                    SELECT id,
+                           action_type,
+                           cost,
+                           reward,
+                           slot_index,
+                           before_slots,
+                           after_slots,
+                           created_at as played_at
+                    FROM stone_logs
+                    WHERE username = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                `;
+                params = [username, limit, offset];
+                countQuery = 'SELECT COUNT(*) FROM stone_logs WHERE username = $1';
                 countParams = [username];
                 break;
 

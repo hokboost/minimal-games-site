@@ -86,6 +86,18 @@
                         <button class="view-records-btn" onclick="viewGameRecords('wish')">查看记录</button>
                     </div>
                 </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">🪨</div>
+                    <div class="stat-content">
+                        <h3>合石头</h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main">记录数: <%= gameStats.stone.total %></span>
+                            <span class="stat-sub">最新操作以记录为准</span>
+                        </div>
+                        <button class="view-records-btn" onclick="viewGameRecords('stone')">查看记录</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -725,7 +737,8 @@
             quiz: '🧠 知识问答记录',
             slot: '🎰 老虎机记录',
             scratch: '🎟️ 刮刮乐记录',
-            wish: '🌟 祈愿记录'
+            wish: '🌟 祈愿记录',
+            stone: '🪨 合石头记录'
         };
         
         document.getElementById('recordsTitle').textContent = titles[gameType];
@@ -869,6 +882,8 @@
             tableHTML += '<thead><tr><th>游戏时间</th><th>结果</th><th>档位</th><th>匹配数</th></tr></thead>';
         } else if (gameType === 'wish') {
             tableHTML += '<thead><tr><th>祈愿时间</th><th>次数</th><th>消耗电币</th><th>结果</th></tr></thead>';
+        } else if (gameType === 'stone') {
+            tableHTML += '<thead><tr><th>操作时间</th><th>操作</th><th>花费</th><th>变化</th></tr></thead>';
         }
         
         tableHTML += '<tbody>';
@@ -917,6 +932,18 @@
                         <td>${resultText}</td>
                     </tr>
                 `;
+            } else if (gameType === 'stone') {
+                const beforeSlots = formatStoneSlots(record.before_slots);
+                const afterSlots = formatStoneSlots(record.after_slots);
+                const costText = record.cost > 0 ? `-${record.cost}` : (record.reward > 0 ? `+${record.reward}` : '0');
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${formatStoneAction(record.action_type)}</td>
+                        <td>${costText} 电币</td>
+                        <td>${beforeSlots} → ${afterSlots}</td>
+                    </tr>
+                `;
             }
         });
         
@@ -950,6 +977,35 @@
         }
         
         recordsPagination.innerHTML = paginationHTML;
+    }
+
+    function formatStoneAction(actionType) {
+        const map = {
+            add: '放入',
+            fill: '一键放满',
+            replace: '更换',
+            redeem: '兑换'
+        };
+        return map[actionType] || actionType;
+    }
+
+    function formatStoneSlots(rawSlots) {
+        let slots = [];
+        try {
+            slots = typeof rawSlots === 'string' ? JSON.parse(rawSlots) : rawSlots;
+        } catch (error) {
+            slots = [];
+        }
+        const colors = {
+            red: '红',
+            orange: '橙',
+            yellow: '黄',
+            green: '绿',
+            cyan: '青',
+            blue: '蓝',
+            purple: '紫'
+        };
+        return (slots || []).map(color => colors[color] || '空').join('');
     }
 
     function changePage(page) {

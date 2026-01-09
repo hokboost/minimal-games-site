@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>合石头</title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            color: #fff;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #00c853;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #00c853;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            color: #ccc;
+        }
+
+        .nav-links a {
+            color: #fff;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .nav-links a:hover {
+            background: rgba(0, 200, 83, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .balance-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .balance-section h3 {
+            color: #ffeb3b;
+            margin: 0;
+        }
+
+        .stone-board {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .stone-ring {
+            position: relative;
+            width: 340px;
+            height: 340px;
+            border-radius: 50%;
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .stone-slot {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #111;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stone-slot.empty {
+            color: #888;
+            font-size: 1.6rem;
+        }
+
+        .stone-slot.selected {
+            transform: scale(1.08);
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.5);
+            border-color: #fff;
+        }
+
+        .stone-slot[data-index="0"] { top: -5px; left: 50%; transform: translateX(-50%); }
+        .stone-slot[data-index="1"] { top: 55px; right: -5px; }
+        .stone-slot[data-index="2"] { bottom: 55px; right: -5px; }
+        .stone-slot[data-index="3"] { bottom: -5px; left: 50%; transform: translateX(-50%); }
+        .stone-slot[data-index="4"] { bottom: 55px; left: -5px; }
+        .stone-slot[data-index="5"] { top: 55px; left: -5px; }
+
+        .stone-red { background: #ff6b6b; }
+        .stone-orange { background: #ffa94d; }
+        .stone-yellow { background: #ffd43b; }
+        .stone-green { background: #69db7c; }
+        .stone-cyan { background: #66d9e8; }
+        .stone-blue { background: #74c0fc; }
+        .stone-purple { background: #b197fc; }
+
+        .reward-center {
+            width: 160px;
+            height: 160px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(0, 200, 83, 0.4);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 0.4rem;
+            padding: 1rem;
+        }
+
+        .reward-title {
+            font-size: 0.85rem;
+            color: #ccc;
+        }
+
+        .reward-amount {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #ffeb3b;
+        }
+
+        .reward-same {
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+
+        .reward-btn {
+            background: linear-gradient(135deg, #00c853, #00bfa5);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.4rem 0.8rem;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .reward-btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .action-row {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .action-btn {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 0.8rem 1.4rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .action-btn.secondary {
+            background: linear-gradient(135deg, #1e88e5, #1565c0);
+        }
+
+        .action-btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .replace-panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            min-width: 260px;
+            text-align: center;
+        }
+
+        .replace-panel span {
+            color: #ccc;
+        }
+
+        .replace-panel strong {
+            color: #ffeb3b;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .stone-ring {
+                width: 280px;
+                height: 280px;
+            }
+
+            .stone-slot {
+                width: 50px;
+                height: 50px;
+            }
+
+            .reward-center {
+                width: 130px;
+                height: 130px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🪨 合石头</h1>
+            <div class="nav-links">
+                <span>用户：<%= username %></span>
+                <a href="/">🏠 返回首页</a>
+                <a href="/profile">👤 个人中心</a>
+            </div>
+        </div>
+
+        <div class="balance-section">
+            <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+        </div>
+
+        <div class="stone-board">
+            <div class="stone-ring">
+                <div class="stone-slot empty" data-index="0">+</div>
+                <div class="stone-slot empty" data-index="1">+</div>
+                <div class="stone-slot empty" data-index="2">+</div>
+                <div class="stone-slot empty" data-index="3">+</div>
+                <div class="stone-slot empty" data-index="4">+</div>
+                <div class="stone-slot empty" data-index="5">+</div>
+
+                <div class="reward-center">
+                    <div class="reward-title">当前可兑换</div>
+                    <div class="reward-amount" id="rewardAmount">--</div>
+                    <div class="reward-same" id="sameCount">同色 0</div>
+                    <button class="reward-btn" id="redeemBtn" disabled>兑换奖励</button>
+                </div>
+            </div>
+
+            <div class="action-row">
+                <button class="action-btn" id="addOneBtn">放入一颗 (30)</button>
+                <button class="action-btn secondary" id="fillBtn">一键放满 (180)</button>
+            </div>
+
+            <div class="replace-panel">
+                <div>已选槽位：<strong id="selectedSlot">-</strong></div>
+                <div>更换费用：<strong id="replaceCost">-</strong></div>
+                <button class="action-btn" id="replaceBtn" disabled>更换一个</button>
+            </div>
+        </div>
+
+        <div style="
+            max-width: 760px;
+            margin: 2rem auto 0;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #ccc;
+            line-height: 1.5;
+            text-align: center;
+        ">
+            ⚠️ <strong>免责声明：</strong>本功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。虚拟电币无法兑换真实货币。严禁未满18周岁用户使用，请理性娱乐。
+        </div>
+    </div>
+
+    <script>
+        const csrfToken = "<%= csrfToken %>";
+        const colors = {
+            red: 'stone-red',
+            orange: 'stone-orange',
+            yellow: 'stone-yellow',
+            green: 'stone-green',
+            cyan: 'stone-cyan',
+            blue: 'stone-blue',
+            purple: 'stone-purple'
+        };
+
+        let selectedSlot = null;
+        let currentState = null;
+
+        function updateBalance(balance) {
+            if (typeof balance === 'number') {
+                document.getElementById('current-balance').textContent = balance;
+            }
+        }
+
+        function renderSlots(slots) {
+            slots.forEach((color, index) => {
+                const slot = document.querySelector(`.stone-slot[data-index="${index}"]`);
+                slot.className = 'stone-slot';
+                slot.classList.remove('selected');
+                if (!color) {
+                    slot.classList.add('empty');
+                    slot.textContent = '+';
+                } else {
+                    slot.classList.add(colors[color] || '');
+                    slot.textContent = '';
+                }
+            });
+        }
+
+        function updateUI(state) {
+            currentState = state;
+            renderSlots(state.slots);
+
+            const isFull = state.isFull;
+            const maxSame = state.maxSame || 0;
+            const reward = state.reward || 0;
+
+            document.getElementById('rewardAmount').textContent = isFull ? `${reward} 电币` : '--';
+            document.getElementById('sameCount').textContent = `同色 ${maxSame}`;
+            document.getElementById('redeemBtn').disabled = !isFull;
+
+            document.getElementById('addOneBtn').disabled = isFull;
+            document.getElementById('fillBtn').disabled = state.slots.some(slot => slot);
+
+            const replaceCost = state.replaceCost;
+            document.getElementById('replaceCost').textContent = replaceCost ? `${replaceCost} 电币` : '不可更换';
+
+            if (!state.canReplace) {
+                selectedSlot = null;
+                document.getElementById('selectedSlot').textContent = '-';
+                document.querySelectorAll('.stone-slot').forEach((item) => item.classList.remove('selected'));
+            }
+
+            document.getElementById('replaceBtn').disabled = !(state.canReplace && selectedSlot !== null);
+        }
+
+        async function loadState() {
+            const response = await fetch('/api/stone/state');
+            const data = await response.json();
+            if (data.success) {
+                updateUI(data);
+            }
+        }
+
+        async function postAction(url, body = {}) {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                },
+                body: JSON.stringify(body)
+            });
+            const result = await response.json();
+            if (!result.success) {
+                alert(result.message || '操作失败');
+                return null;
+            }
+            updateBalance(result.newBalance);
+            await loadState();
+            return result;
+        }
+
+        document.getElementById('addOneBtn').addEventListener('click', () => {
+            postAction('/api/stone/add');
+        });
+
+        document.getElementById('fillBtn').addEventListener('click', () => {
+            postAction('/api/stone/fill');
+        });
+
+        document.getElementById('replaceBtn').addEventListener('click', () => {
+            if (selectedSlot === null) {
+                alert('请选择一个槽位');
+                return;
+            }
+            postAction('/api/stone/replace', { slotIndex: selectedSlot });
+        });
+
+        document.getElementById('redeemBtn').addEventListener('click', async () => {
+            const result = await postAction('/api/stone/redeem');
+            if (result && result.reward !== undefined) {
+                alert(`兑换成功！获得 ${result.reward} 电币`);
+            }
+        });
+
+        document.querySelectorAll('.stone-slot').forEach((slot) => {
+            slot.addEventListener('click', () => {
+                if (!currentState || !currentState.isFull) {
+                    return;
+                }
+                document.querySelectorAll('.stone-slot').forEach((item) => item.classList.remove('selected'));
+                slot.classList.add('selected');
+                selectedSlot = Number(slot.dataset.index);
+                document.getElementById('selectedSlot').textContent = selectedSlot + 1;
+                document.getElementById('replaceBtn').disabled = !(currentState.canReplace && selectedSlot !== null);
+            });
+        });
+
+        loadState();
+    </script>
+</body>
+</html>
