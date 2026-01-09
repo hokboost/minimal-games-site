@@ -1466,14 +1466,16 @@ app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req,
         res.render('wish', { 
             username,
             balance,
-            csrfToken: req.session.csrfToken
+            csrfToken: req.session.csrfToken,
+            canWishTest: username === 'hokboost'
         });
     }).catch((dbError) => {
         console.error('Database query error:', dbError);
         res.render('wish', { 
             username,
             balance,
-            csrfToken: req.session.csrfToken
+            csrfToken: req.session.csrfToken,
+            canWishTest: username === 'hokboost'
         });
     });
 });

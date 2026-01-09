@@ -504,10 +504,9 @@
     </div>
 
     <script>
-        const username = "<%= username %>";
         const csrfToken = "<%= csrfToken %>";
         let wishProgress = { total_wishes: 0, consecutive_fails: 0, total_spent: 0, total_rewards_value: 0 };
-        const isAdminTester = username === 'hokboost';
+        const canWishTest = <%= canWishTest ? 'true' : 'false' %>;
 
         const giftConfigs = {
             deepsea_singer: { name: '深海歌姬', cost: 500, overallRateText: '1.6%', guaranteeCount: 148, rewardValue: 30000 },
@@ -774,7 +773,7 @@
         });
         
         async function simulateWish(giftType) {
-            if (!isAdminTester) return;
+            if (!canWishTest) return;
             try {
                 const response = await fetch('/api/wish/simulate', {
                     method: 'POST',
@@ -833,7 +832,7 @@
         });
 
         // 显示管理员测试按钮
-        if (isAdminTester) {
+        if (canWishTest) {
             document.querySelectorAll('.admin-test-btn').forEach((btn) => {
                 btn.style.display = 'inline-block';
                 btn.addEventListener('click', () => simulateWish(btn.dataset.gift));
