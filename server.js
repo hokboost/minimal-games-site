@@ -3392,15 +3392,16 @@ app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
             console.log(`💰 任务 ${taskId} 资金确认: 锁定 ${cost} 电池，消费 ${actualCost} 电池，退还 ${refundAmount} 电池`);
         }
 
+        const finalDeliveryStatus = partialSuccess ? 'partial_success' : 'success';
         // 标记任务完成
         const result = await pool.query(`
             UPDATE gift_exchanges 
-            SET delivery_status = 'delivered',
+            SET delivery_status = $2,
                 status = 'completed',
                 processed_at = NOW()
             WHERE id = $1
             RETURNING username, gift_name
-        `, [taskId]);
+        `, [taskId, finalDeliveryStatus]);
 
         if (result.rows.length > 0) {
             console.log(`✅ Windows服务完成任务 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name}`);
