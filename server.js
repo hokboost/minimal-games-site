@@ -1731,7 +1731,8 @@ app.get('/api/quiz/leaderboard', requireLogin, requireAuthorized, async (req, re
                      WHERE s2.username = s1.username AND s2.score = MAX(s1.score) 
                      ORDER BY submitted_at DESC LIMIT 1) as submitted_at
              FROM submissions s1
-             WHERE DATE(submitted_at) = CURRENT_DATE 
+             WHERE DATE(submitted_at) = CURRENT_DATE
+               AND s1.username NOT IN (SELECT username FROM users WHERE is_admin = TRUE)
              GROUP BY username
              ORDER BY score DESC, submitted_at ASC 
              LIMIT 20`
@@ -3883,6 +3884,10 @@ app.post('/api/duel/play', requireLogin, requireAuthorized, security.basicRateLi
             ]
         );
 
+        if (req.session.user) {
+            req.session.user.balance = newBalance;
+        }
+
         res.json({
             success: true,
             reward,
@@ -4959,7 +4964,7 @@ app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (r
                 query = `
                     SELECT id,
                            score,
-                           to_char(submitted_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                           to_char(submitted_at::timestamp, 'YYYY-MM-DD HH24:MI:SS') as played_at
                     FROM submissions 
                     WHERE username = $1 
                     ORDER BY submitted_at DESC 
