@@ -1298,19 +1298,23 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance = rewardResult.balance;
             }
 
-            await pool.query(
-                `INSERT INTO duel_logs (
-                    username, gift_type, reward, power, cost, success, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-                [
-                    username,
-                    giftType,
-                    reward,
-                    power,
-                    cost,
-                    success
-                ]
-            );
+            try {
+                await pool.query(
+                    `INSERT INTO duel_logs (
+                        username, gift_type, reward, power, cost, success, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                    [
+                        username,
+                        giftType,
+                        reward,
+                        power,
+                        cost,
+                        success
+                    ]
+                );
+            } catch (dbError) {
+                console.error('Duel log error:', dbError);
+            }
 
             if (req.session.user) {
                 req.session.user.balance = newBalance;
