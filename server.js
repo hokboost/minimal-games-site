@@ -2276,13 +2276,11 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
             const slot2 = amounts[Math.floor(Math.random() * amounts.length)];
             const slot3 = amounts[Math.floor(Math.random() * amounts.length)];
             
-            // 如果是中奖，让所有金额相同
             // 如果是中奖，让显示的金额与实际payout一致；否则随机三格
             const isLose = payout <= 0;
             const displayAmount = payout; // bet=5且“不亏不赚” => payout=5 => 显示[5,5,5]
             const slotResults = isLose ? [slot1, slot2, slot3] : [displayAmount, displayAmount, displayAmount];
 
-                
             await pool.query(`
                 INSERT INTO slot_results (
                     username, result, won, proof, created_at,
@@ -2306,8 +2304,10 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
                     timestamp: new Date().toISOString()
                 })
             ]);
+        } catch (dbError) {
+            console.error('Slot游戏记录存储失败:', dbError);
+        }
 
-        
         res.json({
             success: true,
             outcome: outcome.type,
@@ -2322,6 +2322,7 @@ app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLi
         res.status(500).json({ success: false, message: '游戏失败，请稍后重试' });
     }
 });
+
 
 // ====================
 // Scratch 刮刮乐游戏API
@@ -3209,70 +3210,69 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const errorMessage = req.body.error || '礼物发送失败';
-        
-        // ✅ 最小新增：支持部分成功退款（不影响原有全失败逻辑）
-        const actualQuantityRaw = req.body.actual_quantity ?? req.body.actualQuantity;
-        const partialSuccessRaw = req.body.partial_success ?? req.body.partialSuccess;
-        const actualQuantity = Math.max(0, parseInt(actualQuantityRaw || 0, 10) || 0);
-        const partialSuccess = !!partialSuccessRaw;
-        
+
+        // ✅ [最小新增] 支持部分成功时精准退款（Windows 可传 actualQuantity / partialSuccess）
+        const actualQuantity = Number.isFinite(Number(req.body.actualQuantity)) ? parseInt(req.body.actualQuantity) : null;
+        const partialSuccess = !!req.body.partialSuccess;
+
         // 🛡️ 预扣机制：任务失败时必须退还锁定的资金
         const taskResult = await pool.query(`
             SELECT username, gift_name, cost, status, quantity
             FROM gift_exchanges 
             WHERE id = $1
         `, [taskId]);
-        
+
         if (taskResult.rows.length === 0) {
             return res.status(404).json({ success: false, message: '任务不存在' });
         }
-        
+
         const { username, gift_name, cost, status, quantity } = taskResult.rows[0];
-        
+
         // 🔒 如果资金已锁定，需要退还给用户
         if (status === 'funds_locked') {
-            // ✅ 最小改动：默认全退；若部分成功则只退差额
-            const q = Math.max(0, parseInt(quantity || 0, 10) || 0);
-            const a = Math.min(Math.max(0, actualQuantity), q);
-            const unitCost = q > 0 ? (Number(cost) / q) : Number(cost);
-            let refundAmount = Number(cost); // 默认全退
-            
-            if (partialSuccess && a > 0 && q > 0) {
-                refundAmount = Math.round(unitCost * (q - a));
+            // ✅ [最小新增] 计算实际应退款金额
+            let refundAmount = cost; // 默认全退（保持你原有行为）
+            let descExtra = '';
+
+            if (partialSuccess && actualQuantity !== null && actualQuantity > 0 && quantity > 0) {
+                const unitCost = cost / quantity;              // 单价
+                const actualCost = Math.round(unitCost * actualQuantity);
+                refundAmount = Math.max(0, cost - actualCost); // 只退未送出的差额
+                descExtra = `（部分成功：${actualQuantity}/${quantity}，退还差额 ${refundAmount} 电币）`;
             }
-            
+
             console.log(`🔄 任务 ${taskId} 失败，正在退还锁定资金 ${refundAmount} 电币给用户 ${username}`);
-            
+
             // 使用 BalanceLogger 安全地退还资金并记录日志
             const refundResult = await BalanceLogger.updateBalance({
                 username: username,
-                amount: refundAmount, // ✅ 只改这里：退还差额或全额
+                amount: refundAmount, // ✅ 这里从 cost 改成 refundAmount
                 operationType: 'gift_delivery_failed_refund',
-                description: `礼物发送失败退款: ${gift_name} ${quantity}个，实际成功 ${a} 个，退还 ${refundAmount} 电币 - 原因: ${errorMessage}`,
-                gameData: { 
-                    taskId, 
-                    gift_name, 
+                description: `礼物发送失败退款: ${gift_name} ${quantity}个，退还 ${refundAmount} 电币 - 原因: ${errorMessage}${descExtra}`,
+                gameData: {
+                    taskId,
+                    gift_name,
                     originalCost: cost,
-                    refundAmount: refundAmount,
+                    refundAmount: refundAmount,      // ✅ 记录真实退款
                     errorMessage: errorMessage,
                     quantity: quantity,
-                    actualQuantity: a,
-                    partialSuccess: partialSuccess
+                    actualQuantity: actualQuantity,  // ✅ 新增：便于追踪
+                    partialSuccess: partialSuccess   // ✅ 新增：便于追踪
                 },
                 requireSufficientBalance: false // 退款不需要检查余额
             });
-            
+
             if (!refundResult.success) {
                 console.error(`❌ 退款失败: ${refundResult.message}`);
-                return res.status(500).json({ 
-                    success: false, 
-                    message: `任务失败且退款失败: ${refundResult.message}` 
+                return res.status(500).json({
+                    success: false,
+                    message: `任务失败且退款失败: ${refundResult.message}`
                 });
             }
-            
+
             console.log(`✅ 成功退还 ${refundAmount} 电币给 ${username}，新余额: ${refundResult.balance}`);
         }
-        
+
         // 标记任务为失败
         const result = await pool.query(`
             UPDATE gift_exchanges 
@@ -3282,11 +3282,11 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
             WHERE id = $1
             RETURNING username, gift_name, cost
         `, [taskId]);
-        
+
         if (result.rows.length > 0) {
             console.log(`❌ 任务 ${taskId} 标记为失败: ${username} 的 ${gift_name} - ${errorMessage}`);
             if (status === 'funds_locked') {
-                console.log(`💰 资金处理: 已退还锁定的 ${cost} 电币`);
+                console.log(`💰 资金处理: 已按规则退还（可能为差额退款）`);
             } else {
                 console.log(`💰 资金处理: 无需退款（状态: ${status}）`);
             }
@@ -3297,13 +3297,13 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
 
     } catch (error) {
         console.error('标记任务失败:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: '服务器错误' 
+        res.status(500).json({
+            success: false,
+            message: '服务器错误'
         });
     }
 })
-;
+
 
 // ====================
 // 游戏记录查看API
