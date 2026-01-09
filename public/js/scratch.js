@@ -97,9 +97,22 @@
                 return;
             }
 
-            currentGameData = data;
-            document.getElementById('current-balance').textContent = data.newBalance;
-            startScratchGame(data);
+            const normalized = {
+                reward: data.reward ?? 0,
+                payout: data.reward ?? 0,
+                outcome: (data.reward ?? 0) > 0 ? `中奖 ${data.reward} 电币` : '未中奖',
+                winningNumbers: data.winningNumbers || data.winning_numbers || [],
+                slots: data.slots || [],
+                matchesCount: data.matchesCount ?? data.matches_count ?? 0,
+                balance: data.balance ?? data.newBalance,
+                finalBalance: data.balance ?? data.newBalance
+            };
+
+            currentGameData = normalized;
+            if (typeof normalized.balance === 'number') {
+                document.getElementById('current-balance').textContent = normalized.balance;
+            }
+            startScratchGame(normalized);
         } catch (error) {
             console.error('Scratch game error:', error);
             alert('网络错误，请稍后重试');
@@ -208,8 +221,8 @@
         }
 
         const grid = Array.from(document.querySelectorAll('#scratchContent .grid-item'));
-        const winNums = currentGameData.winningNumbers;
-        const winCount = currentGameData.winningNumbers.length;
+        const winNums = currentGameData.winningNumbers || [];
+        const winCount = winNums.length;
         const userSlots = grid.slice(winCount);
 
         const matched = [];
@@ -224,7 +237,7 @@
         const result = document.getElementById('game-result');
         let resultMessage;
 
-        if (currentGameData.payout === 0) {
+        if ((currentGameData.payout || 0) === 0) {
             resultMessage = `😢 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，未中奖`;
         } else if (currentGameData.payout === selectedTier.cost) {
             resultMessage = `🎯 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，返还: ${currentGameData.payout} 电币`;
@@ -235,11 +248,13 @@
         result.innerHTML = `
             <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
                 <div style="color: #ffeb3b; font-size: 1.1rem; margin-bottom: 0.5rem;">${resultMessage}</div>
-                <div style="color: #ccc;">匹配号码: ${matched.length} 个 | 余额: ${currentGameData.finalBalance} 电币</div>
+                <div style="color: #ccc;">匹配号码: ${matched.length} 个 | 余额: ${currentGameData.finalBalance ?? '--'} 电币</div>
             </div>
         `;
 
-        document.getElementById('current-balance').textContent = currentGameData.finalBalance;
+        if (typeof currentGameData.finalBalance === 'number') {
+            document.getElementById('current-balance').textContent = currentGameData.finalBalance;
+        }
         hasVerified = true;
     }
 })();

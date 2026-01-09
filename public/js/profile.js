@@ -410,6 +410,16 @@
         }
         
         let paginationHTML = '';
+        const total = pagination.total;
+        const current = pagination.current;
+        const windowSize = 2;
+        const pages = new Set([1, total]);
+        for (let i = current - windowSize; i <= current + windowSize; i++) {
+            if (i >= 1 && i <= total) {
+                pages.add(i);
+            }
+        }
+        const pageList = Array.from(pages).sort((a, b) => a - b);
         
         // 上一页
         if (pagination.hasPrev) {
@@ -417,9 +427,13 @@
         }
         
         // 页码
-        for (let i = 1; i <= pagination.total; i++) {
-            const activeClass = i === pagination.current ? 'active' : '';
-            paginationHTML += `<button class="${activeClass}" data-page="${i}">${i}</button>`;
+        for (let i = 0; i < pageList.length; i++) {
+            const page = pageList[i];
+            if (i > 0 && pageList[i - 1] !== page - 1) {
+                paginationHTML += `<span class="pagination-ellipsis">...</span>`;
+            }
+            const activeClass = page === current ? 'active' : '';
+            paginationHTML += `<button class="${activeClass}" data-page="${page}">${page}</button>`;
         }
         
         // 下一页

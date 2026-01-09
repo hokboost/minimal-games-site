@@ -28,6 +28,8 @@ module.exports = function registerGameRoutes(app, deps) {
         duelRewards,
         calculateDuelCost
     } = deps;
+    const { randomInt, randomBytes } = require('crypto');
+    const randomFloat = () => randomInt(0, 1000000) / 1000000;
 
     app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
         // 初始化session
@@ -336,7 +338,7 @@ module.exports = function registerGameRoutes(app, deps) {
             try {
                 const crypto = require('crypto');
                 const proof = crypto.createHash('sha256')
-                    .update(`${username}-${Date.now()}-${Math.random()}`)
+                    .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
                     .digest('hex');
 
                 // 存储主记录到submissions表
@@ -505,7 +507,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 { type: '×0.5', multiplier: 0.5 }
             ];
 
-            const randomIndex = Math.floor(Math.random() * 5);
+            const randomIndex = randomInt(0, 5);
             const outcome = outcomes[randomIndex];
 
             // 计算奖励
@@ -514,7 +516,7 @@ module.exports = function registerGameRoutes(app, deps) {
             // 生成三个金额转动结果（用于前端显示，保证显示与奖励一致）
             const baseAmounts = [50, 100, 150, 200];
             const amounts = baseAmounts.map((num) => Math.max(1, Math.round(num * betAmount / 100)));
-            const randomAmount = () => amounts[Math.floor(Math.random() * amounts.length)];
+            const randomAmount = () => amounts[randomInt(0, amounts.length)];
             const isLose = payout <= 0;
             let slotResults = isLose ? [randomAmount(), randomAmount(), randomAmount()] : [payout, payout, payout];
             if (isLose) {
@@ -552,7 +554,7 @@ module.exports = function registerGameRoutes(app, deps) {
             try {
                 const crypto = require('crypto');
                 const proof = crypto.createHash('sha256')
-                    .update(`${username}-${Date.now()}-${Math.random()}`)
+                    .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
                     .digest('hex');
 
                 await pool.query(`
@@ -640,7 +642,7 @@ module.exports = function registerGameRoutes(app, deps) {
             // 5元：50%中5元，20%中10元，1%中20元，29%不中
             // 10元：50%中10元，20%中20元，1%中40元，29%不中
             // 100元：50%中100元，20%中200元，1%中400元，29%不中
-            const random = Math.random() * 100; // 0-100的随机数
+            const random = randomInt(0, 10000) / 100; // 0-100的随机数
             let payout = 0;
             let outcomeType = '';
 
@@ -689,7 +691,7 @@ module.exports = function registerGameRoutes(app, deps) {
             // 生成刮刮乐显示内容 - 修复为正确的号码配置
             const winningNumbers = [];
             for (let i = 0; i < selectedTier.winCount; i++) {
-                winningNumbers.push(Math.floor(Math.random() * 100) + 1);
+                winningNumbers.push(randomInt(1, 101));
             }
 
             // 生成我的号码区域 - 修复中奖金额显示逻辑
@@ -711,12 +713,12 @@ module.exports = function registerGameRoutes(app, deps) {
 
                 // 如果应该中奖且还没有匹配号码
                 if (payout > 0 && matchedCount === 0) {
-                    num = winningNumbers[Math.floor(Math.random() * winningNumbers.length)];
+                    num = winningNumbers[randomInt(0, winningNumbers.length)];
                     prize = `${payout} 电币`; // 使用实际中奖金额
                     matchedCount++;
                 } else {
-                    num = Math.floor(Math.random() * 100) + 1;
-                    prize = `￥${tierRewards[Math.floor(Math.random() * tierRewards.length)]}`;
+                    num = randomInt(1, 101);
+                    prize = `￥${tierRewards[randomInt(0, tierRewards.length)]}`;
                 }
 
                 userSlots.push({
@@ -739,7 +741,7 @@ module.exports = function registerGameRoutes(app, deps) {
             try {
                 const crypto = require('crypto');
                 const proof = crypto.createHash('sha256')
-                    .update(`${username}-scratch-${Date.now()}-${Math.random()}`)
+                    .update(`${username}-scratch-${Date.now()}-${randomBytes(8).toString('hex')}`)
                     .digest('hex');
 
                 await pool.query(
@@ -1273,7 +1275,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
-            const success = Math.random() < successRate;
+            const success = randomFloat() < successRate;
             const reward = success ? duelRewards[giftType].reward : 0;
 
             let newBalance = balanceResult.balance;

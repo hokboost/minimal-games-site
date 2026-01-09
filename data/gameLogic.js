@@ -21,6 +21,11 @@ class GameLogic {
         return crypto.randomBytes(length).toString('hex');
     }
 
+    // 生成0-1之间的随机浮点数（使用crypto真随机）
+    static randomFloat() {
+        return crypto.randomBytes(4).readUInt32BE(0) / 0x100000000;
+    }
+
     // Quiz 游戏逻辑
     static quiz = {
         // 前6题必选类别 (已废弃，现在完全随机)
@@ -60,7 +65,7 @@ class GameLogic {
     // Slot 游戏逻辑 - 新的金额概率系统
     static slot = {
         spin() {
-            const rand = Math.random();
+            const rand = GameLogic.randomFloat();
             let reward = '0';
             
             // 新概率分配：各20%概率
@@ -122,7 +127,7 @@ class GameLogic {
                 const num = GameLogic.randomInt(1, 99);
                 
                 // 每个号码都有一个金额 - 根据概率分配
-                const rand = Math.random();
+                const rand = GameLogic.randomFloat();
                 let amount;
                 if (rand < 0.1) {
                     amount = '+2';  // 10%概率
@@ -272,7 +277,7 @@ class GameLogic {
             // 计算显示角度（基于实际选择的挑战）
             const segmentAngle = 360 / this.challenges.length;  // 30个任务，每个12度
             const centerAngle = actualChallengeIndex * segmentAngle + segmentAngle / 2;
-            const randomOffset = GameLogic.randomInt(-5, 5) + (Math.random() * 0.9 - 0.45);  // ±5.9度偏移，确保在扇形内
+            const randomOffset = GameLogic.randomInt(-5, 5) + (GameLogic.randomFloat() * 0.9 - 0.45);  // ±5.9度偏移，确保在扇形内
             const angle = (centerAngle + randomOffset) % 360;
             
             return {

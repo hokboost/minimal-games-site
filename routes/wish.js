@@ -11,6 +11,8 @@ module.exports = function registerWishRoutes(app, deps) {
         broadcastDanmaku,
         enqueueWishInventorySend
     } = deps;
+    const { randomInt, randomBytes } = require('crypto');
+    const randomFloat = () => randomInt(0, 1000000) / 1000000;
 
     app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
         // 初始化session
@@ -100,7 +102,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
             // 判断是否成功
             const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
-            const randomSuccess = Math.random() < successRate;
+        const randomSuccess = randomFloat() < successRate;
             const success = isGuaranteed || randomSuccess;
 
             let reward = null;
@@ -162,9 +164,9 @@ module.exports = function registerWishRoutes(app, deps) {
             // 保存祈愿记录
             try {
                 const crypto = require('crypto');
-                const proof = crypto.createHash('sha256')
-                    .update(`${username}-wish-${Date.now()}-${Math.random()}`)
-                    .digest('hex');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                .digest('hex');
 
                 await pool.query(`
                     INSERT INTO wish_results (
@@ -498,7 +500,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
                 // 判断是否成功
                 const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
-                const randomSuccess = Math.random() < successRate;
+            const randomSuccess = randomFloat() < successRate;
                 const success = isGuaranteed || randomSuccess;
 
                 let reward = null;
@@ -558,9 +560,9 @@ module.exports = function registerWishRoutes(app, deps) {
                 // 保存祈愿记录
                 try {
                     const crypto = require('crypto');
-                    const proof = crypto.createHash('sha256')
-                        .update(`${username}-wish-${Date.now()}-${Math.random()}`)
-                        .digest('hex');
+                const proof = crypto.createHash('sha256')
+                    .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                    .digest('hex');
 
                     await pool.query(`
                         INSERT INTO wish_results (
@@ -680,7 +682,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
             for (let i = 0; i < count; i++) {
                 const isGuaranteed = Number.isFinite(guaranteeThreshold) && consecutiveFails >= guaranteeThreshold;
-                const randomSuccess = Math.random() < config.successRate;
+            const randomSuccess = randomFloat() < config.successRate;
                 const success = isGuaranteed || randomSuccess;
                 if (success) {
                     successCount += 1;

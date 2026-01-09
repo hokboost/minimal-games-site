@@ -64,6 +64,7 @@ const BalanceLogger = require('./balance-logger');
 const fs = require('fs');
 const axios = require('axios');
 const { getSimpleGiftSender } = require('./bilibili-gift-sender-simple');
+const crypto = require('crypto');
 
 let giftConfig = {};
 try {
@@ -485,9 +486,9 @@ const registerLimiter = rateLimit({
 function generateUsername() {
     const adjectives = ['快乐', '幸运', '聪明', '勇敢', '神秘', '酷炫', '超级', '无敌'];
     const nouns = ['玩家', '高手', '大师', '英雄', '冠军', '传奇', '战士', '天才'];
-    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    const num = Math.floor(Math.random() * 9999);
+    const adj = adjectives[crypto.randomInt(0, adjectives.length)];
+    const noun = nouns[crypto.randomInt(0, nouns.length)];
+    const num = crypto.randomInt(0, 10000);
     return `${adj}${noun}${num}`;
 }
 
@@ -1159,7 +1160,7 @@ function calculateDuelCost(giftType, power) {
 function shuffleArray(list) {
     const arr = list.slice();
     for (let i = arr.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = crypto.randomInt(0, i + 1);
         [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
@@ -1257,7 +1258,7 @@ async function logFlipAction({
 }
 
 function randomStoneColor() {
-    return stoneColors[Math.floor(Math.random() * stoneColors.length)];
+    return stoneColors[crypto.randomInt(0, stoneColors.length)];
 }
 
 function normalizeStoneSlots(slots) {
