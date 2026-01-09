@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KingBoost Quiz 知识问答</title>
+    <title>知识问答</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🧐 KingBoost 在线答题</h1>
+            <h1>🧐 在线答题</h1>
             <div class="nav-links">
                 <span>用户：<%= username %></span>
                 <a href="/">🏠 返回首页</a>
@@ -654,7 +654,7 @@
         
         resultDiv.innerHTML = resultHTML;
         
-        // 参考kingboost逻辑：显示结果后自动显示排行榜
+        // 显示结果后自动显示排行榜
         setTimeout(() => {
             // 显示当前局结果在排行榜上方
             document.getElementById('current-game-result').style.display = 'block';
