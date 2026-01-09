@@ -122,7 +122,7 @@ class WindowsGiftListener {
                 }
                 
                 // 任务失败，通知服务器
-                const markResult = await this.markTaskFailed(task.id, result.error);
+                const markResult = await this.markTaskFailed(task.id, result.error, result);
                 if (markResult) {
                     console.log(`❌ 任务 ${task.id} 失败: ${result.error}`);
                 } else {
@@ -288,24 +288,33 @@ class WindowsGiftListener {
     }
 
     // 标记任务失败
-    async markTaskFailed(taskId, errorMessage) {
+    async markTaskFailed(taskId, errorMessage, result = {}) {
         try {
-            const response = await axios.post(`${this.serverUrl}/api/gift-tasks/${taskId}/fail`, {
-                error: errorMessage
-            }, {
-                timeout: 5000,
-                headers: {
-                    'X-API-Key': this.apiKey,
-                    'Content-Type': 'application/json'
+            const response = await axios.post(
+                `${this.serverUrl}/api/gift-tasks/${taskId}/fail`,
+                {
+                    error: errorMessage,
+
+                    // ✅【新增】把 Python 的结果一并传给后端
+                    actualQuantity: result.actual_quantity,
+                    requestedQuantity: result.requested_quantity,
+                    partialSuccess: result.partial_success
+                },
+                {
+                    timeout: 5000,
+                    headers: {
+                        'X-API-Key': this.apiKey,
+                        'Content-Type': 'application/json'
+                    }
                 }
-            });
+            );
             return response.status === 200 && response.data.success;
         } catch (error) {
             console.error(`❌ 标记任务失败失败 (${taskId}):`, error.message);
             return false;
         }
-    }
-}
+    }      
+
 
 // 启动服务
 console.log('🔥 Windows B站礼物发送监听服务');
