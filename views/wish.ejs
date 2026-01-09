@@ -74,46 +74,30 @@
             margin: 0;
         }
 
-        .wish-progress-section {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .progress-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-            color: #ccc;
-            font-weight: bold;
-        }
-
-        .wish-progress {
-            margin: 30px 0;
+        .gift-progress {
+            margin-top: 1rem;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             overflow: hidden;
-            height: 40px;
+            height: 28px;
             position: relative;
         }
 
-        .progress-bar {
+        .gift-progress-bar {
             height: 100%;
             background: linear-gradient(45deg, #ff6b6b, #ee5a24);
             transition: width 0.3s ease;
             border-radius: 10px 0 0 10px;
         }
 
-        .progress-text {
+        .gift-progress-text {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             color: #fff;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 12px;
         }
 
         .wish-button {
@@ -141,20 +125,6 @@
             transform: none;
         }
 
-        .wish-stats {
-            margin: 30px 0;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            border: 2px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .stats-row {
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            font-size: 16px;
-        }
 
         .probability-button {
             background: rgba(255, 255, 255, 0.1);
@@ -393,113 +363,106 @@
         </div>
         
         <div class="wish-container">
-            <div class="wish-progress-section">
-                <div class="progress-header">
-                    <span>当前祈愿：<span id="currentGiftName">深海歌姬</span></span>
-                    <span id="currentGiftRule">保底 148 次</span>
-                </div>
-                <div class="wish-progress">
-                    <div class="progress-bar" id="progressBar"></div>
-                    <div class="progress-text" id="progressText">0 / 148 (保底)</div>
-                </div>
-            </div>
-
             <div class="wish-gift-grid">
                 <div class="gift-card gift-card-large" data-gift="deepsea_singer">
                     <div class="gift-title">🧜‍♀️ 深海歌姬</div>
-                    <div class="gift-meta">价值 30000 电币 · 500 电币/次 · 保底 148 次 · 综合中奖率 1.6%</div>
+                    <div class="gift-meta">价值 30000 电币 · 500 电币/次</div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" onclick="makeWish('deepsea_singer', 1)">抽一次</button>
                         <button class="gift-action-btn secondary" onclick="makeWish('deepsea_singer', 10)">十连</button>
                         <button class="gift-action-btn test admin-test-btn" data-gift="deepsea_singer" style="display: none;">10万次测试</button>
                     </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="deepsea_singer"></div>
+                        <div class="gift-progress-text" data-progress-text="deepsea_singer">0 / 148</div>
+                    </div>
                 </div>
 
                 <div class="gift-card" data-gift="sky_throne">
                     <div class="gift-title">💺 飞天转椅</div>
-                    <div class="gift-meta">价值 10000 电币 · 250 电币/次 · 保底 83 次 · 基础概率 2.02%</div>
+                    <div class="gift-meta">价值 10000 电币 · 250 电币/次</div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" onclick="makeWish('sky_throne', 1)">抽一次</button>
                         <button class="gift-action-btn secondary" onclick="makeWish('sky_throne', 10)">十连</button>
                         <button class="gift-action-btn test admin-test-btn" data-gift="sky_throne" style="display: none;">10万次测试</button>
                     </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="sky_throne"></div>
+                        <div class="gift-progress-text" data-progress-text="sky_throne">0 / 83</div>
+                    </div>
                 </div>
 
                 <div class="gift-card" data-gift="proposal">
                     <div class="gift-title">💍 原地求婚</div>
-                    <div class="gift-meta">价值 5200 电币 · 208 电币/次 · 保底 52 次 · 基础概率 3.85%</div>
+                    <div class="gift-meta">价值 5200 电币 · 208 电币/次</div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" onclick="makeWish('proposal', 1)">抽一次</button>
                         <button class="gift-action-btn secondary" onclick="makeWish('proposal', 10)">十连</button>
                         <button class="gift-action-btn test admin-test-btn" data-gift="proposal" style="display: none;">10万次测试</button>
                     </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="proposal"></div>
+                        <div class="gift-progress-text" data-progress-text="proposal">0 / 52</div>
+                    </div>
                 </div>
 
                 <div class="gift-card" data-gift="wonderland">
                     <div class="gift-title">🌙 梦游仙境</div>
-                    <div class="gift-meta">价值 3000 电币 · 150 电币/次 · 保底 41 次 · 基础概率 5.15%</div>
+                    <div class="gift-meta">价值 3000 电币 · 150 电币/次</div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" onclick="makeWish('wonderland', 1)">抽一次</button>
                         <button class="gift-action-btn secondary" onclick="makeWish('wonderland', 10)">十连</button>
                         <button class="gift-action-btn test admin-test-btn" data-gift="wonderland" style="display: none;">10万次测试</button>
                     </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="wonderland"></div>
+                        <div class="gift-progress-text" data-progress-text="wonderland">0 / 41</div>
+                    </div>
                 </div>
 
                 <div class="gift-card" data-gift="white_bride">
                     <div class="gift-title">🤍 纯白花嫁</div>
-                    <div class="gift-meta">价值 1314 电币 · 75 电币/次 · 保底 34 次 · 基础概率 6.4%</div>
+                    <div class="gift-meta">价值 1314 电币 · 75 电币/次</div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" onclick="makeWish('white_bride', 1)">抽一次</button>
                         <button class="gift-action-btn secondary" onclick="makeWish('white_bride', 10)">十连</button>
                         <button class="gift-action-btn test admin-test-btn" data-gift="white_bride" style="display: none;">10万次测试</button>
                     </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="white_bride"></div>
+                        <div class="gift-progress-text" data-progress-text="white_bride">0 / 34</div>
+                    </div>
                 </div>
 
                 <div class="gift-card" data-gift="crystal_ball">
                     <div class="gift-title">🔮 水晶球</div>
-                    <div class="gift-meta">价值 1000 电币 · 66 电币/次 · 保底 32 次 · 基础概率 5.5%</div>
+                    <div class="gift-meta">价值 1000 电币 · 66 电币/次</div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" onclick="makeWish('crystal_ball', 1)">抽一次</button>
                         <button class="gift-action-btn secondary" onclick="makeWish('crystal_ball', 10)">十连</button>
                         <button class="gift-action-btn test admin-test-btn" data-gift="crystal_ball" style="display: none;">10万次测试</button>
                     </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="crystal_ball"></div>
+                        <div class="gift-progress-text" data-progress-text="crystal_ball">0 / 32</div>
+                    </div>
                 </div>
 
                 <div class="gift-card" data-gift="bobo">
                     <div class="gift-title">🫧 啵啵</div>
-                    <div class="gift-meta">价值 399 电币 · 50 电币/次 · 保底 16 次 · 基础概率 10.6%</div>
+                    <div class="gift-meta">价值 399 电币 · 50 电币/次</div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" onclick="makeWish('bobo', 1)">抽一次</button>
                         <button class="gift-action-btn secondary" onclick="makeWish('bobo', 10)">十连</button>
                         <button class="gift-action-btn test admin-test-btn" data-gift="bobo" style="display: none;">10万次测试</button>
                     </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="bobo"></div>
+                        <div class="gift-progress-text" data-progress-text="bobo">0 / 16</div>
+                    </div>
                 </div>
             </div>
             
-            <div class="wish-stats">
-                <h3>📊 祈愿统计</h3>
-                <div class="stats-row">
-                    <span>总祈愿次数:</span>
-                    <span id="totalWishes">0</span>
-                </div>
-                <div class="stats-row">
-                    <span>成功次数:</span>
-                    <span id="successCount">0</span>
-                </div>
-                <div class="stats-row">
-                    <span>个人中奖率:</span>
-                    <span id="personalRate">0.00%</span>
-                </div>
-                <div class="stats-row">
-                    <span>综合中奖率:</span>
-                    <span id="displayRate">1.60%</span>
-                </div>
-                <div class="stats-row">
-                    <span>当前进度:</span>
-                    <span id="currentProgress">0 / 148</span>
-                </div>
-            </div>
-
             <div style="text-align: center; margin: 1rem 0;">
                 <button class="probability-button" onclick="openProbabilityModal()">概率公示</button>
             </div>
@@ -547,13 +510,13 @@
         const isAdminTester = username === 'hokboost';
 
         const giftConfigs = {
-            deepsea_singer: { name: '深海歌姬', cost: 500, rateText: '1.6%', guaranteeCount: 148, rewardValue: 30000 },
-            sky_throne: { name: '飞天转椅', cost: 250, rateText: '2.02%', guaranteeCount: 83, rewardValue: 10000 },
-            proposal: { name: '原地求婚', cost: 208, rateText: '3.85%', guaranteeCount: 52, rewardValue: 5200 },
-            wonderland: { name: '梦游仙境', cost: 150, rateText: '5.15%', guaranteeCount: 41, rewardValue: 3000 },
-            white_bride: { name: '纯白花嫁', cost: 75, rateText: '6.4%', guaranteeCount: 34, rewardValue: 1314 },
-            crystal_ball: { name: '水晶球', cost: 66, rateText: '5.5%', guaranteeCount: 32, rewardValue: 1000 },
-            bobo: { name: '啵啵', cost: 50, rateText: '10.6%', guaranteeCount: 16, rewardValue: 399 }
+            deepsea_singer: { name: '深海歌姬', cost: 500, baseRateText: '1.4%', overallRateText: '1.4%', guaranteeCount: 148, rewardValue: 30000 },
+            sky_throne: { name: '飞天转椅', cost: 250, baseRateText: '2.02%', guaranteeCount: 83, rewardValue: 10000 },
+            proposal: { name: '原地求婚', cost: 208, baseRateText: '3.55%', guaranteeCount: 52, rewardValue: 5200 },
+            wonderland: { name: '梦游仙境', cost: 150, baseRateText: '4.75%', guaranteeCount: 41, rewardValue: 3000 },
+            white_bride: { name: '纯白花嫁', cost: 75, baseRateText: '5.5%', guaranteeCount: 34, rewardValue: 1314 },
+            crystal_ball: { name: '水晶球', cost: 66, baseRateText: '5.5%', guaranteeCount: 32, rewardValue: 1000 },
+            bobo: { name: '啵啵', cost: 50, baseRateText: '10.6%', guaranteeCount: 16, rewardValue: 399 }
         };
 
         let currentGiftType = 'deepsea_singer';
@@ -590,11 +553,6 @@
             currentGiftType = giftType;
             const config = giftConfigs[giftType];
             if (!config) return;
-            document.getElementById('currentGiftName').textContent = config.name;
-            document.getElementById('displayRate').textContent = config.rateText;
-            document.getElementById('currentGiftRule').textContent = config.guaranteeCount
-                ? `保底 ${config.guaranteeCount} 次`
-                : '无保底';
         }
 
         async function selectGift(giftType) {
@@ -613,7 +571,6 @@
                 return;
             }
 
-            const buttonLabel = count === 10 ? '十连' : '抽一次';
             const buttons = document.querySelectorAll(`.gift-card[data-gift="${giftType}"] .gift-action-btn`);
             buttons.forEach(btn => btn.disabled = true);
             
@@ -688,48 +645,52 @@
         }
 
         function updateDisplayNew() {
-            const config = giftConfigs[currentGiftType];
-            if (config && config.guaranteeCount) {
-                const progress = (wishProgress.consecutive_fails / config.guaranteeCount) * 100;
-                document.getElementById('progressBar').style.width = Math.min(progress, 100) + '%';
-                document.getElementById('progressText').textContent = 
-                    `${wishProgress.consecutive_fails} / ${config.guaranteeCount} (保底)`;
-                document.getElementById('currentProgress').textContent = `${wishProgress.consecutive_fails} / ${config.guaranteeCount}`;
+            updateGiftProgressDisplay(currentGiftType, wishProgress);
+        }
+
+        function updateGiftProgressDisplay(giftType, progressData) {
+            const config = giftConfigs[giftType];
+            if (!config) return;
+
+            const bar = document.querySelector(`[data-progress-bar="${giftType}"]`);
+            const text = document.querySelector(`[data-progress-text="${giftType}"]`);
+            if (!bar || !text) return;
+
+            if (config.guaranteeCount) {
+                const percent = (progressData.consecutive_fails / config.guaranteeCount) * 100;
+                bar.style.width = `${Math.min(percent, 100)}%`;
+                text.textContent = `${progressData.consecutive_fails} / ${config.guaranteeCount}`;
+
+                if (progressData.consecutive_fails >= (config.guaranteeCount - 1)) {
+                    bar.style.background = 'linear-gradient(45deg, #f39c12, #e67e22)';
+                } else {
+                    bar.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
+                }
             } else {
-                document.getElementById('progressBar').style.width = '0%';
-                document.getElementById('progressText').textContent = '无保底';
-                document.getElementById('currentProgress').textContent = '无保底';
+                bar.style.width = '0%';
+                text.textContent = '无保底';
+                bar.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
             }
-            
-            document.getElementById('totalWishes').textContent = wishProgress.total_wishes;
-            const rewardValue = config ? config.rewardValue : 0;
-            document.getElementById('successCount').textContent = 
-                rewardValue > 0 ? Math.floor(wishProgress.total_rewards_value / rewardValue) : 0;
-            
-            const failCount = wishProgress.total_wishes - (rewardValue > 0 ? Math.floor(wishProgress.total_rewards_value / rewardValue) : 0);
-            if (document.getElementById('failCount')) {
-                document.getElementById('failCount').textContent = failCount;
-            }
-            
-            const successRate = wishProgress.total_wishes > 0 ? 
-                ((rewardValue > 0 ? Math.floor(wishProgress.total_rewards_value / rewardValue) : 0) / wishProgress.total_wishes * 100).toFixed(1) : '0.0';
-            if (document.getElementById('successRate')) {
-                document.getElementById('successRate').textContent = successRate + '%';
-            }
-            
-            // 如果即将保底，改变进度条颜色
-            if (config && config.guaranteeCount && wishProgress.consecutive_fails >= (config.guaranteeCount - 1)) {
-                document.getElementById('progressBar').style.background = 
-                    'linear-gradient(45deg, #f39c12, #e67e22)'; // 金色，表示即将保底
-            } else {
-                document.getElementById('progressBar').style.background = 
-                    'linear-gradient(45deg, #ff6b6b, #ee5a24)';
-            }
+        }
+
+        async function loadAllGiftProgress() {
+            const giftTypes = Object.keys(giftConfigs);
+            await Promise.all(giftTypes.map(async (giftType) => {
+                try {
+                    const response = await fetch(`/api/wish/progress?giftType=${giftType}`);
+                    const result = await response.json();
+                    if (result.success) {
+                        updateGiftProgressDisplay(giftType, result.progress);
+                    }
+                } catch (error) {
+                    console.error('加载祈愿进度失败:', error);
+                }
+            }));
         }
         
         // 初始化显示
         setCurrentGift(currentGiftType);
-        loadWishProgress();
+        loadAllGiftProgress();
         
         // 飘屏管理器
         class DanmakuManager {
@@ -850,8 +811,8 @@
         function openProbabilityModal() {
             const list = document.getElementById('probabilityList');
             const entries = Object.values(giftConfigs).map(item => {
-                const guaranteeText = item.guaranteeCount ? `保底 ${item.guaranteeCount} 次` : '无保底';
-                return `• ${item.name}：基础概率 ${item.rateText}，${guaranteeText}`;
+                const rateText = item.overallRateText || item.baseRateText;
+                return `• ${item.name}：综合概率 ${rateText}`;
             }).join('<br>');
             list.innerHTML = entries;
             document.getElementById('probabilityModal').style.display = 'flex';

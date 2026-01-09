@@ -2555,7 +2555,7 @@ const wishConfigs = {
         name: '深海歌姬',
         bilibiliGiftId: '35082',
         cost: 500,
-        successRate: 0.016,
+        successRate: 0.014,
         guaranteeCount: 148,
         rewardValue: 30000
     },
@@ -2573,7 +2573,7 @@ const wishConfigs = {
         name: '原地求婚',
         bilibiliGiftId: '34999',
         cost: 208,
-        successRate: 0.0385,
+        successRate: 0.0355,
         guaranteeCount: 52,
         rewardValue: 5200
     },
@@ -2582,7 +2582,7 @@ const wishConfigs = {
         name: '梦游仙境',
         bilibiliGiftId: '31932',
         cost: 150,
-        successRate: 0.0515,
+        successRate: 0.0475,
         guaranteeCount: 41,
         rewardValue: 3000
     },
@@ -2591,7 +2591,7 @@ const wishConfigs = {
         name: '纯白花嫁',
         bilibiliGiftId: '34428',
         cost: 75,
-        successRate: 0.064,
+        successRate: 0.054,
         guaranteeCount: 34,
         rewardValue: 1314
     },
