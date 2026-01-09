@@ -266,6 +266,16 @@ def send_gift_simple(gift_id, room_id, quantity=1):
         # 发送礼物并验证结果
         safe_print(f"Sending gift ID: {gift_id}")
         try:
+            # ✅ [最小新增] 礼物单价映射 + 发送前余额（不改任何现有逻辑）
+            GIFT_PRICE_MAP = {"31164": 1, "32251": 150}
+            price = GIFT_PRICE_MAP.get(str(gift_id), 1)
+            before_balance = None
+            try:
+                before_balance = get_current_balance(page)
+                safe_print(f"💰 [余额差计算] 发送前余额: {before_balance} (price={price})")
+            except Exception as e:
+                safe_print(f"⚠️ [余额差计算] 获取发送前余额失败: {e}")
+
             # 点击礼物
             click_result = page.evaluate(f'''
                 () => {{
@@ -326,6 +336,20 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             balance_insufficient = result.get("reason") == "insufficient_balance"
             
             if balance_insufficient:
+                # ✅ [最小新增] 余额不足时用“余额差/单价”推断实际成功数量
+                after_balance = None
+                try:
+                    after_balance = get_current_balance(page)
+                    safe_print(f"💰 [余额差计算] 发送后余额: {after_balance}")
+                except Exception as e:
+                    safe_print(f"⚠️ [余额差计算] 获取发送后余额失败: {e}")
+
+                sent = 0
+                if before_balance is not None and after_balance is not None and price > 0:
+                    delta = max(0, int(before_balance) - int(after_balance))
+                    sent = delta // price
+                    sent = min(sent, quantity)
+
                 # 余额不足时，无论点击了多少次都算失败
                 safe_print(f"❌ 余额不足失败: 尝试 {quantity} 个礼物，余额不足")
                 return {
@@ -335,8 +359,8 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                     "gift_id": gift_id, 
                     "room_id": room_id,
                     "requested_quantity": quantity,
-                    "actual_quantity": 0,  # 余额不足时实际成功数为0
-                    "partial_success": False
+                    "actual_quantity": sent,  # ✅ 只改这一行：从0 -> sent
+                    "partial_success": sent > 0  # ✅ 只改这一行：从False -> sent>0
                 }
             elif result["success"] or successful_sends > 0:
                 # 只有非余额不足的情况下才考虑部分成功

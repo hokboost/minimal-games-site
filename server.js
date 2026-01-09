@@ -2479,7 +2479,7 @@ app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRat
                     tier_cost, tier_config, balance_before, balance_after, matches_count, game_details,
                     created_at
                 ) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
             `, [
                 username,
                 JSON.stringify(winningNumbers),
