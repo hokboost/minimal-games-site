@@ -259,7 +259,7 @@ module.exports = function registerGiftRoutes(app, deps) {
             let result;
             try {
                 result = await pool.query(`
-                    SELECT gift_type, gift_name, cost, quantity, status,
+                    SELECT gift_type, gift_name, cost, quantity, status, failure_reason,
                            to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at,
                            delivery_status
                     FROM gift_exchanges 
@@ -282,6 +282,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                     // 为每行添加默认quantity
                     result.rows.forEach(row => {
                         row.quantity = 1;
+                        row.failure_reason = null;
                     });
                 } else {
                     throw error;
@@ -487,6 +488,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                         UPDATE wish_inventory
                         SET status = 'sent',
                             sent_at = (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                            last_failure_reason = NULL,
                             updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                         WHERE gift_exchange_id = $1
                     `, [taskId]);
@@ -614,10 +616,11 @@ module.exports = function registerGiftRoutes(app, deps) {
                 UPDATE gift_exchanges 
                 SET delivery_status = 'failed',
                     status = 'failed',
+                    failure_reason = $2,
                     processed_at = NOW()
                 WHERE id = $1
                 RETURNING username, gift_name, cost
-            `, [taskId]);
+            `, [taskId, errorMessage]);
 
             if (result.rows.length > 0) {
                 try {
@@ -625,10 +628,11 @@ module.exports = function registerGiftRoutes(app, deps) {
                         UPDATE wish_inventory
                         SET status = 'stored',
                             gift_exchange_id = NULL,
+                            last_failure_reason = $2,
                             expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
                             updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                         WHERE gift_exchange_id = $1
-                    `, [taskId]);
+                    `, [taskId, errorMessage]);
                 } catch (dbError) {
                     console.error('更新背包失败回退失败:', dbError);
                 }

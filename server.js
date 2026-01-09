@@ -264,6 +264,36 @@ async function initializeDatabase() {
         } else {
             console.log('✅ quantity字段已存在');
         }
+
+        const checkFailureReason = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'gift_exchanges'
+            AND column_name = 'failure_reason'
+        `);
+
+        if (checkFailureReason.rows.length === 0) {
+            console.log('➕ 添加failure_reason字段到gift_exchanges表...');
+            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN failure_reason TEXT`);
+            console.log('✅ failure_reason字段添加完成');
+        } else {
+            console.log('✅ failure_reason字段已存在');
+        }
+
+        const checkWishFailureReason = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'wish_inventory'
+            AND column_name = 'last_failure_reason'
+        `);
+
+        if (checkWishFailureReason.rows.length === 0) {
+            console.log('➕ 添加last_failure_reason字段到wish_inventory表...');
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN last_failure_reason TEXT`);
+            console.log('✅ last_failure_reason字段添加完成');
+        } else {
+            console.log('✅ last_failure_reason字段已存在');
+        }
         
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);
@@ -1464,23 +1494,14 @@ async function autoSendExpiredWishRewards() {
 
 async function autoSendWishInventoryOnBind(username) {
     try {
-        const storedItems = await pool.query(`
-            SELECT id
-            FROM wish_inventory
+        await pool.query(`
+            UPDATE wish_inventory
+            SET expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
+                updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
             WHERE username = $1
               AND status = 'stored'
               AND (expires_at IS NULL OR expires_at = 'infinity'::timestamptz)
-            ORDER BY created_at ASC
-            LIMIT 50
         `, [username]);
-
-        for (const row of storedItems.rows) {
-            await enqueueWishInventorySend({
-                inventoryId: row.id,
-                username,
-                isAuto: true
-            });
-        }
     } catch (error) {
         console.error('绑定房间号后自动送出失败:', error);
     }

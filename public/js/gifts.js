@@ -225,7 +225,12 @@
                 } else if (newItem.delivery_status === 'success') {
                     showMessage(`礼物${getGiftName(newItem.gift_type)}已全部发送成功！`, 'success');
                 } else if (newItem.delivery_status === 'failed') {
-                    showMessage(`礼物${getGiftName(newItem.gift_type)}发送失败，已退还电币。`, 'error');
+                    const reason = (newItem.failure_reason || '').toLowerCase();
+                    if (reason.includes('余额') || reason.includes('balance') || reason.includes('insufficient')) {
+                        showMessage(`B站账号余额不足，礼物${getGiftName(newItem.gift_type)}送出失败。`, 'error');
+                    } else {
+                        showMessage(`礼物${getGiftName(newItem.gift_type)}发送失败，已退还电币。`, 'error');
+                    }
                 }
             }
         }

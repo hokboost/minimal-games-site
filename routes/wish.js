@@ -350,9 +350,13 @@ module.exports = function registerWishRoutes(app, deps) {
                        gift_name,
                        status,
                        gift_exchange_id,
+                       last_failure_reason,
                        CASE WHEN expires_at IS NULL OR expires_at = 'infinity'::timestamptz THEN NULL
                             ELSE to_char(expires_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS')
                        END as expires_at,
+                       CASE WHEN expires_at IS NULL OR expires_at = 'infinity'::timestamptz THEN '绑定房间号后自动送出'
+                            ELSE NULL
+                       END as expires_note,
                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at
                 FROM wish_inventory
                 WHERE username = $1

@@ -194,6 +194,8 @@
         }
     }
 
+    const backpackFailureCache = new Map();
+
     async function loadWishBackpack() {
         const container = document.getElementById('backpackContent');
         container.innerHTML = '<div class="loading">加载中...</div>';
@@ -217,8 +219,20 @@
             tableHTML += '<tbody>';
 
             data.items.forEach(item => {
+                if (item.last_failure_reason) {
+                    const cachedReason = backpackFailureCache.get(item.id);
+                    if (cachedReason !== item.last_failure_reason) {
+                        const reason = item.last_failure_reason.toLowerCase();
+                        if (reason.includes('余额') || reason.includes('balance') || reason.includes('insufficient')) {
+                            showToast('B站账号余额不足，礼物送出失败。', 'error');
+                        } else {
+                            showToast(`送出失败：${item.last_failure_reason}`, 'error');
+                        }
+                        backpackFailureCache.set(item.id, item.last_failure_reason);
+                    }
+                }
                 const createdAt = item.created_at || '';
-                const expiresAt = item.expires_at || '-';
+                const expiresAt = item.expires_note || item.expires_at || '-';
                 const statusText = formatBackpackStatus(item.status, item.expires_at);
                 const canSend = item.status === 'stored';
                 const actionBtn = canSend
@@ -512,3 +526,6 @@
 
     // 初始化背包
     loadWishBackpack();
+    if (backpackContentEl) {
+        setInterval(loadWishBackpack, 10000);
+    }
