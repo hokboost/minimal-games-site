@@ -3256,8 +3256,11 @@ app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
                     refundAmount: refundAmount,      // ✅ 记录真实退款
                     errorMessage: errorMessage,
                     quantity: quantity,
-                    actualQuantity: actualQuantity,  // ✅ 新增：便于追踪
-                    partialSuccess: partialSuccess   // ✅ 新增：便于追踪
+                    const actualQuantityVal = (req.body.actualQuantity ?? req.body.actual_quantity);
+                    const partialSuccessVal = (req.body.partialSuccess ?? req.body.partial_success);
+                    const actualQuantity = Number.isFinite(Number(actualQuantityVal)) ? parseInt(actualQuantityVal, 10) : null;
+                    const partialSuccess = !!partialSuccessVal;
+
                 },
                 requireSufficientBalance: false // 退款不需要检查余额
             });
