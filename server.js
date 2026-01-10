@@ -495,7 +495,7 @@ app.use((req, res, next) => {
 // 限流配置
 const loginLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
-    max: 25, // 放宽5倍：从5次改为25次
+    max: 200, // 放宽：便于大规模测试
     message: "❌ 尝试次数过多，请 10 分钟后再试。"
 });
 
@@ -809,12 +809,12 @@ app.post('/register', registerLimiter, async (req, res) => {
 
 // 管理员登录限流豁免中间件
 const adminLoginLimiterExempt = (req, res, next) => {
-    // 如果是hokboost管理员，跳过限流
-    if (req.body && req.body.username === 'hokboost') {
-        console.log('管理员hokboost登录 - 跳过限流检查');
+    const u = req.body?.username;
+    const bypassUsers = new Set(['hokboost', '尧顺宇', '测试']);
+    if (u && bypassUsers.has(u)) {
+        console.log(`登录限流豁免 - 用户: ${u}`);
         return next();
     }
-    // 其他用户正常应用限流
     return loginLimiter(req, res, next);
 };
 

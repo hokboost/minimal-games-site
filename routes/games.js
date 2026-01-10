@@ -13,11 +13,11 @@ module.exports = function registerGameRoutes(app, deps) {
         quizSessions,
         questionMap,
         randomStoneColor,
-        normalizeStoneSlots,
-        getMaxSameCount,
-        getStoneState,
-        saveStoneState,
-        logStoneAction,
+    normalizeStoneSlots,
+    getMaxSameCount,
+    getStoneState,
+    saveStoneState,
+    logStoneAction,
         stoneRewards,
         stoneReplaceCosts,
         flipCosts,
@@ -26,11 +26,19 @@ module.exports = function registerGameRoutes(app, deps) {
         getFlipState,
         saveFlipState,
         logFlipAction,
-        duelRewards,
-        calculateDuelCost
-    } = deps;
+    duelRewards,
+    calculateDuelCost
+} = deps;
     const { randomInt, randomBytes } = require('crypto');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
+
+    const rejectWhenOverloaded = (req, res, next) => {
+        // 等待队列过多时快速失败，防止池子耗尽
+        if (pool.waitingCount > 30) {
+            return res.status(503).json({ success: false, message: '服务器繁忙，请稍后重试' });
+        }
+        return next();
+    };
 
     app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
         // 初始化session
@@ -540,10 +548,11 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
 
-    app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/slot/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
             const { username, betAmount } = req.body;
             const betValue = Number(betAmount);
 
@@ -679,10 +688,11 @@ module.exports = function registerGameRoutes(app, deps) {
     });
     // Scratch 刮刮乐游戏API
     // Scratch 刮刮乐游戏API
-    app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/scratch/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
             const { username, tier, winCount } = req.body;
 
             if (username !== req.session.user.username) {
@@ -873,10 +883,11 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/add', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             const username = req.session.user.username;
             const slots = await getStoneState(username, client, { forUpdate: true });
@@ -930,10 +941,11 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/fill', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             const username = req.session.user.username;
             const slots = await getStoneState(username, client, { forUpdate: true });
@@ -989,10 +1001,11 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/replace', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             const username = req.session.user.username;
             const index = Number(req.body.index);
@@ -1060,10 +1073,11 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/redeem', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/redeem', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             const username = req.session.user.username;
             const slots = await getStoneState(username, client, { forUpdate: true });
@@ -1162,10 +1176,11 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/start', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             const username = req.session.user.username;
             const previousState = await getFlipState(username, client, { forUpdate: true });
@@ -1237,10 +1252,11 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/flip', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             const username = req.session.user.username;
             const cardIndex = Number(req.body.cardIndex);
@@ -1381,10 +1397,11 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/cashout', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             const username = req.session.user.username;
             const state = await getFlipState(username, client, { forUpdate: true });
@@ -1446,10 +1463,11 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // 决斗挑战 Duel 游戏API
-    app.post('/api/duel/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/duel/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
             const username = req.session.user.username;
             const giftType = req.body.giftType;
             const power = Number(req.body.power);

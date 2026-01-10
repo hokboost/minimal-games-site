@@ -13,6 +13,12 @@ module.exports = function registerWishRoutes(app, deps) {
     } = deps;
     const { randomInt, randomBytes } = require('crypto');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
+    const rejectWhenOverloaded = (req, res, next) => {
+        if (pool.waitingCount > 30) {
+            return res.status(503).json({ success: false, message: '服务器繁忙，请稍后重试' });
+        }
+        return next();
+    };
 
     app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
         // 初始化session
@@ -48,7 +54,7 @@ module.exports = function registerWishRoutes(app, deps) {
         });
     });
 
-    app.post('/api/wish/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/wish/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             const username = req.session.user.username;
@@ -439,6 +445,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
     // 批量祈愿API - 仅支持10次，逐次记录
     app.post('/api/wish-batch',
+        rejectWhenOverloaded,
         requireLogin,
         requireAuthorized,
         security.basicRateLimit,

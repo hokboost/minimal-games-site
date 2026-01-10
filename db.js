@@ -11,7 +11,7 @@ const dbConfig = {
   port: process.env.DB_PORT || 5432,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: 5000, // 快速失败，避免堆积
 };
 
 // Render PostgreSQL 总是需要SSL
@@ -37,8 +37,12 @@ pool.on('error', (err) => {
 });
 
 pool.on('connect', (client) => {
-  client.query("SET TIME ZONE 'Asia/Shanghai'").catch((error) => {
-    console.error('设置数据库时区失败:', error);
+  client.query(`
+    SET TIME ZONE 'Asia/Shanghai';
+    SET statement_timeout = '12000ms';
+    SET lock_timeout = '3000ms';
+  `).catch((error) => {
+    console.error('设置数据库会话参数失败:', error);
   });
   console.log('Minimal-Games-Site 连接到共享数据库成功');
 });
