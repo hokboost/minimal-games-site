@@ -552,7 +552,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
             const { username, betAmount } = req.body;
             const betValue = Number(betAmount);
 
@@ -692,7 +692,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
             const { username, tier, winCount } = req.body;
 
             if (username !== req.session.user.username) {
@@ -887,7 +887,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const slots = await getStoneState(username, client, { forUpdate: true });
@@ -945,7 +945,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const slots = await getStoneState(username, client, { forUpdate: true });
@@ -1005,7 +1005,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const index = Number(req.body.index);
@@ -1077,7 +1077,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const slots = await getStoneState(username, client, { forUpdate: true });
@@ -1180,7 +1180,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const previousState = await getFlipState(username, client, { forUpdate: true });
@@ -1256,7 +1256,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const cardIndex = Number(req.body.cardIndex);
@@ -1401,7 +1401,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const state = await getFlipState(username, client, { forUpdate: true });
@@ -1467,7 +1467,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
             const username = req.session.user.username;
             const giftType = req.body.giftType;
             const power = Number(req.body.power);

@@ -61,7 +61,6 @@ module.exports = function registerWishRoutes(app, deps) {
             const giftType = req.body.giftType || 'deepsea_singer';
             const config = getWishConfig(giftType);
             if (!config) {
-                client.release();
                 return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
             }
 
@@ -72,7 +71,7 @@ module.exports = function registerWishRoutes(app, deps) {
             const rewardValue = config.rewardValue;
 
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             // 锁定祈愿进度
             let progressResult = await client.query(
@@ -108,7 +107,6 @@ module.exports = function registerWishRoutes(app, deps) {
 
             if (!betResult.success) {
                 await client.query('ROLLBACK');
-                client.release();
                 return res.status(400).json({ success: false, message: betResult.message });
             }
 
@@ -468,12 +466,11 @@ module.exports = function registerWishRoutes(app, deps) {
             const rewardValue = config.rewardValue;
 
             if (batchCount !== 10) {
-                client.release();
                 return res.status(400).json({ success: false, message: '仅支持10次祈愿' });
             }
 
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
+            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             // 获取用户余额，提前校验（加锁余额行）
             const balanceResult = await client.query(
@@ -482,7 +479,6 @@ module.exports = function registerWishRoutes(app, deps) {
             );
             if (balanceResult.rows.length === 0) {
                 await client.query('ROLLBACK');
-                client.release();
                 return res.status(404).json({ success: false, message: '用户不存在' });
             }
 
@@ -490,7 +486,6 @@ module.exports = function registerWishRoutes(app, deps) {
             const totalCost = wishCost * batchCount;
             if (currentBalance < totalCost) {
                 await client.query('ROLLBACK');
-                client.release();
                 return res.status(400).json({ success: false, message: '余额不足，无法进行10次祈愿' });
             }
 
