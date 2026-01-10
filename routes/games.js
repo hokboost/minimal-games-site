@@ -399,8 +399,10 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             if (invalidToken) {
-                // 防止旧token/无效token重复提交
-                return res.status(400).json({ success: false, message: '提交包含无效题目或已过期会话' });
+                // 防止旧token/无效token重复提交，直接拒绝
+                sessionData.settled = true;
+                quizSessions.set(quizSessionId, sessionData);
+                return res.status(403).json({ success: false, message: '提交包含无效或过期的题目令牌' });
             }
 
             // 防止重复提交：标记已结算
@@ -541,38 +543,42 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
+
     app.post('/api/slot/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
             const { username, betAmount } = req.body;
             const betValue = Number(betAmount);
 
-            // 验证用户名
             if (username !== req.session.user.username) {
+                await client.query('ROLLBACK');
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
-            // 验证投注金额
             if (!Number.isFinite(betValue) || !Number.isInteger(betValue) || betValue < 1 || betValue > 1000) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '投注金额必须在1-1000电币之间' });
             }
 
-            // 扣除投注电币
             const betResult = await BalanceLogger.updateBalance({
                 username: username,
                 amount: -betValue,
                 operationType: 'slot_bet',
                 description: `老虎机投注：${betValue} 电币`,
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!betResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: betResult.message });
             }
 
             const currentBalance = betResult.balance;
 
-            // 生成游戏结果 - 5种结果各20%概率
             const outcomes = [
                 { type: '不亏不赚', multiplier: 1.0 },
                 { type: '×2', multiplier: 2.0 },
@@ -584,23 +590,19 @@ module.exports = function registerGameRoutes(app, deps) {
             const randomIndex = randomInt(0, 5);
             const outcome = outcomes[randomIndex];
 
-            // 计算奖励
             const payout = Math.floor(betValue * outcome.multiplier);
 
-            // 生成三个金额转动结果（用于前端显示，保证显示与奖励一致）
             const baseAmounts = [50, 100, 150, 200];
             const amounts = baseAmounts.map((num) => Math.max(1, Math.round(num * betValue / 100)));
             const randomAmount = () => amounts[randomInt(0, amounts.length)];
             const isLose = payout <= 0;
             let slotResults = isLose ? [randomAmount(), randomAmount(), randomAmount()] : [payout, payout, payout];
             if (isLose) {
-                // 避免出现三格相同导致误判中奖
                 while (slotResults[0] === slotResults[1] && slotResults[1] === slotResults[2]) {
                     slotResults = [randomAmount(), randomAmount(), randomAmount()];
                 }
             }
 
-            // 发放奖励电币
             let finalBalance = currentBalance;
             if (payout > 0) {
                 const winResult = await BalanceLogger.updateBalance({
@@ -616,7 +618,9 @@ module.exports = function registerGameRoutes(app, deps) {
                     },
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
-                    requireSufficientBalance: false
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
 
                 if (winResult.success) {
@@ -624,14 +628,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 }
             }
 
-            // 存储游戏记录到slot_results表（记录金额转动结果）
             try {
                 const crypto = require('crypto');
                 const proof = crypto.createHash('sha256')
                     .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
                     .digest('hex');
 
-                await pool.query(`
+                await client.query(`
                     INSERT INTO slot_results (
                         username, result, won, proof, created_at,
                         bet_amount, payout_amount, balance_before, balance_after, multiplier, game_details
@@ -639,15 +642,15 @@ module.exports = function registerGameRoutes(app, deps) {
                     VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10)
                 `, [
                     username,
-                    JSON.stringify(slotResults), // result: 三个金额转动结果
-                    outcome.type,                // won: 你现在存的是 outcome.type（先不动）
+                    JSON.stringify(slotResults),
+                    outcome.type,
                     proof,
-                    betValue,                    // $5 bet_amount ✅
-                    payout,                      // $6 payout_amount ✅
-                    currentBalance + betAmount,  // $7 balance_before ✅（下注前余额）
-                    finalBalance,                // $8 balance_after ✅
-                    outcome.multiplier,          // $9 multiplier ✅
-                    JSON.stringify({             // $10 game_details ✅
+                    betValue,
+                    payout,
+                    currentBalance + betAmount,
+                    finalBalance,
+                    outcome.multiplier,
+                    JSON.stringify({
                         outcome: outcome.type,
                         amounts: slotResults,
                         won: payout > 0,
@@ -657,6 +660,8 @@ module.exports = function registerGameRoutes(app, deps) {
             } catch (dbError) {
                 console.error('Slot游戏记录存储失败:', dbError);
             }
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -669,76 +674,74 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
         } catch (error) {
+            await client.query('ROLLBACK').catch(() => {});
             console.error('Slot play error:', error);
             res.status(500).json({ success: false, message: '游戏失败，请稍后重试' });
+        } finally {
+            client.release();
         }
     });
-
+    // Scratch 刮刮乐游戏API
     // Scratch 刮刮乐游戏API
     app.post('/api/scratch/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
             const { username, tier, winCount } = req.body;
 
-            // 验证用户名
             if (username !== req.session.user.username) {
+                await client.query('ROLLBACK');
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
-            // 验证档位参数 - 修复为正确的号码配置逻辑
             const validTiers = [
-                { cost: 5, winCount: 5, userCount: 5 },    // 5元：5个中奖号码，5个我的号码
-                { cost: 10, winCount: 5, userCount: 10 },  // 10元：5个中奖号码，10个我的号码
-                { cost: 100, winCount: 5, userCount: 20 }  // 100元：5个中奖号码，20个我的号码
+                { cost: 5, winCount: 5, userCount: 5 },
+                { cost: 10, winCount: 5, userCount: 10 },
+                { cost: 100, winCount: 5, userCount: 20 }
             ];
 
             const selectedTier = validTiers.find(t => t.cost === tier);
             if (!selectedTier) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '无效的游戏档位' });
             }
 
-            // 扣除投注电币
             const betResult = await BalanceLogger.updateBalance({
                 username: username,
                 amount: -tier,
                 operationType: 'scratch_bet',
                 description: `刮刮乐投注：${tier} 电币 (${selectedTier.winCount}中奖+${selectedTier.userCount}我的)`,
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!betResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: betResult.message });
             }
 
             const currentBalance = betResult.balance;
 
-            // 按用户要求的中奖梯度：
-            // 5元：50%中5元，20%中10元，1%中20元，29%不中
-            // 10元：50%中10元，20%中20元，1%中40元，29%不中
-            // 100元：50%中100元，20%中200元，1%中400元，29%不中
             const random = randomInt(0, 10000) / 100; // 0-100的随机数
             let payout = 0;
             let outcomeType = '';
 
             if (random <= 50) {
-                // 50% 概率中等额
                 payout = tier;
                 outcomeType = `中奖 ${tier} 电币`;
             } else if (random <= 70) {
-                // 20% 概率中2倍
                 payout = tier * 2;
                 outcomeType = `大奖 ${payout} 电币`;
             } else if (random <= 71) {
-                // 1% 概率中4倍
                 payout = tier * 4;
                 outcomeType = `超级大奖 ${payout} 电币`;
             } else {
-                // 29% 概率不中
                 payout = 0;
                 outcomeType = '未中奖';
             }
 
-            // 发放奖励电币
             let finalBalance = currentBalance;
             if (payout > 0) {
                 const winResult = await BalanceLogger.updateBalance({
@@ -754,7 +757,9 @@ module.exports = function registerGameRoutes(app, deps) {
                     },
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
-                    requireSufficientBalance: false
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
 
                 if (winResult.success) {
@@ -1419,16 +1424,20 @@ module.exports = function registerGameRoutes(app, deps) {
 
     // 决斗挑战 Duel 游戏API
     app.post('/api/duel/play', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
             const username = req.session.user.username;
             const giftType = req.body.giftType;
             const power = Number(req.body.power);
 
             if (!duelRewards[giftType]) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '无效的奖品档位' });
             }
 
             if (!Number.isFinite(power) || power < 1 || power > 80) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '功力范围为1-80' });
             }
 
@@ -1441,10 +1450,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 operationType: 'duel_bet',
                 description: `决斗挑战：功力${power}%`,
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
@@ -1461,10 +1473,13 @@ module.exports = function registerGameRoutes(app, deps) {
                     description: `决斗挑战获胜：${duelRewards[giftType].name} ${reward} 电币`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
-                    requireSufficientBalance: false
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
 
                 if (!rewardResult.success) {
+                    await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: rewardResult.message });
                 }
 
@@ -1472,7 +1487,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             try {
-                await pool.query(
+                await client.query(
                     `INSERT INTO duel_logs (
                         username, gift_type, reward, power, cost, success, created_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
@@ -1489,6 +1504,8 @@ module.exports = function registerGameRoutes(app, deps) {
                 console.error('Duel log error:', dbError);
             }
 
+            await client.query('COMMIT');
+
             if (req.session.user) {
                 req.session.user.balance = newBalance;
             }
@@ -1503,8 +1520,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
+            await client.query('ROLLBACK').catch(() => {});
             console.error('Duel play error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
