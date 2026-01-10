@@ -922,7 +922,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
             }
@@ -976,7 +976,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
             }
@@ -1032,7 +1032,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
             }
@@ -1199,7 +1199,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
             }
@@ -1272,7 +1272,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
             }
@@ -1408,7 +1408,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
             }
