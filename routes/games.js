@@ -376,7 +376,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             let correctCount = 0;
-            let invalidToken = false;
+            let validAnswers = 0;
             const userStore = userSessions.get(username);
             const userTokens = userStore?.tokensBySession?.[quizSessionId] || {};
 
@@ -387,15 +387,14 @@ module.exports = function registerGameRoutes(app, deps) {
                     if (question && GameLogic.quiz.validateAnswer(question, answer.answerIndex)) {
                         correctCount++;
                     }
-                } else {
-                    invalidToken = true;
+                    validAnswers++;
                 }
             }
 
-            if (invalidToken || answers.length === 0) {
+            if (validAnswers === 0) {
                 sessionData.settled = true;
                 quizSessions.set(quizSessionId, sessionData);
-                return res.status(403).json({ success: false, message: '提交包含无效或过期的题目令牌' });
+                return res.status(403).json({ success: false, message: '未找到有效题目令牌，请重新开始答题' });
             }
 
             // 防止重复提交：标记已结算
@@ -1134,21 +1133,13 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             const username = req.session.user.username;
             const state = await getFlipState(username);
-            const flips = state.flipped.filter(Boolean).length;
+            const flips = state.good_count + state.bad_count;
             const nextCost = flips < flipCosts.length ? flipCosts[flips] : null;
             const canFlip = !state.ended && flips < flipCosts.length;
             const cashoutReward = flipCashoutRewards[state.good_count] || 0;
 
-            const boardTypes = Array.isArray(state.board) ? state.board : [];
-            const flipped = Array.isArray(state.flipped) ? state.flipped : [];
-            const board = boardTypes.map((type, index) => ({
-                type,
-                flipped: !!flipped[index]
-            }));
-
             res.json({
                 success: true,
-                board,
                 ended: state.ended,
                 goodCount: state.good_count,
                 badCount: state.bad_count,
@@ -1169,7 +1160,7 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const username = req.session.user.username;
             const previousState = await getFlipState(username, client, { forUpdate: true });
-            const flips = previousState.flipped.filter(Boolean).length;
+            const flips = previousState.good_count + previousState.bad_count;
             let previousReward = 0;
             let newBalance = null;
 
@@ -1208,11 +1199,9 @@ module.exports = function registerGameRoutes(app, deps) {
                 }, client);
             }
 
-            const board = createFlipBoard();
-            const flipped = Array(9).fill(false);
             const state = {
-                board,
-                flipped,
+                good_left: 7,
+                bad_left: 2,
                 good_count: 0,
                 bad_count: 0,
                 ended: false
@@ -1252,15 +1241,10 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const state = await getFlipState(username, client, { forUpdate: true });
-            const flips = state.flipped.filter(Boolean).length;
+            const flips = state.good_count + state.bad_count;
             if (state.ended || flips >= flipCosts.length) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '本轮已结束' });
-            }
-
-            if (state.flipped[cardIndex]) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ success: false, message: '该卡牌已翻开' });
             }
 
             const cost = flipCosts[flips];
@@ -1280,11 +1264,16 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
-            state.flipped[cardIndex] = true;
-            const cardType = state.board[cardIndex];
-            if (cardType === 'good') {
+            // 动态抽牌：根据剩余好牌/坏牌计数随机
+            const totalLeft = state.good_left + state.bad_left;
+            const draw = randomInt(0, totalLeft);
+            let cardType = 'bad';
+            if (draw < state.good_left) {
+                cardType = 'good';
+                state.good_left -= 1;
                 state.good_count += 1;
             } else {
+                state.bad_left -= 1;
                 state.bad_count += 1;
                 state.ended = true;
             }

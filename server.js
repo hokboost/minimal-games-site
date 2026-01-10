@@ -1232,33 +1232,26 @@ function shuffleArray(list) {
     return arr;
 }
 
-function createFlipBoard() {
-    const board = [
-        'good', 'good', 'good', 'good', 'good', 'good', 'good',
-        'bad', 'bad'
-    ];
-    return shuffleArray(board);
-}
-
+// Flip: 动态抽牌（不再预存完整牌面），仅存剩余好牌/坏牌数量
 async function getFlipState(username, client = pool, { forUpdate = false } = {}) {
     const executor = client.query ? client.query.bind(client) : client;
     const lockClause = forUpdate ? ' FOR UPDATE' : '';
     const result = await executor(
-        `SELECT * FROM flip_states WHERE username = $1${lockClause}`,
+        `SELECT good_left, bad_left, good_count, bad_count, ended FROM flip_states WHERE username = $1${lockClause}`,
         [username]
     );
 
     if (result.rows.length === 0) {
-        const board = createFlipBoard();
-        const flipped = Array(9).fill(false);
+        const goodLeft = 7;
+        const badLeft = 2;
         await executor(
-            `INSERT INTO flip_states (username, board, flipped, created_at, updated_at)
-             VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-            [username, JSON.stringify(board), JSON.stringify(flipped)]
+            `INSERT INTO flip_states (username, good_left, bad_left, good_count, bad_count, ended, created_at, updated_at)
+             VALUES ($1, $2, $3, 0, 0, FALSE, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+            [username, goodLeft, badLeft]
         );
         return {
-            board,
-            flipped,
+            good_left: goodLeft,
+            bad_left: badLeft,
             good_count: 0,
             bad_count: 0,
             ended: false
@@ -1266,8 +1259,8 @@ async function getFlipState(username, client = pool, { forUpdate = false } = {})
     }
 
     return {
-        board: result.rows[0].board,
-        flipped: result.rows[0].flipped,
+        good_left: result.rows[0].good_left,
+        bad_left: result.rows[0].bad_left,
         good_count: result.rows[0].good_count,
         bad_count: result.rows[0].bad_count,
         ended: result.rows[0].ended
@@ -1278,12 +1271,12 @@ async function saveFlipState(username, state, client = pool) {
     const executor = client.query ? client.query.bind(client) : client;
     await executor(
         `UPDATE flip_states
-         SET board = $1, flipped = $2, good_count = $3, bad_count = $4, ended = $5,
+         SET good_left = $1, bad_left = $2, good_count = $3, bad_count = $4, ended = $5,
              updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
          WHERE username = $6`,
         [
-            JSON.stringify(state.board),
-            JSON.stringify(state.flipped),
+            state.good_left,
+            state.bad_left,
             state.good_count,
             state.bad_count,
             state.ended,
