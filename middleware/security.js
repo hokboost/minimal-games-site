@@ -262,12 +262,11 @@ function adminIPWhitelist(req, res, next) {
     return next();
 }
 
-// 管理接口签名校验（HMAC-SHA256），未配置密钥则跳过
+// 管理接口签名校验（HMAC-SHA256），默认关闭（ADMIN_SIGN_ENFORCE=true 时开启）
 function verifyAdminSignature(req, res, next) {
     const secret = process.env.ADMIN_SIGN_SECRET;
-    if (!secret) {
-        return next();
-    }
+    const enforce = process.env.ADMIN_SIGN_ENFORCE === 'true';
+    if (!enforce || !secret) return next();
 
     const ts = req.headers['x-sig-ts'] || req.headers['x-admin-ts'];
     const sign = (req.headers['x-signature'] || req.headers['x-sig'] || '').toString().toLowerCase();
