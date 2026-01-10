@@ -76,7 +76,7 @@ module.exports = function registerWishRoutes(app, deps) {
             try {
                 await client.query('BEGIN');
                 await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-                await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [username]);
+                await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish\'))', [username]);
 
                 // 锁定祈愿进度
                 let progressResult = await client.query(
@@ -253,7 +253,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     giftName: rewardName
                 });
             } catch (error) {
-                try { await pool.query('ROLLBACK'); } catch (e) {}
+                try { await client.query('ROLLBACK'); } catch (e) { console.error('Wish play rollback failed:', e); }
                 const isLockError = lockErrorCodes.has(error.code);
                 if (isLockError && attempt < maxAttempts) {
                     await sleep(150);
@@ -479,7 +479,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 client = await pool.connect();
                 await client.query('BEGIN');
                 await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-                await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish_batch\'))', [username]);
+                await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish\'))', [username]);
 
                 // 获取用户余额，提前校验（加锁余额行）
                 const balanceResult = await client.query(
