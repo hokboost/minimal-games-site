@@ -52,25 +52,43 @@ class Actor {
     }
     async request(path, options = {}) {
         const url = new URL(path, baseUrl);
+        const depth = options._depth || 0;
         const res = await fetch(url, {
             redirect: 'manual',
             ...options,
             headers: { ...(options.headers || {}), ...this.cookieHeader() }
         });
         this.setCookie(res);
+
+        const status = res.status;
+        const location = res.headers.get('location');
+        const shouldFollow = [301, 302, 303, 307, 308].includes(status) && location && depth < 3;
+        if (shouldFollow) {
+            const nextMethod = ['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase())
+                ? 'GET'
+                : options.method;
+            return this.request(location, { ...options, method: nextMethod, _depth: depth + 1 });
+        }
+
         return res;
     }
     async login() {
         const lp = await this.request('/login');
-        const csrf = (await lp.text()).match(/name="_csrf" value="([^"]+)"/)?.[1];
-        if (!csrf) throw new Error('login csrf missing');
+        const loginHtml = await lp.text();
+        const csrfLogin = loginHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
+        if (!csrfLogin) throw new Error('login csrf missing');
+
         await this.request('/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ username: this.username, password: this.password, _csrf: csrf }).toString()
+            body: new URLSearchParams({ username: this.username, password: this.password, _csrf: csrfLogin }).toString()
         });
+
         const qp = await this.request('/quiz');
-        this.csrf = (await qp.text()).match(/data-csrf-token="([^"]+)"/)?.[1];
+        const quizHtml = await qp.text();
+        this.csrf = quizHtml.match(/data-csrf-token="([^"]+)"/)?.[1]
+            || quizHtml.match(/name="csrfToken" value="([^"]+)"/)?.[1]
+            || quizHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
         if (!this.csrf) throw new Error('quiz csrf missing');
     }
 }

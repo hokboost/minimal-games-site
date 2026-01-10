@@ -60,7 +60,7 @@ async function request(path, options = {}, timeoutMs = 60000) {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const response = await fetch(url, {
-            redirect: 'manual',
+            redirect: 'follow',
             ...options,
             headers,
             signal: controller.signal

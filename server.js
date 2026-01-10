@@ -1616,6 +1616,7 @@ function requireApiKey(req, res, next) {
     const validApiKey = process.env.WINDOWS_API_KEY || 'INVALID_DEFAULT_KEY';
     const ipWhitelist = process.env.GIFT_TASKS_IP_WHITELIST || '';
     const hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || '';
+    const MAX_NONCE_CACHE_SIZE = 10000;
     const clientIpRaw = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for']?.split(',')[0] || '';
     const clientIp = clientIpRaw.startsWith('::ffff:') ? clientIpRaw.slice(7) : clientIpRaw;
     
@@ -1692,6 +1693,12 @@ function requireApiKey(req, res, next) {
     }
 
     const nonceCache = requireApiKey.nonceCache;
+    if (nonceCache.size > MAX_NONCE_CACHE_SIZE) {
+        return res.status(429).json({
+            success: false,
+            message: '请求过于频繁'
+        });
+    }
     if (nonceCache.has(nonceHeader)) {
         return res.status(401).json({
             success: false,

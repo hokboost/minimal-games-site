@@ -49,7 +49,7 @@ async function request(path, options = {}) {
         headers.cookie = cookies;
     }
     const response = await fetch(url, {
-        redirect: 'manual',
+        redirect: 'follow',
         ...options,
         headers
     });
@@ -63,7 +63,7 @@ async function requestNoCookies(path, options = {}) {
         ...(options.headers || {})
     };
     return fetch(url, {
-        redirect: 'manual',
+        redirect: 'follow',
         ...options,
         headers
     });

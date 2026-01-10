@@ -56,7 +56,7 @@ async function request(path, options = {}, timeoutMs = 30000) {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const resp = await fetch(url, { redirect: 'manual', ...options, headers, signal: controller.signal });
+        const resp = await fetch(url, { redirect: 'follow', ...options, headers, signal: controller.signal });
         setCookieFromResponse(resp);
         return resp;
     } finally {

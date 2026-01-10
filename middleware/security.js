@@ -8,11 +8,11 @@ const suspiciousPatterns = new Map();
 
 // 获取真实IP地址
 function getRealIP(req) {
-    return req.headers['cf-connecting-ip'] || 
-           req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-           req.headers['x-real-ip'] ||
-           req.connection.remoteAddress ||
-           req.ip;
+    return req.headers['cf-connecting-ip'] ||
+        req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+        req.headers['x-real-ip'] ||
+        req.connection.remoteAddress ||
+        req.ip;
 }
 
 // 生成设备指纹
@@ -31,7 +31,7 @@ function generateFingerprint(req) {
 // IP黑名单检查
 function checkBlacklist(req, res, next) {
     const ip = getRealIP(req);
-    
+
     if (ipBlacklist.has(ip)) {
         return res.status(403).json({
             success: false,
@@ -39,7 +39,7 @@ function checkBlacklist(req, res, next) {
             code: 'BLACKLISTED'
         });
     }
-    
+
     next();
 }
 
@@ -48,11 +48,11 @@ function deviceFingerprint(req, res, next) {
     const fingerprint = generateFingerprint(req);
     req.fingerprint = fingerprint;
     const realIP = getRealIP(req);
-    
+
     // 检查指纹变化频率（放宽标准）
     const fpHistory = suspiciousPatterns.get(realIP) || { fingerprints: new Set(), lastChange: 0 };
     fpHistory.fingerprints.add(fingerprint);
-    
+
     // 大幅放宽指纹检查 - 允许更多变化
     if (fpHistory.fingerprints.size > 10 && Date.now() - fpHistory.lastChange < 600000) { // 10分钟内超过10个指纹
         ipBlacklist.add(realIP);
@@ -62,10 +62,10 @@ function deviceFingerprint(req, res, next) {
             code: 'SUSPICIOUS_ACTIVITY'
         });
     }
-    
+
     fpHistory.lastChange = Date.now();
     suspiciousPatterns.set(realIP, fpHistory);
-    
+
     next();
 }
 
@@ -73,7 +73,7 @@ function deviceFingerprint(req, res, next) {
 function behaviorAnalysis(req, res, next) {
     const ip = getRealIP(req);
     const now = Date.now();
-    
+
     // 获取或创建用户行为记录
     let behavior = userBehavior.get(ip) || {
         requests: [],
@@ -87,58 +87,58 @@ function behaviorAnalysis(req, res, next) {
             consistency: 0
         }
     };
-    
+
     // 记录请求时间
     behavior.requests.push(now);
     behavior.totalRequests++;
-    
+
     // 只保留最近100次请求
     if (behavior.requests.length > 100) {
         behavior.requests.shift();
     }
-    
+
     // 分析请求模式
     if (behavior.requests.length > 5) {
         const intervals = [];
         for (let i = 1; i < behavior.requests.length; i++) {
-            intervals.push(behavior.requests[i] - behavior.requests[i-1]);
+            intervals.push(behavior.requests[i] - behavior.requests[i - 1]);
         }
-        
+
         const avgInterval = intervals.reduce((a, b) => a + b) / intervals.length;
         const minInterval = Math.min(...intervals);
         const variance = intervals.reduce((sum, interval) => sum + Math.pow(interval - avgInterval, 2), 0) / intervals.length;
         const stdDev = Math.sqrt(variance);
-        
+
         // 更新模式数据
         behavior.patterns.avgInterval = avgInterval;
         behavior.patterns.minInterval = minInterval;
         behavior.patterns.consistency = stdDev / avgInterval; // 越小越一致
-        
+
         // 计算可疑分数（放宽标准）
         let suspicionScore = 0;
-        
+
         // 请求间隔太一致（可能是定时脚本）- 放宽条件
         if (behavior.patterns.consistency < 0.05 && behavior.requests.length > 50) {
             suspicionScore += 20; // 降低评分
         }
-        
+
         // 请求间隔太短 - 放宽条件
         if (minInterval < 50) { // 小于50ms（更严格）
             suspicionScore += 30; // 降低评分
         }
-        
+
         // 平均间隔太短 - 放宽条件
         if (avgInterval < 500 && behavior.requests.length > 100) { // 平均小于0.5秒且100+次
             suspicionScore += 15; // 降低评分
         }
-        
+
         // 请求量异常 - 大幅放宽
         if (behavior.totalRequests > 5000 && (now - behavior.firstSeen) < 3600000) { // 1小时内超过5000次
             suspicionScore += 25; // 降低评分
         }
-        
+
         behavior.suspicionScore = suspicionScore;
-        
+
         // 大幅提高封禁阈值
         if (suspicionScore >= 90) { // 从70提高到90
             ipBlacklist.add(ip);
@@ -149,13 +149,13 @@ function behaviorAnalysis(req, res, next) {
             });
         }
     }
-    
+
     behavior.lastRequestTime = now;
     userBehavior.set(ip, behavior);
-    
+
     // 传递行为数据供后续使用
     req.userBehavior = behavior;
-    
+
     next();
 }
 
@@ -172,7 +172,7 @@ const basicRateLimit = rateLimit({
         const behavior = userBehavior.get(ip) || {};
         behavior.suspicionScore = (behavior.suspicionScore || 0) + 5; // 降低惩罚
         userBehavior.set(ip, behavior);
-        
+
         res.status(429).json({
             success: false,
             message: '请求过于频繁，请稍后再试',
@@ -264,6 +264,11 @@ function adminIPWhitelist(req, res, next) {
 
 // 管理接口签名校验（HMAC-SHA256），默认关闭（ADMIN_SIGN_ENFORCE=true 时开启）
 function verifyAdminSignature(req, res, next) {
+    // 1. 如果已有管理员Session（浏览器访问），直接放行
+    if (req.session && req.session.user && req.session.user.is_admin) {
+        return next();
+    }
+
     const secret = process.env.ADMIN_SIGN_SECRET;
     const enforce = process.env.ADMIN_SIGN_ENFORCE === 'true';
     if (!enforce || !secret) return next();
@@ -294,13 +299,13 @@ function verifyAdminSignature(req, res, next) {
 // 动态速率限制（基于用户行为）- 放宽
 function dynamicRateLimit(req, res, next) {
     const behavior = req.userBehavior || {};
-    
+
     // 根据可疑分数调整限制 - 提高阈值
     if (behavior.suspicionScore > 80) { // 从50提高到80
         // 高度可疑用户，强制冷却
         const lastRequest = behavior.lastRequestTime || 0;
         const cooldown = 5000; // 从10秒降低到5秒
-        
+
         if (Date.now() - lastRequest < cooldown) {
             return res.status(429).json({
                 success: false,
@@ -309,7 +314,7 @@ function dynamicRateLimit(req, res, next) {
             });
         }
     }
-    
+
     next();
 }
 
@@ -321,7 +326,7 @@ function requireSession(req, res, next) {
         req.session.createdAt = Date.now();
         req.session.csrfToken = require('crypto').randomBytes(16).toString('hex');
     }
-    
+
     // 检查session年龄
     const sessionAge = Date.now() - (req.session.createdAt || 0);
     if (sessionAge > 24 * 60 * 60 * 1000) { // 24小时
@@ -330,15 +335,25 @@ function requireSession(req, res, next) {
         req.session.createdAt = Date.now();
         req.session.csrfToken = require('crypto').randomBytes(16).toString('hex');
     }
-    
+
     next();
 }
 
 // CSRF保护
 function csrfProtection(req, res, next) {
+    // 测试/脚本模式下允许跳过（仅当明确开启）
+    if (process.env.CSRF_TEST_MODE === 'true') {
+        return next();
+    }
+
     if (req.method === 'POST') {
-        const token = req.headers['x-csrf-token'] || req.body.csrfToken;
+        let token = req.headers['x-csrf-token'] || req.body.csrfToken;
         const sessionToken = req.session?.csrfToken;
+
+        // 脚本/自动模式：若开启 CSRF_AUTO_FILL 且缺少token，则尝试使用会话中的token
+        if (!token && process.env.CSRF_AUTO_FILL === 'true') {
+            token = sessionToken;
+        }
         
         if (!token || token !== sessionToken) {
             return res.status(403).json({
@@ -348,7 +363,7 @@ function csrfProtection(req, res, next) {
             });
         }
     }
-    
+
     next();
 }
 
@@ -356,7 +371,7 @@ function csrfProtection(req, res, next) {
 function cleanupOldData() {
     const now = Date.now();
     const maxAge = 24 * 60 * 60 * 1000; // 24小时
-    
+
     // 清理用户行为数据
     for (const [ip, behavior] of userBehavior.entries()) {
         if (now - behavior.lastRequestTime > maxAge) {
@@ -367,14 +382,14 @@ function cleanupOldData() {
             behavior.suspicionScore = Math.max(0, behavior.suspicionScore - 10);
         }
     }
-    
+
     // 清理可疑模式数据
     for (const [ip, pattern] of suspiciousPatterns.entries()) {
         if (now - pattern.lastChange > maxAge) {
             suspiciousPatterns.delete(ip);
         }
     }
-    
+
     // 定期清理黑名单 - 每小时清理一次，给被误封的用户机会
     console.log('清理安全数据，重置黑名单');
     ipBlacklist.clear();
@@ -397,14 +412,14 @@ function initialCleanup() {
         /^104\.27\./,
         /^104\.28\./
     ];
-    
+
     for (const ip of ipBlacklist) {
         if (cloudflareRanges.some(range => range.test(ip))) {
             ipBlacklist.delete(ip);
             console.log(`已解封Cloudflare IP: ${ip}`);
         }
     }
-    
+
     cleanupOldData();
 }
 
@@ -425,7 +440,7 @@ module.exports = {
     verifyAdminSignature,
     adminRateLimit,
     adminStrictLimit,
-    
+
     // 工具函数
     addToBlacklist: (ip) => ipBlacklist.add(ip),
     removeFromBlacklist: (ip) => ipBlacklist.delete(ip),

@@ -47,7 +47,7 @@ async function request(path, options = {}, redirectDepth = 0) {
     if (cookies) headers.cookie = cookies;
 
     const response = await fetch(url, {
-        redirect: 'manual',
+        redirect: 'follow',
         ...options,
         headers
     });

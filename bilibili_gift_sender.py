@@ -289,56 +289,60 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             except Exception as e:
                 safe_print(f"⚠️ [余额差计算] 获取发送前余额失败: {e}")
 
-            # 点击礼物
-            click_result = page.evaluate(f'''
-                () => {{
-                    const giftId = "{gift_id}";
-                    const selector = '.gift-id-' + giftId;
-                    const el = document.querySelector(selector);
-                    if (el) {{
-                        const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
-                        el.dispatchEvent(evt);
-                        return {{success: true, id: giftId}};
-                    }} else {{
-                        return {{success: false, id: giftId}};
-                    }}
-                }}
-            ''')
-            
-            if not click_result['success']:
-                safe_print(f"Gift {gift_id} not found")
-                return {"success": False, "error": "Gift element not found", "gift_id": gift_id, "room_id": room_id}
-            
             safe_print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
             
-            # ⚡ 带0.05秒延时的礼物发送，方便计数
-            successful_sends = 1  # 第一次点击已完成
-            if quantity > 1:
-                # 逐个发送剩余礼物，每次间隔0.05秒
-                for i in range(quantity - 1):
-                    time.sleep(0.05)  # 0.05秒延时，方便计数
-                    click_result = page.evaluate(f'''
-                        () => {{
-                            const giftId = "{gift_id}";
-                            const selector = '.gift-id-' + giftId;
-                            const el = document.querySelector(selector);
-                            if (el) {{
-                                const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
-                                el.dispatchEvent(evt);
-                                return true;
-                            }}
-                            return false;
+            # ⚡ 逐个点击发送，每次点击后短暂等待并检查余额，首次发现余额不足立即停止
+            successful_sends = 0
+            stopped_for_balance = False
+            for i in range(quantity):
+                click_result = page.evaluate(f'''
+                    () => {{
+                        const giftId = "{gift_id}";
+                        const selector = '.gift-id-' + giftId;
+                        const el = document.querySelector(selector);
+                        if (el) {{
+                            const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
+                            el.dispatchEvent(evt);
+                            return true;
                         }}
-                    ''')
-                    
-                    if click_result:
-                        successful_sends += 1
-                    else:
-                        safe_print(f"⚠️ 第{i+2}次点击失败，礼物元素不可用")
-                        break
-                
-                safe_print(f"⚡ 带延时发送: {successful_sends - 1}/{quantity - 1} 次额外点击成功")
-                safe_print(f"🎯 总计完成 {successful_sends}/{quantity} 个礼物发送")
+                        return false;
+                    }}
+                ''')
+
+                if not click_result:
+                    safe_print(f"⚠️ 第{i+1}次点击失败，礼物元素不可用")
+                    break
+
+                time.sleep(0.3)  # 每次点击间隔0.3秒，便于观察余额变化
+                if check_balance_insufficient(page):
+                    safe_print(f"🚫 余额不足，已发送 {successful_sends}/{quantity}，在第{i+1}次点击后停止")
+                    stopped_for_balance = True
+                    break
+
+                successful_sends += 1
+
+            safe_print(f"🎯 总计完成 {successful_sends}/{quantity} 个礼物发送")
+
+            # 如果已经检测到余额不足，直接返回失败并带上实际成功数
+            if stopped_for_balance:
+                after_balance = None
+                try:
+                    after_balance = get_current_balance(page)
+                    safe_print(f"💰 [余额差计算] 发送后余额: {after_balance}")
+                except Exception as e:
+                    safe_print(f"⚠️ [余额差计算] 获取发送后余额失败: {e}")
+
+                return {
+                    "success": False,
+                    "error": "insufficient_balance",
+                    "balance_insufficient": True,
+                    "gift_id": gift_id,
+                    "room_id": room_id,
+                    "requested_quantity": quantity,
+                    "actual_quantity": successful_sends,
+                    "partial_success": successful_sends > 0,
+                    "coins_spent": successful_sends * price
+                }
             
             # 使用threeserver的完整验证逻辑
             safe_print("Checking gift send result using threeserver validation logic...")
@@ -349,7 +353,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             balance_insufficient = result.get("reason") == "insufficient_balance"
             
             if balance_insufficient:
-                # ✅ [最小新增] 余额不足时用“余额差/单价”推断实际成功数量
+                # ✅ 用余额差/单价推断实际成功数量，兼容后续支持不同礼物价格
                 after_balance = None
                 try:
                     after_balance = get_current_balance(page)
@@ -357,24 +361,38 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 except Exception as e:
                     safe_print(f"⚠️ [余额差计算] 获取发送后余额失败: {e}")
 
-                sent = 0
+                sent = successful_sends
                 if before_balance is not None and after_balance is not None and price > 0:
                     delta = max(0, int(before_balance) - int(after_balance))
-                    sent = delta // price
-                    sent = min(sent, quantity)
+                    sent = min(quantity, delta // price)
 
-                # 余额不足时，无论点击了多少次都算失败
-                safe_print(f"❌ 余额不足失败: 尝试 {quantity} 个礼物，余额不足")
-                return {
-                    "success": False, 
-                    "error": "insufficient_balance", 
-                    "balance_insufficient": True,
-                    "gift_id": gift_id, 
-                    "room_id": room_id,
-                    "requested_quantity": quantity,
-                    "actual_quantity": sent,  # ✅ 只改这一行：从0 -> sent
-                    "partial_success": sent > 0  # ✅ 只改这一行：从False -> sent>0
-                }
+                # 余额不足：如果全部送完则算成功，否则部分成功并返回失败状态
+                if sent == quantity:
+                    safe_print(f"✅ 全部成功（余额用尽）: {sent}/{quantity} 个礼物发送成功")
+                    return {
+                        "success": True,
+                        "gift_id": gift_id,
+                        "room_id": room_id,
+                        "requested_quantity": quantity,
+                        "actual_quantity": sent,
+                        "verified": True,
+                        "message": "送礼成功（余额耗尽）",
+                        "partial_success": False,
+                        "coins_spent": sent * price
+                    }
+                else:
+                    safe_print(f"⚠️ 部分成功且余额不足: {sent}/{quantity} 个礼物发送成功")
+                    return {
+                        "success": False, 
+                        "error": "insufficient_balance", 
+                        "balance_insufficient": True,
+                        "gift_id": gift_id, 
+                        "room_id": room_id,
+                        "requested_quantity": quantity,
+                        "actual_quantity": sent,
+                        "partial_success": sent > 0,
+                        "coins_spent": sent * price
+                    }
             elif result["success"] or successful_sends > 0:
                 # 只有非余额不足的情况下才考虑部分成功
                 verified = "message" in result and result.get("reason") != "assumed_success"
@@ -393,7 +411,8 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                     "actual_quantity": successful_sends,
                     "verified": verified,
                     "message": result.get("message", "送礼成功"),
-                    "partial_success": is_partial
+                    "partial_success": is_partial,
+                    "coins_spent": successful_sends * price
                 }
             else:
                 error_msg = result.get("message", result.get("reason", "未知错误"))

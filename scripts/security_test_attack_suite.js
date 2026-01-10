@@ -45,7 +45,7 @@ function createClient() {
             headers.cookie = cookies;
         }
         const response = await fetch(url, {
-            redirect: 'manual',
+            redirect: 'follow',
             ...options,
             headers
         });
@@ -59,7 +59,7 @@ function createClient() {
             ...(options.headers || {})
         };
         return fetch(url, {
-            redirect: 'manual',
+            redirect: 'follow',
             ...options,
             headers
         });

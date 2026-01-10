@@ -284,11 +284,12 @@ class WindowsGiftListener {
     async markTaskComplete(taskId, resultData = {}) {
         try {
             const path = `/api/gift-tasks/${taskId}/complete`;
-            const payload = {
+            // ✅ 修复：清理 undefined 值，确保签名计算和 HTTP body 一致
+            const payload = cleanPayload({
                 actual_quantity: resultData.actualQuantity,
                 requested_quantity: resultData.requestedQuantity,
                 partial_success: resultData.partialSuccess
-            };
+            });
             const headers = this.buildSignedHeaders('POST', path, payload);
             const response = await axios.post(`${this.serverUrl}${path}`, payload, {
                 timeout: 5000,
@@ -308,14 +309,13 @@ class WindowsGiftListener {
     async markTaskFailed(taskId, errorMessage, result = {}) {
         try {
             const path = `/api/gift-tasks/${taskId}/fail`;
-            const payload = {
+            // ✅ 修复：清理 undefined 值，确保签名计算和 HTTP body 一致
+            const payload = cleanPayload({
                 error: errorMessage,
-
-                // ✅【新增】把 Python 的结果一并传给后端
                 actual_quantity: result.actual_quantity,
                 requested_quantity: result.requested_quantity,
                 partial_success: result.partial_success
-            };
+            });
             const headers = this.buildSignedHeaders('POST', path, payload);
             const response = await axios.post(`${this.serverUrl}${path}`, payload, {
                 timeout: 5000,
@@ -345,6 +345,20 @@ class WindowsGiftListener {
             'X-Signature': signature
         };
     }
+}
+
+// ✅ 清理对象中的 undefined/null 值，避免签名不匹配
+function cleanPayload(obj) {
+    if (!obj || typeof obj !== 'object') {
+        return obj;
+    }
+    const cleaned = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined && value !== null) {
+            cleaned[key] = value;
+        }
+    }
+    return cleaned;
 }
 
 function stableStringifyBody(body) {

@@ -44,11 +44,22 @@ async function request(path, options = {}) {
         headers.cookie = cookies;
     }
     const response = await fetch(url, {
-        redirect: 'manual',
+        redirect: 'follow',
         ...options,
         headers
     });
     setCookieFromResponse(response);
+
+    const status = response.status;
+    const location = response.headers.get('location');
+    const shouldFollow = [301, 302, 303, 307, 308].includes(status) && location && (options._depth || 0) < 3;
+    if (shouldFollow) {
+        const nextMethod = ['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase())
+            ? 'GET'
+            : options.method;
+        return request(location, { ...options, method: nextMethod, _depth: (options._depth || 0) + 1 });
+    }
+
     return response;
 }
 

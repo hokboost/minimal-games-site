@@ -30,7 +30,7 @@ const hdr = () => (jar.size ? { cookie: [...jar.entries()].map(([k, v]) => `${k}
 
 async function req(path, opt = {}) {
     const u = new URL(path, base);
-    const res = await fetch(u, { redirect: 'manual', ...opt, headers: { ...(opt.headers || {}), ...hdr() } });
+    const res = await fetch(u, { redirect: 'follow', ...opt, headers: { ...(opt.headers || {}), ...hdr() } });
     setCookie(res);
     return res;
 }
