@@ -1,6 +1,6 @@
 (() => {
-    const { username, csrfToken } = document.body.dataset;
-    const csrf = csrfToken || '';
+    const { username } = document.body.dataset;
+    let csrf = document.body.dataset.csrfToken || '';
     let currentQuestions = [];
     let currentAnswers = [];
     let questionIndex = 0;
@@ -25,6 +25,27 @@
         loadLeaderboard();
     });
 
+    async function refreshCsrf() {
+        try {
+            const resp = await fetch('/quiz', { credentials: 'same-origin' });
+            const html = await resp.text();
+            const match = html.match(/data-csrf-token="([^"]+)"/);
+            if (match && match[1]) {
+                csrf = match[1];
+            }
+        } catch (e) {
+            console.error('刷新CSRF失败:', e);
+        }
+    }
+
+    async function safeFetch(url, options = {}) {
+        const resp = await fetch(url, options);
+        if (resp.status === 401 || resp.status === 403) {
+            await refreshCsrf();
+        }
+        return resp;
+    }
+
     async function startQuiz() {
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
         if (currentBalance < 10) {
@@ -33,7 +54,7 @@
         }
 
         try {
-            const response = await fetch('/api/quiz/start', {
+            const response = await safeFetch('/api/quiz/start', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -91,7 +112,7 @@
         }
 
         try {
-            const response = await fetch('/api/quiz/next', {
+            const response = await safeFetch('/api/quiz/next', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -116,6 +137,9 @@
                 document.getElementById('progress').textContent = `题目 ${questionIndex + 1}/${totalQuestions}`;
             } else {
                 alert('获取题目失败: ' + data.message);
+                if (data.message && data.message.includes('先开始')) {
+                    await startQuiz();
+                }
             }
         } catch (error) {
             console.error('Error:', error);
@@ -173,7 +197,7 @@
 
     async function submitQuiz() {
         try {
-            const response = await fetch('/api/quiz/submit', {
+            const response = await safeFetch('/api/quiz/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -190,6 +214,9 @@
                 showResult(data.score, data.total, data.reward, data.newBalance);
             } else {
                 alert('提交失败: ' + data.message);
+                if (data.message && data.message.includes('请先开始')) {
+                    await startQuiz();
+                }
             }
         } catch (error) {
             console.error('Error:', error);

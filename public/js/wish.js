@@ -1,4 +1,4 @@
-        const csrfToken = document.body.dataset.csrfToken || '';
+        let csrfToken = document.body.dataset.csrfToken || '';
         let wishProgress = { total_wishes: 0, consecutive_fails: 0, total_spent: 0, total_rewards_value: 0 };
         const canWishTest = document.body.dataset.canTest === 'true';
 
@@ -53,6 +53,19 @@
             await loadWishProgress();
         }
 
+        async function refreshCsrf() {
+            try {
+                const resp = await fetch('/wish', { credentials: 'same-origin' });
+                const html = await resp.text();
+                const match = html.match(/data-csrf-token="([^"]+)"/);
+                if (match && match[1]) {
+                    csrfToken = match[1];
+                }
+            } catch (e) {
+                console.error('刷新CSRF失败:', e);
+            }
+        }
+
         async function makeWish(giftType, count) {
             setCurrentGift(giftType);
             const config = giftConfigs[giftType];
@@ -68,6 +81,9 @@
             buttons.forEach(btn => btn.disabled = true);
             
             try {
+                if (!csrfToken) {
+                    await refreshCsrf();
+                }
                 const response = await fetch(count === 10 ? '/api/wish-batch' : '/api/wish/play', {
                     method: 'POST',
                     headers: {
@@ -79,6 +95,12 @@
                         batchCount: count === 10 ? 10 : undefined
                     })
                 });
+                
+                if (response.status === 401 || response.status === 403) {
+                    await refreshCsrf();
+                    alert('登录状态失效或令牌过期，请刷新后重试');
+                    return;
+                }
                 
                 const result = await response.json();
                 
