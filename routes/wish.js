@@ -11,6 +11,10 @@ module.exports = function registerWishRoutes(app, deps) {
         broadcastDanmaku,
         enqueueWishInventorySend
     } = deps;
+    // 兜底，防止 security 中未提供特定中间件时报 undefined
+    const userActionRateLimit = security.userActionRateLimit || ((req, res, next) => next());
+    const basicRateLimit = security.basicRateLimit || ((req, res, next) => next());
+    const csrfProtection = security.csrfProtection || ((req, res, next) => next());
     const { randomInt, randomBytes } = require('crypto');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
     const rejectWhenOverloaded = (req, res, next) => {
@@ -22,7 +26,7 @@ module.exports = function registerWishRoutes(app, deps) {
     const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/statement timeout, deadlock, serialization
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    app.get('/wish', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
+    app.get('/wish', requireLogin, requireAuthorized, basicRateLimit, (req, res) => {
         // 初始化session
         if (!req.session.initialized) {
             req.session.initialized = true;
@@ -60,9 +64,9 @@ module.exports = function registerWishRoutes(app, deps) {
         rejectWhenOverloaded,
         requireLogin,
         requireAuthorized,
-        security.basicRateLimit,
-        security.userActionRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        userActionRateLimit,
+        csrfProtection,
         async (req, res) => {
         const username = req.session.user.username;
         const giftType = req.body.giftType || 'deepsea_singer';
@@ -428,9 +432,9 @@ module.exports = function registerWishRoutes(app, deps) {
     app.post('/api/wish/backpack/send',
         requireLogin,
         requireAuthorized,
-        security.basicRateLimit,
-        security.userActionRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        userActionRateLimit,
+        csrfProtection,
         async (req, res) => {
         try {
             const username = req.session.user.username;
@@ -454,8 +458,8 @@ module.exports = function registerWishRoutes(app, deps) {
 
     // Wish API 路由
     app.post('/api/wish',
-        security.basicRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        csrfProtection,
         (req, res) => {
         try {
             const { currentCount = 0, username } = req.body;
@@ -483,9 +487,9 @@ module.exports = function registerWishRoutes(app, deps) {
         rejectWhenOverloaded,
         requireLogin,
         requireAuthorized,
-        security.basicRateLimit,
-        security.userActionRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        userActionRateLimit,
+        csrfProtection,
         async (req, res) => {
         const username = req.session.user.username;
         const batchCount = Number(req.body.batchCount || 10);
@@ -783,8 +787,8 @@ module.exports = function registerWishRoutes(app, deps) {
     app.post('/api/wish/simulate',
         requireLogin,
         requireAuthorized,
-        security.basicRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        csrfProtection,
         async (req, res) => {
         try {
             const username = req.session.user.username;

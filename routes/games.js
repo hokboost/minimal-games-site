@@ -29,6 +29,10 @@ module.exports = function registerGameRoutes(app, deps) {
     duelRewards,
     calculateDuelCost
 } = deps;
+    // 兜底，防止 security 中未提供特定中间件时报 undefined
+    const userActionRateLimit = security.userActionRateLimit || ((req, res, next) => next());
+    const basicRateLimit = security.basicRateLimit || ((req, res, next) => next());
+    const csrfProtection = security.csrfProtection || ((req, res, next) => next());
     const { randomInt, randomBytes } = require('crypto');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
 
@@ -40,7 +44,7 @@ module.exports = function registerGameRoutes(app, deps) {
         return next();
     };
 
-    app.get('/quiz', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/quiz', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         // 初始化session
         if (!req.session.initialized) {
             req.session.initialized = true;
@@ -71,7 +75,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // Quiz 开始游戏 API - 扣除电币 + 创建付费会话
-    app.post('/api/quiz/start', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.post('/api/quiz/start', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
 
@@ -124,7 +128,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.get('/slot', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/slot', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             // 初始化session
             if (!req.session.initialized) {
@@ -154,7 +158,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.get('/scratch', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/scratch', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             // 初始化session
             if (!req.session.initialized) {
@@ -184,7 +188,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.get('/spin', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
+    app.get('/spin', requireLogin, requireAuthorized, basicRateLimit, (req, res) => {
         // 初始化session
         if (!req.session.initialized) {
             req.session.initialized = true;
@@ -200,7 +204,7 @@ module.exports = function registerGameRoutes(app, deps) {
         });
     });
 
-    app.get('/stone', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/stone', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             if (!req.session.initialized) {
                 req.session.initialized = true;
@@ -227,7 +231,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.get('/flip', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/flip', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             if (!req.session.initialized) {
                 req.session.initialized = true;
@@ -254,7 +258,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.get('/duel', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/duel', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             if (!req.session.initialized) {
                 req.session.initialized = true;
@@ -282,7 +286,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // Quiz API 路由
-    app.get('/api/user-info', security.basicRateLimit, (req, res) => {
+    app.get('/api/user-info', basicRateLimit, (req, res) => {
         const username = generateUsername();
         res.json({ success: true, username });
     });
@@ -290,8 +294,8 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/quiz/next',
         requireLogin,
         requireAuthorized,
-        security.basicRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        csrfProtection,
         (req, res) => {
         try {
             const { username: requestUsername, seen = [], questionIndex = 0 } = req.body;
@@ -367,8 +371,8 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/quiz/submit',
         requireLogin,
         requireAuthorized,
-        security.basicRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        csrfProtection,
         async (req, res) => {
         try {
             const { username, answers = [] } = req.body;
@@ -586,7 +590,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
 
-    app.post('/api/slot/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/slot/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -732,7 +736,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
     // Scratch 刮刮乐游戏API
     // Scratch 刮刮乐游戏API
-    app.post('/api/scratch/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/scratch/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -907,7 +911,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // 合石头 Stone 游戏API
-    app.get('/api/stone/state', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/api/stone/state', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             const username = req.session.user.username;
             const slots = await getStoneState(username);
@@ -931,7 +935,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -997,7 +1001,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1065,7 +1069,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1145,7 +1149,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/redeem', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/redeem', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1227,7 +1231,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // 翻卡牌
-    app.get('/api/flip/state', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+    app.get('/api/flip/state', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             const username = req.session.user.username;
             const state = await getFlipState(username);
@@ -1256,7 +1260,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1340,7 +1344,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1493,7 +1497,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1568,7 +1572,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // 决斗挑战 Duel 游戏API
-    app.post('/api/duel/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/duel/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1682,8 +1686,8 @@ module.exports = function registerGameRoutes(app, deps) {
 
     // Spin API 路由
     app.post('/api/spin',
-        security.basicRateLimit,
-        security.csrfProtection,
+        basicRateLimit,
+        csrfProtection,
         (req, res) => {
         try {
             const result = GameLogic.spin.spin();
