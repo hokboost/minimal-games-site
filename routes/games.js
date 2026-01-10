@@ -922,15 +922,16 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            await client.query('BEGIN');
-
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            if (!lock.rows[0].locked) {
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
+            }
             const username = req.session.user.username;
             const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             const emptyIndex = slots.findIndex((slot) => !slot);
             if (emptyIndex === -1) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位已满' });
             }
 
@@ -946,7 +947,6 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
             if (!balanceResult.success) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
@@ -960,15 +960,12 @@ module.exports = function registerGameRoutes(app, deps) {
                 afterSlots: slots
             }, client);
 
-            await client.query('COMMIT');
-
             res.json({
                 success: true,
                 slots,
                 newBalance: balanceResult.balance
             });
         } catch (error) {
-            await client.query('ROLLBACK');
             console.error('Stone add error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
@@ -979,14 +976,15 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            await client.query('BEGIN');
-
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            if (!lock.rows[0].locked) {
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
+            }
             const username = req.session.user.username;
             const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             if (slots.every((slot) => slot)) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位已满' });
             }
 
@@ -1005,7 +1003,6 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
             if (!balanceResult.success) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
@@ -1019,15 +1016,12 @@ module.exports = function registerGameRoutes(app, deps) {
                 afterSlots: newSlots
             }, client);
 
-            await client.query('COMMIT');
-
             res.json({
                 success: true,
                 slots: newSlots,
                 newBalance: balanceResult.balance
             });
         } catch (error) {
-            await client.query('ROLLBACK');
             console.error('Stone fill error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
@@ -1038,20 +1032,20 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            await client.query('BEGIN');
-
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            if (!lock.rows[0].locked) {
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
+            }
             const username = req.session.user.username;
             const index = Number(req.body.index);
             const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             if (!Number.isInteger(index) || index < 0 || index >= slots.length) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位索引无效' });
             }
 
             if (!slots.every((slot) => slot)) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位未满' });
             }
 
@@ -1074,7 +1068,6 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
             if (!balanceResult.success) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
@@ -1090,15 +1083,12 @@ module.exports = function registerGameRoutes(app, deps) {
                 afterSlots: newSlots
             }, client);
 
-            await client.query('COMMIT');
-
             res.json({
                 success: true,
                 slots: newSlots,
                 newBalance: balanceResult.balance
             });
         } catch (error) {
-            await client.query('ROLLBACK');
             console.error('Stone replace error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
@@ -1109,14 +1099,15 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/stone/redeem', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            await client.query('BEGIN');
-
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            if (!lock.rows[0].locked) {
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
+            }
             const username = req.session.user.username;
             const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             if (!slots.every((slot) => slot)) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位未满' });
             }
 
@@ -1161,8 +1152,6 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance = balanceResult.rows.length > 0 ? balanceResult.rows[0].balance : 0;
             }
 
-            await client.query('COMMIT');
-
             res.json({
                 success: true,
                 slots: newSlots,
@@ -1170,7 +1159,6 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
-            await client.query('ROLLBACK');
             console.error('Stone redeem error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
@@ -1211,8 +1199,10 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            await client.query('BEGIN');
-
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            if (!lock.rows[0].locked) {
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
+            }
             const username = req.session.user.username;
             const previousState = await getFlipState(username, client);
             const flips = previousState.good_count + previousState.bad_count;
@@ -1238,7 +1228,6 @@ module.exports = function registerGameRoutes(app, deps) {
                     });
 
                     if (!rewardResult.success) {
-                        await client.query('ROLLBACK');
                         return res.status(400).json({ success: false, message: rewardResult.message });
                     }
                     newBalance = rewardResult.balance;
@@ -1264,8 +1253,6 @@ module.exports = function registerGameRoutes(app, deps) {
             };
             await saveFlipState(username, state, client);
 
-            await client.query('COMMIT');
-
             res.json({
                 success: true,
                 nextCost: flipCosts[0],
@@ -1275,7 +1262,6 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
-            await client.query('ROLLBACK');
             console.error('Flip start error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
@@ -1286,20 +1272,20 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            await client.query('BEGIN');
-
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            if (!lock.rows[0].locked) {
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
+            }
             const username = req.session.user.username;
             const cardIndex = Number(req.body.cardIndex);
 
             if (!Number.isInteger(cardIndex) || cardIndex < 0 || cardIndex > 8) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '卡牌索引无效' });
             }
 
             const state = await getFlipState(username, client);
             const flips = state.good_count + state.bad_count;
             if (state.ended || flips >= flipCosts.length) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '本轮已结束' });
             }
 
@@ -1316,23 +1302,19 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
             if (!balanceResult.success) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
             if (!Array.isArray(state.board) || !Array.isArray(state.flipped)) {
-                await client.query('ROLLBACK');
                 return res.status(500).json({ success: false, message: '翻牌数据异常，请重试' });
             }
 
             const boardSize = state.board.length;
             if (cardIndex >= boardSize) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '卡牌索引无效' });
             }
 
             if (state.flipped[cardIndex]) {
-                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '该卡牌已翻开' });
             }
 
@@ -1388,7 +1370,6 @@ module.exports = function registerGameRoutes(app, deps) {
                 });
 
                 if (!rewardResult.success) {
-                    await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: rewardResult.message });
                 }
                 rewardBalance = rewardResult.balance;
@@ -1406,8 +1387,6 @@ module.exports = function registerGameRoutes(app, deps) {
                 }, client);
             }
 
-            await client.query('COMMIT');
-
             res.json({
                 success: true,
                 cardIndex,
@@ -1419,7 +1398,6 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance: rewardBalance
             });
         } catch (error) {
-            await client.query('ROLLBACK');
             console.error('Flip card error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
@@ -1430,7 +1408,10 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
-            await client.query('BEGIN');
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            if (!lock.rows[0].locked) {
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
+            }
 
             const username = req.session.user.username;
             const state = await getFlipState(username, client);
@@ -1475,15 +1456,12 @@ module.exports = function registerGameRoutes(app, deps) {
                 ended: true
             }, client);
 
-            await client.query('COMMIT');
-
             res.json({
                 success: true,
                 reward,
                 newBalance: rewardResult.balance
             });
         } catch (error) {
-            await client.query('ROLLBACK');
             console.error('Flip cashout error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {

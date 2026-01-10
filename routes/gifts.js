@@ -147,12 +147,11 @@ module.exports = function registerGiftRoutes(app, deps) {
             try {
                 console.log('🔍 [DEBUG] 开始事务');
                 await client.query('BEGIN');
-                await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
                 // 1. 锁定用户行并检查余额
                 console.log(`🔍 [DEBUG] 查询用户 ${username} 的余额和房间号`);
                 const lockResult = await client.query(
-                    'SELECT balance, bilibili_room_id FROM users WHERE username = $1 FOR UPDATE',
+                    'SELECT balance, bilibili_room_id FROM users WHERE username = $1',
                     [username]
                 );
                 console.log('🔍 [DEBUG] 数据库查询结果:', lockResult.rows);
@@ -407,7 +406,6 @@ module.exports = function registerGiftRoutes(app, deps) {
                         WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
                         ORDER BY created_at ASC 
                         LIMIT 10
-                        FOR UPDATE SKIP LOCKED
                     )
                     RETURNING id, gift_type, bilibili_room_id, username, gift_name, quantity, created_at
                 `);
@@ -422,7 +420,6 @@ module.exports = function registerGiftRoutes(app, deps) {
                             WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
                             ORDER BY created_at ASC 
                             LIMIT 10
-                            FOR UPDATE SKIP LOCKED
                         )
                         RETURNING id, gift_type, bilibili_room_id, username, gift_name, created_at
                     `);

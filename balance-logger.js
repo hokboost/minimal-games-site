@@ -75,7 +75,7 @@ class BalanceLogger {
         managedTransaction = false
     }) {
         const client = externalClient || await pool.connect();
-        const manageTx = !managedTransaction;
+        const manageTx = false; // 按要求去掉事务/锁控制，使用单语句更新
         const maxAttempts = 3;
         const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/stmt timeout, deadlock, serialization
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -83,11 +83,7 @@ class BalanceLogger {
         try {
             for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
                 try {
-                    if (manageTx) {
-                        await client.query('BEGIN');
-                        await client.query(`SET LOCAL lock_timeout = '8s'; SET LOCAL statement_timeout = '12s';`);
-                    }
-                    
+                    // 不再显式开启事务或设置锁/超时，缩短占用时间
                     // 单语句更新，避免显式行锁等待
                     let updateResult;
                     if (requireSufficientBalance && amount < 0) {
