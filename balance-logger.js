@@ -143,9 +143,8 @@ class BalanceLogger {
                     };
                     
                 } catch (error) {
-                    if (manageTx) {
-                        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-                    }
+                    // 确保异常后事务被回滚，避免后续查询遇到 25P02
+                    try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
                     const isLockTimeout = lockErrorCodes.has(error.code);
                     if (isLockTimeout && attempt < maxAttempts) {
                         // 轻量重试，缓解偶发锁等待
