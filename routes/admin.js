@@ -1070,7 +1070,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取活跃会话列表
-    app.get('/api/admin/sessions', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
+    app.get('/api/admin/sessions', requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, async (req, res) => {
         try {
             const stats = await SessionManager.getSessionStats();
 
