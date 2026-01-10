@@ -498,6 +498,24 @@ module.exports = function registerWishRoutes(app, deps) {
                     return res.status(400).json({ success: false, message: '余额不足，无法进行10次祈愿' });
                 }
 
+                // 一次性扣除十连总费用，避免循环中反复持锁
+                const totalBetResult = await BalanceLogger.updateBalance({
+                    username,
+                    amount: -totalCost,
+                    operationType: 'wish_bet_batch',
+                    description: `十连祈愿扣费：${totalCost} 电币`,
+                    ipAddress: req.ip,
+                    userAgent: req.get('User-Agent'),
+                    client,
+                    managedTransaction: true
+                });
+                if (!totalBetResult.success) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ success: false, message: totalBetResult.message });
+                }
+                const startingBalance = currentBalance;
+                let balanceAfter = totalBetResult.balance;
+
                 // 获取用户当前祈愿进度（加锁）
                 let progressResult = await client.query(
                     'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
@@ -518,34 +536,9 @@ module.exports = function registerWishRoutes(app, deps) {
 
                 let progress = progressResult.rows[0];
                 let successCount = 0;
-                let balanceAfter = currentBalance;
-
-                let retryBet = false;
                 for (let i = 0; i < batchCount; i++) {
-                    // 扣除祈愿费用
-                    const betResult = await BalanceLogger.updateBalance({
-                        username: username,
-                        amount: -wishCost,
-                        operationType: 'wish_bet',
-                        description: `幸运祈愿：${wishCost} 电币`,
-                        ipAddress: req.ip,
-                        userAgent: req.get('User-Agent'),
-                        client,
-                        managedTransaction: true
-                    });
-
-                    if (!betResult.success) {
-                        const shouldRetry = betResult.message && betResult.message.includes('系统繁忙');
-                        if (shouldRetry && attempt < maxAttempts) {
-                            retryBet = true;
-                            break;
-                        }
-                        await client.query('ROLLBACK');
-                        return res.status(400).json({ success: false, message: betResult.message });
-                    }
-
-                    const balanceBefore = betResult.balance + wishCost;
-                    balanceAfter = betResult.balance;
+                    const balanceBefore = startingBalance - (wishCost * i);
+                    const balanceAfterThis = balanceBefore - wishCost;
 
                     // 判断是否成功
                     const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
@@ -627,7 +620,7 @@ module.exports = function registerWishRoutes(app, deps) {
                             reward,
                             success ? rewardValue : null,
                             balanceBefore,
-                            balanceAfter,
+                            balanceAfterThis,
                             newTotalWishes,
                             isGuaranteed,
                             JSON.stringify({
@@ -654,14 +647,6 @@ module.exports = function registerWishRoutes(app, deps) {
                         total_rewards_value: newTotalRewardsValue,
                         last_success_at: success ? new Date() : progress.last_success_at
                     };
-                }
-
-                if (retryBet) {
-                    await client.query('ROLLBACK');
-                    client.release();
-                    client = null;
-                    await sleep(150);
-                    continue;
                 }
 
                 // 记录祈愿会话（十连）
