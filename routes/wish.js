@@ -74,11 +74,12 @@ module.exports = function registerWishRoutes(app, deps) {
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             const client = await pool.connect();
             try {
+                await client.query('BEGIN');
                 const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':wish\')) AS locked', [username]);
                 if (!lock.rows[0].locked) {
+                    await client.query('ROLLBACK');
                     return res.status(429).json({ success: false, message: '祈愿过于频繁，请稍后重试' });
                 }
-                await client.query('BEGIN');
 
                 // 锁定祈愿进度
                 let progressResult = await client.query(
@@ -483,10 +484,6 @@ module.exports = function registerWishRoutes(app, deps) {
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             let client;
             try {
-                const preLock = await pool.query('SELECT pg_try_advisory_lock(hashtext($1 || \':wish\')) AS locked', [username]);
-                if (!preLock.rows[0].locked) {
-                    return res.status(429).json({ success: false, message: '祈愿过于频繁，请稍后重试' });
-                }
                 // 先用独立事务一次性扣款，避免长事务占用 users 行锁
                 const totalCost = wishCost * batchCount;
                 const totalBetResult = await BalanceLogger.updateBalance({
