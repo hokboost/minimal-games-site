@@ -1227,7 +1227,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 安全监控面板 - 修复后：使用统一的session权限体系
-    app.get('/admin/security', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, (req, res) => {
+    app.get('/admin/security', requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, (req, res) => {
         // 收集安全统计信息
         const blacklist = security.getBlacklist();
         const behaviorStats = [];
