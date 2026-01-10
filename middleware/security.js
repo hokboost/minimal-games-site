@@ -220,6 +220,31 @@ const adminRateLimit = rateLimit({
     legacyHeaders: false
 });
 
+// 简单的管理员严格限流（内存计数，叠加 rateLimit，防止 miss）
+const adminStrictLimit = (() => {
+    const windowMs = 60 * 1000;
+    const max = 12;
+    const hits = new Map();
+    return (req, res, next) => {
+        const key = req.session?.user?.username || getRealIP(req);
+        const now = Date.now();
+        const entry = hits.get(key) || { count: 0, start: now };
+        if (now - entry.start > windowMs) {
+            entry.count = 0;
+            entry.start = now;
+        }
+        entry.count += 1;
+        hits.set(key, entry);
+        if (entry.count > max) {
+            return res.status(429).json({
+                success: false,
+                message: '管理员操作过于频繁，请稍后再试'
+            });
+        }
+        return next();
+    };
+})();
+
 // 管理接口 IP 白名单（通过 env 配置，逗号分隔），未配置则不拦截
 function adminIPWhitelist(req, res, next) {
     const whitelist = (process.env.ADMIN_IP_WHITELIST || '').split(',').map((ip) => ip.trim()).filter(Boolean);
@@ -399,6 +424,8 @@ module.exports = {
     generateFingerprint,
     adminIPWhitelist,
     verifyAdminSignature,
+    adminRateLimit,
+    adminStrictLimit,
     
     // 工具函数
     addToBlacklist: (ip) => ipBlacklist.add(ip),

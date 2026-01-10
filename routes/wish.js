@@ -625,40 +625,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     ]);
 
                     // 保存祈愿记录
-                    try {
-                        const crypto = require('crypto');
-                        const proof = crypto.createHash('sha256')
-                            .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                            .digest('hex');
 
-                        await client.query(`
-                            INSERT INTO wish_results (
-                                username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
-                                wishes_count, is_guaranteed, game_details, created_at
-                            ) 
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
-                        `, [
-                            username,
-                            giftType,
-                            wishCost,
-                            success,
-                            reward,
-                            success ? rewardValue : null,
-                            balanceBefore,
-                            balanceAfterThis,
-                            newTotalWishes,
-                            isGuaranteed,
-                            JSON.stringify({
-                                success_rate: successRate,
-                                is_guaranteed: isGuaranteed,
-                                consecutive_fails_before: progress.consecutive_fails,
-                                proof: proof,
-                                timestamp: new Date().toISOString()
-                            })
-                        ]);
-                    } catch (dbError) {
-                        console.error('祈愿记录存储失败:', dbError);
-                    }
 
                     if (success) {
                         successCount += 1;
