@@ -50,6 +50,8 @@ module.exports = function registerGiftRoutes(app, deps) {
         // ✅ FIX: 事务内拿到的值需要在事务外继续用
         let currentBalance;
         let bilibiliRoomId;
+        let existingExchange = null;
+        const idempotencyKey = req.body?.idempotencyKey || req.body?.idempotency_key || null;
 
         try {
             const { giftType, cost, quantity = 1 } = req.body;
@@ -129,6 +131,7 @@ module.exports = function registerGiftRoutes(app, deps) {
             try {
                 console.log('🔍 [DEBUG] 开始事务');
                 await client.query('BEGIN');
+                await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
                 // 1. 锁定用户行并检查余额
                 console.log(`🔍 [DEBUG] 查询用户 ${username} 的余额和房间号`);
@@ -158,6 +161,33 @@ module.exports = function registerGiftRoutes(app, deps) {
                 }
                 console.log('✅ [DEBUG] 余额检查通过');
 
+                // 2.1 幂等检查（如果表支持 idempotency_key）
+                if (idempotencyKey) {
+                    try {
+                        const idemResult = await client.query(
+                            'SELECT id, delivery_status, status FROM gift_exchanges WHERE username = $1 AND idempotency_key = $2 LIMIT 1',
+                            [username, idempotencyKey]
+                        );
+                        if (idemResult.rows.length > 0) {
+                            existingExchange = idemResult.rows[0];
+                            await client.query('ROLLBACK');
+                            return res.json({
+                                success: true,
+                                message: '重复请求，返回已有结果',
+                                exchangeId: existingExchange.id,
+                                deliveryStatus: existingExchange.delivery_status,
+                                status: existingExchange.status,
+                                newBalance: currentBalance - costNum
+                            });
+                        }
+                    } catch (idemError) {
+                        if (idemError.code !== '42703') {
+                            throw idemError;
+                        }
+                        console.log('⚠️ idempotency_key 字段不存在，跳过幂等检查');
+                    }
+                }
+
                 // 2. 检查是否有pending的任务（防止重复兑换）
                 console.log('🔍 [DEBUG] 检查是否有pending任务');
                 const pendingResult = await client.query(
@@ -174,24 +204,48 @@ module.exports = function registerGiftRoutes(app, deps) {
 
                 // 3. 立即锁住资金（从余额中扣除，但标记为frozen）
                 console.log(`🔍 [DEBUG] 扣除资金: ${costNum} 电币`); // ✅ FIX
-                await client.query(
-                    'UPDATE users SET balance = balance - $1 WHERE username = $2',
-                    [costNum, username] // ✅ FIX
-                );
+                const deductResult = await BalanceLogger.updateBalance({
+                    username,
+                    amount: -costNum,
+                    operationType: 'gift_exchange_lock',
+                    description: `兑换礼物预扣：${availableGifts[giftType].name} x${quantityNum}`,
+                    ipAddress: clientIP,
+                    userAgent,
+                    client,
+                    managedTransaction: true
+                });
+                if (!deductResult.success) {
+                    throw new Error(deductResult.message || '扣费失败');
+                }
                 console.log('✅ [DEBUG] 资金扣除完成');
 
                 // 4. 创建任务记录，标记资金已锁定
                 console.log('🔍 [DEBUG] 创建礼物兑换任务记录');
-                const insertParams = [username, giftType, availableGifts[giftType].name, costNum, quantityNum, bilibiliRoomId, 'pending'];
+                const insertParams = [username, giftType, availableGifts[giftType].name, costNum, quantityNum, bilibiliRoomId, 'pending', idempotencyKey];
                 console.log('🔍 [DEBUG] INSERT参数:', insertParams);
 
-                insertResult = await client.query(`
-                    INSERT INTO gift_exchanges (
-                        username, gift_type, gift_name, cost, quantity, status, created_at,
-                        bilibili_room_id, delivery_status
-                    ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7)
-                    RETURNING id
-                `, insertParams);
+                try {
+                    insertResult = await client.query(`
+                        INSERT INTO gift_exchanges (
+                            username, gift_type, gift_name, cost, quantity, status, created_at,
+                            bilibili_room_id, delivery_status, idempotency_key
+                        ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7, $8)
+                        RETURNING id
+                    `, insertParams);
+                } catch (insertError) {
+                    if (insertError.code === '42703') {
+                        console.log('⚠️ idempotency_key 字段不存在，回退到无幂等插入');
+                        insertResult = await client.query(`
+                            INSERT INTO gift_exchanges (
+                                username, gift_type, gift_name, cost, quantity, status, created_at,
+                                bilibili_room_id, delivery_status
+                            ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7)
+                            RETURNING id
+                        `, insertParams.slice(0, 7));
+                    } else {
+                        throw insertError;
+                    }
+                }
                 console.log('✅ [DEBUG] 任务记录创建成功:', insertResult.rows);
 
                 console.log('🔍 [DEBUG] 提交事务');
@@ -450,10 +504,13 @@ module.exports = function registerGiftRoutes(app, deps) {
                     console.log(`💰 资金处理: 锁定 ${cost} 电池，实际消费 ${actualCost} 电池，退还 ${refundAmount} 电池`);
 
                     // 退还多余的资金
-                    await pool.query(
-                        'UPDATE users SET balance = balance + $1 WHERE username = $2',
-                        [refundAmount, username]
-                    );
+                    await BalanceLogger.updateBalance({
+                        username,
+                        amount: refundAmount,
+                        operationType: 'gift_delivery_refund',
+                        description: `礼物部分成功退款 ${refundAmount} 电币`,
+                        requireSufficientBalance: false
+                    });
                 }
 
                 // 记录最终的扣费日志
