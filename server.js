@@ -1536,6 +1536,13 @@ async function autoSendExpiredWishRewards() {
     }
     isWishAutoSendRunning = true;
 
+    // 跨实例互斥，避免重复发送
+    const lockResult = await pool.query("SELECT pg_try_advisory_lock(hashtext('wish_auto_send')) AS locked");
+    if (!lockResult.rows[0].locked) {
+        isWishAutoSendRunning = false;
+        return;
+    }
+
     try {
         const expiredItems = await pool.query(`
             SELECT wi.id, wi.username, u.bilibili_room_id
@@ -1567,6 +1574,11 @@ async function autoSendExpiredWishRewards() {
     } catch (error) {
         console.error('自动发送祈愿礼物失败:', error);
     } finally {
+        try {
+            await pool.query("SELECT pg_advisory_unlock(hashtext('wish_auto_send'))");
+        } catch (e) {
+            console.error('释放 wish_auto_send 锁失败:', e);
+        }
         isWishAutoSendRunning = false;
     }
 }

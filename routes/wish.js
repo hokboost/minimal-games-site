@@ -484,22 +484,6 @@ module.exports = function registerWishRoutes(app, deps) {
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             let client;
             try {
-                // 先用独立事务一次性扣款，避免长事务占用 users 行锁
-                const totalCost = wishCost * batchCount;
-                const totalBetResult = await BalanceLogger.updateBalance({
-                    username,
-                    amount: -totalCost,
-                    operationType: 'wish_bet_batch',
-                    description: `十连祈愿扣费：${totalCost} 电币`,
-                    ipAddress: req.ip,
-                    userAgent: req.get('User-Agent')
-                });
-                if (!totalBetResult.success) {
-                    return res.status(400).json({ success: false, message: totalBetResult.message });
-                }
-                const startingBalance = totalBetResult.balance + totalCost;
-                const finalBalance = totalBetResult.balance;
-
                 client = await pool.connect();
                 await client.query('BEGIN');
                 const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':wish\')) AS locked', [username]);
@@ -507,6 +491,25 @@ module.exports = function registerWishRoutes(app, deps) {
                     await client.query('ROLLBACK');
                     return res.status(429).json({ success: false, message: '祈愿过于频繁，请稍后重试' });
                 }
+
+                // 扣款放入同一事务，确保后续失败可以回滚
+                const totalCost = wishCost * batchCount;
+                const totalBetResult = await BalanceLogger.updateBalance({
+                    username,
+                    amount: -totalCost,
+                    operationType: 'wish_bet_batch',
+                    description: `十连祈愿扣费：${totalCost} 电币`,
+                    ipAddress: req.ip,
+                    userAgent: req.get('User-Agent'),
+                    client,
+                    managedTransaction: true
+                });
+                if (!totalBetResult.success) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ success: false, message: totalBetResult.message });
+                }
+                const startingBalance = totalBetResult.balance + totalCost;
+                const finalBalance = totalBetResult.balance;
 
                 // 获取用户当前祈愿进度（加锁）
                 let progressResult = await client.query(

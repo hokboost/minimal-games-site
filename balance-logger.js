@@ -75,7 +75,6 @@ class BalanceLogger {
         managedTransaction = false
     }) {
         const client = externalClient || await pool.connect();
-        const manageTx = false; // 按要求去掉事务/锁控制，使用单语句更新
         const maxAttempts = 3;
         const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/stmt timeout, deadlock, serialization
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,7 +108,6 @@ class BalanceLogger {
                     }
 
                     if (updateResult.rows.length === 0) {
-                        if (manageTx) await client.query('ROLLBACK');
                         return { success: false, message: '余额不足' };
                     }
 
@@ -133,20 +131,14 @@ class BalanceLogger {
                         ipAddress,
                         userAgent
                     ]);
-                    
-                    if (manageTx) {
-                        await client.query('COMMIT');
-                    }
-                    
+
                     return {
                         success: true,
                         balance: balanceAfter,
                         balanceBefore: balanceBefore
                     };
-                    
+
                 } catch (error) {
-                    // 确保异常后事务被回滚，避免后续查询遇到 25P02
-                    try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
                     const isLockTimeout = lockErrorCodes.has(error.code);
                     if (isLockTimeout && attempt < maxAttempts) {
                         // 轻量重试，缓解偶发锁等待

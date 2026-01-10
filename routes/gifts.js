@@ -148,10 +148,20 @@ module.exports = function registerGiftRoutes(app, deps) {
                 console.log('🔍 [DEBUG] 开始事务');
                 await client.query('BEGIN');
 
+                // 加锁：同一用户礼物兑换互斥，避免并发重复扣款
+                const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':gift_exchange\')) AS locked', [username]);
+                if (!lock.rows[0].locked) {
+                    await client.query('ROLLBACK');
+                    return res.status(429).json({
+                        success: false,
+                        message: '兑换过于频繁，请稍后再试'
+                    });
+                }
+
                 // 1. 锁定用户行并检查余额
                 console.log(`🔍 [DEBUG] 查询用户 ${username} 的余额和房间号`);
                 const lockResult = await client.query(
-                    'SELECT balance, bilibili_room_id FROM users WHERE username = $1',
+                    'SELECT balance, bilibili_room_id FROM users WHERE username = $1 FOR UPDATE',
                     [username]
                 );
                 console.log('🔍 [DEBUG] 数据库查询结果:', lockResult.rows);
