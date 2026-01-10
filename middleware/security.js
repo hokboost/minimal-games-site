@@ -190,6 +190,83 @@ const strictRateLimit = rateLimit({
     legacyHeaders: false
 });
 
+// 针对已登录用户的细粒度限流（以用户为key，fallback为指纹/IP）
+const userActionRateLimit = rateLimit({
+    windowMs: 60 * 1000, // 1分钟
+    max: 40, // 高价值操作默认每分钟40次
+    keyGenerator: (req) => req.session?.user?.username || req.fingerprint || getRealIP(req),
+    handler: (req, res) => {
+        res.status(429).json({
+            success: false,
+            message: '操作过于频繁，请稍后再试'
+        });
+    },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+// 管理员接口限流（账号/IP 维度更严格）
+const adminRateLimit = rateLimit({
+    windowMs: 60 * 1000, // 1分钟
+    max: 15,
+    keyGenerator: (req) => req.session?.user?.username || getRealIP(req),
+    handler: (req, res) => {
+        res.status(429).json({
+            success: false,
+            message: '管理员操作过于频繁，请稍后再试'
+        });
+    },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+// 管理接口 IP 白名单（通过 env 配置，逗号分隔），未配置则不拦截
+function adminIPWhitelist(req, res, next) {
+    const whitelist = (process.env.ADMIN_IP_WHITELIST || '').split(',').map((ip) => ip.trim()).filter(Boolean);
+    if (whitelist.length === 0) {
+        return next();
+    }
+    const ip = getRealIP(req);
+    if (!whitelist.includes(ip)) {
+        return res.status(403).json({
+            success: false,
+            message: '管理员 IP 未授权',
+            code: 'ADMIN_IP_REJECTED'
+        });
+    }
+    return next();
+}
+
+// 管理接口签名校验（HMAC-SHA256），未配置密钥则跳过
+function verifyAdminSignature(req, res, next) {
+    const secret = process.env.ADMIN_SIGN_SECRET;
+    if (!secret) {
+        return next();
+    }
+
+    const ts = req.headers['x-sig-ts'] || req.headers['x-admin-ts'];
+    const sign = (req.headers['x-signature'] || req.headers['x-sig'] || '').toString().toLowerCase();
+
+    if (!ts || !sign) {
+        return res.status(401).json({ success: false, message: '缺少签名' });
+    }
+
+    const tsNum = Number(ts);
+    if (!Number.isFinite(tsNum) || Math.abs(Date.now() - tsNum) > 5 * 60 * 1000) {
+        return res.status(401).json({ success: false, message: '签名时间无效' });
+    }
+
+    const payload = JSON.stringify(req.body || {});
+    const raw = `${tsNum}:${req.method}:${req.originalUrl}:${payload}`;
+    const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+
+    if (expected !== sign) {
+        return res.status(401).json({ success: false, message: '签名校验失败' });
+    }
+
+    return next();
+}
+
 // 动态速率限制（基于用户行为）- 放宽
 function dynamicRateLimit(req, res, next) {
     const behavior = req.userBehavior || {};
@@ -320,6 +397,8 @@ module.exports = {
     requireSession,
     csrfProtection,
     generateFingerprint,
+    adminIPWhitelist,
+    verifyAdminSignature,
     
     // 工具函数
     addToBlacklist: (ip) => ipBlacklist.add(ip),

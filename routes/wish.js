@@ -56,7 +56,14 @@ module.exports = function registerWishRoutes(app, deps) {
         });
     });
 
-    app.post('/api/wish/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/wish/play',
+        rejectWhenOverloaded,
+        requireLogin,
+        requireAuthorized,
+        security.basicRateLimit,
+        security.userActionRateLimit,
+        security.csrfProtection,
+        async (req, res) => {
         const username = req.session.user.username;
         const giftType = req.body.giftType || 'deepsea_singer';
         const config = getWishConfig(giftType);
@@ -418,7 +425,13 @@ module.exports = function registerWishRoutes(app, deps) {
         }
     });
 
-    app.post('/api/wish/backpack/send', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/wish/backpack/send',
+        requireLogin,
+        requireAuthorized,
+        security.basicRateLimit,
+        security.userActionRateLimit,
+        security.csrfProtection,
+        async (req, res) => {
         try {
             const username = req.session.user.username;
             const inventoryId = Number(req.body.inventoryId);
@@ -471,6 +484,7 @@ module.exports = function registerWishRoutes(app, deps) {
         requireLogin,
         requireAuthorized,
         security.basicRateLimit,
+        security.userActionRateLimit,
         security.csrfProtection,
         async (req, res) => {
         const username = req.session.user.username;

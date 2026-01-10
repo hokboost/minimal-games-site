@@ -48,7 +48,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     };
 
     // 管理员后台
-    app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
+    app.get('/admin', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
         try {
             // 初始化session
             if (!req.session.initialized) {
@@ -207,7 +207,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
-    app.get('/admin/users/:username/records', requireLogin, requireAdmin, async (req, res) => {
+    app.get('/admin/users/:username/records', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
         try {
             const targetUsername = req.params.username;
             const userResult = await pool.query(
@@ -333,7 +333,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 添加电币
-    app.post('/api/admin/add-electric-coin', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/add-electric-coin', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username, amount } = req.body;
 
@@ -377,7 +377,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 授权用户
-    app.post('/api/admin/authorize-user', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/authorize-user', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
 
@@ -398,7 +398,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 取消授权
-    app.post('/api/admin/unauthorize-user', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/unauthorize-user', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
 
@@ -419,7 +419,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 重置密码
-    app.post('/api/admin/reset-password', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/reset-password', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username, newPassword = '123456' } = req.body;
 
@@ -441,7 +441,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 修改用户余额 - 添加CSRF保护
-    app.post('/api/admin/update-balance', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/update-balance', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username, balance } = req.body;
             const adminUsername = req.session.user.username;
@@ -512,7 +512,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 删除账户
-    app.post('/api/admin/delete-account', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/delete-account', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
 
@@ -589,7 +589,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 解锁账户
-    app.post('/api/admin/unlock-account', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/unlock-account', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
 
@@ -610,7 +610,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 清除失败记录
-    app.post('/api/admin/clear-failures', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/clear-failures', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
 
@@ -631,7 +631,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 管理员修改自己密码
-    app.post('/api/admin/change-self-password', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/change-self-password', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { oldPassword, newPassword } = req.body;
             const username = req.session.user.username;
@@ -737,7 +737,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 绑定或更新B站房间号 (仅管理员)
-    app.post('/api/bilibili/room', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+    app.post('/api/bilibili/room', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, security.adminRateLimit, async (req, res) => {
         try {
             const { roomId, targetUsername } = req.body;
             const adminUsername = req.session.user.username;
@@ -808,7 +808,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 手动刷新B站Cookie (仅管理员)
-    app.post('/api/bilibili/cookies/refresh', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+    app.post('/api/bilibili/cookies/refresh', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, security.adminRateLimit, async (req, res) => {
         try {
             console.log(`🔄 管理员 ${req.session.user.username} 请求刷新B站Cookie`);
 
@@ -839,7 +839,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 检查B站Cookie状态 (仅管理员)
-    app.get('/api/bilibili/cookies/status', requireLogin, requireAdmin, async (req, res) => {
+    app.get('/api/bilibili/cookies/status', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
         try {
             console.log(`🔍 管理员 ${req.session.user.username} 检查Cookie状态`);
 
@@ -865,7 +865,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 解除房间号绑定 (仅管理员)
-    app.delete('/api/bilibili/room', requireLogin, requireAdmin, security.basicRateLimit, async (req, res) => {
+    app.delete('/api/bilibili/room', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, security.adminRateLimit, async (req, res) => {
         try {
             const { targetUsername } = req.body;
             const adminUsername = req.session.user.username;
@@ -917,7 +917,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 管理员查看所有余额记录 API
-    app.get('/api/admin/balance/logs', requireLogin, requireAdmin, async (req, res) => {
+    app.get('/api/admin/balance/logs', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
         try {
             const page = parseInt(req.query.page) || 1;
             const limit = Math.min(parseInt(req.query.limit) || 50, 200);
@@ -940,7 +940,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取IP风险信息
-    app.get('/api/admin/ip/:ip', requireLogin, requireAdmin, async (req, res) => {
+    app.get('/api/admin/ip/:ip', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
         try {
             const ip = req.params.ip;
             const [riskData, stats] = await Promise.all([
@@ -961,7 +961,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 添加IP到黑名单
-    app.post('/api/admin/ip/blacklist', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/ip/blacklist', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { ip, reason } = req.body;
             const adminUser = req.session.user.username;
@@ -985,7 +985,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 添加IP到白名单
-    app.post('/api/admin/ip/whitelist', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/ip/whitelist', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { ip, reason } = req.body;
             const adminUser = req.session.user.username;
@@ -1009,7 +1009,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 移除IP黑名单
-    app.post('/api/admin/ip/remove-blacklist', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/ip/remove-blacklist', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { ip } = req.body;
             const adminUser = req.session.user.username;
@@ -1033,7 +1033,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 强制踢出用户所有会话
-    app.post('/api/admin/force-logout', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/force-logout', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
             const adminUser = req.session.user.username;
@@ -1065,7 +1065,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取活跃会话列表
-    app.get('/api/admin/sessions', requireLogin, requireAdmin, async (req, res) => {
+    app.get('/api/admin/sessions', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
         try {
             const stats = await SessionManager.getSessionStats();
 
@@ -1089,7 +1089,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取安全事件列表
-    app.get('/api/admin/security-events', requireLogin, requireAdmin, async (req, res) => {
+    app.get('/api/admin/security-events', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
         try {
             const events = await pool.query(`
                 SELECT id, event_type, username, ip_address, description, severity, 
@@ -1110,12 +1110,12 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // WebSocket测试页面
-    app.get('/test-websocket', requireLogin, requireAdmin, (req, res) => {
+    app.get('/test-websocket', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, (req, res) => {
         res.sendFile(path.join(__dirname, '../test-websocket.html'));
     });
 
     // 管理员工具：重置卡住的礼物任务
-    app.post('/api/admin/reset-stuck-gift-tasks', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, async (req, res) => {
+    app.post('/api/admin/reset-stuck-gift-tasks', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, async (req, res) => {
         try {
             const adminUser = req.session.user.username;
 
@@ -1195,7 +1195,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 管理员安全警告测试API (需要管理员权限)
-    app.post('/api/admin/test/security-alert', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, (req, res) => {
+    app.post('/api/admin/test/security-alert', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, (req, res) => {
         const { username } = req.body;
         const adminUsername = req.session.user.username;
 
@@ -1222,7 +1222,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 安全监控面板 - 修复后：使用统一的session权限体系
-    app.get('/admin/security', requireLogin, requireAdmin, (req, res) => {
+    app.get('/admin/security', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, (req, res) => {
         // 收集安全统计信息
         const blacklist = security.getBlacklist();
         const behaviorStats = [];
@@ -1261,7 +1261,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 安全管理解除封禁
-    app.post('/admin/security/unblock', requireLogin, requireAdmin, requireCSRF, security.basicRateLimit, (req, res) => {
+    app.post('/admin/security/unblock', requireLogin, requireAdmin, security.adminIPWhitelist, security.verifyAdminSignature, requireCSRF, security.adminRateLimit, (req, res) => {
         const { ip } = req.body;
         const adminUsername = req.session.user.username;
 

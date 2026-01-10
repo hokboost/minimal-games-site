@@ -586,7 +586,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
 
-    app.post('/api/slot/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/slot/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -931,7 +931,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -997,7 +997,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1065,7 +1065,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1145,7 +1145,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/stone/redeem', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/stone/redeem', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1256,7 +1256,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1340,7 +1340,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1493,7 +1493,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
-    app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1568,7 +1568,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // 决斗挑战 Duel 游戏API
-    app.post('/api/duel/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+    app.post('/api/duel/play', rejectWhenOverloaded, requireLogin, requireAuthorized, security.basicRateLimit, security.userActionRateLimit, security.csrfProtection, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
