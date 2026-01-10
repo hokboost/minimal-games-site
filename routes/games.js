@@ -875,6 +875,8 @@ module.exports = function registerGameRoutes(app, deps) {
                 console.error('Scratch游戏记录存储失败:', dbError);
             }
 
+            await client.query('COMMIT');
+
             res.json({
                 success: true,
                 reward: payout,
@@ -889,8 +891,11 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
         } catch (error) {
+            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
             console.error('Scratch play error:', error);
             res.status(500).json({ success: false, message: '游戏失败，请稍后重试' });
+        } finally {
+            client.release();
         }
     });
 
@@ -1254,6 +1259,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     });
 
                     if (!rewardResult.success) {
+                        await client.query('ROLLBACK');
                         return res.status(400).json({ success: false, message: rewardResult.message });
                     }
                     newBalance = rewardResult.balance;
@@ -1334,6 +1340,7 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
@@ -1405,6 +1412,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 });
 
                 if (!rewardResult.success) {
+                    await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: rewardResult.message });
                 }
                 rewardBalance = rewardResult.balance;

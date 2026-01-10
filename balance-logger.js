@@ -35,14 +35,14 @@ class BalanceLogger {
             `, [
                 username,
                 operationType,
-                amount,
-                balanceBefore,
-                balanceAfter,
-                description,
-                gameData ? JSON.stringify(gameData) : null,
-                ipAddress,
-                userAgent
-            ]);
+                        amount,
+                        balanceBefore,
+                        balanceAfter,
+                        description,
+                        gameData ? JSON.stringify(gameData) : null,
+                        ipAddress,
+                        userAgent
+                    ]);
         } catch (error) {
             console.error('记录余额日志失败:', error);
             // 不抛出错误，避免影响主业务
@@ -78,9 +78,15 @@ class BalanceLogger {
         const maxAttempts = 3;
         const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/stmt timeout, deadlock, serialization
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const useSavepoint = Boolean(managedTransaction);
 
         try {
             for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                const savepointName = useSavepoint ? `balance_update_${attempt}` : null;
+                if (useSavepoint) {
+                    // 独立的保存点，避免单次语句失败把整个外层事务打脏
+                    await client.query(`SAVEPOINT ${savepointName}`);
+                }
                 try {
                     // 不再显式开启事务或设置锁/超时，缩短占用时间
                     // 单语句更新，避免显式行锁等待
@@ -132,6 +138,9 @@ class BalanceLogger {
                         userAgent
                     ]);
 
+                    if (useSavepoint) {
+                        await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+                    }
                     return {
                         success: true,
                         balance: balanceAfter,
@@ -139,6 +148,15 @@ class BalanceLogger {
                     };
 
                 } catch (error) {
+                    if (useSavepoint) {
+                        // 回滚到保存点，清理掉本次失败让事务可继续使用
+                        try {
+                            await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+                            await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+                        } catch (rollbackError) {
+                            console.error('回滚余额更新保存点失败:', rollbackError);
+                        }
+                    }
                     const isLockTimeout = lockErrorCodes.has(error.code);
                     if (isLockTimeout && attempt < maxAttempts) {
                         // 轻量重试，缓解偶发锁等待
