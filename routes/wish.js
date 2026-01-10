@@ -58,6 +58,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 client.release();
                 return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
             }
+
             const wishCost = config.cost;
             const successRate = config.successRate;
             const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
@@ -65,6 +66,7 @@ module.exports = function registerWishRoutes(app, deps) {
             const rewardValue = config.rewardValue;
 
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             // 锁定祈愿进度
             let progressResult = await client.query(
@@ -464,6 +466,7 @@ module.exports = function registerWishRoutes(app, deps) {
             }
 
             await client.query('BEGIN');
+            await client.query(`SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '8s';`);
 
             // 获取用户余额，提前校验（加锁余额行）
             const balanceResult = await client.query(

@@ -51,8 +51,8 @@ class IPManager {
         // 先检查缓存
         if (this.riskCache.has(ip)) {
             const cached = this.riskCache.get(ip);
-            if (Date.now() - cached.timestamp < 10 * 60 * 1000) { // 10分钟缓存
-                return cached.score;
+            if (Date.now() - cached.timestamp < 10 * 60 * 1000 && cached.result) { // 10分钟缓存
+                return cached.result;
             }
         }
 
@@ -68,8 +68,9 @@ class IPManager {
             if (blacklistCheck.rows.length > 0) {
                 riskScore = 100; // 最高风险
                 reasons.push(`黑名单IP: ${blacklistCheck.rows[0].reason}`);
-                this.cacheRiskScore(ip, riskScore, reasons);
-                return { score: riskScore, reasons, level: 'CRITICAL' };
+                const result = { score: riskScore, reasons, level: 'CRITICAL' };
+                this.cacheRiskScore(ip, result);
+                return result;
             }
 
             // 检查IP是否在白名单
@@ -80,8 +81,9 @@ class IPManager {
             if (whitelistCheck.rows.length > 0) {
                 riskScore = 0; // 无风险
                 reasons.push('可信IP白名单');
-                this.cacheRiskScore(ip, riskScore, reasons);
-                return { score: riskScore, reasons, level: 'SAFE' };
+                const result = { score: riskScore, reasons, level: 'SAFE' };
+                this.cacheRiskScore(ip, result);
+                return result;
             }
 
             // 计算短期活动频率 (过去1小时)
@@ -147,7 +149,7 @@ class IPManager {
             else level = 'SAFE';
 
             const result = { score: riskScore, reasons, level };
-            this.cacheRiskScore(ip, riskScore, reasons);
+            this.cacheRiskScore(ip, result);
             return result;
 
         } catch (error) {
@@ -217,10 +219,9 @@ class IPManager {
     }
 
     // 缓存风险评分
-    cacheRiskScore(ip, score, reasons) {
+    cacheRiskScore(ip, result) {
         this.riskCache.set(ip, {
-            score,
-            reasons,
+            result,
             timestamp: Date.now()
         });
     }

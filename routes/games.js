@@ -100,7 +100,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 paid: true,
                 settled: false,
                 createdAt: now,
-                expiresAt: now + 10 * 60 * 1000 // 10分钟有效期
+                expiresAt: now + 20 * 60 * 1000 // 有效期放宽到20分钟，减少误判
             });
             req.session.quizSessionId = sessionId;
 
@@ -397,18 +397,9 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             if (validAnswers === 0) {
-                sessionData.settled = true;
-                quizSessions.set(quizSessionId, sessionData);
-                if (userSessions.has(username)) {
-                    userSessions.delete(username);
-                }
-                return res.json({
-                    success: true,
-                    score: 0,
-                    total: answers.length,
-                    reward: 0,
-                    newBalance: 0,
-                    proof: GameLogic.generateToken(8)
+                return res.status(400).json({
+                    success: false,
+                    message: '未找到有效题目令牌，请重新获取题目后再提交'
                 });
             }
 
