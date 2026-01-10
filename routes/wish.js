@@ -476,45 +476,26 @@ module.exports = function registerWishRoutes(app, deps) {
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             let client;
             try {
-                client = await pool.connect();
-                await client.query('BEGIN');
-                await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-                await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish\'))', [username]);
-
-                // 获取用户余额，提前校验（加锁余额行）
-                const balanceResult = await client.query(
-                    'SELECT balance FROM users WHERE username = $1 FOR UPDATE',
-                    [username]
-                );
-                if (balanceResult.rows.length === 0) {
-                    await client.query('ROLLBACK');
-                    return res.status(404).json({ success: false, message: '用户不存在' });
-                }
-
-                const currentBalance = parseFloat(balanceResult.rows[0].balance);
+                // 先用独立事务一次性扣款，避免长事务占用 users 行锁
                 const totalCost = wishCost * batchCount;
-                if (currentBalance < totalCost) {
-                    await client.query('ROLLBACK');
-                    return res.status(400).json({ success: false, message: '余额不足，无法进行10次祈愿' });
-                }
-
-                // 一次性扣除十连总费用，避免循环中反复持锁
                 const totalBetResult = await BalanceLogger.updateBalance({
                     username,
                     amount: -totalCost,
                     operationType: 'wish_bet_batch',
                     description: `十连祈愿扣费：${totalCost} 电币`,
                     ipAddress: req.ip,
-                    userAgent: req.get('User-Agent'),
-                    client,
-                    managedTransaction: true
+                    userAgent: req.get('User-Agent')
                 });
                 if (!totalBetResult.success) {
-                    await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: totalBetResult.message });
                 }
-                const startingBalance = currentBalance;
-                let balanceAfter = totalBetResult.balance;
+                const startingBalance = totalBetResult.balance + totalCost;
+                const finalBalance = totalBetResult.balance;
+
+                client = await pool.connect();
+                await client.query('BEGIN');
+                await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
+                await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish\'))', [username]);
 
                 // 获取用户当前祈愿进度（加锁）
                 let progressResult = await client.query(
@@ -674,7 +655,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 return res.json({
                     success: true,
                     successCount,
-                    newBalance: balanceAfter,
+                    newBalance: finalBalance,
                     progress: {
                         total_wishes: progress.total_wishes,
                         consecutive_fails: progress.consecutive_fails,
