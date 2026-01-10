@@ -75,11 +75,10 @@ module.exports = function registerWishRoutes(app, deps) {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
-                await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
                 // 锁定祈愿进度
                 let progressResult = await client.query(
-                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
+                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
                     [username, giftType]
                 );
 
@@ -90,7 +89,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     `, [username, giftType]);
 
                     progressResult = await client.query(
-                        'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
+                        'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
                         [username, giftType]
                     );
                 }
@@ -498,11 +497,10 @@ module.exports = function registerWishRoutes(app, deps) {
 
                 client = await pool.connect();
                 await client.query('BEGIN');
-                await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
                 // 获取用户当前祈愿进度（加锁）
                 let progressResult = await client.query(
-                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
+                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
                     [username, giftType]
                 );
 
@@ -513,7 +511,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     `, [username, giftType]);
 
                     progressResult = await client.query(
-                        'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
+                        'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
                         [username, giftType]
                     );
                 }
