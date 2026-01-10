@@ -1764,7 +1764,6 @@ registerGameRoutes(app, {
     stoneReplaceCosts,
     flipCosts,
     flipCashoutRewards,
-    createFlipBoard,
     getFlipState,
     saveFlipState,
     logFlipAction,

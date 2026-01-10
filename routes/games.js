@@ -22,7 +22,6 @@ module.exports = function registerGameRoutes(app, deps) {
         stoneReplaceCosts,
         flipCosts,
         flipCashoutRewards,
-        createFlipBoard,
         getFlipState,
         saveFlipState,
         logFlipAction,
