@@ -70,12 +70,17 @@ class BalanceLogger {
         gameData = null,
         ipAddress = null,
         userAgent = null,
-        requireSufficientBalance = true
+        requireSufficientBalance = true,
+        client: externalClient = null,
+        managedTransaction = false
     }) {
-        const client = await pool.connect();
-        
+        const client = externalClient || await pool.connect();
+        const manageTx = !managedTransaction;
+
         try {
-            await client.query('BEGIN');
+            if (manageTx) {
+                await client.query('BEGIN');
+            }
             
             // 获取当前余额（加锁）
             const currentResult = await client.query(
@@ -121,7 +126,9 @@ class BalanceLogger {
                 userAgent
             ]);
             
-            await client.query('COMMIT');
+            if (manageTx) {
+                await client.query('COMMIT');
+            }
             
             return {
                 success: true,
@@ -130,11 +137,15 @@ class BalanceLogger {
             };
             
         } catch (error) {
-            await client.query('ROLLBACK');
+            if (manageTx) {
+                await client.query('ROLLBACK');
+            }
             console.error('更新余额失败:', error);
             return { success: false, message: '系统错误' };
         } finally {
-            client.release();
+            if (!externalClient) {
+                client.release();
+            }
         }
     }
 

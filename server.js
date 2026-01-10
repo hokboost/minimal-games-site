@@ -600,7 +600,21 @@ setInterval(() => {
     const maxAge = 5 * 60 * 1000; // 5分钟过期
     
     for (const [username, sessions] of userSessions.entries()) {
-        if (sessions && sessions.tokens) {
+        if (sessions && sessions.tokensBySession) {
+            for (const [sessionId, tokens] of Object.entries(sessions.tokensBySession)) {
+                for (const [token, data] of Object.entries(tokens)) {
+                    if (data && now - data.timestamp > maxAge) {
+                        delete tokens[token];
+                    }
+                }
+                if (Object.keys(tokens).length === 0) {
+                    delete sessions.tokensBySession[sessionId];
+                }
+            }
+            if (Object.keys(sessions.tokensBySession).length === 0) {
+                userSessions.delete(username);
+            }
+        } else if (sessions && sessions.tokens) {
             for (const [token, data] of Object.entries(sessions.tokens)) {
                 if (data && now - data.timestamp > maxAge) {
                     delete sessions.tokens[token];
@@ -1226,16 +1240,18 @@ function createFlipBoard() {
     return shuffleArray(board);
 }
 
-async function getFlipState(username) {
-    const result = await pool.query(
-        'SELECT * FROM flip_states WHERE username = $1',
+async function getFlipState(username, client = pool, { forUpdate = false } = {}) {
+    const executor = client.query ? client.query.bind(client) : client;
+    const lockClause = forUpdate ? ' FOR UPDATE' : '';
+    const result = await executor(
+        `SELECT * FROM flip_states WHERE username = $1${lockClause}`,
         [username]
     );
 
     if (result.rows.length === 0) {
         const board = createFlipBoard();
         const flipped = Array(9).fill(false);
-        await pool.query(
+        await executor(
             `INSERT INTO flip_states (username, board, flipped, created_at, updated_at)
              VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
             [username, JSON.stringify(board), JSON.stringify(flipped)]
@@ -1258,8 +1274,9 @@ async function getFlipState(username) {
     };
 }
 
-async function saveFlipState(username, state) {
-    await pool.query(
+async function saveFlipState(username, state, client = pool) {
+    const executor = client.query ? client.query.bind(client) : client;
+    await executor(
         `UPDATE flip_states
          SET board = $1, flipped = $2, good_count = $3, bad_count = $4, ended = $5,
              updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
@@ -1285,9 +1302,10 @@ async function logFlipAction({
     goodCount = 0,
     badCount = 0,
     ended = false
-}) {
+}, client = pool) {
+    const executor = client.query ? client.query.bind(client) : client;
     try {
-        await pool.query(
+        await executor(
             `INSERT INTO flip_logs (
                 username, action_type, cost, reward, card_index, card_type,
                 good_count, bad_count, ended, created_at
@@ -1331,15 +1349,17 @@ function getMaxSameCount(slots) {
     return values.length ? Math.max(...values) : 0;
 }
 
-async function getStoneState(username) {
-    const result = await pool.query(
-        'SELECT slots FROM stone_states WHERE username = $1',
+async function getStoneState(username, client = pool, { forUpdate = false } = {}) {
+    const executor = client.query ? client.query.bind(client) : client;
+    const lockClause = forUpdate ? ' FOR UPDATE' : '';
+    const result = await executor(
+        `SELECT slots FROM stone_states WHERE username = $1${lockClause}`,
         [username]
     );
 
     if (result.rows.length === 0) {
         const slots = normalizeStoneSlots([]);
-        await pool.query(
+        await executor(
             `INSERT INTO stone_states (username, slots, created_at, updated_at)
              VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
             [username, JSON.stringify(slots)]
@@ -1350,8 +1370,9 @@ async function getStoneState(username) {
     return normalizeStoneSlots(result.rows[0].slots);
 }
 
-async function saveStoneState(username, slots) {
-    await pool.query(
+async function saveStoneState(username, slots, client = pool) {
+    const executor = client.query ? client.query.bind(client) : client;
+    await executor(
         `UPDATE stone_states
          SET slots = $1, updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
          WHERE username = $2`,
@@ -1367,9 +1388,10 @@ async function logStoneAction({
     slotIndex = null,
     beforeSlots,
     afterSlots
-}) {
+}, client = pool) {
+    const executor = client.query ? client.query.bind(client) : client;
     try {
-        await pool.query(
+        await executor(
             `INSERT INTO stone_logs (
                 username, action_type, cost, reward, slot_index, before_slots, after_slots, created_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,

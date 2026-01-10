@@ -311,18 +311,24 @@ module.exports = function registerGameRoutes(app, deps) {
             const token = GameLogic.generateToken(16);
             const signature = GameLogic.generateToken(16);
 
-            // 存储问题信息，绑定到当前付费会话
+            // 存储问题信息，绑定到当前付费会话，按 session 分桶
             if (!userSessions.has(username)) {
-                userSessions.set(username, { tokens: {}, quizSessionId });
+                userSessions.set(username, { tokensBySession: {} });
             }
-            if (!userSessions.get(username).tokens) {
-                userSessions.get(username).tokens = {};
+            const userStore = userSessions.get(username);
+            if (!userStore.tokensBySession) {
+                userStore.tokensBySession = {};
+            } else {
+                // 清理其他会话的残留token，确保单次会话隔离
+                userStore.tokensBySession = {};
             }
-            userSessions.get(username).quizSessionId = quizSessionId;
-            userSessions.get(username).tokens[token] = {
+            userStore.tokensBySession[quizSessionId] = {};
+            userStore.tokensBySession[quizSessionId][token] = {
                 questionId: question.id,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                sessionId: quizSessionId
             };
+            userSessions.set(username, userStore);
 
             res.json({
                 success: true,
@@ -370,11 +376,16 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             let correctCount = 0;
-            const userSession = userSessions.get(username)?.tokens || {};
+            const userStore = userSessions.get(username);
+            const userTokens = userStore?.tokensBySession?.[quizSessionId] || {};
 
             for (const answer of answers) {
-                const sessionData = userSession[answer.token];
+                const sessionData = userTokens[answer.token];
                 if (sessionData) {
+                    if (sessionData.sessionId !== quizSessionId) {
+                        console.warn(`Token session mismatch: token=${answer.token} user=${username}`);
+                        continue;
+                    }
                     const question = questionMap.get(sessionData.questionId);
                     if (question && GameLogic.quiz.validateAnswer(question, answer.answerIndex)) {
                         correctCount++;
@@ -854,13 +865,17 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     app.post('/api/stone/add', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
+
             const username = req.session.user.username;
-            const slots = await getStoneState(username);
+            const slots = await getStoneState(username, client, { forUpdate: true });
             const beforeSlots = slots.slice();
 
             const emptyIndex = slots.findIndex((slot) => !slot);
             if (emptyIndex === -1) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位已满' });
             }
 
@@ -870,22 +885,27 @@ module.exports = function registerGameRoutes(app, deps) {
                 operationType: 'stone_add',
                 description: '合石头：放入一颗石头',
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
             slots[emptyIndex] = randomStoneColor();
-            await saveStoneState(username, slots);
+            await saveStoneState(username, slots, client);
             await logStoneAction({
                 username,
                 actionType: 'add',
                 cost: 30,
                 beforeSlots,
                 afterSlots: slots
-            });
+            }, client);
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -893,18 +913,25 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance: balanceResult.balance
             });
         } catch (error) {
+            await client.query('ROLLBACK');
             console.error('Stone add error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
     app.post('/api/stone/fill', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
+
             const username = req.session.user.username;
-            const slots = await getStoneState(username);
+            const slots = await getStoneState(username, client, { forUpdate: true });
             const beforeSlots = slots.slice();
 
             if (slots.every((slot) => slot)) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位已满' });
             }
 
@@ -917,22 +944,27 @@ module.exports = function registerGameRoutes(app, deps) {
                 operationType: 'stone_fill',
                 description: '合石头：一键填满',
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
             const newSlots = slots.map((slot) => slot || randomStoneColor());
-            await saveStoneState(username, newSlots);
+            await saveStoneState(username, newSlots, client);
             await logStoneAction({
                 username,
                 actionType: 'fill',
                 cost,
                 beforeSlots,
                 afterSlots: newSlots
-            });
+            }, client);
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -940,29 +972,38 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance: balanceResult.balance
             });
         } catch (error) {
+            await client.query('ROLLBACK');
             console.error('Stone fill error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
     app.post('/api/stone/replace', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
+
             const username = req.session.user.username;
             const index = Number(req.body.index);
-            const slots = await getStoneState(username);
+            const slots = await getStoneState(username, client, { forUpdate: true });
             const beforeSlots = slots.slice();
 
             if (!Number.isInteger(index) || index < 0 || index >= slots.length) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位索引无效' });
             }
 
             if (!slots.every((slot) => slot)) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位未满' });
             }
 
             const maxSame = getMaxSameCount(slots);
             const replaceCost = stoneReplaceCosts[maxSame];
             if (replaceCost === undefined) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '当前无法更换' });
             }
 
@@ -972,16 +1013,19 @@ module.exports = function registerGameRoutes(app, deps) {
                 operationType: 'stone_replace',
                 description: `合石头：更换第${index + 1}颗石头`,
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
             const newSlots = slots.slice();
             newSlots[index] = randomStoneColor();
-            await saveStoneState(username, newSlots);
+            await saveStoneState(username, newSlots, client);
             await logStoneAction({
                 username,
                 actionType: 'replace',
@@ -989,7 +1033,9 @@ module.exports = function registerGameRoutes(app, deps) {
                 slotIndex: index,
                 beforeSlots,
                 afterSlots: newSlots
-            });
+            }, client);
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -997,18 +1043,25 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance: balanceResult.balance
             });
         } catch (error) {
+            await client.query('ROLLBACK');
             console.error('Stone replace error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
     app.post('/api/stone/redeem', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
+
             const username = req.session.user.username;
-            const slots = await getStoneState(username);
+            const slots = await getStoneState(username, client, { forUpdate: true });
             const beforeSlots = slots.slice();
 
             if (!slots.every((slot) => slot)) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '槽位未满' });
             }
 
@@ -1016,14 +1069,14 @@ module.exports = function registerGameRoutes(app, deps) {
             const reward = stoneRewards[maxSame] || 0;
             const newSlots = normalizeStoneSlots([]);
 
-            await saveStoneState(username, newSlots);
+            await saveStoneState(username, newSlots, client);
             await logStoneAction({
                 username,
                 actionType: 'redeem',
                 reward,
                 beforeSlots,
                 afterSlots: newSlots
-            });
+            }, client);
 
             let newBalance = null;
             if (reward > 0) {
@@ -1034,21 +1087,26 @@ module.exports = function registerGameRoutes(app, deps) {
                     description: `合石头兑换奖励 ${reward} 电币`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
-                    requireSufficientBalance: false
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
 
                 if (!rewardResult.success) {
+                    await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: rewardResult.message });
                 }
 
                 newBalance = rewardResult.balance;
             } else {
-                const balanceResult = await pool.query(
+                const balanceResult = await client.query(
                     'SELECT balance FROM users WHERE username = $1',
                     [username]
                 );
                 newBalance = balanceResult.rows.length > 0 ? balanceResult.rows[0].balance : 0;
             }
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -1057,8 +1115,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
+            await client.query('ROLLBACK');
             console.error('Stone redeem error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
@@ -1096,9 +1157,12 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     app.post('/api/flip/start', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
+
             const username = req.session.user.username;
-            const previousState = await getFlipState(username);
+            const previousState = await getFlipState(username, client, { forUpdate: true });
             const flips = previousState.flipped.filter(Boolean).length;
             let previousReward = 0;
             let newBalance = null;
@@ -1106,7 +1170,7 @@ module.exports = function registerGameRoutes(app, deps) {
             if (!previousState.ended && flips > 0 && previousState.good_count > 0) {
                 previousReward = flipCashoutRewards[previousState.good_count] || 0;
                 previousState.ended = true;
-                await saveFlipState(username, previousState);
+                await saveFlipState(username, previousState, client);
 
                 if (previousReward > 0) {
                     const rewardResult = await BalanceLogger.updateBalance({
@@ -1116,10 +1180,13 @@ module.exports = function registerGameRoutes(app, deps) {
                         description: `翻卡牌开始新一轮自动结算 ${previousReward} 电币`,
                         ipAddress: req.ip,
                         userAgent: req.get('User-Agent'),
-                        requireSufficientBalance: false
+                        requireSufficientBalance: false,
+                        client,
+                        managedTransaction: true
                     });
 
                     if (!rewardResult.success) {
+                        await client.query('ROLLBACK');
                         return res.status(400).json({ success: false, message: rewardResult.message });
                     }
                     newBalance = rewardResult.balance;
@@ -1132,7 +1199,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     goodCount: previousState.good_count,
                     badCount: previousState.bad_count,
                     ended: true
-                });
+                }, client);
             }
 
             const board = createFlipBoard();
@@ -1144,7 +1211,9 @@ module.exports = function registerGameRoutes(app, deps) {
                 bad_count: 0,
                 ended: false
             };
-            await saveFlipState(username, state);
+            await saveFlipState(username, state, client);
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -1155,27 +1224,36 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
+            await client.query('ROLLBACK');
             console.error('Flip start error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
     app.post('/api/flip/flip', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
+
             const username = req.session.user.username;
             const cardIndex = Number(req.body.cardIndex);
 
             if (!Number.isInteger(cardIndex) || cardIndex < 0 || cardIndex > 8) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '卡牌索引无效' });
             }
 
-            const state = await getFlipState(username);
+            const state = await getFlipState(username, client, { forUpdate: true });
             const flips = state.flipped.filter(Boolean).length;
             if (state.ended || flips >= flipCosts.length) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '本轮已结束' });
             }
 
             if (state.flipped[cardIndex]) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '该卡牌已翻开' });
             }
 
@@ -1186,10 +1264,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 operationType: 'flip_card',
                 description: `翻卡牌：翻开第${flips + 1}张`,
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
@@ -1210,6 +1291,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 state.ended = true;
             }
 
+            let rewardBalance = balanceResult.balance;
             if (reward > 0) {
                 const rewardResult = await BalanceLogger.updateBalance({
                     username,
@@ -1218,15 +1300,19 @@ module.exports = function registerGameRoutes(app, deps) {
                     description: `翻卡牌奖励 ${reward} 电币`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
-                    requireSufficientBalance: false
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
 
                 if (!rewardResult.success) {
+                    await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: rewardResult.message });
                 }
+                rewardBalance = rewardResult.balance;
             }
 
-            await saveFlipState(username, state);
+            await saveFlipState(username, state, client);
             if (state.ended) {
                 await logFlipAction({
                     username,
@@ -1235,8 +1321,10 @@ module.exports = function registerGameRoutes(app, deps) {
                     goodCount: state.good_count,
                     badCount: state.bad_count,
                     ended: true
-                });
+                }, client);
             }
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -1246,30 +1334,38 @@ module.exports = function registerGameRoutes(app, deps) {
                 badCount: state.bad_count,
                 ended: state.ended,
                 reward,
-                newBalance: balanceResult.balance + reward
+                newBalance: rewardBalance
             });
         } catch (error) {
+            await client.query('ROLLBACK');
             console.error('Flip card error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
     app.post('/api/flip/cashout', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
+
             const username = req.session.user.username;
-            const state = await getFlipState(username);
+            const state = await getFlipState(username, client, { forUpdate: true });
 
             if (state.ended) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '本轮已结束' });
             }
 
             if (state.bad_count > 0) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '坏牌已出现，无法退出' });
             }
 
             const reward = flipCashoutRewards[state.good_count] || 0;
             state.ended = true;
-            await saveFlipState(username, state);
+            await saveFlipState(username, state, client);
 
             const rewardResult = await BalanceLogger.updateBalance({
                 username,
@@ -1278,10 +1374,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 description: `翻卡牌退出奖励 ${reward} 电币`,
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent'),
-                requireSufficientBalance: false
+                requireSufficientBalance: false,
+                client,
+                managedTransaction: true
             });
 
             if (!rewardResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: rewardResult.message });
             }
 
@@ -1292,7 +1391,9 @@ module.exports = function registerGameRoutes(app, deps) {
                 goodCount: state.good_count,
                 badCount: state.bad_count,
                 ended: true
-            });
+            }, client);
+
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -1300,8 +1401,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance: rewardResult.balance
             });
         } catch (error) {
+            await client.query('ROLLBACK');
             console.error('Flip cashout error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
         }
     });
 
