@@ -590,7 +590,6 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
             const { username, betAmount } = req.body;
             const betValue = Number(betAmount);
 
@@ -730,7 +729,6 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
             const { username, tier, winCount } = req.body;
 
             if (username !== req.session.user.username) {
@@ -925,10 +923,9 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
-            const slots = await getStoneState(username, client, { forUpdate: true });
+            const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             const emptyIndex = slots.findIndex((slot) => !slot);
@@ -983,10 +980,9 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
-            const slots = await getStoneState(username, client, { forUpdate: true });
+            const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             if (slots.every((slot) => slot)) {
@@ -1043,11 +1039,10 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
             const index = Number(req.body.index);
-            const slots = await getStoneState(username, client, { forUpdate: true });
+            const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             if (!Number.isInteger(index) || index < 0 || index >= slots.length) {
@@ -1115,10 +1110,9 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
 
             const username = req.session.user.username;
-            const slots = await getStoneState(username, client, { forUpdate: true });
+            const slots = await getStoneState(username, client);
             const beforeSlots = slots.slice();
 
             if (!slots.every((slot) => slot)) {
@@ -1218,11 +1212,9 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-            await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':flip\'))', [req.session.user.username]);
 
             const username = req.session.user.username;
-            const previousState = await getFlipState(username, client, { forUpdate: true });
+            const previousState = await getFlipState(username, client);
             const flips = previousState.good_count + previousState.bad_count;
             let previousReward = 0;
             let newBalance = null;
@@ -1295,8 +1287,6 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-            await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':flip\'))', [req.session.user.username]);
 
             const username = req.session.user.username;
             const cardIndex = Number(req.body.cardIndex);
@@ -1306,7 +1296,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '卡牌索引无效' });
             }
 
-            const state = await getFlipState(username, client, { forUpdate: true });
+            const state = await getFlipState(username, client);
             const flips = state.good_count + state.bad_count;
             if (state.ended || flips >= flipCosts.length) {
                 await client.query('ROLLBACK');
@@ -1441,11 +1431,9 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-            await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':flip\'))', [req.session.user.username]);
 
             const username = req.session.user.username;
-            const state = await getFlipState(username, client, { forUpdate: true });
+            const state = await getFlipState(username, client);
 
             if (state.ended) {
                 await client.query('ROLLBACK');
@@ -1508,7 +1496,6 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
             const username = req.session.user.username;
             const giftType = req.body.giftType;
             const power = Number(req.body.power);

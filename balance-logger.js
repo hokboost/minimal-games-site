@@ -88,32 +88,38 @@ class BalanceLogger {
                         await client.query(`SET LOCAL lock_timeout = '8s'; SET LOCAL statement_timeout = '12s';`);
                     }
                     
-                    // 获取当前余额（加锁）
-                    const currentResult = await client.query(
-                        'SELECT balance FROM users WHERE username = $1 FOR UPDATE',
-                        [username]
-                    );
-                    
-                    if (currentResult.rows.length === 0) {
-                        if (manageTx) await client.query('ROLLBACK');
-                        return { success: false, message: '用户不存在' };
+                    // 单语句更新，避免显式行锁等待
+                    let updateResult;
+                    if (requireSufficientBalance && amount < 0) {
+                        updateResult = await client.query(
+                            `
+                            UPDATE users
+                            SET balance = balance + $2
+                            WHERE username = $1 AND balance >= $3
+                            RETURNING balance
+                            `,
+                            [username, amount, Math.abs(amount)]
+                        );
+                    } else {
+                        updateResult = await client.query(
+                            `
+                            UPDATE users
+                            SET balance = balance + $2
+                            WHERE username = $1
+                            RETURNING balance
+                            `,
+                            [username, amount]
+                        );
                     }
-                    
-                    const balanceBefore = parseFloat(currentResult.rows[0].balance);
-                    const balanceAfter = balanceBefore + amount;
-                    
-                    // 检查余额是否充足
-                    if (requireSufficientBalance && amount < 0 && balanceAfter < 0) {
+
+                    if (updateResult.rows.length === 0) {
                         if (manageTx) await client.query('ROLLBACK');
                         return { success: false, message: '余额不足' };
                     }
-                    
-                    // 更新余额
-                    await client.query(
-                        'UPDATE users SET balance = $1 WHERE username = $2',
-                        [balanceAfter, username]
-                    );
-                    
+
+                    const balanceAfter = parseFloat(updateResult.rows[0].balance);
+                    const balanceBefore = balanceAfter - amount;
+
                     // 记录日志
                     await client.query(`
                         INSERT INTO balance_logs (
