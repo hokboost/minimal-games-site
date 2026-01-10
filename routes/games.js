@@ -318,11 +318,16 @@ module.exports = function registerGameRoutes(app, deps) {
             const userStore = userSessions.get(username);
             if (!userStore.tokensBySession) {
                 userStore.tokensBySession = {};
-            } else {
-                // 清理其他会话的残留token，确保单次会话隔离
-                userStore.tokensBySession = {};
             }
-            userStore.tokensBySession[quizSessionId] = {};
+            // 只清理其他会话的残留，当前会话保留已有题目的token
+            Object.keys(userStore.tokensBySession).forEach((sid) => {
+                if (sid !== quizSessionId) {
+                    delete userStore.tokensBySession[sid];
+                }
+            });
+            if (!userStore.tokensBySession[quizSessionId]) {
+                userStore.tokensBySession[quizSessionId] = {};
+            }
             userStore.tokensBySession[quizSessionId][token] = {
                 questionId: question.id,
                 timestamp: Date.now(),
