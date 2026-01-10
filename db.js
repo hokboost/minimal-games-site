@@ -40,7 +40,6 @@ pool.on('connect', (client) => {
   client.query(`
     SET TIME ZONE 'Asia/Shanghai';
     SET statement_timeout = '12000ms';
-    SET lock_timeout = '3000ms';
   `).catch((error) => {
     console.error('设置数据库会话参数失败:', error);
   });
