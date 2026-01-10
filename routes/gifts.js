@@ -51,7 +51,8 @@ module.exports = function registerGiftRoutes(app, deps) {
         let currentBalance;
         let bilibiliRoomId;
         let existingExchange = null;
-        const idempotencyKey = req.body?.idempotencyKey || req.body?.idempotency_key || null;
+        // 如果未传入，则后端自动生成，避免NULL导致无法去重
+        const idempotencyKey = req.body?.idempotencyKey || req.body?.idempotency_key || `auto-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 
         try {
             const { giftType, cost, quantity = 1 } = req.body;

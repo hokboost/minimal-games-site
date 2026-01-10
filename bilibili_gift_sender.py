@@ -219,7 +219,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
 
         # 加载cookies
         safe_print("Loading cookies...")
-        cookie_path = 'C:/Users/user/Desktop/jiaobenbili/cookie.txt'
+        cookie_path = 'C:/Users/user/minimal-games-site/cookie.txt'
         cookies = load_cookies_from_txt(cookie_path)
         page.goto("https://www.bilibili.com/")
         page.context.add_cookies(cookies)
