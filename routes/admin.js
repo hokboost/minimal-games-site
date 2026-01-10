@@ -922,7 +922,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 管理员查看所有余额记录 API
-    app.get('/api/admin/balance/logs', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
+    app.get('/api/admin/balance/logs', requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, async (req, res) => {
         try {
             const page = parseInt(req.query.page) || 1;
             const limit = Math.min(parseInt(req.query.limit) || 50, 200);
@@ -945,7 +945,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取IP风险信息
-    app.get('/api/admin/ip/:ip', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
+    app.get('/api/admin/ip/:ip', requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, async (req, res) => {
         try {
             const ip = req.params.ip;
             const [riskData, stats] = await Promise.all([
