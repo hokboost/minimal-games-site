@@ -376,6 +376,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             let correctCount = 0;
+            let invalidToken = false;
             const userStore = userSessions.get(username);
             const userTokens = userStore?.tokensBySession?.[quizSessionId] || {};
 
@@ -384,6 +385,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 if (sessionData) {
                     if (sessionData.sessionId !== quizSessionId) {
                         console.warn(`Token session mismatch: token=${answer.token} user=${username}`);
+                        invalidToken = true;
                         continue;
                     }
                     const question = questionMap.get(sessionData.questionId);
@@ -392,7 +394,13 @@ module.exports = function registerGameRoutes(app, deps) {
                     }
                 } else {
                     console.warn(`Missing session data for token: ${answer.token}, user: ${username}`);
+                    invalidToken = true;
                 }
+            }
+
+            if (invalidToken) {
+                // 防止旧token/无效token重复提交
+                return res.status(400).json({ success: false, message: '提交包含无效题目或已过期会话' });
             }
 
             // 防止重复提交：标记已结算
