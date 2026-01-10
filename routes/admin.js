@@ -16,6 +16,37 @@ module.exports = function registerAdminRoutes(app, deps) {
         path
     } = deps;
 
+    const auditAdminAction = async ({
+        adminUsername,
+        action,
+        targetUsername,
+        details = {},
+        clientIP = null
+    }) => {
+        try {
+            await pool.query(`
+                INSERT INTO security_events (event_type, username, ip_address, description, severity)
+                VALUES ('admin_action', $1, $2, $3, 'high')
+            `, [
+                adminUsername,
+                clientIP,
+                `${action}: ${targetUsername} - ${JSON.stringify(details)}`
+            ]);
+
+            if (adminUsername !== 'hokboost') {
+                notifySecurityEvent('hokboost', {
+                    type: 'admin_action',
+                    title: '管理员操作通知',
+                    message: `${adminUsername} 执行了 ${action} 操作`,
+                    details: { targetUsername, ...details },
+                    level: 'warning'
+                });
+            }
+        } catch (err) {
+            console.error('记录管理员操作失败:', err);
+        }
+    };
+
     // 管理员后台
     app.get('/admin', requireLogin, requireAdmin, async (req, res) => {
         try {
@@ -459,6 +490,14 @@ module.exports = function registerAdminRoutes(app, deps) {
                     message: `余额修改失败: ${balanceResult.message}`
                 });
             }
+
+            await auditAdminAction({
+                adminUsername,
+                action: '修改余额',
+                targetUsername: username,
+                details: { oldBalance: currentBalance, newBalance: balance, delta },
+                clientIP: req.clientIP
+            });
 
             res.json({
                 success: true,

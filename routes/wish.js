@@ -72,6 +72,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
             await client.query('BEGIN');
             await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [username]);
 
             // 锁定祈愿进度
             let progressResult = await client.query(
@@ -471,6 +472,7 @@ module.exports = function registerWishRoutes(app, deps) {
 
             await client.query('BEGIN');
             await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish_batch\'))', [username]);
 
             // 获取用户余额，提前校验（加锁余额行）
             const balanceResult = await client.query(

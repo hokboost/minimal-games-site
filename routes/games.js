@@ -336,6 +336,11 @@ module.exports = function registerGameRoutes(app, deps) {
             if (!userStore.tokensBySession[quizSessionId]) {
                 userStore.tokensBySession[quizSessionId] = {};
             }
+            // 限制单次会话题目数量，防止无限刷题
+            const currentCount = Object.keys(userStore.tokensBySession[quizSessionId]).length;
+            if (currentCount >= 10) {
+                return res.status(400).json({ success: false, message: '题目数量已达上限，请提交答案' });
+            }
             userStore.tokensBySession[quizSessionId][token] = {
                 questionId: question.id,
                 timestamp: Date.now(),
@@ -392,17 +397,36 @@ module.exports = function registerGameRoutes(app, deps) {
             let validAnswers = 0;
             const userStore = userSessions.get(username);
             const userTokens = userStore?.tokensBySession?.[quizSessionId] || {};
+            const usedTokens = new Set();
 
             for (const answer of answers) {
                 const tokenData = userTokens[answer.token];
+                // token不存在直接跳过
+                if (!tokenData) {
+                    continue;
+                }
+                // 防重放：同一次提交内重复token
+                if (usedTokens.has(answer.token)) {
+                    return res.status(400).json({ success: false, message: 'Token重复使用，疑似作弊' });
+                }
+                const tokenAge = Date.now() - (tokenData.timestamp || 0);
+                if (tokenAge > 60_000) {
+                    continue; // 过期token直接忽略
+                }
                 if (tokenData && tokenData.sessionId === quizSessionId) {
                     const question = questionMap.get(tokenData.questionId);
                     if (question && GameLogic.quiz.validateAnswer(question, answer.answerIndex)) {
                         correctCount++;
                     }
                     validAnswers++;
+                    usedTokens.add(answer.token);
                 }
             }
+
+            // 消费已使用的token，避免后续重放
+            usedTokens.forEach((token) => {
+                delete userTokens[token];
+            });
 
             if (validAnswers === 0) {
                 return res.status(400).json({

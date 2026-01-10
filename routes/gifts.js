@@ -9,6 +9,21 @@ module.exports = function registerGiftRoutes(app, deps) {
         security,
         generateCSRFToken
     } = deps;
+    const crypto = require('crypto');
+
+    function verifyGiftTaskHMAC(taskId, timestamp, signature) {
+        const secret = process.env.GIFT_TASKS_HMAC_SECRET;
+        if (!secret) return { valid: false, error: '签名配置缺失' };
+        if (!timestamp || !signature) return { valid: false, error: '签名缺失' };
+        const payload = `${taskId}:${timestamp}`;
+        const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+        if (signature !== expected) return { valid: false, error: '签名无效' };
+        const age = Date.now() - Number(timestamp);
+        if (!Number.isFinite(age) || age < 0 || age > 300000) {
+            return { valid: false, error: '请求已过期' };
+        }
+        return { valid: true };
+    }
 
     // 礼物兑换页面
     app.get('/gifts', requireLogin, requireAuthorized, async (req, res) => {
@@ -471,6 +486,11 @@ module.exports = function registerGiftRoutes(app, deps) {
     app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
         try {
             const taskId = parseInt(req.params.id);
+            const { timestamp, signature } = req.body || {};
+            const verification = verifyGiftTaskHMAC(taskId, timestamp, signature);
+            if (!verification.valid) {
+                return res.status(401).json({ success: false, message: verification.error });
+            }
 
             // 🛡️ 预扣机制：获取任务信息并执行部分成功的扣费
             // ✅ 兼容 Windows(Python) snake_case 与 JS camelCase
