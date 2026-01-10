@@ -1094,7 +1094,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取安全事件列表
-    app.get('/api/admin/security-events', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, async (req, res) => {
+    app.get('/api/admin/security-events', requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, async (req, res) => {
         try {
             const events = await pool.query(`
                 SELECT id, event_type, username, ip_address, description, severity, 
@@ -1115,7 +1115,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // WebSocket测试页面
-    app.get('/test-websocket', requireLogin, requireAdmin, security.adminIPWhitelist, security.adminRateLimit, (req, res) => {
+    app.get('/test-websocket', requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, (req, res) => {
         res.sendFile(path.join(__dirname, '../test-websocket.html'));
     });
 
