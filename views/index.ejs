@@ -213,7 +213,7 @@
 </head>
 <body data-authorized="<%= user && user.authorized ? 'true' : 'false' %>" data-username="<%= user ? user.username : '' %>">
     <div class="container">
-        <!-- 所有用户都能看到的头部导航 -->
+        
         <div class="header">
             <h1 class="title">🎮 Minimal Games 游戏中心</h1>
             <div class="user-info">
@@ -236,7 +236,7 @@
         </div>
         
         <% if (typeof user !== 'undefined' && user && user.authorized) { %>
-            <!-- 授权用户：显示游戏内容 -->
+            
             
             <div class="spins-reminder">
                 <h3>⚡ 电币余额：<%= balance !== null ? balance : 0 %> 电币</h3>
@@ -293,7 +293,7 @@
                     <span class="game-status status-hot">🔥 热血</span>
                 </a>
 
-                <!-- 礼物兑换入口 -->
+                
                 <a href="/gifts" class="game-card" style="background: linear-gradient(135deg, rgba(255, 152, 0, 0.2), rgba(255, 193, 7, 0.1));">
                     <span class="game-icon">🎁</span>
                     <h2 class="game-title">礼物兑换</h2>
@@ -302,7 +302,7 @@
                 </a>
             </div>
             
-            <!-- 免责声明 -->
+            
             <div style="
                 max-width: 800px;
                 margin: 3rem auto 0;
@@ -324,7 +324,7 @@
                 <strong>严禁未满18周岁用户使用，请理性娱乐，适度游戏。</strong>
             </div>
         <% } else { %>
-            <!-- 未登录或未授权用户：只显示网站功能开发中 -->
+            
             <div style="
                 text-align: center;
                 padding: 4rem 2rem;

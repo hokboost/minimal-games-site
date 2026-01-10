@@ -1,6 +1,6 @@
     const csrfToken = document.body.dataset.csrfToken || '';
 
-    // 带数量的礼物兑换功能
+    
     async function exchangeGiftWithQuantity(giftType, unitCost) {
         const quantity = parseInt(document.getElementById(giftType + '-quantity').value);
         const totalCost = unitCost * quantity;
@@ -42,14 +42,14 @@
             if (result.success) {
                 showMessage(`成功兑换 ${quantity} 个礼物！`, 'success');
                 
-                // 更新余额显示
+                
                 document.getElementById('currentBalance').textContent = result.newBalance;
                 
-                // 重置数量为1
+                
                 document.getElementById(giftType + '-quantity').value = 1;
                 updateGiftTotal(giftType, unitCost);
                 
-                // 刷新兑换记录
+                
                 loadExchangeHistory();
             } else {
                 showMessage(result.message || '兑换失败', 'error');
@@ -60,7 +60,7 @@
         }
     }
 
-    // 原有的兑换功能（兼容性保留）
+    
     async function exchangeGift(giftType, cost) {
         const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
         
@@ -93,10 +93,10 @@
             if (result.success) {
                 showMessage('兑换成功！', 'success');
                 
-                // 更新余额显示
+                
                 document.getElementById('currentBalance').textContent = result.newBalance;
                 
-                // 刷新兑换记录
+                
                 loadExchangeHistory();
             } else {
                 showMessage(result.message || '兑换失败', 'error');
@@ -107,7 +107,7 @@
         }
     }
 
-    // 加载兑换记录
+    
     async function loadExchangeHistory() {
         try {
             const response = await fetch('/api/gifts/history');
@@ -116,7 +116,7 @@
             const historyDiv = document.getElementById('exchangeHistory');
             
             if (result.success && result.history.length > 0) {
-                // 检查状态变化并显示弹窗通知
+                
                 checkStatusChanges(result.history);
                 
                 historyDiv.innerHTML = result.history.map(item => `
@@ -140,7 +140,7 @@
         }
     }
 
-    // 获取礼物图标
+    
     function getGiftIcon(giftType) {
         const icons = {
             'heartbox': '💝',
@@ -149,7 +149,7 @@
         return icons[giftType] || '🎁';
     }
 
-    // 获取礼物名称
+    
     function getGiftName(giftType) {
         const names = {
             'heartbox': '心动盲盒',
@@ -158,7 +158,7 @@
         return names[giftType] || '未知礼物';
     }
 
-    // 格式化时间
+    
     function formatTime(timestamp) {
         if (!timestamp) {
             return '';
@@ -178,16 +178,16 @@
         });
     }
 
-    // 获取送礼状态徽章
+    
     function getDeliveryStatusBadge(item) {
         const status = item.delivery_status;
         const statusColors = {
-            'pending': '#ff9800',      // 橙色 - 等待发送
-            'processing': '#2196f3',   // 蓝色 - 发送中
-            'success': '#4caf50',      // 绿色 - 发送成功  
-            'partial_success': '#ff5722', // 深橙色 - 部分成功
-            'failed': '#f44336',       // 红色 - 发送失败
-            'no_room': '#9e9e9e'       // 灰色 - 无房间号
+            'pending': '#ff9800',      
+            'processing': '#2196f3',   
+            'success': '#4caf50',      
+            'partial_success': '#ff5722', 
+            'failed': '#f44336',       
+            'no_room': '#9e9e9e'       
         };
         
         const statusTexts = {
@@ -205,17 +205,17 @@
         return `<span style="color: ${color}; font-size: 0.8rem; margin-left: 8px;">${text}</span>`;
     }
 
-    // 存储上次检查的历史记录，用于检测状态变化
+    
     let lastHistory = [];
     
-    // 检查送礼状态变化并显示弹窗通知
+    
     function checkStatusChanges(newHistory) {
         if (lastHistory.length === 0) {
             lastHistory = [...newHistory];
             return;
         }
         
-        // 检查每个任务的状态变化
+        
         for (const newItem of newHistory) {
             const oldItem = lastHistory.find(item => 
                 item.gift_type === newItem.gift_type && 
@@ -223,7 +223,7 @@
             );
             
             if (oldItem && oldItem.delivery_status !== newItem.delivery_status) {
-                // 状态发生了变化
+                
                 if (newItem.delivery_status === 'partial_success') {
                     showMessage(`礼物${getGiftName(newItem.gift_type)}部分发送成功！部分礼物可能因余额不足等原因发送失败。`, 'info');
                 } else if (newItem.delivery_status === 'success') {
@@ -242,7 +242,7 @@
         lastHistory = [...newHistory];
     }
 
-    // 显示消息
+    
     function showMessage(message, type = 'info') {
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
@@ -267,9 +267,9 @@
         }, 3000);
     }
 
-    // 房间绑定功能已移至管理后台 (/admin)
+    
 
-    // 更新礼物总价显示
+    
     function updateGiftTotal(giftType, unitCost) {
         const quantityInput = document.getElementById(giftType + '-quantity');
         const totalSpan = document.getElementById(giftType + '-total');
@@ -278,11 +278,11 @@
         totalSpan.textContent = total;
     }
 
-    // 页面加载完成后加载兑换记录并设置事件监听
+    
     document.addEventListener('DOMContentLoaded', function() {
         loadExchangeHistory();
         
-        // 设置定期刷新兑换记录以检查送礼状态变化（每10秒检查一次）
+        
         setInterval(() => {
             loadExchangeHistory();
         }, 10000);
@@ -298,7 +298,7 @@
             });
         });
 
-        // 为数量输入框添加事件监听
+        
         const heartboxQuantity = document.getElementById('heartbox-quantity');
         const fanlightQuantity = document.getElementById('fanlight-quantity');
         

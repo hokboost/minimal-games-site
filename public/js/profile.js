@@ -1,4 +1,4 @@
-// 显示消息提示
+
     function showToast(message, type = 'info') {
         const toast = document.getElementById('messageToast');
         toast.textContent = message;
@@ -68,18 +68,18 @@
         });
     }
 
-    // 显示修改密码模态框
+    
     function showChangePasswordModal() {
         document.getElementById('changePasswordModal').style.display = 'block';
         document.getElementById('changePasswordForm').reset();
     }
 
-    // 关闭修改密码模态框
+    
     function closeChangePasswordModal() {
         document.getElementById('changePasswordModal').style.display = 'none';
     }
 
-    // 处理修改密码表单提交
+    
     document.getElementById('changePasswordForm').addEventListener('submit', async function(e) {
         e.preventDefault();
         
@@ -87,7 +87,7 @@
         const newPassword = document.getElementById('newPassword').value;
         const confirmPassword = document.getElementById('confirmPassword').value;
         
-        // 客户端验证
+        
         if (!currentPassword || !newPassword || !confirmPassword) {
             showToast('请填写所有字段', 'error');
             return;
@@ -132,7 +132,7 @@
     });
 
 
-    // ESC键关闭模态框
+    
     document.addEventListener('keydown', function(event) {
         if (event.key === 'Escape') {
             closeChangePasswordModal();
@@ -143,7 +143,7 @@
         showToast('数据导出功能开发中...', 'info');
     }
 
-    // 游戏记录相关功能
+    
     let currentGameType = null;
     let currentPage = 1;
 
@@ -313,7 +313,7 @@
         
         let tableHTML = '<table class="records-table">';
         
-        // 表头
+        
         if (gameType === 'quiz') {
             tableHTML += '<thead><tr><th>游戏时间</th><th>得分</th></tr></thead>';
         } else if (gameType === 'slot') {
@@ -332,7 +332,7 @@
         
         tableHTML += '<tbody>';
         
-        // 表内容
+        
         records.forEach(record => {
             const playedAt = record.played_at || '';
             
@@ -438,12 +438,12 @@
         }
         const pageList = Array.from(pages).sort((a, b) => a - b);
         
-        // 上一页
+        
         if (pagination.hasPrev) {
             paginationHTML += `<button data-page="${pagination.current - 1}">上一页</button>`;
         }
         
-        // 页码
+        
         for (let i = 0; i < pageList.length; i++) {
             const page = pageList[i];
             if (i > 0 && pageList[i - 1] !== page - 1) {
@@ -453,7 +453,7 @@
             paginationHTML += `<button class="${activeClass}" data-page="${page}">${page}</button>`;
         }
         
-        // 下一页
+        
         if (pagination.hasNext) {
             paginationHTML += `<button data-page="${pagination.current + 1}">下一页</button>`;
         }
@@ -514,7 +514,7 @@
         loadGameRecords(currentGameType, page);
     }
 
-    // 点击模态框外部关闭
+    
     window.onclick = function(event) {
         const changePasswordModal = document.getElementById('changePasswordModal');
         const gameRecordsModal = document.getElementById('gameRecordsModal');
@@ -527,7 +527,7 @@
         }
     }
 
-    // 初始化背包
+    
     loadWishBackpack();
     if (backpackContentEl) {
         setInterval(loadWishBackpack, 10000);

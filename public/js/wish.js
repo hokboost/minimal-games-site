@@ -34,7 +34,7 @@
             
             modal.style.display = 'flex';
             
-            // 3秒后自动关闭，点击可提前关闭
+            
             setTimeout(() => {
                 if (modal.style.display === 'flex') {
                     modal.style.display = 'none';
@@ -83,14 +83,14 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    // 更新本地进度数据
+                    
                     wishProgress = result.progress;
                     
                     if (typeof result.newBalance === 'number') {
                         document.getElementById('current-balance').textContent = result.newBalance;
                     }
                     
-                    // 显示结果
+                    
                     if (count === 10) {
                         const modal = document.getElementById('fullscreenModal');
                         const content = document.getElementById('modalContent');
@@ -119,7 +119,7 @@
             }
         }
         
-        // 页面加载时获取祈愿进度
+        
         async function loadWishProgress() {
             try {
                 const response = await fetch(`/api/wish/progress?giftType=${currentGiftType}`);
@@ -181,15 +181,15 @@
             }));
         }
         
-        // 初始化显示
+        
         setCurrentGift(currentGiftType);
         loadAllGiftProgress();
         
-        // 飘屏管理器
+        
         class DanmakuManager {
             constructor() {
                 this.container = document.getElementById('danmaku-container');
-                this.usedLanes = new Set(); // 避免重叠
+                this.usedLanes = new Set(); 
                 this.maxLanes = Math.floor((window.innerHeight - 200) / 50);
             }
             
@@ -198,13 +198,13 @@
                 message.className = 'danmaku-message';
                 message.textContent = data.content;
                 
-                // 随机选择不重叠的轨道
+                
                 const lane = this.getAvailableLane();
                 message.style.top = `${lane * 50 + 100}px`;
                 
                 this.container.appendChild(message);
                 
-                // 12秒后移除
+                
                 setTimeout(() => {
                     if (message.parentNode) {
                         message.parentNode.removeChild(message);
@@ -221,14 +221,14 @@
                         return i;
                     }
                 }
-                // 如果没有空闲轨道，随机选择一个
+                
                 return Math.floor(Math.random() * this.maxLanes);
             }
         }
         
         const danmakuManager = new DanmakuManager();
         
-        // WebSocket连接
+        
         let socket;
         
         function initSocket() {
@@ -243,16 +243,16 @@
                 console.log('Socket连接断开');
             });
             
-            // 监听新飘屏消息
+            
             socket.on('new_danmaku', (data) => {
                 console.log('收到飘屏消息:', data);
                 danmakuManager.addMessage(data);
             });
             
-            // 接收历史消息
+            
             socket.on('recent_messages', (messages) => {
                 console.log('收到历史消息:', messages);
-                // 显示最近的3条成功消息
+                
                 messages.slice(0, 3).forEach((msg, index) => {
                     setTimeout(() => {
                         danmakuManager.addMessage(msg);
@@ -261,7 +261,7 @@
             });
         }
         
-        // 页面加载完成后初始化Socket
+        
         document.addEventListener('DOMContentLoaded', function() {
             initSocket();
         });
@@ -314,7 +314,7 @@
             document.getElementById('probabilityModal').style.display = 'none';
         }
 
-        // 点击弹窗直接关闭
+        
         document.getElementById('fullscreenModal').addEventListener('click', function() {
             this.style.display = 'none';
         });
@@ -325,7 +325,7 @@
             }
         });
 
-        // 显示管理员测试按钮
+        
         if (canWishTest) {
             document.querySelectorAll('.admin-test-btn').forEach((btn) => {
                 btn.style.display = 'inline-block';

@@ -479,7 +479,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             // 验证投注金额
-            if (!Number.isFinite(betValue) || betValue < 1 || betValue > 1000) {
+            if (!Number.isFinite(betValue) || !Number.isInteger(betValue) || betValue < 1 || betValue > 1000) {
                 return res.status(400).json({ success: false, message: '投注金额必须在1-1000电币之间' });
             }
 

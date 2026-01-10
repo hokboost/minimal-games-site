@@ -63,7 +63,7 @@ document.addEventListener('click', (event) => {
 function addElectricCoin(username, btn) {
         const amount = prompt(`为用户 "${username}" 添加电币:\\n\\n请输入要添加的电币数量:`, '100');
         
-        if (amount === null) return; // 用户取消
+        if (amount === null) return; 
         
         const coinAmount = parseFloat(amount);
         
@@ -104,7 +104,7 @@ function addElectricCoin(username, btn) {
             }
             
             alert(`✅ 成功为用户 "${username}" 添加 ${coinAmount} 电币！\\n新余额: ${data.newBalance} 电币`);
-            location.reload(); // 刷新页面显示新余额
+            location.reload(); 
         })
         .catch(err => {
             console.error('Add electric coin error:', err);
@@ -315,7 +315,7 @@ function addElectricCoin(username, btn) {
     function editBalance(username, currentBalance) {
         const newBalance = prompt(`修改用户 "${username}" 的电币余额:\\n\\n当前余额: ${currentBalance} 电币\\n\\n请输入新的电币数量:`, currentBalance);
         
-        if (newBalance === null) return; // 用户取消
+        if (newBalance === null) return; 
         
         const balance = parseFloat(newBalance);
         
@@ -333,7 +333,7 @@ function addElectricCoin(username, btn) {
         
         if (!confirmChange) return;
         
-        // 发送请求到服务器
+        
         adminFetch('/api/admin/update-balance', {
             method: 'POST',
             headers: { 
@@ -345,7 +345,7 @@ function addElectricCoin(username, btn) {
         .then(data => {
             if (data.success) {
                 alert(`✅ 用户 "${username}" 的电币余额已成功修改为 ${balance} 电币`);
-                location.reload(); // 刷新页面显示新余额
+                location.reload(); 
             } else {
                 alert('修改失败: ' + data.message);
             }
@@ -413,10 +413,10 @@ function addElectricCoin(username, btn) {
     }
 
     // ==========================================
-    // Cookie 管理功能
+    
     // ==========================================
     
-    // 检查Cookie状态
+    
     async function checkCookieStatus() {
         try {
             showMessage('正在检查Cookie状态...', 'info');
@@ -474,7 +474,7 @@ function addElectricCoin(username, btn) {
         }
     }
 
-    // 刷新Cookie
+    
     async function refreshCookies() {
         try {
             if (!confirm('确定要刷新B站Cookie吗？\\n\\n这将打开浏览器窗口，请在浏览器中完成登录操作。')) {
@@ -499,7 +499,7 @@ function addElectricCoin(username, btn) {
             
             if (result.success) {
                 showMessage('Cookie刷新成功！', 'success');
-                checkCookieStatus(); // 重新检查状态
+                checkCookieStatus(); 
             } else {
                 showMessage('Cookie刷新失败: ' + result.message, 'error');
                 statusDiv.style.background = 'rgba(244, 67, 54, 0.8)';
@@ -513,10 +513,10 @@ function addElectricCoin(username, btn) {
     }
 
     // ==========================================
-    // 直播间管理功能
+    
     // ==========================================
     
-    // 绑定用户房间
+    
     async function bindUserRoom() {
         try {
             const username = document.getElementById('bindUsername').value.trim();
@@ -556,10 +556,10 @@ function addElectricCoin(username, btn) {
             
             if (result.success) {
                 showMessage(result.message, 'success');
-                // 清空输入框
+                
                 document.getElementById('bindUsername').value = '';
                 document.getElementById('bindRoomId').value = '';
-                // 刷新绑定列表
+                
                 loadRoomBindings();
             } else {
                 showMessage(result.message || '绑定失败', 'error');
@@ -571,7 +571,7 @@ function addElectricCoin(username, btn) {
         }
     }
 
-    // 解除用户房间绑定
+    
     async function unbindUserRoom() {
         try {
             const username = document.getElementById('unbindUsername').value.trim();
@@ -599,9 +599,9 @@ function addElectricCoin(username, btn) {
             
             if (result.success) {
                 showMessage(result.message, 'success');
-                // 清空输入框
+                
                 document.getElementById('unbindUsername').value = '';
-                // 刷新绑定列表
+                
                 loadRoomBindings();
             } else {
                 showMessage(result.message || '解除绑定失败', 'error');
@@ -613,7 +613,7 @@ function addElectricCoin(username, btn) {
         }
     }
 
-    // 加载房间绑定列表
+    
     async function loadRoomBindings() {
         try {
             const response = await adminFetch('/api/bilibili/room');
@@ -666,7 +666,7 @@ function addElectricCoin(username, btn) {
         }
     }
 
-    // 显示消息
+    
     function showMessage(message, type = 'info') {
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
@@ -691,10 +691,10 @@ function addElectricCoin(username, btn) {
         }, 5000);
     }
 
-    // 页面加载完成后的初始化
+    
     document.addEventListener('DOMContentLoaded', function() {
-        // 自动检查Cookie状态
+        
         checkCookieStatus();
-        // 自动加载房间绑定
+        
         loadRoomBindings();
     });

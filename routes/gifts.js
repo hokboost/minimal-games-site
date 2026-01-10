@@ -65,7 +65,7 @@ module.exports = function registerGiftRoutes(app, deps) {
             const quantityNum = Number(quantity);
 
             // 验证输入参数
-            if (!giftType || !Number.isFinite(costNum) || quantityNum < 1) { // ✅ FIX
+            if (!giftType || !Number.isFinite(costNum) || !Number.isInteger(costNum) || !Number.isFinite(quantityNum) || !Number.isInteger(quantityNum) || quantityNum < 1) {
                 console.log('❌ [DEBUG] 参数验证失败:', { giftType, cost, quantity });
                 return res.status(400).json({
                     success: false,
