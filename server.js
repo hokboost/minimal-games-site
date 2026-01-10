@@ -1233,11 +1233,8 @@ function shuffleArray(list) {
 }
 
 function createFlipBoard() {
-    const cards = [
-        'good', 'good', 'good', 'good', 'good', 'good', 'good',
-        'bad', 'bad'
-    ];
-    return shuffleArray(cards);
+    // 动态模式下不预先写死牌面，这里仅返回占位数组（向前兼容调用）
+    return Array(9).fill(null);
 }
 
 // Flip: 使用预生成牌面，数据库记录牌面与已翻状态
@@ -1255,7 +1252,7 @@ async function getFlipState(username, client = pool, { forUpdate = false } = {})
         await executor(
             `INSERT INTO flip_states (username, board, flipped, good_count, bad_count, ended, created_at, updated_at)
              VALUES ($1, $2, $3, 0, 0, FALSE, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-            [username, board, flipped]
+            [username, JSON.stringify(board), JSON.stringify(flipped)]
         );
         return {
             board,
@@ -1267,8 +1264,33 @@ async function getFlipState(username, client = pool, { forUpdate = false } = {})
     }
 
     const row = result.rows[0];
-    const board = Array.isArray(row.board) ? row.board : createFlipBoard();
-    const flipped = Array.isArray(row.flipped) ? row.flipped : [];
+    let boardValue = row.board;
+    if (typeof boardValue === 'string') {
+        try {
+            boardValue = JSON.parse(boardValue);
+        } catch (err) {
+            boardValue = null;
+        }
+    }
+    let board = Array.isArray(boardValue) ? boardValue : createFlipBoard();
+    if (!Array.isArray(board) || board.length === 0) {
+        board = createFlipBoard();
+    }
+    if (board.length < 9) {
+        board = board.concat(Array(9 - board.length).fill(null));
+    } else if (board.length > 9) {
+        board = board.slice(0, 9);
+    }
+
+    let flippedValue = row.flipped;
+    if (typeof flippedValue === 'string') {
+        try {
+            flippedValue = JSON.parse(flippedValue);
+        } catch (err) {
+            flippedValue = null;
+        }
+    }
+    const flipped = Array.isArray(flippedValue) ? flippedValue : [];
     const normalizedFlipped = Array(board.length).fill(false);
     for (let i = 0; i < Math.min(board.length, flipped.length); i += 1) {
         normalizedFlipped[i] = !!flipped[i];
@@ -1295,8 +1317,8 @@ async function saveFlipState(username, state, client = pool) {
              updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
          WHERE username = $6`,
         [
-            state.board,
-            state.flipped,
+            JSON.stringify(state.board),
+            JSON.stringify(state.flipped),
             state.good_count,
             state.bad_count,
             state.ended,

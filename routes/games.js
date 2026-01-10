@@ -1145,7 +1145,7 @@ module.exports = function registerGameRoutes(app, deps) {
             const nextCost = flips < flipCosts.length ? flipCosts[flips] : null;
             const canFlip = !state.ended && flips < flipCosts.length;
             const cashoutReward = flipCashoutRewards[state.good_count] || 0;
-            const board = (state.board || []).map((card, idx) => ({
+            const board = (state.board || Array(9).fill(null)).map((card, idx) => ({
                 type: state.flipped?.[idx] ? card : 'unknown',
                 flipped: !!state.flipped?.[idx]
             }));
@@ -1212,7 +1212,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 }, client);
             }
 
-            const board = createFlipBoard();
+            const board = Array(9).fill(null);
             const state = {
                 board,
                 flipped: Array(board.length).fill(false),
@@ -1294,10 +1294,22 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '该卡牌已翻开' });
             }
 
-            const cardType = state.board[cardIndex];
-            if (cardType !== 'good' && cardType !== 'bad') {
+            // 动态分配本次翻开的牌型，根据剩余好/坏牌数量抽签
+            const remainingGood = Math.max(0, 7 - state.good_count);
+            const remainingBad = Math.max(0, 2 - state.bad_count);
+            const remainingTotal = remainingGood + remainingBad;
+            if (remainingTotal <= 0) {
+                state.ended = true;
+                await saveFlipState(username, state, client);
                 await client.query('ROLLBACK');
-                return res.status(500).json({ success: false, message: '牌面数据错误，请重新开始' });
+                return res.status(400).json({ success: false, message: '本轮已结束，请重新开始' });
+            }
+
+            let cardType = state.board[cardIndex];
+            if (cardType !== 'good' && cardType !== 'bad') {
+                const draw = randomInt(0, remainingTotal);
+                cardType = draw < remainingGood ? 'good' : 'bad';
+                state.board[cardIndex] = cardType;
             }
 
             state.flipped[cardIndex] = true;
