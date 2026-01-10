@@ -76,7 +76,6 @@ module.exports = function registerWishRoutes(app, deps) {
             try {
                 await client.query('BEGIN');
                 await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-                await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish\'))', [username]);
 
                 // 锁定祈愿进度
                 let progressResult = await client.query(
@@ -111,7 +110,12 @@ module.exports = function registerWishRoutes(app, deps) {
                 });
 
                 if (!betResult.success) {
+                    const shouldRetry = betResult.message && betResult.message.includes('系统繁忙');
                     await client.query('ROLLBACK');
+                    if (shouldRetry && attempt < maxAttempts) {
+                        await sleep(150);
+                        continue;
+                    }
                     return res.status(400).json({ success: false, message: betResult.message });
                 }
 
@@ -495,7 +499,6 @@ module.exports = function registerWishRoutes(app, deps) {
                 client = await pool.connect();
                 await client.query('BEGIN');
                 await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
-                await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':wish\'))', [username]);
 
                 // 获取用户当前祈愿进度（加锁）
                 let progressResult = await client.query(
