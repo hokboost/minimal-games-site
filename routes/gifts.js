@@ -187,29 +187,29 @@ module.exports = function registerGiftRoutes(app, deps) {
                 console.log('✅ [DEBUG] 余额检查通过');
 
                 // 2.1 幂等检查（如果表支持 idempotency_key）
+                // 2.1 幂等检查
                 if (idempotencyKey) {
-                    try {
-                        const idemResult = await client.query(
-                            'SELECT id, delivery_status, status FROM gift_exchanges WHERE username = $1 AND idempotency_key = $2 LIMIT 1',
-                            [username, idempotencyKey]
-                        );
-                        if (idemResult.rows.length > 0) {
-                            existingExchange = idemResult.rows[0];
-                            await client.query('ROLLBACK');
-                            return res.json({
-                                success: true,
-                                message: '重复请求，返回已有结果',
-                                exchangeId: existingExchange.id,
-                                deliveryStatus: existingExchange.delivery_status,
-                                status: existingExchange.status,
-                                newBalance: currentBalance - costNum
-                            });
-                        }
-                    } catch (idemError) {
-                        if (idemError.code !== '42703') {
-                            throw idemError;
-                        }
-                        console.log('⚠️ idempotency_key 字段不存在，跳过幂等检查');
+                    const idemResult = await client.query(
+                        'SELECT id, delivery_status, status FROM gift_exchanges WHERE username = $1 AND idempotency_key = $2 LIMIT 1',
+                        [username, idempotencyKey]
+                    );
+
+                    if (idemResult.rows.length > 0) {
+                        existingExchange = idemResult.rows[0];
+                        await client.query('ROLLBACK');
+
+                        // 获取当前真实余额
+                        const balanceResult = await pool.query('SELECT balance FROM users WHERE username = $1', [username]);
+                        const realBalance = balanceResult.rows.length > 0 ? parseFloat(balanceResult.rows[0].balance) : 0;
+
+                        return res.json({
+                            success: true,
+                            message: '重复请求，返回已有结果',
+                            exchangeId: existingExchange.id,
+                            deliveryStatus: existingExchange.delivery_status,
+                            status: existingExchange.status,
+                            newBalance: realBalance
+                        });
                     }
                 }
 
@@ -249,28 +249,13 @@ module.exports = function registerGiftRoutes(app, deps) {
                 const insertParams = [username, giftType, availableGifts[giftType].name, costNum, quantityNum, bilibiliRoomId, 'pending', idempotencyKey];
                 console.log('🔍 [DEBUG] INSERT参数:', insertParams);
 
-                try {
-                    insertResult = await client.query(`
-                        INSERT INTO gift_exchanges (
-                            username, gift_type, gift_name, cost, quantity, status, created_at,
-                            bilibili_room_id, delivery_status, idempotency_key
-                        ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7, $8)
-                        RETURNING id
-                    `, insertParams);
-                } catch (insertError) {
-                    if (insertError.code === '42703') {
-                        console.log('⚠️ idempotency_key 字段不存在，回退到无幂等插入');
-                        insertResult = await client.query(`
-                            INSERT INTO gift_exchanges (
-                                username, gift_type, gift_name, cost, quantity, status, created_at,
-                                bilibili_room_id, delivery_status
-                            ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7)
-                            RETURNING id
-                        `, insertParams.slice(0, 7));
-                    } else {
-                        throw insertError;
-                    }
-                }
+                insertResult = await client.query(`
+                    INSERT INTO gift_exchanges (
+                        username, gift_type, gift_name, cost, quantity, status, created_at,
+                        bilibili_room_id, delivery_status, idempotency_key
+                    ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7, $8)
+                    RETURNING id
+                `, insertParams);
                 console.log('✅ [DEBUG] 任务记录创建成功:', insertResult.rows);
 
                 console.log('🔍 [DEBUG] 提交事务');
