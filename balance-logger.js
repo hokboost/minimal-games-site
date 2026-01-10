@@ -76,71 +76,88 @@ class BalanceLogger {
     }) {
         const client = externalClient || await pool.connect();
         const manageTx = !managedTransaction;
+        const maxAttempts = 2;
+        const lockErrorCodes = new Set(['55P03', '57014']); // lock timeout / statement timeout
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
         try {
-            if (manageTx) {
-                await client.query('BEGIN');
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                try {
+                    if (manageTx) {
+                        await client.query('BEGIN');
+                    }
+                    
+                    // 获取当前余额（加锁）
+                    const currentResult = await client.query(
+                        'SELECT balance FROM users WHERE username = $1 FOR UPDATE',
+                        [username]
+                    );
+                    
+                    if (currentResult.rows.length === 0) {
+                        if (manageTx) await client.query('ROLLBACK');
+                        return { success: false, message: '用户不存在' };
+                    }
+                    
+                    const balanceBefore = parseFloat(currentResult.rows[0].balance);
+                    const balanceAfter = balanceBefore + amount;
+                    
+                    // 检查余额是否充足
+                    if (requireSufficientBalance && amount < 0 && balanceAfter < 0) {
+                        if (manageTx) await client.query('ROLLBACK');
+                        return { success: false, message: '余额不足' };
+                    }
+                    
+                    // 更新余额
+                    await client.query(
+                        'UPDATE users SET balance = $1 WHERE username = $2',
+                        [balanceAfter, username]
+                    );
+                    
+                    // 记录日志
+                    await client.query(`
+                        INSERT INTO balance_logs (
+                            username, operation_type, amount, balance_before, balance_after,
+                            description, game_data, ip_address, user_agent
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    `, [
+                        username,
+                        operationType,
+                        amount,
+                        balanceBefore,
+                        balanceAfter,
+                        description,
+                        gameData ? JSON.stringify(gameData) : null,
+                        ipAddress,
+                        userAgent
+                    ]);
+                    
+                    if (manageTx) {
+                        await client.query('COMMIT');
+                    }
+                    
+                    return {
+                        success: true,
+                        balance: balanceAfter,
+                        balanceBefore: balanceBefore
+                    };
+                    
+                } catch (error) {
+                    if (manageTx) {
+                        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+                    }
+                    const isLockTimeout = lockErrorCodes.has(error.code);
+                    if (isLockTimeout && attempt < maxAttempts) {
+                        // 轻量重试，缓解偶发锁等待
+                        await sleep(150);
+                        continue;
+                    }
+                    console.error('更新余额失败:', error);
+                    return {
+                        success: false,
+                        message: isLockTimeout ? '系统繁忙，请稍后重试' : '系统错误'
+                    };
+                }
             }
-            
-            // 获取当前余额（加锁）
-            const currentResult = await client.query(
-                'SELECT balance FROM users WHERE username = $1 FOR UPDATE',
-                [username]
-            );
-            
-            if (currentResult.rows.length === 0) {
-                await client.query('ROLLBACK');
-                return { success: false, message: '用户不存在' };
-            }
-            
-            const balanceBefore = parseFloat(currentResult.rows[0].balance);
-            const balanceAfter = balanceBefore + amount;
-            
-            // 检查余额是否充足
-            if (requireSufficientBalance && amount < 0 && balanceAfter < 0) {
-                await client.query('ROLLBACK');
-                return { success: false, message: '余额不足' };
-            }
-            
-            // 更新余额
-            await client.query(
-                'UPDATE users SET balance = $1 WHERE username = $2',
-                [balanceAfter, username]
-            );
-            
-            // 记录日志
-            await client.query(`
-                INSERT INTO balance_logs (
-                    username, operation_type, amount, balance_before, balance_after,
-                    description, game_data, ip_address, user_agent
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            `, [
-                username,
-                operationType,
-                amount,
-                balanceBefore,
-                balanceAfter,
-                description,
-                gameData ? JSON.stringify(gameData) : null,
-                ipAddress,
-                userAgent
-            ]);
-            
-            if (manageTx) {
-                await client.query('COMMIT');
-            }
-            
-            return {
-                success: true,
-                balance: balanceAfter,
-                balanceBefore: balanceBefore
-            };
-            
-        } catch (error) {
-            if (manageTx) {
-                await client.query('ROLLBACK');
-            }
-            console.error('更新余额失败:', error);
             return { success: false, message: '系统错误' };
         } finally {
             if (!externalClient) {
