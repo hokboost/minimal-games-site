@@ -590,6 +590,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const { username, betAmount } = req.body;
             const betValue = Number(betAmount);
 
@@ -670,40 +671,46 @@ module.exports = function registerGameRoutes(app, deps) {
                 }
             }
 
-            try {
-                const crypto = require('crypto');
-                const proof = crypto.createHash('sha256')
-                    .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                    .digest('hex');
+            // 提交后记录 slot 结果，减少事务内 I/O
+            postCommitTasks.push(async () => {
+                try {
+                    const crypto = require('crypto');
+                    const proof = crypto.createHash('sha256')
+                        .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                        .digest('hex');
 
-                await client.query(`
-                    INSERT INTO slot_results (
-                        username, result, won, proof, created_at,
-                        bet_amount, payout_amount, balance_before, balance_after, multiplier, game_details
-                    ) 
-                    VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10)
-                `, [
-                    username,
-                    JSON.stringify(slotResults),
-                    outcome.type,
-                    proof,
-                    betValue,
-                    payout,
-                    currentBalance + betAmount,
-                    finalBalance,
-                    outcome.multiplier,
-                    JSON.stringify({
-                        outcome: outcome.type,
-                        amounts: slotResults,
-                        won: payout > 0,
-                        timestamp: new Date().toISOString()
-                    })
-                ]);
-            } catch (dbError) {
-                console.error('Slot游戏记录存储失败:', dbError);
-            }
+                    await pool.query(`
+                        INSERT INTO slot_results (
+                            username, result, won, proof, created_at,
+                            bet_amount, payout_amount, balance_before, balance_after, multiplier, game_details
+                        ) 
+                        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10)
+                    `, [
+                        username,
+                        JSON.stringify(slotResults),
+                        outcome.type,
+                        proof,
+                        betValue,
+                        payout,
+                        currentBalance + betAmount,
+                        finalBalance,
+                        outcome.multiplier,
+                        JSON.stringify({
+                            outcome: outcome.type,
+                            amounts: slotResults,
+                            won: payout > 0,
+                            timestamp: new Date().toISOString()
+                        })
+                    ]);
+                } catch (dbError) {
+                    console.error('Slot游戏记录存储失败:', dbError);
+                }
+            });
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Slot post-commit log failed:', err));
+            }
 
             res.json({
                 success: true,
@@ -928,6 +935,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -961,15 +969,20 @@ module.exports = function registerGameRoutes(app, deps) {
 
             slots[emptyIndex] = randomStoneColor();
             await saveStoneState(username, slots, client);
-            await logStoneAction({
-                username,
-                actionType: 'add',
-                cost: 30,
-                beforeSlots,
-                afterSlots: slots
-            }, client);
+            postCommitTasks.push(async () => {
+                await logStoneAction({
+                    username,
+                    actionType: 'add',
+                    cost: 30,
+                    beforeSlots,
+                    afterSlots: slots
+                });
+            });
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Stone add post-commit log failed:', err));
+            }
             res.json({
                 success: true,
                 slots,
@@ -988,6 +1001,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1023,15 +1037,20 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const newSlots = slots.map((slot) => slot || randomStoneColor());
             await saveStoneState(username, newSlots, client);
-            await logStoneAction({
-                username,
-                actionType: 'fill',
-                cost,
-                beforeSlots,
-                afterSlots: newSlots
-            }, client);
+            postCommitTasks.push(async () => {
+                await logStoneAction({
+                    username,
+                    actionType: 'fill',
+                    cost,
+                    beforeSlots,
+                    afterSlots: newSlots
+                });
+            });
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Stone fill post-commit log failed:', err));
+            }
             res.json({
                 success: true,
                 slots: newSlots,
@@ -1050,6 +1069,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1096,16 +1116,21 @@ module.exports = function registerGameRoutes(app, deps) {
             const newSlots = slots.slice();
             newSlots[index] = randomStoneColor();
             await saveStoneState(username, newSlots, client);
-            await logStoneAction({
-                username,
-                actionType: 'replace',
-                cost: replaceCost,
-                slotIndex: index,
-                beforeSlots,
-                afterSlots: newSlots
-            }, client);
+            postCommitTasks.push(async () => {
+                await logStoneAction({
+                    username,
+                    actionType: 'replace',
+                    cost: replaceCost,
+                    slotIndex: index,
+                    beforeSlots,
+                    afterSlots: newSlots
+                });
+            });
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Stone replace post-commit log failed:', err));
+            }
             res.json({
                 success: true,
                 slots: newSlots,
@@ -1124,6 +1149,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1143,13 +1169,15 @@ module.exports = function registerGameRoutes(app, deps) {
             const newSlots = normalizeStoneSlots([]);
 
             await saveStoneState(username, newSlots, client);
-            await logStoneAction({
-                username,
-                actionType: 'redeem',
-                reward,
-                beforeSlots,
-                afterSlots: newSlots
-            }, client);
+            postCommitTasks.push(async () => {
+                await logStoneAction({
+                    username,
+                    actionType: 'redeem',
+                    reward,
+                    beforeSlots,
+                    afterSlots: newSlots
+                });
+            });
 
             let newBalance = null;
             if (reward > 0) {
@@ -1180,6 +1208,9 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Stone redeem post-commit log failed:', err));
+            }
             res.json({
                 success: true,
                 slots: newSlots,
@@ -1229,6 +1260,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1265,14 +1297,16 @@ module.exports = function registerGameRoutes(app, deps) {
                     newBalance = rewardResult.balance;
                 }
 
-                await logFlipAction({
-                    username,
-                    actionType: 'end',
-                    reward: previousReward,
-                    goodCount: previousState.good_count,
-                    badCount: previousState.bad_count,
-                    ended: true
-                }, client);
+                postCommitTasks.push(async () => {
+                    await logFlipAction({
+                        username,
+                        actionType: 'end',
+                        reward: previousReward,
+                        goodCount: previousState.good_count,
+                        badCount: previousState.bad_count,
+                        ended: true
+                    });
+                });
             }
 
             const board = Array(9).fill(null);
@@ -1286,6 +1320,9 @@ module.exports = function registerGameRoutes(app, deps) {
             await saveFlipState(username, state, client);
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Flip start post-commit log failed:', err));
+            }
             res.json({
                 success: true,
                 nextCost: flipCosts[0],
@@ -1307,6 +1344,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1420,17 +1458,22 @@ module.exports = function registerGameRoutes(app, deps) {
 
             await saveFlipState(username, state, client);
             if (state.ended) {
-                await logFlipAction({
-                    username,
-                    actionType: 'end',
-                    reward,
-                    goodCount: state.good_count,
-                    badCount: state.bad_count,
-                    ended: true
-                }, client);
+                postCommitTasks.push(async () => {
+                    await logFlipAction({
+                        username,
+                        actionType: 'end',
+                        reward,
+                        goodCount: state.good_count,
+                        badCount: state.bad_count,
+                        ended: true
+                    });
+                });
             }
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Flip flip post-commit log failed:', err));
+            }
             res.json({
                 success: true,
                 cardIndex,
@@ -1454,6 +1497,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1494,16 +1538,21 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: rewardResult.message });
             }
 
-            await logFlipAction({
-                username,
-                actionType: 'end',
-                reward,
-                goodCount: state.good_count,
-                badCount: state.bad_count,
-                ended: true
-            }, client);
+            postCommitTasks.push(async () => {
+                await logFlipAction({
+                    username,
+                    actionType: 'end',
+                    reward,
+                    goodCount: state.good_count,
+                    badCount: state.bad_count,
+                    ended: true
+                });
+            });
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Flip cashout post-commit log failed:', err));
+            }
             res.json({
                 success: true,
                 reward,
@@ -1523,6 +1572,7 @@ module.exports = function registerGameRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            const postCommitTasks = [];
             const username = req.session.user.username;
             const giftType = req.body.giftType;
             const power = Number(req.body.power);
@@ -1582,25 +1632,31 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance = rewardResult.balance;
             }
 
-            try {
-                await client.query(
-                    `INSERT INTO duel_logs (
-                        username, gift_type, reward, power, cost, success, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-                    [
-                        username,
-                        giftType,
-                        reward,
-                        power,
-                        cost,
-                        success
-                    ]
-                );
-            } catch (dbError) {
-                console.error('Duel log error:', dbError);
-            }
+            // 提交后记录 duel 日志，避免事务内多一次 I/O
+            postCommitTasks.push(async () => {
+                try {
+                    await pool.query(
+                        `INSERT INTO duel_logs (
+                            username, gift_type, reward, power, cost, success, created_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                        [
+                            username,
+                            giftType,
+                            reward,
+                            power,
+                            cost,
+                            success
+                        ]
+                    );
+                } catch (dbError) {
+                    console.error('Duel log error:', dbError);
+                }
+            });
 
             await client.query('COMMIT');
+            for (const task of postCommitTasks) {
+                task().catch((err) => console.error('Duel post-commit log failed:', err));
+            }
 
             if (req.session.user) {
                 req.session.user.balance = newBalance;
