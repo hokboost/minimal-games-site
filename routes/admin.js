@@ -24,8 +24,10 @@ module.exports = function registerAdminRoutes(app, deps) {
 
     // 页面类接口：登录+admin+IP白名单+限流，不强制签名（浏览器点击可用）
     const adminGuards = [requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, adminStrictLimit];
-    // API 类接口：在 adminGuards 基础上强制签名
-    const adminApiGuards = [...adminGuards, verifyAdminSignature];
+    // API 类接口：在 adminGuards 基础上强制签名（可选关闭，用 ADMIN_SIGN_SECRET 控制）
+    const adminApiGuards = verifyAdminSignature === ((req, res, next) => next())
+        ? adminGuards
+        : [...adminGuards, verifyAdminSignature];
 
     const auditAdminAction = async ({
         adminUsername,
