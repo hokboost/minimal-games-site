@@ -77,7 +77,7 @@ class BalanceLogger {
         const client = externalClient || await pool.connect();
         const manageTx = !managedTransaction;
         const maxAttempts = 2;
-        const lockErrorCodes = new Set(['55P03', '57014']); // lock timeout / statement timeout
+        const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/stmt timeout, deadlock, serialization
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
         try {
@@ -154,7 +154,7 @@ class BalanceLogger {
                     console.error('更新余额失败:', error);
                     return {
                         success: false,
-                        message: isLockTimeout ? '系统繁忙，请稍后重试' : '系统错误'
+                        message: isLockTimeout ? '系统繁忙，请稍后重试' : (error.message || '系统错误')
                     };
                 }
             }

@@ -336,9 +336,9 @@ module.exports = function registerGameRoutes(app, deps) {
             if (!userStore.tokensBySession[quizSessionId]) {
                 userStore.tokensBySession[quizSessionId] = {};
             }
-            // 限制单次会话题目数量，防止无限刷题
+            // 限制单次会话题目数量，防止无限刷题（最多15题）
             const currentCount = Object.keys(userStore.tokensBySession[quizSessionId]).length;
-            if (currentCount >= 10) {
+            if (currentCount >= 15) {
                 return res.status(400).json({ success: false, message: '题目数量已达上限，请提交答案' });
             }
             userStore.tokensBySession[quizSessionId][token] = {
@@ -392,6 +392,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 quizSessions.delete(quizSessionId);
                 return res.status(403).json({ success: false, message: '答题会话已过期，请重新开始' });
             }
+            if (sessionData.processing) {
+                return res.status(429).json({ success: false, message: '答题提交处理中，请勿重复提交' });
+            }
+            sessionData.processing = true;
+            quizSessions.set(quizSessionId, sessionData);
 
             let correctCount = 0;
             let validAnswers = 0;
@@ -437,6 +442,7 @@ module.exports = function registerGameRoutes(app, deps) {
 
             // 防止重复提交：标记已结算
             sessionData.settled = true;
+            sessionData.processing = false;
             quizSessions.set(quizSessionId, sessionData);
 
             // 存储到数据库 - 完全对齐kingboost格式
@@ -517,6 +523,14 @@ module.exports = function registerGameRoutes(app, deps) {
                 proof: GameLogic.generateToken(8)
             });
         } catch (error) {
+            const quizSessionId = req.session.quizSessionId;
+            if (quizSessionId && quizSessions.has(quizSessionId)) {
+                const sd = quizSessions.get(quizSessionId);
+                if (sd) {
+                    sd.processing = false;
+                    quizSessions.set(quizSessionId, sd);
+                }
+            }
             console.error('Quiz submit error:', error);
             res.status(500).json({ success: false, message: '提交失败' });
         }
@@ -1205,6 +1219,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             await client.query('BEGIN');
             await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':flip\'))', [req.session.user.username]);
 
             const username = req.session.user.username;
             const previousState = await getFlipState(username, client, { forUpdate: true });
@@ -1281,6 +1296,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             await client.query('BEGIN');
             await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':flip\'))', [req.session.user.username]);
 
             const username = req.session.user.username;
             const cardIndex = Number(req.body.cardIndex);
@@ -1426,6 +1442,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             await client.query('BEGIN');
             await client.query(`SET LOCAL lock_timeout = '10s'; SET LOCAL statement_timeout = '15s';`);
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':flip\'))', [req.session.user.username]);
 
             const username = req.session.user.username;
             const state = await getFlipState(username, client, { forUpdate: true });
