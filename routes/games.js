@@ -381,25 +381,18 @@ module.exports = function registerGameRoutes(app, deps) {
             const userTokens = userStore?.tokensBySession?.[quizSessionId] || {};
 
             for (const answer of answers) {
-                const sessionData = userTokens[answer.token];
-                if (sessionData) {
-                    if (sessionData.sessionId !== quizSessionId) {
-                        console.warn(`Token session mismatch: token=${answer.token} user=${username}`);
-                        invalidToken = true;
-                        continue;
-                    }
-                    const question = questionMap.get(sessionData.questionId);
+                const tokenData = userTokens[answer.token];
+                if (tokenData && tokenData.sessionId === quizSessionId) {
+                    const question = questionMap.get(tokenData.questionId);
                     if (question && GameLogic.quiz.validateAnswer(question, answer.answerIndex)) {
                         correctCount++;
                     }
                 } else {
-                    console.warn(`Missing session data for token: ${answer.token}, user: ${username}`);
                     invalidToken = true;
                 }
             }
 
-            if (invalidToken) {
-                // 防止旧token/无效token重复提交，直接拒绝
+            if (invalidToken || answers.length === 0) {
                 sessionData.settled = true;
                 quizSessions.set(quizSessionId, sessionData);
                 return res.status(403).json({ success: false, message: '提交包含无效或过期的题目令牌' });
