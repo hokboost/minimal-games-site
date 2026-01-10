@@ -10,6 +10,7 @@ module.exports = function registerGameRoutes(app, deps) {
         requireAuthorized,
         security,
         userSessions,
+        quizSessions,
         questionMap,
         randomStoneColor,
         normalizeStoneSlots,
@@ -61,7 +62,7 @@ module.exports = function registerGameRoutes(app, deps) {
         });
     });
 
-    // Quiz 开始游戏 API - 扣除电币
+    // Quiz 开始游戏 API - 扣除电币 + 创建付费会话
     app.post('/api/quiz/start', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
         try {
             const { username } = req.body;
@@ -69,6 +70,12 @@ module.exports = function registerGameRoutes(app, deps) {
             // 验证用户名
             if (username !== req.session.user.username) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
+            }
+
+            // 每次开始新会话时，清理旧的 quiz 会话
+            const prevSessionId = req.session.quizSessionId;
+            if (prevSessionId) {
+                quizSessions.delete(prevSessionId);
             }
 
             // 使用余额日志系统扣除电币
@@ -85,10 +92,23 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
+            // 创建新的 quiz 会话（绑定付费、未结算、过期时间）
+            const sessionId = GameLogic.generateToken(16);
+            const now = Date.now();
+            quizSessions.set(sessionId, {
+                username,
+                paid: true,
+                settled: false,
+                createdAt: now,
+                expiresAt: now + 10 * 60 * 1000 // 10分钟有效期
+            });
+            req.session.quizSessionId = sessionId;
+
             res.json({
                 success: true,
                 message: '游戏开始，已扣除10电币',
-                newBalance: balanceResult.balance
+                newBalance: balanceResult.balance,
+                quizSessionId: sessionId
             });
         } catch (error) {
             console.error('Quiz start error:', error);
@@ -272,6 +292,17 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
+            // 验证付费会话
+            const quizSessionId = req.session.quizSessionId;
+            const sessionData = quizSessionId ? quizSessions.get(quizSessionId) : null;
+            if (!sessionData || sessionData.username !== username) {
+                return res.status(403).json({ success: false, message: '未找到有效答题会话，请先开始游戏' });
+            }
+            const now = Date.now();
+            if (!sessionData.paid || sessionData.settled || now > sessionData.expiresAt) {
+                return res.status(403).json({ success: false, message: '答题会话无效或已过期，请重新开始' });
+            }
+
             const question = GameLogic.quiz.getRandomQuestion(questions, seen, questionIndex);
             if (!question) {
                 return res.json({ success: false, message: '没有更多题目了' });
@@ -280,11 +311,15 @@ module.exports = function registerGameRoutes(app, deps) {
             const token = GameLogic.generateToken(16);
             const signature = GameLogic.generateToken(16);
 
-            // 存储问题信息
+            // 存储问题信息，绑定到当前付费会话
             if (!userSessions.has(username)) {
-                userSessions.set(username, {});
+                userSessions.set(username, { tokens: {}, quizSessionId });
             }
-            userSessions.get(username)[token] = {
+            if (!userSessions.get(username).tokens) {
+                userSessions.get(username).tokens = {};
+            }
+            userSessions.get(username).quizSessionId = quizSessionId;
+            userSessions.get(username).tokens[token] = {
                 questionId: question.id,
                 timestamp: Date.now()
             };
@@ -319,8 +354,23 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
+            // 验证付费会话
+            const quizSessionId = req.session.quizSessionId;
+            const sessionData = quizSessionId ? quizSessions.get(quizSessionId) : null;
+            const now = Date.now();
+            if (!sessionData || sessionData.username !== username) {
+                return res.status(403).json({ success: false, message: '未找到有效答题会话，请先开始游戏' });
+            }
+            if (!sessionData.paid || sessionData.settled) {
+                return res.status(403).json({ success: false, message: '答题会话无效或已结算' });
+            }
+            if (now > sessionData.expiresAt) {
+                quizSessions.delete(quizSessionId);
+                return res.status(403).json({ success: false, message: '答题会话已过期，请重新开始' });
+            }
+
             let correctCount = 0;
-            const userSession = userSessions.get(username) || {};
+            const userSession = userSessions.get(username)?.tokens || {};
 
             for (const answer of answers) {
                 const sessionData = userSession[answer.token];
@@ -333,6 +383,10 @@ module.exports = function registerGameRoutes(app, deps) {
                     console.warn(`Missing session data for token: ${answer.token}, user: ${username}`);
                 }
             }
+
+            // 防止重复提交：标记已结算
+            sessionData.settled = true;
+            quizSessions.set(quizSessionId, sessionData);
 
             // 存储到数据库 - 完全对齐kingboost格式
             try {
@@ -374,7 +428,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             // 清理用户会话
-            if (Object.keys(userSession).length > 0) {
+            if (userSessions.has(username)) {
                 userSessions.delete(username);
             }
 

@@ -522,8 +522,9 @@ function generateUsername() {
     return `${adj}${noun}${num}`;
 }
 
-// 存储用户会话数据 (简单内存存储)
+// 存储用户答题会话数据 (简单内存存储)
 const userSessions = new Map();
+const quizSessions = new Map();
 
 // 飘屏系统
 class DanmakuSystem {
@@ -593,26 +594,41 @@ function broadcastDanmaku(username, type, isWin) {
 // 创建题目ID索引，提升查找性能
 const questionMap = new Map(questions.map(q => [q.id, q]));
 
-// 定时清理过期的用户会话数据
+// 定时清理过期的答题会话数据
 setInterval(() => {
     const now = Date.now();
     const maxAge = 5 * 60 * 1000; // 5分钟过期
     
     for (const [username, sessions] of userSessions.entries()) {
-        if (typeof sessions === 'object' && sessions !== null) {
+        if (sessions && sessions.tokens) {
+            for (const [token, data] of Object.entries(sessions.tokens)) {
+                if (data && now - data.timestamp > maxAge) {
+                    delete sessions.tokens[token];
+                }
+            }
+            if (Object.keys(sessions.tokens).length === 0) {
+                userSessions.delete(username);
+            }
+        } else if (typeof sessions === 'object' && sessions !== null) {
+            // 兼容旧结构
             for (const [token, data] of Object.entries(sessions)) {
                 if (data && now - data.timestamp > maxAge) {
                     delete sessions[token];
                 }
             }
-            // 如果用户的所有session都过期了，删除用户记录
             if (Object.keys(sessions).length === 0) {
                 userSessions.delete(username);
             }
         }
     }
+
+    for (const [sessionId, session] of quizSessions.entries()) {
+        if (!session || !session.expiresAt || now > session.expiresAt) {
+            quizSessions.delete(sessionId);
+        }
+    }
     
-    console.log(`Session cleanup: ${userSessions.size} active users`);
+    console.log(`Session cleanup: ${userSessions.size} active users, ${quizSessions.size} active quiz sessions`);
 }, 60000); // 每分钟清理一次
 
 // ====================
@@ -1721,6 +1737,7 @@ registerGameRoutes(app, {
     requireAuthorized,
     security,
     userSessions,
+    quizSessions,
     questionMap,
     randomStoneColor,
     normalizeStoneSlots,
