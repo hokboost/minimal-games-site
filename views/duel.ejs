@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>决斗挑战</title>
+    <title><%= lang === 'zh' ? '决斗挑战' : 'Duel Challenge' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
         .container {
@@ -196,39 +196,43 @@
     </style>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
+    <%- include('partials/language-switcher') %>
+
     <div class="container">
         <div class="header">
-            <h1>⚔️ 决斗挑战</h1>
+            <h1>⚔️ <%= lang === 'zh' ? '决斗挑战' : 'Duel Challenge' %></h1>
             <div class="nav-links">
-                <span>用户：<%= username %></span>
-                <a href="/">🏠 返回首页</a>
-                <a href="/profile">👤 个人中心</a>
+                <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
+                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
+                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
             </div>
         </div>
 
         <div class="balance-section">
-            <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+            <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
         </div>
 
         <div class="duel-panel">
             <div class="panel-card">
-                <h3>奖品档位</h3>
+                <h3><%= lang === 'zh' ? '奖品档位' : 'Reward Tiers' %></h3>
                 <div class="reward-list" id="rewardList"></div>
             </div>
 
             <div class="panel-card">
-                <h3>选择功力</h3>
+                <h3><%= lang === 'zh' ? '选择功力' : 'Select Power' %></h3>
                 <div class="control-row">
-                    <label>功力（1-80%）</label>
+                    <label><%= lang === 'zh' ? '功力（1-80%）' : 'Power (1-80%)' %></label>
                     <input type="range" id="powerRange" min="1" max="80" value="20">
                     <input type="number" id="powerInput" min="1" max="80" value="20">
                 </div>
                 <div class="summary-box">
-                    功力：<strong id="powerValue">20%</strong><br>
-                    消耗电币：<strong id="costValue">1040</strong>
+                    <%= lang === 'zh' ? '功力' : 'Power' %>：<strong id="powerValue">20%</strong><br>
+                    <%= lang === 'zh' ? '消耗电币' : 'Cost' %>：<strong id="costValue">1040</strong>
                 </div>
                 <div class="action-row">
-                    <button class="action-btn" id="duelBtn">开始挑战</button>
+                    <button class="action-btn" id="duelBtn">
+                        <%= lang === 'zh' ? '开始挑战' : 'Start Challenge' %>
+                    </button>
                 </div>
                 <div class="result-box" id="resultBox"></div>
             </div>

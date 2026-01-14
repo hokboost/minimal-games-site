@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>合石头</title>
+    <title><%= lang === 'zh' ? '合石头' : 'Stone Match' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
         .container {
@@ -269,18 +269,20 @@
     </style>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
+    <%- include('partials/language-switcher') %>
+
     <div class="container">
         <div class="header">
-            <h1>🪨 合石头</h1>
+            <h1>🪨 <%= lang === 'zh' ? '合石头' : 'Stone Match' %></h1>
             <div class="nav-links">
-                <span>用户：<%= username %></span>
-                <a href="/">🏠 返回首页</a>
-                <a href="/profile">👤 个人中心</a>
+                <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
+                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
+                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
             </div>
         </div>
 
         <div class="balance-section">
-            <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+            <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
         </div>
 
         <div class="stone-board">
@@ -293,22 +295,32 @@
                 <div class="stone-slot empty" data-index="5">+</div>
 
                 <div class="reward-center">
-                    <div class="reward-title">当前可兑换</div>
+                    <div class="reward-title"><%= lang === 'zh' ? '当前可兑换' : 'Can Redeem' %></div>
                     <div class="reward-amount" id="rewardAmount">--</div>
-                    <div class="reward-same" id="sameCount">同色 0</div>
-                    <button class="reward-btn" id="redeemBtn" disabled>兑换奖励</button>
+                    <div class="reward-same" id="sameCount">
+                        <%= lang === 'zh' ? '同色' : 'Same Color' %> 0
+                    </div>
+                    <button class="reward-btn" id="redeemBtn" disabled>
+                        <%= lang === 'zh' ? '兑换奖励' : 'Redeem' %>
+                    </button>
                 </div>
             </div>
 
             <div class="action-row">
-                <button class="action-btn" id="addOneBtn">放入一颗 (30)</button>
-                <button class="action-btn secondary" id="fillBtn">一键放满 (180)</button>
+                <button class="action-btn" id="addOneBtn">
+                    <%= lang === 'zh' ? '放入一颗' : 'Add One' %> (30)
+                </button>
+                <button class="action-btn secondary" id="fillBtn">
+                    <%= lang === 'zh' ? '一键放满' : 'Fill All' %> (180)
+                </button>
             </div>
 
             <div class="replace-panel">
-                <div>已选槽位：<strong id="selectedSlot">-</strong></div>
-                <div>更换费用：<strong id="replaceCost">-</strong></div>
-                <button class="action-btn" id="replaceBtn" disabled>更换一个</button>
+                <div><%= lang === 'zh' ? '已选槽位' : 'Selected Slot' %>：<strong id="selectedSlot">-</strong></div>
+                <div><%= lang === 'zh' ? '更换费用' : 'Replace Cost' %>：<strong id="replaceCost">-</strong></div>
+                <button class="action-btn" id="replaceBtn" disabled>
+                    <%= lang === 'zh' ? '更换一个' : 'Replace' %>
+                </button>
             </div>
         </div>
 
@@ -323,7 +335,11 @@
             line-height: 1.5;
             text-align: center;
         ">
-            ⚠️ <strong>免责声明：</strong>本功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。虚拟电币无法兑换真实货币。严禁未满18周岁用户使用，请理性娱乐。
+            <% if (lang === 'zh') { %>
+                ⚠️ <strong>免责声明：</strong>本功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。虚拟电币无法兑换真实货币。严禁未满18周岁用户使用，请理性娱乐。
+            <% } else { %>
+                ⚠️ <strong>Disclaimer:</strong> This feature is for entertainment only and does not involve any form of gambling, betting, or real money usage. Virtual coins cannot be exchanged for real money. Strictly prohibited for users under 18 years old. Please enjoy responsibly.
+            <% } %>
         </div>
     </div>
 

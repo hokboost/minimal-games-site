@@ -7,137 +7,143 @@
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body data-csrf-token="<%= csrfToken %>">
+    <%- include('partials/language-switcher') %>
+
     <div class="container">
         <div class="profile-header">
-            <h1>👤 个人资料</h1>
+            <h1>👤 <%= lang === 'zh' ? '个人资料' : 'Profile' %></h1>
             <div class="nav-links">
-                <a href="/">🏠 首页</a>
-                <a href="/logout">🚪 退出登录</a>
+                <a href="/">🏠 <%= lang === 'zh' ? '首页' : 'Home' %></a>
+                <a href="/logout">🚪 <%= lang === 'zh' ? '退出登录' : 'Logout' %></a>
             </div>
         </div>
 
         <div class="profile-section">
-            <h2>📋 基本信息</h2>
+            <h2>📋 <%= lang === 'zh' ? '基本信息' : 'Basic Info' %></h2>
             <div class="info-grid">
                 <div class="info-item">
-                    <label>用户名:</label>
+                    <label><%= lang === 'zh' ? '用户名' : 'Username' %>:</label>
                     <span><%= user.username %></span>
                 </div>
                 <div class="info-item">
-                    <label>账户状态:</label>
+                    <label><%= lang === 'zh' ? '账户状态' : 'Account Status' %>:</label>
                     <span class="status <%= user.authorized ? 'authorized' : 'pending' %>">
-                        <%= user.authorized ? '✅ 已授权' : '⏳ 待授权' %>
+                        <% if (user.authorized) { %>
+                            ✅ <%= lang === 'zh' ? '已授权' : 'Authorized' %>
+                        <% } else { %>
+                            ⏳ <%= lang === 'zh' ? '待授权' : 'Pending' %>
+                        <% } %>
                     </span>
                 </div>
                 <div class="info-item">
-                    <label>电币余额:</label>
-                    <span class="balance-count"><%= user.balance || 0 %> 电币</span>
+                    <label><%= lang === 'zh' ? '电币余额' : 'Coin Balance' %>:</label>
+                    <span class="balance-count"><%= user.balance || 0 %> <%= lang === 'zh' ? '电币' : 'coins' %></span>
                 </div>
             </div>
         </div>
 
         <div class="profile-section">
-            <h2>🎮 游戏记录</h2>
+            <h2>🎮 <%= lang === 'zh' ? '游戏记录' : 'Game Records' %></h2>
             <div class="game-stats-grid">
                 <div class="stat-card">
                     <div class="stat-icon">🧠</div>
                     <div class="stat-content">
-                        <h3>知识问答</h3>
+                        <h3><%= lang === 'zh' ? '知识问答' : 'Quiz Game' %></h3>
                         <div class="stat-numbers">
-                            <span class="stat-main">总场次: <%= gameStats.quiz.total %></span>
-                            <span class="stat-sub">最高分: <%= gameStats.quiz.bestScore %></span>
+                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.quiz.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '最高分' : 'Best Score' %>: <%= gameStats.quiz.bestScore %></span>
                         </div>
-                        <button class="view-records-btn" data-records="quiz">查看记录</button>
+                        <button class="view-records-btn" data-records="quiz"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
                 </div>
-                
+
                 <div class="stat-card">
                     <div class="stat-icon">🎰</div>
                     <div class="stat-content">
-                        <h3>幸运老虎机</h3>
+                        <h3><%= lang === 'zh' ? '幸运老虎机' : 'Slot Machine' %></h3>
                         <div class="stat-numbers">
-                            <span class="stat-main">总场次: <%= gameStats.slot.total %></span>
-                            <span class="stat-sub">中奖: <%= gameStats.slot.wins %> 次</span>
+                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.slot.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '中奖' : 'Wins' %>: <%= gameStats.slot.wins %> <%= lang === 'zh' ? '次' : 'times' %></span>
                         </div>
-                        <button class="view-records-btn" data-records="slot">查看记录</button>
+                        <button class="view-records-btn" data-records="slot"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
                 </div>
-                
+
                 <div class="stat-card">
                     <div class="stat-icon">🎟️</div>
                     <div class="stat-content">
-                        <h3>刮刮乐</h3>
+                        <h3><%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></h3>
                         <div class="stat-numbers">
-                            <span class="stat-main">总场次: <%= gameStats.scratch.total %></span>
-                            <span class="stat-sub">中奖: <%= gameStats.scratch.wins %> 次</span>
+                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.scratch.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '中奖' : 'Wins' %>: <%= gameStats.scratch.wins %> <%= lang === 'zh' ? '次' : 'times' %></span>
                         </div>
-                        <button class="view-records-btn" data-records="scratch">查看记录</button>
+                        <button class="view-records-btn" data-records="scratch"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
                 </div>
 
                 <div class="stat-card">
                     <div class="stat-icon">🌟</div>
                     <div class="stat-content">
-                        <h3>幸运祈愿</h3>
+                        <h3><%= lang === 'zh' ? '幸运祈愿' : 'Lucky Wish' %></h3>
                         <div class="stat-numbers">
-                            <span class="stat-main">总场次: <%= gameStats.wish.total %></span>
-                            <span class="stat-sub">成功: <%= gameStats.wish.wins %> 次</span>
+                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.wish.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '成功' : 'Success' %>: <%= gameStats.wish.wins %> <%= lang === 'zh' ? '次' : 'times' %></span>
                         </div>
-                        <button class="view-records-btn" data-records="wish">查看记录</button>
+                        <button class="view-records-btn" data-records="wish"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
                 </div>
 
                 <div class="stat-card">
                     <div class="stat-icon">🪨</div>
                     <div class="stat-content">
-                        <h3>合石头</h3>
+                        <h3><%= lang === 'zh' ? '合石头' : 'Stone Match' %></h3>
                         <div class="stat-numbers">
-                            <span class="stat-main">记录数: <%= gameStats.stone.total %></span>
-                            <span class="stat-sub">最新操作以记录为准</span>
+                            <span class="stat-main"><%= lang === 'zh' ? '记录数' : 'Records' %>: <%= gameStats.stone.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '最新操作以记录为准' : 'Latest operations on record' %></span>
                         </div>
-                        <button class="view-records-btn" data-records="stone">查看记录</button>
+                        <button class="view-records-btn" data-records="stone"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
                 </div>
 
                 <div class="stat-card">
                     <div class="stat-icon">🃏</div>
                     <div class="stat-content">
-                        <h3>翻卡牌</h3>
+                        <h3><%= lang === 'zh' ? '翻卡牌' : 'Card Flip' %></h3>
                         <div class="stat-numbers">
-                            <span class="stat-main">记录数: <%= gameStats.flip.total %></span>
-                            <span class="stat-sub">翻牌与结算日志</span>
+                            <span class="stat-main"><%= lang === 'zh' ? '记录数' : 'Records' %>: <%= gameStats.flip.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '翻牌与结算日志' : 'Flip & settlement logs' %></span>
                         </div>
-                        <button class="view-records-btn" data-records="flip">查看记录</button>
+                        <button class="view-records-btn" data-records="flip"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
                 </div>
 
                 <div class="stat-card">
                     <div class="stat-icon">⚔️</div>
                     <div class="stat-content">
-                        <h3>决斗挑战</h3>
+                        <h3><%= lang === 'zh' ? '决斗挑战' : 'Duel Challenge' %></h3>
                         <div class="stat-numbers">
-                            <span class="stat-main">记录数: <%= gameStats.duel.total %></span>
-                            <span class="stat-sub">挑战记录</span>
+                            <span class="stat-main"><%= lang === 'zh' ? '记录数' : 'Records' %>: <%= gameStats.duel.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '挑战记录' : 'Challenge records' %></span>
                         </div>
-                        <button class="view-records-btn" data-records="duel">查看记录</button>
+                        <button class="view-records-btn" data-records="duel"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="profile-section">
-            <h2>🎒 礼物背包</h2>
+            <h2>🎒 <%= lang === 'zh' ? '礼物背包' : 'Gift Backpack' %></h2>
             <div class="backpack-toolbar">
-                <button class="view-records-btn" id="refresh-backpack">刷新背包</button>
+                <button class="view-records-btn" id="refresh-backpack"><%= lang === 'zh' ? '刷新背包' : 'Refresh' %></button>
             </div>
             <div id="backpackContent" class="loading"><%= t.common.loading %></div>
         </div>
 
-        
+
         <div id="gameRecordsModal" class="modal">
             <div class="modal-content records-modal">
                 <div class="modal-header">
-                    <h3 id="recordsTitle">🎮 游戏记录</h3>
+                    <h3 id="recordsTitle">🎮 <%= lang === 'zh' ? '游戏记录' : 'Game Records' %></h3>
                     <span class="close" id="close-records">&times;</span>
                 </div>
                 <div class="modal-body">
@@ -150,10 +156,10 @@
         </div>
 
         <div class="profile-section">
-            <h2>⚙️ 账户设置</h2>
+            <h2>⚙️ <%= lang === 'zh' ? '账户设置' : 'Account Settings' %></h2>
             <div class="settings-grid">
-                <button class="setting-btn" id="open-change-password">🔐 修改密码</button>
-                <button class="setting-btn" id="export-data">📤 导出数据</button>
+                <button class="setting-btn" id="open-change-password">🔐 <%= lang === 'zh' ? '修改密码' : 'Change Password' %></button>
+                <button class="setting-btn" id="export-data">📤 <%= lang === 'zh' ? '导出数据' : 'Export Data' %></button>
             </div>
         </div>
     </div>
@@ -162,27 +168,27 @@
     <div id="changePasswordModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>🔐 修改密码</h3>
+                <h3>🔐 <%= lang === 'zh' ? '修改密码' : 'Change Password' %></h3>
                 <span class="close" id="close-change-password">&times;</span>
             </div>
             <div class="modal-body">
                 <form id="changePasswordForm">
                     <div class="form-group">
-                        <label for="currentPassword">当前密码:</label>
+                        <label for="currentPassword"><%= lang === 'zh' ? '当前密码' : 'Current Password' %>:</label>
                         <input type="password" id="currentPassword" name="currentPassword" required>
                     </div>
                     <div class="form-group">
-                        <label for="newPassword">新密码:</label>
+                        <label for="newPassword"><%= lang === 'zh' ? '新密码' : 'New Password' %>:</label>
                         <input type="password" id="newPassword" name="newPassword" required minlength="6">
-                        <small>密码至少需要6个字符</small>
+                        <small><%= lang === 'zh' ? '密码至少需要6个字符' : 'Password must be at least 6 characters' %></small>
                     </div>
                     <div class="form-group">
-                        <label for="confirmPassword">确认新密码:</label>
+                        <label for="confirmPassword"><%= lang === 'zh' ? '确认新密码' : 'Confirm New Password' %>:</label>
                         <input type="password" id="confirmPassword" name="confirmPassword" required minlength="6">
                     </div>
                     <div class="form-actions">
                         <button type="button" id="cancel-change-password" class="btn-secondary"><%= t.game.cancel %></button>
-                        <button type="submit" class="btn-primary">确认修改</button>
+                        <button type="submit" class="btn-primary"><%= lang === 'zh' ? '确认修改' : 'Confirm' %></button>
                     </div>
                 </form>
             </div>

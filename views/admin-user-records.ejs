@@ -11,9 +11,9 @@
 
     <div class="container">
         <div class="admin-header">
-            <h1>🧾 用户记录：<%= targetUsername %></h1>
+            <h1>🧾 <%= lang === 'zh' ? '用户记录：' : 'User Records: ' %><%= targetUsername %></h1>
             <div class="nav-links">
-                <a href="/admin">⬅️ 返回管理后台</a>
+                <a href="/admin">⬅️ <%= lang === 'zh' ? '返回管理后台' : 'Back to Admin' %></a>
                 <a href="/logout">🚪 退出登录</a>
             </div>
         </div>
@@ -23,13 +23,13 @@
             <table>
                 <thead>
                     <tr>
-                        <th>时间</th>
-                        <th>分数</th>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '分数' : 'Score' %></th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if (records.quiz.length === 0) { %>
-                        <tr><td colspan="2">暂无记录</td></tr>
+                        <tr><td colspan="2"><%= lang === 'zh' ? '暂无记录' : 'No records' %></td></tr>
                     <% } else { %>
                         <% records.quiz.forEach(row => { %>
                             <tr>
@@ -47,17 +47,17 @@
             <table>
                 <thead>
                     <tr>
-                        <th>时间</th>
-                        <th>结果</th>
-                        <th>下注</th>
-                        <th>倍数</th>
-                        <th>派奖</th>
-                        <th>面板</th>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '结果' : 'Result' %></th>
+                        <th><%= lang === 'zh' ? '下注' : 'Bet' %></th>
+                        <th><%= lang === 'zh' ? '倍数' : 'Multiplier' %></th>
+                        <th><%= lang === 'zh' ? '派奖' : 'Payout' %></th>
+                        <th><%= lang === 'zh' ? '面板' : 'Panel' %></th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if (records.slot.length === 0) { %>
-                        <tr><td colspan="6">暂无记录</td></tr>
+                        <tr><td colspan="6"><%= lang === 'zh' ? '暂无记录' : 'No records' %></td></tr>
                     <% } else { %>
                         <% records.slot.forEach(row => { %>
                             <tr>
@@ -79,15 +79,15 @@
             <table>
                 <thead>
                     <tr>
-                        <th>时间</th>
-                        <th>档位</th>
-                        <th>匹配</th>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '档位' : 'Tier' %></th>
+                        <th><%= lang === 'zh' ? '匹配' : 'Match' %></th>
                         <th><%= t.game.reward %></th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if (records.scratch.length === 0) { %>
-                        <tr><td colspan="4">暂无记录</td></tr>
+                        <tr><td colspan="4"><%= lang === 'zh' ? '暂无记录' : 'No records' %></td></tr>
                     <% } else { %>
                         <% records.scratch.forEach(row => { %>
                             <tr>
@@ -107,24 +107,24 @@
             <table>
                 <thead>
                     <tr>
-                        <th>时间</th>
-                        <th>礼物</th>
-                        <th>消耗</th>
-                        <th>结果</th>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '礼物' : 'Gift' %></th>
+                        <th><%= lang === 'zh' ? '消耗' : 'Cost' %></th>
+                        <th><%= lang === 'zh' ? '结果' : 'Result' %></th>
                         <th><%= t.game.reward %></th>
-                        <th>次数</th>
+                        <th><%= lang === 'zh' ? '次数' : 'Count' %></th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if (records.wish.length === 0) { %>
-                        <tr><td colspan="6">暂无记录</td></tr>
+                        <tr><td colspan="6"><%= lang === 'zh' ? '暂无记录' : 'No records' %></td></tr>
                     <% } else { %>
                         <% records.wish.forEach(row => { %>
                             <tr>
                                 <td><%= row.played_at %></td>
                                 <td><%= row.gift_type || '-' %></td>
                                 <td><%= row.cost %></td>
-                                <td><%= row.success ? '成功' : '失败' %></td>
+                                <td><%= row.success ? lang === 'zh' ? '成功' : 'Success' : lang === 'zh' ? '失败' : 'Failed' %></td>
                                 <td><%= row.reward || '-' %></td>
                                 <td><%= row.wishes_count %></td>
                             </tr>
@@ -139,17 +139,17 @@
             <table>
                 <thead>
                     <tr>
-                        <th>时间</th>
-                        <th>动作</th>
-                        <th>消耗</th>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '动作' : 'Action' %></th>
+                        <th><%= lang === 'zh' ? '消耗' : 'Cost' %></th>
                         <th><%= t.game.reward %></th>
-                        <th>槽位</th>
-                        <th>变化</th>
+                        <th><%= lang === 'zh' ? '槽位' : 'Slot' %></th>
+                        <th><%= lang === 'zh' ? '变化' : 'Change' %></th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if (records.stone.length === 0) { %>
-                        <tr><td colspan="6">暂无记录</td></tr>
+                        <tr><td colspan="6"><%= lang === 'zh' ? '暂无记录' : 'No records' %></td></tr>
                     <% } else { %>
                         <% records.stone.forEach(row => { %>
                             <tr>
@@ -171,18 +171,18 @@
             <table>
                 <thead>
                     <tr>
-                        <th>时间</th>
-                        <th>动作</th>
-                        <th>消耗</th>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '动作' : 'Action' %></th>
+                        <th><%= lang === 'zh' ? '消耗' : 'Cost' %></th>
                         <th><%= t.game.reward %></th>
-                        <th>翻开</th>
-                        <th>好/坏</th>
-                        <th>结束</th>
+                        <th><%= lang === 'zh' ? '翻开' : 'Flipped' %></th>
+                        <th><%= lang === 'zh' ? '好/坏' : 'Good/Bad' %></th>
+                        <th><%= lang === 'zh' ? '结束' : 'Ended' %></th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if (records.flip.length === 0) { %>
-                        <tr><td colspan="7">暂无记录</td></tr>
+                        <tr><td colspan="7"><%= lang === 'zh' ? '暂无记录' : 'No records' %></td></tr>
                     <% } else { %>
                         <% records.flip.forEach(row => { %>
                             <tr>
@@ -192,7 +192,7 @@
                                 <td><%= row.reward %></td>
                                 <td><%= row.card_index !== null ? row.card_index : '-' %> / <%= row.card_type || '-' %></td>
                                 <td><%= row.good_count %>/<%= row.bad_count %></td>
-                                <td><%= row.ended ? '是' : '否' %></td>
+                                <td><%= row.ended ? lang === 'zh' ? '是' : 'Yes' : lang === 'zh' ? '否' : 'No' %></td>
                             </tr>
                         <% }) %>
                     <% } %>
@@ -205,17 +205,17 @@
             <table>
                 <thead>
                     <tr>
-                        <th>时间</th>
-                        <th>礼物</th>
-                        <th>功力</th>
-                        <th>消耗</th>
-                        <th>结果</th>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '礼物' : 'Gift' %></th>
+                        <th><%= lang === 'zh' ? '功力' : 'Power' %></th>
+                        <th><%= lang === 'zh' ? '消耗' : 'Cost' %></th>
+                        <th><%= lang === 'zh' ? '结果' : 'Result' %></th>
                         <th><%= t.game.reward %></th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if (records.duel.length === 0) { %>
-                        <tr><td colspan="6">暂无记录</td></tr>
+                        <tr><td colspan="6"><%= lang === 'zh' ? '暂无记录' : 'No records' %></td></tr>
                     <% } else { %>
                         <% records.duel.forEach(row => { %>
                             <tr>
@@ -223,7 +223,7 @@
                                 <td><%= row.gift_type %></td>
                                 <td><%= row.power %>%</td>
                                 <td><%= row.cost %></td>
-                                <td><%= row.success ? '成功' : '失败' %></td>
+                                <td><%= row.success ? lang === 'zh' ? '成功' : 'Success' : lang === 'zh' ? '失败' : 'Failed' %></td>
                                 <td><%= row.reward %></td>
                             </tr>
                         <% }) %>

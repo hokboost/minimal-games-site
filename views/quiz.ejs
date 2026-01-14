@@ -7,29 +7,41 @@
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+    <%- include('partials/language-switcher') %>
+
     <div class="container">
         <div class="header">
-            <h1>🧐 在线答题</h1>
+            <h1>🧐 <%= lang === 'zh' ? '在线答题' : 'Online Quiz' %></h1>
             <div class="nav-links">
-                <span>用户：<%= username %></span>
-                <a href="/">🏠 返回首页</a>
-                <a href="/profile">👤 个人中心</a>
+                <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
+                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
+                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
             </div>
         </div>
 
         <div id="user-section" class="game-section">
             <div class="balance-info">
-                <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
-                <p class="cost-info">💰 游戏费用: 10 电币 | 🏆 获胜奖励: 得分 × 2 电币</p>
+                <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
+                <p class="cost-info">
+                    💰 <%= lang === 'zh' ? '游戏费用' : 'Game Cost' %>: 10 <%= lang === 'zh' ? '电币' : 'coins' %> |
+                    🏆 <%= lang === 'zh' ? '获胜奖励' : 'Win Reward' %>: <%= lang === 'zh' ? '得分 × 2 电币' : 'Score × 2 coins' %>
+                </p>
             </div>
-            <p class="game-desc">挑战知识问答，展示你的智慧！15题总共30秒，答对得分，答错不扣分。</p>
-            <button id="start-quiz-btn">🎮 开始答题 (消耗10电币)</button>
+            <p class="game-desc">
+                <%= lang === 'zh'
+                    ? '挑战知识问答，展示你的智慧！15题总共30秒，答对得分，答错不扣分。'
+                    : 'Challenge your knowledge and show your wisdom! 15 questions in 30 seconds total. Correct answers earn points, wrong answers don\'t lose points.'
+                %>
+            </p>
+            <button id="start-quiz-btn">
+                🎮 <%= lang === 'zh' ? '开始答题 (消耗10电币)' : 'Start Quiz (Cost 10 coins)' %>
+            </button>
         </div>
 
         <div id="quiz" style="display:none" class="quiz-section">
             <div class="quiz-header">
-                <p id="timer" class="timer">准备中...</p>
-                <p id="progress" class="progress">题目 1/15</p>
+                <p id="timer" class="timer"><%= lang === 'zh' ? '准备中...' : 'Preparing...' %></p>
+                <p id="progress" class="progress"><%= lang === 'zh' ? '题目' : 'Question' %> 1/15</p>
             </div>
             <div class="quiz-container">
                 <div id="question" class="question"></div>
@@ -48,23 +60,25 @@
                 text-align: center;
                 display: none;
             ">
-                <h3 style="color: #00c853; margin-bottom: 1rem;">📊 本局结果</h3>
+                <h3 style="color: #00c853; margin-bottom: 1rem;">📊 <%= lang === 'zh' ? '本局结果' : 'Current Game Result' %></h3>
                 <div id="current-score" style="font-size: 1.3rem; color: #ffeb3b; margin-bottom: 0.5rem;"></div>
                 <div id="current-reward" style="font-size: 1.1rem; color: #00c853;"></div>
             </div>
-            
-            <h2>🏆 今日排行榜</h2>
+
+            <h2>🏆 <%= lang === 'zh' ? '今日排行榜' : 'Today\'s Leaderboard' %></h2>
             <div class="refresh-controls">
-                <button class="refresh-btn" id="refresh-leaderboard-btn">🔄 刷新排行榜</button>
-                <small style="display: block; margin-top: 5px;">排行榜显示每个用户最高分</small>
+                <button class="refresh-btn" id="refresh-leaderboard-btn">🔄 <%= lang === 'zh' ? '刷新排行榜' : 'Refresh Leaderboard' %></button>
+                <small style="display: block; margin-top: 5px;">
+                    <%= lang === 'zh' ? '排行榜显示每个用户最高分' : 'Leaderboard shows highest score per user' %>
+                </small>
             </div>
             <table class="leaderboard-table">
                 <thead>
                     <tr>
-                        <th>排名</th>
-                        <th>用户名</th>
+                        <th><%= lang === 'zh' ? '排名' : 'Rank' %></th>
+                        <th><%= lang === 'zh' ? '用户名' : 'Username' %></th>
                         <th><%= t.game.score %></th>
-                        <th>完成时间</th>
+                        <th><%= lang === 'zh' ? '完成时间' : 'Completed At' %></th>
                     </tr>
                 </thead>
                 <tbody id="leaderboard-body">
@@ -72,8 +86,8 @@
                 </tbody>
             </table>
         </div>
-        
-        
+
+
         <div style="
             max-width: 760px;
             margin: 2rem auto 0;
@@ -85,7 +99,11 @@
             line-height: 1.5;
             text-align: center;
         ">
-            ⚠️ <strong>免责声明：</strong>本问答游戏仅供娱乐学习，积分为虚拟奖励，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。请理性游戏，严禁未满18周岁用户使用。
+            <% if (lang === 'zh') { %>
+                ⚠️ <strong>免责声明：</strong>本问答游戏仅供娱乐学习，积分为虚拟奖励，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。请理性游戏，严禁未满18周岁用户使用。
+            <% } else { %>
+                ⚠️ <strong>Disclaimer:</strong> This quiz game is for entertainment and learning only. Points are virtual rewards that cannot be exchanged for real money or valuable goods. Participation is completely free and complies with relevant laws. Please play responsibly. Strictly prohibited for users under 18 years old.
+            <% } %>
         </div>
     </div>
 

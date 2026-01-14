@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>幸运转盘</title>
+    <title><%= lang === 'zh' ? '幸运转盘' : 'Lucky Wheel' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
         #container {
@@ -161,68 +161,106 @@
     </style>
 </head>
 <body data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
-    <a href="/" class="back-button">← 返回</a>
+    <%- include('partials/language-switcher') %>
+
+    <a href="/" class="back-button">← <%= lang === 'zh' ? '返回' : 'Back' %></a>
     <div class="game-container">
-        <h1>🎡 挑战转盘</h1>
-        <p>玩家：<%= username %></p>
-        <p style="color: #666;">转动转盘，接受生存直播挑战！</p>
-        
+        <h1>🎡 <%= lang === 'zh' ? '挑战转盘' : 'Challenge Wheel' %></h1>
+        <p><%= lang === 'zh' ? '玩家' : 'Player' %>：<%= username %></p>
+        <p style="color: #666;">
+            <%= lang === 'zh' ? '转动转盘，接受生存直播挑战！' : 'Spin the wheel and accept survival stream challenges!' %>
+        </p>
+
         <div id="container">
             <div id="pointer"></div>
             <canvas id="wheel" width="300" height="300"></canvas>
         </div>
-        
+
         <div id="button-area">
-            <button id="spinButton">🎰 开始转动</button>
+            <button id="spinButton">🎰 <%= lang === 'zh' ? '开始转动' : 'Spin Now' %></button>
         </div>
-        
+
         <div id="result" style="margin-top: 20px; font-size: 1.2rem; min-height: 40px;"></div>
-        
+
         <div id="countdown-timer" style="display: none; margin-top: 20px; padding: 15px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px;">
-            <h3 style="color: #856404; margin: 0 0 10px 0;">⏰ 路人任务倒计时</h3>
+            <h3 style="color: #856404; margin: 0 0 10px 0;">
+                ⏰ <%= lang === 'zh' ? '路人任务倒计时' : 'Stranger Task Countdown' %>
+            </h3>
             <div id="countdown-display" style="font-size: 2rem; font-weight: bold; color: #dc3545; text-align: center;"></div>
         </div>
-        
+
         <div class="challenge-rules">
-            <h3>💰 挑战金额规则</h3>
+            <h3>💰 <%= lang === 'zh' ? '挑战金额规则' : 'Challenge Reward Rules' %></h3>
             <div class="rules-container">
                 <div class="rule-section">
-                    <strong>🎯 通用规则：</strong>
-                    <span>所有挑战成功 <span class="success">+4加币</span> | 失败 <span class="fail">-4加币</span></span>
+                    <strong>🎯 <%= lang === 'zh' ? '通用规则' : 'General Rules' %>：</strong>
+                    <span>
+                        <%= lang === 'zh' ? '所有挑战成功' : 'All challenges success' %>
+                        <span class="success">+4<%= lang === 'zh' ? '加币' : ' coins' %></span> |
+                        <%= lang === 'zh' ? '失败' : 'failure' %>
+                        <span class="fail">-4<%= lang === 'zh' ? '加币' : ' coins' %></span>
+                    </span>
                 </div>
                 <div class="rule-section">
-                    <strong>📋 挑战任务（老板可指定）：</strong>
+                    <strong>📋 <%= lang === 'zh' ? '挑战任务（老板可指定）' : 'Challenge Tasks (Boss can assign)' %>：</strong>
                     <div style="margin-top: 10px; font-size: 0.9rem;">
-                        <div>• 3分钟不能说你我他（成功+4加币，失败-4加币）</div>
-                        <div>• 20秒吹一瓶可乐（成功+4加币，失败-4加币）</div>
-                        <div style="color: #666; margin-top: 8px; font-style: italic;">老板可以商量指定任何其他挑战</div>
+                        <% if (lang === 'zh') { %>
+                            <div>• 3分钟不能说你我他（成功+4加币，失败-4加币）</div>
+                            <div>• 20秒吹一瓶可乐（成功+4加币，失败-4加币）</div>
+                            <div style="color: #666; margin-top: 8px; font-style: italic;">老板可以商量指定任何其他挑战</div>
+                        <% } else { %>
+                            <div>• Don't say "you/I/he" for 3 minutes (Success +4 coins, Failure -4 coins)</div>
+                            <div>• Chug a bottle of cola in 20 seconds (Success +4 coins, Failure -4 coins)</div>
+                            <div style="color: #666; margin-top: 8px; font-style: italic;">Boss can negotiate any other challenges</div>
+                        <% } %>
                     </div>
                 </div>
                 <div class="rule-section">
-                    <strong>🎮 游戏任务（有各自奖惩规则）：</strong>
+                    <strong>🎮 <%= lang === 'zh' ? '游戏任务（有各自奖惩规则）' : 'Game Tasks (Each has own reward rules)' %>：</strong>
                     <div style="margin-top: 10px; font-size: 0.9rem;">
-                        <div>• Quiz（知识问答）: 0-4分扣2币 | 5-9分扣1币 | 10+分加1币</div>
-                        <div>• Slot（老虎机）: -2/-1/0/+1/+2加币</div>
-                        <div>• Scratch（刮刮卡）: 0/+1/+2加币</div>
+                        <% if (lang === 'zh') { %>
+                            <div>• Quiz（知识问答）: 0-4分扣2币 | 5-9分扣1币 | 10+分加1币</div>
+                            <div>• Slot（老虎机）: -2/-1/0/+1/+2加币</div>
+                            <div>• Scratch（刮刮卡）: 0/+1/+2加币</div>
+                        <% } else { %>
+                            <div>• Quiz: 0-4 pts -2 coins | 5-9 pts -1 coin | 10+ pts +1 coin</div>
+                            <div>• Slot Machine: -2/-1/0/+1/+2 coins</div>
+                            <div>• Scratch Card: 0/+1/+2 coins</div>
+                        <% } %>
                     </div>
                 </div>
                 <div class="rule-section">
-                    <strong>🏃 纯惩罚任务（不影响资金）：</strong>
+                    <strong>🏃 <%= lang === 'zh' ? '纯惩罚任务（不影响资金）' : 'Punishment Tasks (No money effect)' %>：</strong>
                     <div style="margin-top: 10px; font-size: 0.9rem;">
-                        <div>• 10个深蹲</div>
-                        <div>• 热舞1分钟</div>
-                        <div>• 10个俯卧撑</div>
-                        <div>• 反方向走3分钟</div>
-                        <div>• 负重前行（买瓶水放包里背着）</div>
-                        <div>• 垃圾清洁工</div>
-                        <div>• 浏览器记录</div>
+                        <% if (lang === 'zh') { %>
+                            <div>• 10个深蹲</div>
+                            <div>• 热舞1分钟</div>
+                            <div>• 10个俯卧撑</div>
+                            <div>• 反方向走3分钟</div>
+                            <div>• 负重前行（买瓶水放包里背着）</div>
+                            <div>• 垃圾清洁工</div>
+                            <div>• 浏览器记录</div>
+                        <% } else { %>
+                            <div>• 10 squats</div>
+                            <div>• Dance for 1 minute</div>
+                            <div>• 10 push-ups</div>
+                            <div>• Walk backwards for 3 minutes</div>
+                            <div>• Carry weight (buy a bottle of water and carry it)</div>
+                            <div>• Trash cleaner</div>
+                            <div>• Browser history</div>
+                        <% } %>
                     </div>
                 </div>
                 <div class="rule-section">
-                    <strong>🎁 奖励任务：</strong>
+                    <strong>🎁 <%= lang === 'zh' ? '奖励任务' : 'Reward Tasks' %>：</strong>
                     <div style="margin-top: 10px; font-size: 0.9rem;">
-                        <div>• 2加币买吃的（奖励2加币买食物）</div>
-                        <div>• 转盘次数+2（增加转盘次数）</div>
+                        <% if (lang === 'zh') { %>
+                            <div>• 2加币买吃的（奖励2加币买食物）</div>
+                            <div>• 转盘次数+2（增加转盘次数）</div>
+                        <% } else { %>
+                            <div>• 2 coins for food (Reward 2 coins to buy food)</div>
+                            <div>• Wheel spins +2 (Increase wheel spin count)</div>
+                        <% } %>
                     </div>
                 </div>
             </div>

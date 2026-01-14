@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>翻卡牌</title>
+    <title><%= lang === 'zh' ? '翻卡牌' : 'Card Flip' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
         .container {
@@ -203,32 +203,34 @@
     </style>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
+    <%- include('partials/language-switcher') %>
+
     <div class="container">
         <div class="header">
-            <h1>🃏 翻卡牌</h1>
+            <h1>🃏 <%= lang === 'zh' ? '翻卡牌' : 'Card Flip' %></h1>
             <div class="nav-links">
-                <span>用户：<%= username %></span>
-                <a href="/">🏠 返回首页</a>
-                <a href="/profile">👤 个人中心</a>
+                <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
+                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
+                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
             </div>
         </div>
 
         <div class="balance-section">
-            <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+            <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
         </div>
 
         <div class="flip-layout">
             <div class="status-panel">
                 <div class="status-box">
-                    <h4>下一张花费</h4>
+                    <h4><%= lang === 'zh' ? '下一张花费' : 'Next Card Cost' %></h4>
                     <span id="nextCost">--</span>
                 </div>
                 <div class="status-box">
-                    <h4>已翻好牌</h4>
+                    <h4><%= lang === 'zh' ? '已翻好牌' : 'Good Cards' %></h4>
                     <span id="goodCount">0</span>
                 </div>
                 <div class="status-box">
-                    <h4>当前退出奖励</h4>
+                    <h4><%= lang === 'zh' ? '当前退出奖励' : 'Current Cashout' %></h4>
                     <span id="cashoutReward">0</span>
                 </div>
             </div>
@@ -236,12 +238,19 @@
             <div class="flip-grid" id="flipGrid"></div>
 
             <div class="action-row">
-                <button class="action-btn secondary" id="startBtn">开始新一轮</button>
-                <button class="action-btn" id="cashoutBtn">立即退出</button>
+                <button class="action-btn secondary" id="startBtn">
+                    <%= lang === 'zh' ? '开始新一轮' : 'Start New Round' %>
+                </button>
+                <button class="action-btn" id="cashoutBtn">
+                    <%= lang === 'zh' ? '立即退出' : 'Cash Out' %>
+                </button>
             </div>
 
             <div class="hint-text">
-                翻到坏牌会立刻结束并获得安慰奖 50 电币。翻满 7 张好牌自动获得 30000 电币。
+                <%= lang === 'zh'
+                    ? '翻到坏牌会立刻结束并获得安慰奖 50 电币。翻满 7 张好牌自动获得 30000 电币。'
+                    : 'Flipping a bad card ends immediately with consolation prize of 50 coins. Flip all 7 good cards to automatically win 30000 coins.'
+                %>
             </div>
         </div>
 
@@ -256,7 +265,11 @@
             line-height: 1.5;
             text-align: center;
         ">
-            ⚠️ <strong>免责声明：</strong>本功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。虚拟电币无法兑换真实货币。严禁未满18周岁用户使用，请理性娱乐。
+            <% if (lang === 'zh') { %>
+                ⚠️ <strong>免责声明：</strong>本功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。虚拟电币无法兑换真实货币。严禁未满18周岁用户使用，请理性娱乐。
+            <% } else { %>
+                ⚠️ <strong>Disclaimer:</strong> This feature is for entertainment only and does not involve any form of gambling, betting, or real money usage. Virtual coins cannot be exchanged for real money. Strictly prohibited for users under 18 years old. Please enjoy responsibly.
+            <% } %>
         </div>
     </div>
 

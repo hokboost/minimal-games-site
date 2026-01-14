@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>开发中</title>
+    <title><%= lang === 'zh' ? '开发中' : 'Under Development' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
         .container {
@@ -47,9 +47,16 @@
 
     <div class="container">
         <div class="status-card">
-            <h1>🚧 网站开发中</h1>
-            <p>当前服务仍在准备中，敬请期待。</p>
-            <a class="logout-btn" href="/logout">退出登录</a>
+            <h1>🚧 <%= lang === 'zh' ? '网站开发中' : 'Website Under Development' %></h1>
+            <p>
+                <%= lang === 'zh'
+                    ? '当前服务仍在准备中，敬请期待。'
+                    : 'Current service is still under preparation. Stay tuned.'
+                %>
+            </p>
+            <a class="logout-btn" href="/logout">
+                <%= lang === 'zh' ? '退出登录' : 'Logout' %>
+            </a>
         </div>
     </div>
 </body>

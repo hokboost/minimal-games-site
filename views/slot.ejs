@@ -3,38 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>幸运老虎机</title>
+    <title><%= lang === 'zh' ? '幸运老虎机' : 'Lucky Slot Machine' %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+    <%- include('partials/language-switcher') %>
+
     <div class="container">
         <div class="header">
-            <h1>🎰 幸运老虎机</h1>
+            <h1>🎰 <%= lang === 'zh' ? '幸运老虎机' : 'Lucky Slot Machine' %></h1>
             <div class="nav-links">
-                <span>用户：<%= username %></span>
-                <a href="/">🏠 返回首页</a>
-                <a href="/profile">👤 个人中心</a>
+                <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
+                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
+                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
             </div>
         </div>
-        
+
         <div class="balance-betting-section">
             <div class="balance-info">
-                <h3>⚡ 当前电币: <span id="current-balance"><%= balance || 0 %></span> 电币</h3>
+                <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
             </div>
             <div class="betting-section">
-                <label for="bet-amount">💰 投注金额:</label>
-                <input type="number" id="bet-amount" min="1" max="1000" value="10" placeholder="输入投注金额 (1-1000)">
-                <span class="bet-info">电币</span>
+                <label for="bet-amount">💰 <%= lang === 'zh' ? '投注金额' : 'Bet Amount' %>:</label>
+                <input type="number" id="bet-amount" min="1" max="1000" value="10" placeholder="<%= lang === 'zh' ? '输入投注金额 (1-1000)' : 'Enter bet amount (1-1000)' %>">
+                <span class="bet-info"><%= lang === 'zh' ? '电币' : 'coins' %></span>
             </div>
         </div>
-        
+
         <div id="slot" class="slot-area">
             <div class="slot-reels">
                 <span id="r1">50</span>
                 <span id="r2">100</span>
                 <span id="r3">150</span>
             </div>
-            <button id="spinBtn">🎰 开始游戏</button>
+            <button id="spinBtn">🎰 <%= lang === 'zh' ? '开始游戏' : 'Start Game' %></button>
         </div>
         <p id="rewardResult" class="result-text"></p>
         <div style="
@@ -50,7 +52,11 @@
             text-align: center;
             line-height: 1.5;
         ">
-            ⚠️ <strong>免责声明：</strong>本老虎机功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得，参与完全免费，无需任何付费。本功能符合中华人民共和国相关法律法规，不属于博彩或彩票性质。使用本功能即表示您确认并接受这些条款。严禁未满18周岁用户使用，请理性娱乐。
+            <% if (lang === 'zh') { %>
+                ⚠️ <strong>免责声明：</strong>本老虎机功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得，参与完全免费，无需任何付费。本功能符合中华人民共和国相关法律法规，不属于博彩或彩票性质。使用本功能即表示您确认并接受这些条款。严禁未满18周岁用户使用，请理性娱乐。
+            <% } else { %>
+                ⚠️ <strong>Disclaimer:</strong> This slot machine feature is for entertainment only and does not involve any form of gambling, betting, or real money usage. No real money prizes are available. Participation is completely free with no payment required. This feature complies with relevant laws and is not a form of gambling or lottery. By using this feature, you confirm and accept these terms. Strictly prohibited for users under 18 years old. Please enjoy responsibly.
+            <% } %>
         </div>
     </div>
 
