@@ -566,7 +566,18 @@ const translations = {
 // i18n 中间件
 function i18nMiddleware(req, res, next) {
     // 从cookie或query获取语言设置，默认中文
-    const lang = req.cookies.lang || req.query.lang || 'zh';
+    // 手动解析cookie（兼容无cookie-parser的情况）
+    let cookieLang = 'zh';
+    if (req.headers.cookie) {
+        const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+            const [key, value] = cookie.trim().split('=');
+            acc[key] = value;
+            return acc;
+        }, {});
+        cookieLang = cookies.lang || 'zh';
+    }
+
+    const lang = req.cookies?.lang || cookieLang || req.query.lang || 'zh';
 
     // 验证语言
     const validLang = ['zh', 'en'].includes(lang) ? lang : 'zh';
