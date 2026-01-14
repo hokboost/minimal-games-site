@@ -32,16 +32,20 @@ if (!username || !password) {
 const cookieJar = new Map();
 
 function setCookieFromResponse(response) {
-    const setCookie = response.headers.get('set-cookie');
-    if (!setCookie) return;
-    const parts = setCookie.split(',');
-    for (const part of parts) {
-        const first = part.split(';')[0];
-        const [name, value] = first.split('=');
-        if (name && value !== undefined) {
-            cookieJar.set(name.trim(), value.trim());
-        }
-    }
+    const rawList = response.headers.raw?.()['set-cookie'];
+    const cookies = rawList && Array.isArray(rawList) && rawList.length > 0
+        ? rawList
+        : (response.headers.get('set-cookie') ? [response.headers.get('set-cookie')] : []);
+    cookies.forEach((raw) => {
+        if (!raw) return;
+        raw.split(/,(?=[^;]+?=)/).forEach((part) => {
+            const first = part.split(';')[0];
+            const [name, value] = first.split('=');
+            if (name && value !== undefined) {
+                cookieJar.set(name.trim(), value.trim());
+            }
+        });
+    });
 }
 
 function cookieHeader() {
@@ -60,12 +64,23 @@ async function request(path, options = {}, timeoutMs = 60000) {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const response = await fetch(url, {
-            redirect: 'follow',
+            redirect: 'manual', // 手动跟随，便于保存 cookie
             ...options,
             headers,
             signal: controller.signal
         });
         setCookieFromResponse(response);
+
+        const status = response.status;
+        const location = response.headers.get('location');
+        const shouldFollow = [301, 302, 303, 307, 308].includes(status) && location && (options._depth || 0) < 5;
+        if (shouldFollow) {
+            const nextMethod = ['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase())
+                ? 'GET'
+                : 'GET'; // 登录后统一用GET
+            return request(location, { ...options, method: nextMethod, body: undefined, _depth: (options._depth || 0) + 1 });
+        }
+
         return response;
     } finally {
         clearTimeout(timeout);
@@ -90,11 +105,17 @@ async function login() {
     const body = new URLSearchParams({ username, password, _csrf: csrf }).toString();
     const resp = await request('/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-csrf-token': csrf },
         body
     });
-    const ok = resp.status === 302 || resp.status === 303;
+    const text = await resp.text();
+    const looksLikeLoginForm = /name=["']username["']|name=["']password["']|<form[^>]*login/i.test(text);
+    const ok = resp.status === 302 || resp.status === 303 || (resp.status === 200 && !looksLikeLoginForm);
     log('Login submit', ok, `status=${resp.status} location=${resp.headers.get('location')}`);
+    if (!ok) {
+        console.log('--- Login body (truncated) ---');
+        console.log(text.slice(0, 400));
+    }
     return ok;
 }
 
@@ -231,6 +252,48 @@ async function wishFlow(csrf) {
     }
 }
 
+async function wishBatchFlow(csrf) {
+    try {
+        const resp = await request('/api/wish-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ giftType: 'bobo', batchCount: 1 })
+        });
+        const payload = await resp.json().catch(() => ({}));
+        log('Wish batch', resp.status === 200 && payload.success, `status=${resp.status} msg=${payload.message}`);
+    } catch (err) {
+        log('Wish batch', false, err.message);
+    }
+}
+
+async function giftExchangeFlow(csrf) {
+    try {
+        const resp = await request('/api/gifts/exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ giftType: 'fanlight', cost: 1, quantity: 1 })
+        });
+        const payload = await resp.json().catch(() => ({}));
+        log('Gift exchange', resp.status === 200 && payload.success, `status=${resp.status} msg=${payload.message}`);
+    } catch (err) {
+        log('Gift exchange', false, err.message);
+    }
+}
+
+async function duelFlow(csrf) {
+    try {
+        const start = await request('/api/duel/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ power: 1 })
+        });
+        const payload = await start.json().catch(() => ({}));
+        log('Duel start', start.status === 200 && payload.success, `status=${start.status} msg=${payload.message}`);
+    } catch (err) {
+        log('Duel flow', false, err.message);
+    }
+}
+
 async function main() {
     console.log(`Target: ${baseUrl}`);
     const loggedIn = await login();
@@ -245,6 +308,9 @@ async function main() {
     await spinFlow(csrf);
     await flipFlow(csrf);
     await wishFlow(csrf);
+    await wishBatchFlow(csrf);
+    await giftExchangeFlow(csrf);
+    await duelFlow(csrf);
 }
 
 main().catch((err) => {

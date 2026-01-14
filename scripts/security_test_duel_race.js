@@ -81,12 +81,18 @@ async function loginAndCsrf() {
     const body = new URLSearchParams({ username, password, _csrf: csrf }).toString();
     const resp = await request('/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-csrf-token': csrf },
         body
     });
-    const ok = resp.status === 302 || resp.status === 303;
+    const text = await resp.text();
+    const looksLikeLoginForm = /name=["']username["']|name=["']password["']|<form[^>]*login/i.test(text);
+    const ok = resp.status === 302 || resp.status === 303 || (resp.status === 200 && !looksLikeLoginForm);
     log('Login submit', ok, `status=${resp.status} location=${resp.headers.get('location')}`);
-    if (!ok) return null;
+    if (!ok) {
+        console.log('--- Login body (truncated) ---');
+        console.log(text.slice(0, 400));
+        return null;
+    }
 
     // 决斗页取 CSRF
     const duelPage = await request('/duel');

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,23 +7,35 @@
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+    <%- include('partials/language-switcher') %>
+
     <div class="container">
-        <h1>🆕 注册 Minimal Games</h1>
-        
+        <h1>🆕 <%= t.auth.register %> Minimal Games</h1>
+
         <form id="register-form" action="/register" method="POST" class="auth-form">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            
+
             <div class="form-group">
-                <input type="text" name="username" placeholder="用户名" required minlength="2" maxlength="30" />
-                <div class="input-hint">用户名要求: 2-30个字符，支持中文、英文、数字、符号</div>
+                <input type="text" name="username" placeholder="<%= t.auth.username %>" required minlength="2" maxlength="30" />
+                <div class="input-hint">
+                    <%= lang === 'zh'
+                        ? '用户名要求: 2-30个字符，支持中文、英文、数字、符号'
+                        : 'Username: 2-30 characters, supports Chinese, English, numbers, symbols'
+                    %>
+                </div>
             </div>
-            
+
             <div class="form-group">
-                <input type="password" name="password" placeholder="密码" required minlength="6" maxlength="128" />
-                <div class="input-hint">密码要求: 6-128个字符，不能使用常见弱密码（如123456）</div>
+                <input type="password" name="password" placeholder="<%= t.auth.password %>" required minlength="6" maxlength="128" />
+                <div class="input-hint">
+                    <%= lang === 'zh'
+                        ? '密码要求: 6-128个字符，不能使用常见弱密码（如123456）'
+                        : 'Password: 6-128 characters, avoid common weak passwords (e.g., 123456)'
+                    %>
+                </div>
             </div>
-            
-            <button type="submit" id="register-btn" class="btn-primary">注册</button>
+
+            <button type="submit" id="register-btn" class="btn-primary"><%= t.auth.registerButton %></button>
         </form>
 
         <% if (typeof error !== 'undefined' && error) { %>
@@ -31,9 +43,9 @@
         <% } %>
 
         <div class="auth-links">
-            已有账号？<a href="/login">点我登录</a>
+            <%= t.auth.hasAccount %> <a href="/login"><%= t.auth.goLogin %></a>
             <br>
-            <a href="/">← 返回首页</a>
+            <a href="/">← <%= lang === 'zh' ? '返回首页' : 'Back to Home' %></a>
         </div>
     </div>
 

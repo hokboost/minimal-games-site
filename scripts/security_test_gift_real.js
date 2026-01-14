@@ -84,14 +84,21 @@ async function login() {
     const response = await request('/login', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'x-csrf-token': csrfToken
         },
         body
     });
 
-    const pass = response.status === 302 || response.status === 303;
     const location = response.headers.get('location') || '';
+    const text = await response.text();
+    const looksLikeLoginForm = /name=["']username["']|name=["']password["']|<form[^>]*login/i.test(text);
+    const pass = response.status === 302 || response.status === 303 || (response.status === 200 && !looksLikeLoginForm);
     logResult('Login submit', pass, `status=${response.status} location=${location}`);
+    if (!pass) {
+        console.log('--- Login body (truncated) ---');
+        console.log(text.slice(0, 400));
+    }
     return pass;
 }
 

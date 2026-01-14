@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -63,12 +63,12 @@
                     <tr>
                         <th>排名</th>
                         <th>用户名</th>
-                        <th><%= t.game.score %></th>
+                        <th>得分</th>
                         <th>完成时间</th>
                     </tr>
                 </thead>
                 <tbody id="leaderboard-body">
-                    <tr><td colspan="4"><%= t.common.loading %></td></tr>
+                    <tr><td colspan="4">加载中...</td></tr>
                 </tbody>
             </table>
         </div>

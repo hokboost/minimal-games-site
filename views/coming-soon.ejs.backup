@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -43,8 +43,6 @@
     </style>
 </head>
 <body>
-    <%- include('partials/language-switcher') %>
-
     <div class="container">
         <div class="status-card">
             <h1>🚧 网站开发中</h1>

@@ -86,6 +86,9 @@ const registerGiftRoutes = require('./routes/gifts');
 const registerWishRoutes = require('./routes/wish');
 const registerGameRoutes = require('./routes/games');
 
+// 导入i18n国际化
+const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
+
 // CSRF 保护
 const tokens = new csrf();
 
@@ -358,6 +361,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(mongoSanitize()); // 防止NoSQL注入
+
+// 国际化中间件
+app.use(i18nMiddleware);
+
+// 语言切换路由
+setupLanguageRoutes(app);
 
 // IP风控中间件
 app.use(async (req, res, next) => {

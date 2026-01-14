@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,8 +7,6 @@
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <%- include('partials/language-switcher') %>
-
     <div class="container">
         <div class="admin-header">
             <h1>🧾 用户记录：<%= targetUsername %></h1>
@@ -82,7 +80,7 @@
                         <th>时间</th>
                         <th>档位</th>
                         <th>匹配</th>
-                        <th><%= t.game.reward %></th>
+                        <th>奖励</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -111,7 +109,7 @@
                         <th>礼物</th>
                         <th>消耗</th>
                         <th>结果</th>
-                        <th><%= t.game.reward %></th>
+                        <th>奖励</th>
                         <th>次数</th>
                     </tr>
                 </thead>
@@ -142,7 +140,7 @@
                         <th>时间</th>
                         <th>动作</th>
                         <th>消耗</th>
-                        <th><%= t.game.reward %></th>
+                        <th>奖励</th>
                         <th>槽位</th>
                         <th>变化</th>
                     </tr>
@@ -174,7 +172,7 @@
                         <th>时间</th>
                         <th>动作</th>
                         <th>消耗</th>
-                        <th><%= t.game.reward %></th>
+                        <th>奖励</th>
                         <th>翻开</th>
                         <th>好/坏</th>
                         <th>结束</th>
@@ -210,7 +208,7 @@
                         <th>功力</th>
                         <th>消耗</th>
                         <th>结果</th>
-                        <th><%= t.game.reward %></th>
+                        <th>奖励</th>
                     </tr>
                 </thead>
                 <tbody>

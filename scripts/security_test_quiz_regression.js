@@ -16,16 +16,20 @@ if (!username || !password) {
 const cookieJar = new Map();
 
 function setCookieFromResponse(response) {
-    const setCookie = response.headers.get('set-cookie');
-    if (!setCookie) return;
-    const parts = setCookie.split(',');
-    for (const part of parts) {
-        const first = part.split(';')[0];
-        const [name, value] = first.split('=');
-        if (name && value !== undefined) {
-            cookieJar.set(name.trim(), value.trim());
-        }
-    }
+    const rawList = response.headers.raw?.()['set-cookie'];
+    const cookies = rawList && Array.isArray(rawList) && rawList.length > 0
+        ? rawList
+        : (response.headers.get('set-cookie') ? [response.headers.get('set-cookie')] : []);
+    cookies.forEach((raw) => {
+        if (!raw) return;
+        raw.split(/,(?=[^;]+?=)/).forEach((part) => {
+            const first = part.split(';')[0];
+            const [name, value] = first.split('=');
+            if (name && value !== undefined) {
+                cookieJar.set(name.trim(), value.trim());
+            }
+        });
+    });
 }
 
 function cookieHeader() {
@@ -45,11 +49,18 @@ async function request(path, options = {}) {
         headers.cookie = cookies;
     }
     const response = await fetch(url, {
-        redirect: 'follow',
+        redirect: 'manual',
         ...options,
         headers
     });
     setCookieFromResponse(response);
+    const status = response.status;
+    const location = response.headers.get('location');
+    const shouldFollow = [301, 302, 303, 307, 308].includes(status) && location && (options._depth || 0) < 5;
+    if (shouldFollow) {
+        const nextMethod = ['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase()) ? 'GET' : 'GET';
+        return request(location, { ...options, method: nextMethod, body: undefined, _depth: (options._depth || 0) + 1 });
+    }
     return response;
 }
 
@@ -78,13 +89,19 @@ async function login() {
 
     const response = await request('/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-csrf-token': csrfToken },
         body
     });
 
-    const pass = response.status === 302 || response.status === 303;
     const location = response.headers.get('location') || '';
+    const text = await response.text();
+    const looksLikeLoginForm = /name=["']username["']|name=["']password["']|<form[^>]*login/i.test(text);
+    const pass = response.status === 302 || response.status === 303 || (response.status === 200 && !looksLikeLoginForm);
     logResult('Login submit', pass, `status=${response.status} location=${location}`);
+    if (!pass) {
+        console.log('--- Login body (truncated) ---');
+        console.log(text.slice(0, 400));
+    }
     return pass ? csrfToken : null;
 }
 
