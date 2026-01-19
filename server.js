@@ -283,6 +283,22 @@ async function initializeDatabase() {
             console.log('✅ failure_reason字段已存在');
         }
 
+        const checkUpdatedAt = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'gift_exchanges'
+            AND column_name = 'updated_at'
+        `);
+
+        if (checkUpdatedAt.rows.length === 0) {
+            console.log('➕ 添加updated_at字段到gift_exchanges表...');
+            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`);
+            await pool.query(`UPDATE gift_exchanges SET updated_at = created_at WHERE updated_at IS NULL`);
+            console.log('✅ updated_at字段添加完成');
+        } else {
+            console.log('✅ updated_at字段已存在');
+        }
+
         const checkWishFailureReason = await pool.query(`
             SELECT column_name
             FROM information_schema.columns

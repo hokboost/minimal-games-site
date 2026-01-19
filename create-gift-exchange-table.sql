@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS gift_exchanges (
     cost INTEGER NOT NULL,
     status VARCHAR(20) DEFAULT 'completed',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     processed_at TIMESTAMP WITH TIME ZONE,
     bilibili_room_id VARCHAR(50),
     bilibili_uid VARCHAR(50),
