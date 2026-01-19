@@ -1,3 +1,6 @@
+        const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+        const t = (zh, en) => (lang === 'zh' ? zh : en);
+        const translateServerMessage = window.translateServerMessage || ((message) => message);
         const csrfToken = document.body.dataset.csrfToken || '';
         const colors = {
             red: 'stone-red',
@@ -44,8 +47,8 @@
             const maxSame = state.maxSame || 0;
             const reward = state.reward || 0;
 
-            document.getElementById('rewardAmount').textContent = isFull ? `${reward} 电币` : '--';
-            document.getElementById('sameCount').textContent = `同色 ${maxSame}`;
+            document.getElementById('rewardAmount').textContent = isFull ? `${reward} ${t('电币', 'coins')}` : '--';
+            document.getElementById('sameCount').textContent = t(`同色 ${maxSame}`, `Same Color ${maxSame}`);
             const redeemBtn = document.getElementById('redeemBtn');
             redeemBtn.disabled = !isFull;
             redeemBtn.classList.toggle('ready', !redeemBtn.disabled);
@@ -59,7 +62,7 @@
             fillBtn.classList.toggle('ready', !fillBtn.disabled);
 
             const replaceCost = state.replaceCost;
-            document.getElementById('replaceCost').textContent = replaceCost ? `${replaceCost} 电币` : '不可更换';
+            document.getElementById('replaceCost').textContent = replaceCost ? `${replaceCost} ${t('电币', 'coins')}` : t('不可更换', 'Not Available');
 
             if (!state.canReplace) {
                 selectedSlot = null;
@@ -91,7 +94,7 @@
             });
             const result = await response.json();
             if (!result.success) {
-                alert(result.message || '操作失败');
+                alert(translateServerMessage(result.message) || t('操作失败', 'Action failed'));
                 return null;
             }
             updateBalance(result.newBalance);
@@ -109,7 +112,7 @@
 
         document.getElementById('replaceBtn').addEventListener('click', () => {
             if (selectedSlot === null) {
-                alert('请选择一个槽位');
+                alert(t('请选择一个槽位', 'Please select a slot'));
                 return;
             }
             postAction('/api/stone/replace', { index: selectedSlot });
@@ -118,7 +121,10 @@
         document.getElementById('redeemBtn').addEventListener('click', async () => {
             const result = await postAction('/api/stone/redeem');
             if (result && result.reward !== undefined) {
-                alert(`兑换成功！获得 ${result.reward} 电币`);
+                alert(t(
+                    `兑换成功！获得 ${result.reward} 电币`,
+                    `Redeem success! Earned ${result.reward} coins`
+                ));
             }
         });
 

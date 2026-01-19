@@ -1,6 +1,21 @@
 (() => {
+    const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+    const t = (zh, en) => (lang === 'zh' ? zh : en);
+    const translateServerMessage = window.translateServerMessage || ((message) => message);
+
     const { username, csrfToken } = document.body.dataset;
     const csrf = csrfToken || '';
+    const formatScratchOutcome = (outcome) => {
+        if (!outcome || lang === 'zh') {
+            return outcome;
+        }
+        let formatted = outcome;
+        formatted = formatted.replace('未中奖', 'No Win');
+        formatted = formatted.replace('中奖', 'Win');
+        formatted = formatted.replace('返还', 'Returned');
+        formatted = formatted.replace('电币', 'coins');
+        return formatted;
+    };
 
     if (!crypto.randomUUID) {
         crypto.randomUUID = function () {
@@ -42,10 +57,15 @@
         let prizeStyle;
         let bgStyle = '';
 
+        const hasCoinPrize = typeof prize === 'string'
+            && (prize.includes('电币') || prize.toLowerCase().includes('coin'));
+        const isThankYou = typeof prize === 'string'
+            && (prize.includes('谢谢') || prize.toLowerCase().includes('thanks'));
+
         if (isWinningArea) {
             prizeStyle = 'color: #00c853; font-weight: bold; font-size: 0.9rem;';
             bgStyle = 'background: rgba(255, 215, 0, 0.2); border: 2px solid #FFD700;';
-        } else if (prize && prize.includes('电币') && !prize.includes('谢谢')) {
+        } else if (prize && hasCoinPrize && !isThankYou) {
             prizeStyle = 'color: #00c853; font-weight: bold; font-size: 0.9rem;';
             bgStyle = 'background: rgba(0, 200, 83, 0.2); border: 2px solid #00c853;';
         } else {
@@ -71,7 +91,10 @@
     async function selectTier(cost, winCount) {
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
         if (currentBalance < cost) {
-            alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`);
+            alert(t(
+                `⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`,
+                `⚡ Insufficient coins! Balance: ${currentBalance}, needed: ${cost}. For entertainment only, virtual coins cannot be exchanged for real money.`
+            ));
             return;
         }
 
@@ -93,12 +116,16 @@
 
             const data = await response.json();
             if (!data.success) {
-                alert('游戏开始失败：' + data.message);
+                alert(t('游戏开始失败：', 'Failed to start game: ') + translateServerMessage(data.message));
                 return;
             }
 
             const payoutValue = data.payout ?? data.reward ?? 0;
-            const outcomeText = data.outcome ?? ((payoutValue > 0) ? `中奖 ${payoutValue} 电币` : '未中奖');
+            const outcomeText = data.outcome
+                ? formatScratchOutcome(data.outcome)
+                : (payoutValue > 0
+                    ? t(`中奖 ${payoutValue} 电币`, `Won ${payoutValue} coins`)
+                    : t('未中奖', 'No win'));
             const normalized = {
                 reward: data.reward ?? payoutValue,
                 payout: payoutValue,
@@ -117,7 +144,7 @@
             startScratchGame(normalized);
         } catch (error) {
             console.error('Scratch game error:', error);
-            alert('网络错误，请稍后重试');
+            alert(t('网络错误，请稍后重试', 'Network error, please try again'));
         }
     }
 
@@ -128,8 +155,8 @@
 
         const userCount = gameData.slots.length;
         document.getElementById('current-tier-info').innerHTML = `
-            <div>当前档位: ${selectedTier.cost} 电币 | 中奖号码: ${gameData.winningNumbers.length} 个 | 我的号码: ${userCount} 个</div>
-            <div style="color: #ffeb3b;">🎯 刮开涂层，点击验证查看中奖结果！</div>
+            <div>${t('当前档位', 'Current Tier')}: ${selectedTier.cost} ${t('电币', 'coins')} | ${t('中奖号码', 'Winning Numbers')}: ${gameData.winningNumbers.length} ${t('个', '')} | ${t('我的号码', 'My Numbers')}: ${userCount} ${t('个', '')}</div>
+            <div style="color: #ffeb3b;">🎯 ${t('刮开涂层，点击验证查看中奖结果！', 'Scratch off and click verify to reveal your result!')}</div>
         `;
 
         const canvas = document.getElementById('scratchCanvas');
@@ -142,7 +169,7 @@
         ctx.globalCompositeOperation = 'destination-out';
 
         const all = [
-            ...gameData.winningNumbers.map((n) => ({ num: n, prize: '中奖号码', isWinning: true })),
+            ...gameData.winningNumbers.map((n) => ({ num: n, prize: t('中奖号码', 'Winning'), isWinning: true })),
             ...gameData.slots.map((s) => ({
                 num: s.number,
                 prize: s.prize,
@@ -222,7 +249,7 @@
 
     function verifyWin() {
         if (!currentGameData) {
-            alert('请先开始游戏！');
+            alert(t('请先开始游戏！', 'Please start the game first!'));
             return;
         }
 
@@ -244,17 +271,26 @@
         let resultMessage;
 
         if ((currentGameData.payout || 0) === 0) {
-            resultMessage = `😢 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，未中奖`;
+            resultMessage = t(
+                `😢 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，未中奖`,
+                `😢 ${currentGameData.outcome}! Bet: ${selectedTier.cost} coins, no win`
+            );
         } else if (currentGameData.payout === selectedTier.cost) {
-            resultMessage = `🎯 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，返还: ${currentGameData.payout} 电币`;
+            resultMessage = t(
+                `🎯 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，返还: ${currentGameData.payout} 电币`,
+                `🎯 ${currentGameData.outcome}! Bet: ${selectedTier.cost} coins, returned: ${currentGameData.payout} coins`
+            );
         } else {
-            resultMessage = `🎉 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，获得: ${currentGameData.payout} 电币`;
+            resultMessage = t(
+                `🎉 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，获得: ${currentGameData.payout} 电币`,
+                `🎉 ${currentGameData.outcome}! Bet: ${selectedTier.cost} coins, earned: ${currentGameData.payout} coins`
+            );
         }
 
         result.innerHTML = `
             <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
                 <div style="color: #ffeb3b; font-size: 1.1rem; margin-bottom: 0.5rem;">${resultMessage}</div>
-                <div style="color: #ccc;">匹配号码: ${matched.length} 个 | 余额: ${currentGameData.finalBalance ?? '--'} 电币</div>
+                <div style="color: #ccc;">${t('匹配号码', 'Matches')}: ${matched.length} ${t('个', '')} | ${t('余额', 'Balance')}: ${currentGameData.finalBalance ?? '--'} ${t('电币', 'coins')}</div>
             </div>
         `;
 

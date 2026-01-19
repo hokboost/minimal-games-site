@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>游戏中心</title>
+    <title><%= lang === 'zh' ? '游戏中心' : 'Game Center' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
     .header {
@@ -340,7 +340,6 @@
                 <% } %>
             </div>
         <% } else { %>
-            
             <div style="
                 text-align: center;
                 padding: 4rem 2rem;
@@ -349,16 +348,36 @@
                 border-radius: 12px;
                 border: 1px solid rgba(255, 255, 255, 0.1);
             ">
-                <div style="font-size: 4rem; margin-bottom: 1.5rem;">🚧</div>
-                <h2 style="color: #ff9800; margin-bottom: 1rem;">
-                    <%= lang === 'zh' ? '网站功能开发中' : 'Website Features Under Development' %>
-                </h2>
-                <p style="color: #ccc; font-size: 1.1rem; line-height: 1.6;">
-                    <%= lang === 'zh'
-                        ? '敬请期待正式版本的上线'
-                        : 'Stay tuned for the official release'
-                    %>
-                </p>
+                <% if (typeof user !== 'undefined' && user && !user.authorized) { %>
+                    <div style="font-size: 3.6rem; margin-bottom: 1.5rem;">🔒</div>
+                    <h2 style="color: #ff9800; margin-bottom: 1rem;">
+                        <%= lang === 'zh' ? '账户待授权' : 'Account Pending Authorization' %>
+                    </h2>
+                    <p style="color: #ccc; font-size: 1.1rem; line-height: 1.6;">
+                        <%= lang === 'zh'
+                            ? '你的账号需要管理员授权后才能进入游戏。请联系管理员或稍后再试。'
+                            : 'Your account needs admin approval before you can access the games. Please contact the admin or try again later.'
+                        %>
+                    </p>
+                    <div style="margin-top: 1.5rem;">
+                        <a href="/logout" class="btn-logout" style="display: inline-block;"><%= lang === 'zh' ? '退出登录' : 'Logout' %></a>
+                    </div>
+                <% } else { %>
+                    <div style="font-size: 3.6rem; margin-bottom: 1.5rem;">👋</div>
+                    <h2 style="color: #ff9800; margin-bottom: 1rem;">
+                        <%= lang === 'zh' ? '请先登录或注册' : 'Please Login or Register' %>
+                    </h2>
+                    <p style="color: #ccc; font-size: 1.1rem; line-height: 1.6;">
+                        <%= lang === 'zh'
+                            ? '登录后即可开始游戏并兑换礼物。'
+                            : 'Sign in to start playing games and redeem gifts.'
+                        %>
+                    </p>
+                    <div style="margin-top: 1.5rem; display: inline-flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center;">
+                        <a href="/login" class="btn-login">🔐 <%= t.auth.login %></a>
+                        <a href="/register" class="btn-register">🆕 <%= t.auth.register %></a>
+                    </div>
+                <% } %>
             </div>
         <% } %>
     </div>

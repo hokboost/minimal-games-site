@@ -1,4 +1,8 @@
 (() => {
+    const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+    const t = (zh, en) => (lang === 'zh' ? zh : en);
+    const translateServerMessage = window.translateServerMessage || ((message) => message);
+
     const { csrfToken } = document.body.dataset;
     const grid = document.getElementById('flipGrid');
     const nextCostEl = document.getElementById('nextCost');
@@ -24,9 +28,9 @@
             if (card.flipped) {
                 cardEl.classList.add('flipped');
                 cardEl.classList.add(card.type === 'good' ? 'good' : 'bad');
-                cardEl.textContent = card.type === 'good' ? '好' : '坏';
+                cardEl.textContent = card.type === 'good' ? t('好', 'Good') : t('坏', 'Bad');
             } else {
-                cardEl.innerHTML = '<span class="card-label">翻开</span>';
+                cardEl.innerHTML = `<span class="card-label">${t('翻开', 'Flip')}</span>`;
             }
 
             if (ended || card.flipped) {
@@ -45,9 +49,9 @@
     function updateState(data) {
         state = data;
         renderBoard(data.board, data.ended);
-        nextCostEl.textContent = data.nextCost ? `${data.nextCost} 电币` : '--';
+        nextCostEl.textContent = data.nextCost ? `${data.nextCost} ${t('电币', 'coins')}` : '--';
         goodCountEl.textContent = data.goodCount || 0;
-        cashoutRewardEl.textContent = `${data.cashoutReward || 0} 电币`;
+        cashoutRewardEl.textContent = `${data.cashoutReward || 0} ${t('电币', 'coins')}`;
         cashoutBtn.disabled = data.ended || data.goodCount === 0;
     }
 
@@ -70,14 +74,14 @@
         });
         const result = await response.json();
         if (!result.success) {
-            alert(result.message || '翻牌失败');
+            alert(translateServerMessage(result.message) || t('翻牌失败', 'Flip failed'));
             return;
         }
         updateBalance(result.newBalance);
         await loadState();
 
         if (result.reward > 0) {
-            alert(`本轮结束！获得 ${result.reward} 电币`);
+            alert(t(`本轮结束！获得 ${result.reward} 电币`, `Round ended! Earned ${result.reward} coins`));
         }
     }
 
@@ -91,14 +95,17 @@
         });
         const result = await response.json();
         if (!result.success) {
-            alert(result.message || '开始失败');
+            alert(translateServerMessage(result.message) || t('开始失败', 'Start failed'));
             return;
         }
         if (typeof result.newBalance === 'number') {
             updateBalance(result.newBalance);
         }
         if (result.previousReward > 0) {
-            alert(`上一轮自动结算：获得 ${result.previousReward} 电币`);
+            alert(t(
+                `上一轮自动结算：获得 ${result.previousReward} 电币`,
+                `Previous round auto-settled: earned ${result.previousReward} coins`
+            ));
         }
         await loadState();
     });
@@ -113,12 +120,12 @@
         });
         const result = await response.json();
         if (!result.success) {
-            alert(result.message || '退出失败');
+            alert(translateServerMessage(result.message) || t('退出失败', 'Cash out failed'));
             return;
         }
         updateBalance(result.newBalance);
         await loadState();
-        alert(`退出成功，获得 ${result.reward} 电币`);
+        alert(t(`退出成功，获得 ${result.reward} 电币`, `Cash out success, earned ${result.reward} coins`));
     });
 
     loadState();

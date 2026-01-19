@@ -1,3 +1,34 @@
+const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+const t = (zh, en) => (lang === 'zh' ? zh : en);
+const translateServerMessage = window.translateServerMessage || ((message) => message);
+const giftNameMap = {
+    deepsea_singer: { zh: '深海歌姬', en: 'Deep Sea Diva' },
+    sky_throne: { zh: '飞天转椅', en: 'Sky Throne' },
+    proposal: { zh: '原地求婚', en: 'On-the-Spot Proposal' },
+    wonderland: { zh: '梦游仙境', en: 'Wonderland Dream' },
+    white_bride: { zh: '纯白花嫁', en: 'Pure White Bride' },
+    crystal_ball: { zh: '水晶球', en: 'Crystal Ball' },
+    bobo: { zh: '啵啵', en: 'Bubbles' }
+};
+const giftNameByZh = Object.fromEntries(
+    Object.values(giftNameMap).map(({ zh, en }) => [zh, en])
+);
+const getWishGiftName = (giftType, giftName) => {
+    if (lang === 'zh') {
+        return giftName || giftNameMap[giftType]?.zh || giftType || '';
+    }
+    return giftNameMap[giftType]?.en || giftNameByZh[giftName] || giftName || giftType || '';
+};
+const formatScratchResult = (result) => {
+    if (!result || lang === 'zh') {
+        return result || '';
+    }
+    let formatted = result;
+    formatted = formatted.replace('未中奖', 'No Win');
+    formatted = formatted.replace('中奖', 'Win');
+    formatted = formatted.replace('电币', 'coins');
+    return formatted;
+};
 
     function showToast(message, type = 'info') {
         const toast = document.getElementById('messageToast');
@@ -89,17 +120,17 @@
         
         
         if (!currentPassword || !newPassword || !confirmPassword) {
-            showToast('请填写所有字段', 'error');
+            showToast(t('请填写所有字段', 'Please fill in all fields'), 'error');
             return;
         }
         
         if (newPassword !== confirmPassword) {
-            showToast('新密码和确认密码不匹配', 'error');
+            showToast(t('新密码和确认密码不匹配', 'Passwords do not match'), 'error');
             return;
         }
         
         if (newPassword.length < 6) {
-            showToast('新密码至少需要6个字符', 'error');
+            showToast(t('新密码至少需要6个字符', 'Password must be at least 6 characters'), 'error');
             return;
         }
         
@@ -119,15 +150,15 @@
             const result = await response.json();
             
             if (result.success) {
-                showToast(result.message, 'success');
+                showToast(translateServerMessage(result.message), 'success');
                 closeChangePasswordModal();
                 document.getElementById('changePasswordForm').reset();
             } else {
-                showToast(result.message, 'error');
+                showToast(translateServerMessage(result.message), 'error');
             }
         } catch (error) {
-            console.error('修改密码失败:', error);
-            showToast('网络错误，请稍后重试', 'error');
+            console.error(t('修改密码失败:', 'Failed to change password:'), error);
+            showToast(t('网络错误，请稍后重试', 'Network error, please try again'), 'error');
         }
     });
 
@@ -140,7 +171,7 @@
     });
 
     function exportData() {
-        showToast('数据导出功能开发中...', 'info');
+        showToast(t('数据导出功能开发中...', 'Data export is under development...'), 'info');
     }
 
     
@@ -152,13 +183,13 @@
         currentPage = 1;
         
         const titles = {
-            quiz: '🧠 知识问答记录',
-            slot: '🎰 老虎机记录',
-            scratch: '🎟️ 刮刮乐记录',
-            wish: '🌟 祈愿记录',
-            stone: '🪨 合石头记录',
-            flip: '🃏 翻卡牌记录',
-            duel: '⚔️ 决斗挑战记录'
+            quiz: t('🧠 知识问答记录', '🧠 Quiz Records'),
+            slot: t('🎰 老虎机记录', '🎰 Slot Records'),
+            scratch: t('🎟️ 刮刮乐记录', '🎟️ Scratch Records'),
+            wish: t('🌟 祈愿记录', '🌟 Wish Records'),
+            stone: t('🪨 合石头记录', '🪨 Stone Match Records'),
+            flip: t('🃏 翻卡牌记录', '🃏 Card Flip Records'),
+            duel: t('⚔️ 决斗挑战记录', '⚔️ Duel Records')
         };
         
         document.getElementById('recordsTitle').textContent = titles[gameType];
@@ -175,7 +206,7 @@
         const recordsContent = document.getElementById('recordsContent');
         const recordsPagination = document.getElementById('recordsPagination');
         
-        recordsContent.innerHTML = '<div class="loading">加载中...</div>';
+        recordsContent.innerHTML = `<div class="loading">${t('加载中...', 'Loading...')}</div>`;
         recordsPagination.innerHTML = '';
         
         try {
@@ -186,11 +217,11 @@
                 renderGameRecords(data.records, gameType);
                 renderPagination(data.pagination, gameType);
             } else {
-                recordsContent.innerHTML = `<div class="loading">加载失败: ${data.message}</div>`;
+                recordsContent.innerHTML = `<div class="loading">${t('加载失败', 'Load failed')}: ${translateServerMessage(data.message)}</div>`;
             }
         } catch (error) {
-            console.error('加载游戏记录失败:', error);
-            recordsContent.innerHTML = '<div class="loading">网络错误，请稍后重试</div>';
+            console.error(t('加载游戏记录失败:', 'Failed to load game records:'), error);
+            recordsContent.innerHTML = `<div class="loading">${t('网络错误，请稍后重试', 'Network error, please try again')}</div>`;
         }
     }
 
@@ -198,24 +229,24 @@
 
     async function loadWishBackpack() {
         const container = document.getElementById('backpackContent');
-        container.innerHTML = '<div class="loading">加载中...</div>';
+        container.innerHTML = `<div class="loading">${t('加载中...', 'Loading...')}</div>`;
         
         try {
             const response = await fetch('/api/wish/backpack');
             const data = await response.json();
             
             if (!data.success) {
-                container.innerHTML = `<div class="loading">加载失败: ${data.message}</div>`;
+                container.innerHTML = `<div class="loading">${t('加载失败', 'Load failed')}: ${translateServerMessage(data.message)}</div>`;
                 return;
             }
 
             if (!data.items || data.items.length === 0) {
-                container.innerHTML = '<div class="loading">背包暂无礼物</div>';
+                container.innerHTML = `<div class="loading">${t('背包暂无礼物', 'No gifts in backpack')}</div>`;
                 return;
             }
 
             let tableHTML = '<table class="records-table">';
-            tableHTML += '<thead><tr><th>获得时间</th><th>礼物</th><th>到期时间</th><th>状态</th><th>操作</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('获得时间', 'Received')}</th><th>${t('礼物', 'Gift')}</th><th>${t('到期时间', 'Expires')}</th><th>${t('状态', 'Status')}</th><th>${t('操作', 'Action')}</th></tr></thead>`;
             tableHTML += '<tbody>';
 
             data.items.forEach(item => {
@@ -224,9 +255,9 @@
                     if (cachedReason !== item.last_failure_reason) {
                         const reason = item.last_failure_reason.toLowerCase();
                         if (reason.includes('余额') || reason.includes('balance') || reason.includes('insufficient')) {
-                            showToast('B站账号余额不足，礼物送出失败。', 'error');
+                            showToast(t('B站账号余额不足，礼物送出失败。', 'Bilibili balance is insufficient. Gift failed to send.'), 'error');
                         } else {
-                            showToast(`送出失败：${item.last_failure_reason}`, 'error');
+                            showToast(t('送出失败：', 'Send failed: ') + item.last_failure_reason, 'error');
                         }
                         backpackFailureCache.set(item.id, item.last_failure_reason);
                     }
@@ -236,13 +267,13 @@
                 const statusText = formatBackpackStatus(item.status, item.expires_at);
                 const canSend = item.status === 'stored';
                 const actionBtn = canSend
-                    ? `<button class="view-records-btn" data-backpack-id="${item.id}">送出</button>`
+                    ? `<button class="view-records-btn" data-backpack-id="${item.id}">${t('送出', 'Send')}</button>`
                     : '-';
 
                 tableHTML += `
                     <tr>
                         <td>${createdAt}</td>
-                        <td>${item.gift_name}</td>
+                        <td>${getWishGiftName(item.gift_type, item.gift_name)}</td>
                         <td>${expiresAt}</td>
                         <td>${statusText}</td>
                         <td>${actionBtn}</td>
@@ -253,27 +284,27 @@
             tableHTML += '</tbody></table>';
             container.innerHTML = tableHTML;
         } catch (error) {
-            console.error('加载背包失败:', error);
-            container.innerHTML = '<div class="loading">网络错误，请稍后重试</div>';
+            console.error(t('加载背包失败:', 'Failed to load backpack:'), error);
+            container.innerHTML = `<div class="loading">${t('网络错误，请稍后重试', 'Network error, please try again')}</div>`;
         }
     }
 
     function formatBackpackStatus(status, expiresAt) {
         if (status === 'stored') {
             if (!expiresAt) {
-                return '📦 待发送';
+                return t('📦 待发送', '📦 Pending');
             }
             const now = new Date();
             const expireTime = new Date(expiresAt);
             if (expireTime <= now) {
-                return '⏳ 到期自动送出中';
+                return t('⏳ 到期自动送出中', '⏳ Auto-sending');
             }
-            return '📦 待发送';
+            return t('📦 待发送', '📦 Pending');
         }
-        if (status === 'queued') return '🚚 发送中';
-        if (status === 'sent') return '✅ 已发送';
-        if (status === 'failed') return '❌ 发送失败';
-        if (status === 'expired') return '⌛ 已过期';
+        if (status === 'queued') return t('🚚 发送中', '🚚 Sending');
+        if (status === 'sent') return t('✅ 已发送', '✅ Sent');
+        if (status === 'failed') return t('❌ 发送失败', '❌ Failed');
+        if (status === 'expired') return t('⌛ 已过期', '⌛ Expired');
         return status;
     }
 
@@ -292,14 +323,14 @@
 
             const result = await response.json();
             if (result.success) {
-                showToast('礼物已加入发送队列', 'success');
+                showToast(t('礼物已加入发送队列', 'Gift added to send queue'), 'success');
                 loadWishBackpack();
             } else {
-                showToast(result.message || '送出失败', 'error');
+                showToast(translateServerMessage(result.message) || t('送出失败', 'Send failed'), 'error');
             }
         } catch (error) {
-            console.error('送出失败:', error);
-            showToast('网络错误，请稍后重试', 'error');
+            console.error(t('送出失败:', 'Send failed:'), error);
+            showToast(t('网络错误，请稍后重试', 'Network error, please try again'), 'error');
         }
     }
 
@@ -307,7 +338,7 @@
         const recordsContent = document.getElementById('recordsContent');
         
         if (records.length === 0) {
-            recordsContent.innerHTML = '<div class="loading">暂无游戏记录</div>';
+            recordsContent.innerHTML = `<div class="loading">${t('暂无游戏记录', 'No game records')}</div>`;
             return;
         }
         
@@ -315,19 +346,19 @@
         
         
         if (gameType === 'quiz') {
-            tableHTML += '<thead><tr><th>游戏时间</th><th>得分</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('得分', 'Score')}</th></tr></thead>`;
         } else if (gameType === 'slot') {
-            tableHTML += '<thead><tr><th>游戏时间</th><th>结果</th><th>获得电币</th><th>转动结果</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('获得电币', 'Coins Earned')}</th><th>${t('转动结果', 'Reels')}</th></tr></thead>`;
         } else if (gameType === 'scratch') {
-            tableHTML += '<thead><tr><th>游戏时间</th><th>结果</th><th>档位</th><th>匹配数</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('档位', 'Tier')}</th><th>${t('匹配数', 'Matches')}</th></tr></thead>`;
         } else if (gameType === 'wish') {
-            tableHTML += '<thead><tr><th>祈愿时间</th><th>次数</th><th>消耗电币</th><th>结果</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('祈愿时间', 'Wish Time')}</th><th>${t('次数', 'Count')}</th><th>${t('消耗电币', 'Cost')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
         } else if (gameType === 'stone') {
-            tableHTML += '<thead><tr><th>操作时间</th><th>操作</th><th>花费</th><th>变化</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('操作时间', 'Time')}</th><th>${t('操作', 'Action')}</th><th>${t('花费', 'Cost')}</th><th>${t('变化', 'Change')}</th></tr></thead>`;
         } else if (gameType === 'flip') {
-            tableHTML += '<thead><tr><th>操作时间</th><th>动作</th><th>成本/奖励</th><th>结果</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('操作时间', 'Time')}</th><th>${t('动作', 'Action')}</th><th>${t('成本/奖励', 'Cost/Reward')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
         } else if (gameType === 'duel') {
-            tableHTML += '<thead><tr><th>挑战时间</th><th>礼物</th><th>功力</th><th>消耗</th><th>结果</th></tr></thead>';
+            tableHTML += `<thead><tr><th>${t('挑战时间', 'Challenge Time')}</th><th>${t('礼物', 'Gift')}</th><th>${t('功力', 'Power')}</th><th>${t('消耗', 'Cost')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
         }
         
         tableHTML += '<tbody>';
@@ -340,7 +371,7 @@
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
-                        <td>${record.score} 分</td>
+                        <td>${record.score} ${t('分', 'pts')}</td>
                     </tr>
                 `;
             } else if (gameType === 'slot') {
@@ -349,8 +380,8 @@
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
-                        <td>${record.result === 'lost' ? '❌ 未中奖' : '✅ 中奖'}</td>
-                        <td>${record.payout || 0} 电币</td>
+                        <td>${record.result === 'lost' ? t('❌ 未中奖', '❌ No Win') : t('✅ 中奖', '✅ Win')}</td>
+                        <td>${record.payout || 0} ${t('电币', 'coins')}</td>
                         <td>[${amountsText}]</td>
                     </tr>
                 `;
@@ -358,21 +389,22 @@
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
-                        <td>${record.result}</td>
-                        <td>${record.tier_cost} 电币</td>
-                        <td>${record.matches_count} 个</td>
+                        <td>${formatScratchResult(record.result)}</td>
+                        <td>${record.tier_cost} ${t('电币', 'coins')}</td>
+                        <td>${record.matches_count} ${t('个', '')}</td>
                     </tr>
                 `;
             } else if (gameType === 'wish') {
                 const successCount = Number(record.success_count || 0);
+                const wishGiftName = getWishGiftName(record.gift_type, record.gift_name) || t('礼物', 'Gift');
                 const resultText = successCount > 0
-                    ? `✅ ${record.gift_name || '礼物'} x${successCount}`
-                    : '❌ 未中奖';
+                    ? `✅ ${wishGiftName} x${successCount}`
+                    : t('❌ 未中奖', '❌ No Win');
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
                         <td>${record.batch_count}</td>
-                        <td>${record.total_cost} 电币</td>
+                        <td>${record.total_cost} ${t('电币', 'coins')}</td>
                         <td>${resultText}</td>
                     </tr>
                 `;
@@ -384,25 +416,30 @@
                     <tr>
                         <td>${playedAt}</td>
                         <td>${formatStoneAction(record.action_type)}</td>
-                        <td>${costText} 电币</td>
+                        <td>${costText} ${t('电币', 'coins')}</td>
                         <td>${beforeSlots} → ${afterSlots}</td>
                     </tr>
                 `;
             } else if (gameType === 'flip') {
                 const actionText = formatFlipAction(record.action_type);
                 const amountText = record.reward > 0 ? `+${record.reward}` : '0';
-                const resultText = `好牌${record.good_count || 0}，坏牌${record.bad_count || 0}`;
+                const resultText = t(
+                    `好牌${record.good_count || 0}，坏牌${record.bad_count || 0}`,
+                    `Good ${record.good_count || 0}, Bad ${record.bad_count || 0}`
+                );
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
                         <td>${actionText}</td>
-                        <td>${amountText} 电币</td>
+                        <td>${amountText} ${t('电币', 'coins')}</td>
                         <td>${resultText}</td>
                     </tr>
                 `;
             } else if (gameType === 'duel') {
                 const giftName = formatDuelGift(record.gift_type);
-                const resultText = record.success ? `✅ 成功 +${record.reward}` : '❌ 失败';
+                const resultText = record.success
+                    ? t(`✅ 成功 +${record.reward}`, `✅ Success +${record.reward}`)
+                    : t('❌ 失败', '❌ Failed');
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
@@ -440,7 +477,7 @@
         
         
         if (pagination.hasPrev) {
-            paginationHTML += `<button data-page="${pagination.current - 1}">上一页</button>`;
+            paginationHTML += `<button data-page="${pagination.current - 1}">${t('上一页', 'Prev')}</button>`;
         }
         
         
@@ -455,7 +492,7 @@
         
         
         if (pagination.hasNext) {
-            paginationHTML += `<button data-page="${pagination.current + 1}">下一页</button>`;
+            paginationHTML += `<button data-page="${pagination.current + 1}">${t('下一页', 'Next')}</button>`;
         }
         
         recordsPagination.innerHTML = paginationHTML;
@@ -463,10 +500,10 @@
 
     function formatStoneAction(actionType) {
         const map = {
-            add: '放入',
-            fill: '一键放满',
-            replace: '更换',
-            redeem: '兑换'
+            add: t('放入', 'Add'),
+            fill: t('一键放满', 'Fill'),
+            replace: t('更换', 'Replace'),
+            redeem: t('兑换', 'Redeem')
         };
         return map[actionType] || actionType;
     }
@@ -479,32 +516,32 @@
             slots = [];
         }
         const colors = {
-            red: '红',
-            orange: '橙',
-            yellow: '黄',
-            green: '绿',
-            cyan: '青',
-            blue: '蓝',
-            purple: '紫'
+            red: t('红', 'Red'),
+            orange: t('橙', 'Orange'),
+            yellow: t('黄', 'Yellow'),
+            green: t('绿', 'Green'),
+            cyan: t('青', 'Cyan'),
+            blue: t('蓝', 'Blue'),
+            purple: t('紫', 'Purple')
         };
-        return (slots || []).map(color => colors[color] || '空').join('');
+        return (slots || []).map(color => colors[color] || t('空', 'Empty')).join('');
     }
 
     function formatFlipAction(actionType) {
         const map = {
-            end: '本局结果'
+            end: t('本局结果', 'Result')
         };
         return map[actionType] || actionType;
     }
 
     function formatDuelGift(giftType) {
         const map = {
-            crown: '至尊奖 30000',
-            dragon: '龙魂奖 13140',
-            phoenix: '凤羽奖 5000',
-            jade: '玉阶奖 1000',
-            bronze: '青铜奖 500',
-            iron: '铁心奖 200'
+            crown: t('至尊奖 30000', 'Crown Prize 30000'),
+            dragon: t('龙魂奖 13140', 'Dragon Prize 13140'),
+            phoenix: t('凤羽奖 5000', 'Phoenix Prize 5000'),
+            jade: t('玉阶奖 1000', 'Jade Prize 1000'),
+            bronze: t('青铜奖 500', 'Bronze Prize 500'),
+            iron: t('铁心奖 200', 'Iron Prize 200')
         };
         return map[giftType] || giftType;
     }

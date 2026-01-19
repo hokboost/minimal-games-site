@@ -1,3 +1,6 @@
+    const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+    const t = (zh, en) => (lang === 'zh' ? zh : en);
+    const translateServerMessage = window.translateServerMessage || ((message) => message);
     const csrfToken = document.body.dataset.csrfToken || '';
 
     
@@ -6,23 +9,26 @@
         const totalCost = unitCost * quantity;
         
         if (quantity < 1 || quantity > 100) {
-            showMessage('数量必须在1-100之间！', 'error');
+            showMessage(t('数量必须在1-100之间！', 'Quantity must be between 1 and 100.'), 'error');
             return;
         }
         
         const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
         
         if (currentBalance < totalCost) {
-            showMessage('电币余额不足！', 'error');
+            showMessage(t('电币余额不足！', 'Insufficient coin balance.'), 'error');
             return;
         }
 
-        if (!confirm(`确定要花费 ${totalCost} 电币兑换 ${quantity} 个礼物吗？`)) {
+        if (!confirm(t(
+            `确定要花费 ${totalCost} 电币兑换 ${quantity} 个礼物吗？`,
+            `Exchange ${quantity} gift(s) for ${totalCost} coins?`
+        ))) {
             return;
         }
 
         try {
-            showMessage('正在处理兑换...', 'info');
+            showMessage(t('正在处理兑换...', 'Processing exchange...'), 'info');
             
             const response = await fetch('/api/gifts/exchange', {
                 method: 'POST',
@@ -40,7 +46,7 @@
             const result = await response.json();
             
             if (result.success) {
-                showMessage(`成功兑换 ${quantity} 个礼物！`, 'success');
+                showMessage(t(`成功兑换 ${quantity} 个礼物！`, `Successfully exchanged ${quantity} gift(s)!`), 'success');
                 
                 
                 document.getElementById('currentBalance').textContent = result.newBalance;
@@ -52,11 +58,11 @@
                 
                 loadExchangeHistory();
             } else {
-                showMessage(result.message || '兑换失败', 'error');
+                showMessage(translateServerMessage(result.message) || t('兑换失败', 'Exchange failed'), 'error');
             }
         } catch (error) {
             console.error('兑换失败:', error);
-            showMessage('网络错误，请稍后重试', 'error');
+            showMessage(t('网络错误，请稍后重试', 'Network error, please try again'), 'error');
         }
     }
 
@@ -65,16 +71,19 @@
         const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
         
         if (currentBalance < cost) {
-            showMessage('电币余额不足！', 'error');
+            showMessage(t('电币余额不足！', 'Insufficient coin balance.'), 'error');
             return;
         }
 
-        if (!confirm(`确定要花费 ${cost} 电币兑换这个礼物吗？`)) {
+        if (!confirm(t(
+            `确定要花费 ${cost} 电币兑换这个礼物吗？`,
+            `Exchange this gift for ${cost} coins?`
+        ))) {
             return;
         }
 
         try {
-            showMessage('正在处理兑换...', 'info');
+            showMessage(t('正在处理兑换...', 'Processing exchange...'), 'info');
             
             const response = await fetch('/api/gifts/exchange', {
                 method: 'POST',
@@ -91,7 +100,7 @@
             const result = await response.json();
             
             if (result.success) {
-                showMessage('兑换成功！', 'success');
+                showMessage(t('兑换成功！', 'Exchange successful!'), 'success');
                 
                 
                 document.getElementById('currentBalance').textContent = result.newBalance;
@@ -99,11 +108,11 @@
                 
                 loadExchangeHistory();
             } else {
-                showMessage(result.message || '兑换失败', 'error');
+                showMessage(translateServerMessage(result.message) || t('兑换失败', 'Exchange failed'), 'error');
             }
         } catch (error) {
             console.error('兑换失败:', error);
-            showMessage('网络错误，请稍后重试', 'error');
+            showMessage(t('网络错误，请稍后重试', 'Network error, please try again'), 'error');
         }
     }
 
@@ -124,19 +133,19 @@
                         <div class="history-gift">
                             <span>${getGiftIcon(item.gift_type)}</span>
                             <span>${getGiftName(item.gift_type)} ${item.quantity > 1 ? 'x' + item.quantity : ''}</span>
-                            <span style="color: #ff9800;">(-${item.cost} 电币)</span>
+                            <span style="color: #ff9800;">(-${item.cost} ${t('电币', 'coins')})</span>
                             ${getDeliveryStatusBadge(item)}
                         </div>
                         <div class="history-time">${formatTime(item.created_at)}</div>
                     </div>
                 `).join('');
             } else {
-                historyDiv.innerHTML = '<div class="loading">暂无兑换记录</div>';
+                historyDiv.innerHTML = `<div class="loading">${t('暂无兑换记录', 'No exchange history')}</div>`;
             }
         } catch (error) {
             console.error('加载兑换记录失败:', error);
             document.getElementById('exchangeHistory').innerHTML = 
-                '<div class="loading">加载失败，请刷新重试</div>';
+                `<div class="loading">${t('加载失败，请刷新重试', 'Load failed, please refresh and retry')}</div>`;
         }
     }
 
@@ -152,10 +161,10 @@
     
     function getGiftName(giftType) {
         const names = {
-            'heartbox': '心动盲盒',
-            'fanlight': '粉丝团灯牌'
+            'heartbox': t('心动盲盒', 'Mystery Gift Box'),
+            'fanlight': t('粉丝团灯牌', 'Fan Light Badge')
         };
-        return names[giftType] || '未知礼物';
+        return names[giftType] || t('未知礼物', 'Unknown Gift');
     }
 
     
@@ -166,7 +175,7 @@
         if (typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp)) {
             return timestamp;
         }
-        return new Date(timestamp).toLocaleString('zh-CN', {
+        return new Date(timestamp).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
             timeZone: 'Asia/Shanghai',
             year: 'numeric',
             month: '2-digit',
@@ -191,16 +200,16 @@
         };
         
         const statusTexts = {
-            'pending': '⏳ 等待发送',
-            'processing': '🔄 发送中',
-            'success': '✅ 发送成功',
-            'partial_success': '⚠️ 部分成功',
-            'failed': '❌ 发送失败', 
-            'no_room': '📍 无房间号'
+            'pending': t('⏳ 等待发送', '⏳ Pending'),
+            'processing': t('🔄 发送中', '🔄 Sending'),
+            'success': t('✅ 发送成功', '✅ Sent'),
+            'partial_success': t('⚠️ 部分成功', '⚠️ Partial'),
+            'failed': t('❌ 发送失败', '❌ Failed'),
+            'no_room': t('📍 无房间号', '📍 No Room')
         };
         
         const color = statusColors[status] || '#9e9e9e';
-        const text = statusTexts[status] || '❓ 未知状态';
+        const text = statusTexts[status] || t('❓ 未知状态', '❓ Unknown');
         
         return `<span style="color: ${color}; font-size: 0.8rem; margin-left: 8px;">${text}</span>`;
     }
@@ -225,15 +234,27 @@
             if (oldItem && oldItem.delivery_status !== newItem.delivery_status) {
                 
                 if (newItem.delivery_status === 'partial_success') {
-                    showMessage(`礼物${getGiftName(newItem.gift_type)}部分发送成功！部分礼物可能因余额不足等原因发送失败。`, 'info');
+                    showMessage(t(
+                        `礼物${getGiftName(newItem.gift_type)}部分发送成功！部分礼物可能因余额不足等原因发送失败。`,
+                        `Gift ${getGiftName(newItem.gift_type)} partially sent. Some items may have failed due to insufficient balance.`
+                    ), 'info');
                 } else if (newItem.delivery_status === 'success') {
-                    showMessage(`礼物${getGiftName(newItem.gift_type)}已全部发送成功！`, 'success');
+                    showMessage(t(
+                        `礼物${getGiftName(newItem.gift_type)}已全部发送成功！`,
+                        `Gift ${getGiftName(newItem.gift_type)} sent successfully.`
+                    ), 'success');
                 } else if (newItem.delivery_status === 'failed') {
                     const reason = (newItem.failure_reason || '').toLowerCase();
                     if (reason.includes('余额') || reason.includes('balance') || reason.includes('insufficient')) {
-                        showMessage(`B站账号余额不足，礼物${getGiftName(newItem.gift_type)}送出失败。`, 'error');
+                        showMessage(t(
+                            `B站账号余额不足，礼物${getGiftName(newItem.gift_type)}送出失败。`,
+                            `Bilibili account balance is insufficient. Gift ${getGiftName(newItem.gift_type)} failed to send.`
+                        ), 'error');
                     } else {
-                        showMessage(`礼物${getGiftName(newItem.gift_type)}发送失败，已退还电币。`, 'error');
+                        showMessage(t(
+                            `礼物${getGiftName(newItem.gift_type)}发送失败，已退还电币。`,
+                            `Gift ${getGiftName(newItem.gift_type)} failed to send. Coins refunded.`
+                        ), 'error');
                     }
                 }
             }

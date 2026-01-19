@@ -119,26 +119,28 @@
                         background: rgba(0, 0, 0, 0.3); border-radius: 8px; padding: 1rem;
                         min-height: 100px; color: #ccc;
                     ">
-                        <div style="text-align: center; color: #999;">正在加载绑定信息...</div>
+                        <div style="text-align: center; color: #999;">
+                            <%= lang === 'zh' ? '正在加载绑定信息...' : 'Loading bindings...' %>
+                        </div>
                     </div>
                     <button id="load-room-bindings" style="
                         margin-top: 0.8rem; padding: 0.6rem 1.2rem; 
                         background: linear-gradient(135deg, #2196f3, #1976d2);
                         color: white; border: none; border-radius: 6px; font-weight: bold;
                         cursor: pointer; transition: all 0.3s ease;
-                    ">🔄 刷新列表</button>
+                    ">🔄 <%= lang === 'zh' ? '刷新列表' : 'Refresh List' %></button>
                 </div>
             </div>
 
             <table class="users-table">
                 <thead>
                     <tr>
-                        <th>用户名</th>
-                        <th>电币余额</th>
-                        <th>操作</th>
-                        <th>密码管理</th>
-                        <th>账号管理</th>
-                        <th>登录状态</th>
+                        <th><%= lang === 'zh' ? '用户名' : 'Username' %></th>
+                        <th><%= lang === 'zh' ? '电币余额' : 'Coin Balance' %></th>
+                        <th><%= lang === 'zh' ? '操作' : 'Actions' %></th>
+                        <th><%= lang === 'zh' ? '密码管理' : 'Password' %></th>
+                        <th><%= lang === 'zh' ? '账号管理' : 'Account' %></th>
+                        <th><%= lang === 'zh' ? '登录状态' : 'Status' %></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -152,49 +154,49 @@
                             <td class="balance">
                                 <span class="balance-display">⚡<%= user.balance || 0 %> 电币</span>
                                 <button class="edit-balance-btn" data-action="edit-balance" data-username="<%= user.username %>" data-balance="<%= user.balance || 0 %>">
-                                    ✏️ 修改
+                                    ✏️ <%= lang === 'zh' ? '修改' : 'Edit' %>
                                 </button>
                             </td>
                             <td>
-                                <button class="btn-add" data-action="add-coin" data-username="<%= user.username %>">⚡ 加电币</button>
+                                <button class="btn-add" data-action="add-coin" data-username="<%= user.username %>">⚡ <%= lang === 'zh' ? '加电币' : 'Add Coins' %></button>
                                 <% if (user.authorized) { %>
-                                    <button class="btn-unauthorize" data-action="unauthorize" data-username="<%= user.username %>">❌ 取消授权</button>
+                                    <button class="btn-unauthorize" data-action="unauthorize" data-username="<%= user.username %>">❌ <%= lang === 'zh' ? '取消授权' : 'Revoke' %></button>
                                 <% } else { %>
-                                    <button class="btn-authorize" data-action="authorize" data-username="<%= user.username %>">✅ 授权</button>
+                                    <button class="btn-authorize" data-action="authorize" data-username="<%= user.username %>">✅ <%= lang === 'zh' ? '授权' : 'Authorize' %></button>
                                 <% } %>
                             </td>
                             <td>
                                 <% if (user.username === userLoggedIn) { %>
-                                    <button class="btn-self" id="change-self-password">🔑 修改密码</button>
+                                    <button class="btn-self" id="change-self-password">🔑 <%= lang === 'zh' ? '修改密码' : 'Change Password' %></button>
                                 <% } else { %>
-                                    <button class="btn-reset" data-action="reset-password" data-username="<%= user.username %>">🔑 重置密码</button>
+                                    <button class="btn-reset" data-action="reset-password" data-username="<%= user.username %>">🔑 <%= lang === 'zh' ? '重置密码' : 'Reset Password' %></button>
                                 <% } %>
                             </td>
                             <td>
                                 <% if (user.username === userLoggedIn) { %>
-                                    <span class="self-indicator">👤 自己</span>
+                                    <span class="self-indicator">👤 <%= lang === 'zh' ? '自己' : 'You' %></span>
                                 <% } else { %>
-                                    <button class="btn-delete" data-action="delete-account" data-username="<%= user.username %>">🗑️ 注销账号</button>
+                                    <button class="btn-delete" data-action="delete-account" data-username="<%= user.username %>">🗑️ <%= lang === 'zh' ? '注销账号' : 'Delete Account' %></button>
                                 <% } %>
                             </td>
                             <td>
                                 <% if (user.is_admin) { %>
-                                    <span class="status-admin">👑 管理员</span>
+                                    <span class="status-admin">👑 <%= lang === 'zh' ? '管理员' : 'Admin' %></span>
                                 <% } else if (user.is_locked) { %>
                                     <div class="status-locked">
-                                        🔒 已锁定<br>
-                                        <small>剩余 <%= user.lock_minutes %> 分钟</small><br>
-                                        <small>失败次数: <%= user.login_failures %></small><br>
-                                        <button class="btn-unlock" data-action="unlock" data-username="<%= user.username %>">解锁</button>
+                                        🔒 <%= lang === 'zh' ? '已锁定' : 'Locked' %><br>
+                                        <small><%= lang === 'zh' ? '剩余' : 'Remaining' %> <%= user.lock_minutes %> <%= lang === 'zh' ? '分钟' : 'min' %></small><br>
+                                        <small><%= lang === 'zh' ? '失败次数' : 'Failures' %>: <%= user.login_failures %></small><br>
+                                        <button class="btn-unlock" data-action="unlock" data-username="<%= user.username %>"><%= lang === 'zh' ? '解锁' : 'Unlock' %></button>
                                     </div>
                                 <% } else if (user.login_failures > 0) { %>
                                     <div class="status-warning">
-                                        ⚠️ 警告<br>
-                                        <small>失败次数: <%= user.login_failures %></small><br>
-                                        <button class="btn-clear" data-action="clear-failures" data-username="<%= user.username %>">清除</button>
+                                        ⚠️ <%= lang === 'zh' ? '警告' : 'Warning' %><br>
+                                        <small><%= lang === 'zh' ? '失败次数' : 'Failures' %>: <%= user.login_failures %></small><br>
+                                        <button class="btn-clear" data-action="clear-failures" data-username="<%= user.username %>"><%= lang === 'zh' ? '清除' : 'Clear' %></button>
                                     </div>
                                 <% } else { %>
-                                    <span class="status-normal">✅ 正常</span>
+                                    <span class="status-normal">✅ <%= lang === 'zh' ? '正常' : 'Normal' %></span>
                                 <% } %>
                             </td>
                         </tr>
@@ -203,12 +205,12 @@
             </table>
 
             <div class="recent-records">
-                <h2>🧾 最近游戏记录</h2>
+                <h2>🧾 <%= lang === 'zh' ? '最近游戏记录' : 'Recent Game Records' %></h2>
                 <div class="records-table-wrap">
                     <table class="records-table">
                         <thead>
                             <tr>
-                                <th>用户名</th>
+                                <th><%= lang === 'zh' ? '用户名' : 'Username' %></th>
                                 <th>Quiz</th>
                                 <th>Slot</th>
                                 <th>Scratch</th>

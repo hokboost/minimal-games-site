@@ -1,4 +1,7 @@
 (() => {
+    const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+    const t = (zh, en) => (lang === 'zh' ? zh : en);
+
     const { authorized, username } = document.body.dataset;
     if (authorized !== 'true') {
         return;
@@ -30,7 +33,7 @@
         notificationDiv.innerHTML = `
             <div class="notification-content">
                 <div class="notification-header">
-                    <strong>${notification.title || '系统通知'}</strong>
+                    <strong>${notification.title || t('系统通知', 'System Notification')}</strong>
                     <span class="notification-close">&times;</span>
                 </div>
                 <div class="notification-body">
@@ -93,7 +96,7 @@
                 </div>
                 <div class="alert-body">
                     ${event.message}
-                    ${event.details ? `<div class="alert-details">设备数量: ${event.details.kickedDevices}</div>` : ''}
+                    ${event.details ? `<div class="alert-details">${t('设备数量', 'Devices')}: ${event.details.kickedDevices}</div>` : ''}
                 </div>
             </div>
         `;

@@ -1,4 +1,7 @@
 (() => {
+    const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+    const t = (zh, en) => (lang === 'zh' ? zh : en);
+
     if (!window.io) {
         return;
     }
@@ -53,8 +56,8 @@
         overlay.className = 'security-alert-overlay';
         overlay.innerHTML = `
             <div class="security-alert-box">
-                ⚠️ 账号安全提醒
-                <small>您的账号已在其他设备登录</small>
+                ⚠️ ${t('账号安全提醒', 'Security Alert')}
+                <small>${t('您的账号已在其他设备登录', 'Your account has been logged in on another device')}</small>
             </div>
         `;
         document.body.appendChild(overlay);

@@ -1,4 +1,8 @@
 (() => {
+    const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+    const t = (zh, en) => (lang === 'zh' ? zh : en);
+    const translateServerMessage = window.translateServerMessage || ((message) => message);
+
     const { username } = document.body.dataset;
     let csrf = document.body.dataset.csrfToken || '';
     let currentQuestions = [];
@@ -34,7 +38,7 @@
                 csrf = match[1];
             }
         } catch (e) {
-            console.error('刷新CSRF失败:', e);
+            console.error(t('刷新CSRF失败:', 'Failed to refresh CSRF:'), e);
         }
     }
 
@@ -49,7 +53,10 @@
     async function startQuiz() {
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
         if (currentBalance < 10) {
-            alert('⚡ 电币不足！需要10电币才能开始答题。仅供娱乐，虚拟电币不可兑换真实货币。');
+            alert(t(
+                '⚡ 电币不足！需要10电币才能开始答题。仅供娱乐，虚拟电币不可兑换真实货币。',
+                '⚡ Insufficient coins! You need 10 coins to start. For entertainment only, virtual coins cannot be exchanged for real money.'
+            ));
             return;
         }
 
@@ -65,14 +72,14 @@
 
             const data = await response.json();
             if (!data.success) {
-                alert('开始游戏失败：' + data.message);
+                alert(t('开始游戏失败：', 'Failed to start game: ') + translateServerMessage(data.message));
                 return;
             }
 
             document.getElementById('current-balance').textContent = data.newBalance;
         } catch (error) {
             console.error('Start quiz error:', error);
-            alert('网络错误，请稍后重试');
+            alert(t('网络错误，请稍后重试', 'Network error, please try again'));
             return;
         }
 
@@ -96,12 +103,12 @@
         const question = document.getElementById('question');
         const options = document.getElementById('options');
 
-        timerEl.textContent = '服务器预热中...';
-        question.textContent = '正在准备题目，请稍候...';
+        timerEl.textContent = t('服务器预热中...', 'Warming up server...');
+        question.textContent = t('正在准备题目，请稍候...', 'Preparing questions, please wait...');
         options.innerHTML = '';
 
         setTimeout(() => {
-            timerEl.textContent = '游戏开始！';
+            timerEl.textContent = t('游戏开始！', 'Game start!');
         }, 1000);
     }
 
@@ -134,16 +141,19 @@
                 });
 
                 displayQuestion(data.question, data.token);
-                document.getElementById('progress').textContent = `题目 ${questionIndex + 1}/${totalQuestions}`;
+                document.getElementById('progress').textContent = t(
+                    `题目 ${questionIndex + 1}/${totalQuestions}`,
+                    `Question ${questionIndex + 1}/${totalQuestions}`
+                );
             } else {
-                alert('获取题目失败: ' + data.message);
+                alert(t('获取题目失败: ', 'Failed to get question: ') + translateServerMessage(data.message));
                 if (data.message && data.message.includes('先开始')) {
                     await startQuiz();
                 }
             }
         } catch (error) {
             console.error('Error:', error);
-            alert('网络错误，请稍后重试');
+            alert(t('网络错误，请稍后重试', 'Network error, please try again'));
         }
     }
 
@@ -182,11 +192,17 @@
     }
 
     function startTotalTimer() {
-        document.getElementById('timer').textContent = `剩余时间: ${timeLeft}s`;
+        document.getElementById('timer').textContent = t(
+            `剩余时间: ${timeLeft}s`,
+            `Time left: ${timeLeft}s`
+        );
 
         timer = setInterval(() => {
             timeLeft -= 1;
-            document.getElementById('timer').textContent = `剩余时间: ${timeLeft}s`;
+            document.getElementById('timer').textContent = t(
+                `剩余时间: ${timeLeft}s`,
+                `Time left: ${timeLeft}s`
+            );
 
             if (timeLeft <= 0) {
                 clearInterval(timer);
@@ -213,14 +229,14 @@
             if (data.success) {
                 showResult(data.score, data.total, data.reward, data.newBalance);
             } else {
-                alert('提交失败: ' + data.message);
-                if (data.message && data.message.includes('请先开始')) {
-                    await startQuiz();
-                }
+            alert(t('提交失败: ', 'Submit failed: ') + translateServerMessage(data.message));
+            if (data.message && data.message.includes('请先开始')) {
+                await startQuiz();
+            }
             }
         } catch (error) {
             console.error('Error:', error);
-            alert('提交失败，请稍后重试');
+            alert(t('提交失败，请稍后重试', 'Submit failed, please try again'));
         }
     }
 
@@ -240,17 +256,17 @@
         const timeTaken = Math.round((endTime - startTime) / 1000);
 
         let resultHTML = `
-            <h2>🎉 答题完成！</h2>
+            <h2>🎉 ${t('答题完成！', 'Quiz Complete!')}</h2>
             <div style="font-size: 2rem; margin: 1rem 0; color: #00c853;">
-                ${score}/${total} 分 (${percentage}%)
+                ${score}/${total} ${t('分', 'pts')} (${percentage}%)
             </div>
             <div style="font-size: 1.5rem; margin: 1rem 0; color: #ffeb3b;">
-                ⚡ 获得奖励: ${reward || 0} 电币
+                ⚡ ${t('获得奖励', 'Reward')}: ${reward || 0} ${t('电币', 'coins')}
             </div>
             <div style="font-size: 1.2rem; margin: 1rem 0; color: #ffeb3b;">
-                💰 当前余额: ${newBalance || 0} 电币
+                💰 ${t('当前余额', 'Balance')}: ${newBalance || 0} ${t('电币', 'coins')}
             </div>
-            <p>用时: ${timeTaken} 秒</p>
+            <p>${t('用时', 'Time')}: ${timeTaken} ${t('秒', 's')}</p>
         `;
 
         if (newBalance !== undefined) {
@@ -258,11 +274,11 @@
         }
 
         if (percentage >= 80) {
-            resultHTML += `<p style="color: #4caf50;">🌟 优秀！知识渊博！</p>`;
+            resultHTML += `<p style="color: #4caf50;">🌟 ${t('优秀！知识渊博！', 'Excellent! Great knowledge!')}</p>`;
         } else if (percentage >= 60) {
-            resultHTML += `<p style="color: #ff9800;">👍 不错！继续努力！</p>`;
+            resultHTML += `<p style="color: #ff9800;">👍 ${t('不错！继续努力！', 'Nice! Keep going!')}</p>`;
         } else {
-            resultHTML += `<p style="color: #f44336;">💪 加油！多学习多练习！</p>`;
+            resultHTML += `<p style="color: #f44336;">💪 ${t('加油！多学习多练习！', 'Keep it up! Practice more!')}</p>`;
         }
 
         resultHTML += `
@@ -275,7 +291,7 @@
                     font-size: 16px;
                     border-radius: 25px;
                     cursor: pointer;
-                ">🔄 再来一次 (消耗10电币)</button>
+                ">🔄 ${t('再来一次 (消耗10电币)', 'Play Again (Cost 10 coins)')}</button>
 
                 <button class="result-action-btn" data-action="home" style="
                     background: linear-gradient(45deg, #2196f3, #1976d2);
@@ -285,7 +301,7 @@
                     font-size: 16px;
                     border-radius: 25px;
                     cursor: pointer;
-                ">🏠 返回首页</button>
+                ">🏠 ${t('返回首页', 'Back to Home')}</button>
             </div>
         `;
 
@@ -302,8 +318,14 @@
 
         setTimeout(() => {
             document.getElementById('current-game-result').style.display = 'block';
-            document.getElementById('current-score').textContent = `本局得分：${score}/${total} 分 (${percentage}%)`;
-            document.getElementById('current-reward').textContent = `获得电币：${reward} 电币`;
+            document.getElementById('current-score').textContent = t(
+                `本局得分：${score}/${total} 分 (${percentage}%)`,
+                `Score: ${score}/${total} pts (${percentage}%)`
+            );
+            document.getElementById('current-reward').textContent = t(
+                `获得电币：${reward} 电币`,
+                `Coins Earned: ${reward} coins`
+            );
 
             document.getElementById('leaderboard').style.display = 'block';
             loadLeaderboard();
@@ -336,7 +358,7 @@
                         <td>${index + 1}</td>
                         <td>${record.username}</td>
                         <td>${record.score}</td>
-                        <td>${new Date(record.submitted_at).toLocaleString('zh-CN', {
+                        <td>${new Date(record.submitted_at).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
                             timeZone: 'Asia/Shanghai',
                             year: 'numeric',
                             month: '2-digit',
@@ -350,11 +372,11 @@
                     tbody.appendChild(row);
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="4">暂无排行榜数据</td></tr>';
+                tbody.innerHTML = `<tr><td colspan="4">${t('暂无排行榜数据', 'No leaderboard data')}</td></tr>`;
             }
         } catch (error) {
-            console.error('加载排行榜失败:', error);
-            document.getElementById('leaderboard-body').innerHTML = '<tr><td colspan="4">加载排行榜失败</td></tr>';
+            console.error(t('加载排行榜失败:', 'Failed to load leaderboard:'), error);
+            document.getElementById('leaderboard-body').innerHTML = `<tr><td colspan="4">${t('加载排行榜失败', 'Failed to load leaderboard')}</td></tr>`;
         }
     }
 })();

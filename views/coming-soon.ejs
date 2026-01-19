@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><%= lang === 'zh' ? '开发中' : 'Under Development' %></title>
+    <title><%= lang === 'zh' ? '请登录或注册' : 'Please Login or Register' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
         .container {
@@ -31,7 +31,7 @@
             margin-bottom: 2rem;
         }
 
-        .logout-btn {
+        .action-btn {
             display: inline-block;
             padding: 0.8rem 2rem;
             border-radius: 999px;
@@ -39,6 +39,10 @@
             color: #fff;
             text-decoration: none;
             font-weight: bold;
+            margin: 0 0.35rem;
+        }
+        .action-btn.secondary {
+            background: linear-gradient(45deg, #00c853, #00bfa5);
         }
     </style>
 </head>
@@ -47,16 +51,25 @@
 
     <div class="container">
         <div class="status-card">
-            <h1>🚧 <%= lang === 'zh' ? '网站开发中' : 'Website Under Development' %></h1>
+            <h1>🔐 <%= lang === 'zh' ? '请先登录或注册' : 'Please Login or Register' %></h1>
             <p>
                 <%= lang === 'zh'
-                    ? '当前服务仍在准备中，敬请期待。'
-                    : 'Current service is still under preparation. Stay tuned.'
+                    ? '登录后即可访问全部游戏功能与礼物系统。'
+                    : 'Log in to access all games and the gift system.'
                 %>
             </p>
-            <a class="logout-btn" href="/logout">
-                <%= lang === 'zh' ? '退出登录' : 'Logout' %>
-            </a>
+            <% if (typeof user !== 'undefined' && user) { %>
+                <a class="action-btn" href="/logout">
+                    <%= lang === 'zh' ? '退出登录' : 'Logout' %>
+                </a>
+            <% } else { %>
+                <a class="action-btn secondary" href="/login">
+                    <%= lang === 'zh' ? '登录' : 'Login' %>
+                </a>
+                <a class="action-btn" href="/register">
+                    <%= lang === 'zh' ? '注册' : 'Register' %>
+                </a>
+            <% } %>
         </div>
     </div>
 </body>

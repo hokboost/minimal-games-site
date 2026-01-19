@@ -1,15 +1,28 @@
+        const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+        const t = (zh, en) => (lang === 'zh' ? zh : en);
+        const translateServerMessage = window.translateServerMessage || ((message) => message);
         let csrfToken = document.body.dataset.csrfToken || '';
         let wishProgress = { total_wishes: 0, consecutive_fails: 0, total_spent: 0, total_rewards_value: 0 };
         const canWishTest = document.body.dataset.canTest === 'true';
 
+        const giftNames = {
+            deepsea_singer: { zh: '深海歌姬', en: 'Deep Sea Diva' },
+            sky_throne: { zh: '飞天转椅', en: 'Sky Throne' },
+            proposal: { zh: '原地求婚', en: 'On-the-Spot Proposal' },
+            wonderland: { zh: '梦游仙境', en: 'Wonderland Dream' },
+            white_bride: { zh: '纯白花嫁', en: 'Pure White Bride' },
+            crystal_ball: { zh: '水晶球', en: 'Crystal Ball' },
+            bobo: { zh: '啵啵', en: 'Bubbles' }
+        };
+
         const giftConfigs = {
-            deepsea_singer: { name: '深海歌姬', cost: 500, overallRateText: '1.6%', guaranteeCount: 148, rewardValue: 30000 },
-            sky_throne: { name: '飞天转椅', cost: 250, overallRateText: '2.49%', guaranteeCount: 83, rewardValue: 10000 },
-            proposal: { name: '原地求婚', cost: 208, overallRateText: '3.98%', guaranteeCount: 52, rewardValue: 5200 },
-            wonderland: { name: '梦游仙境', cost: 150, overallRateText: '4.97%', guaranteeCount: 41, rewardValue: 3000 },
-            white_bride: { name: '纯白花嫁', cost: 75, overallRateText: '5.7%', guaranteeCount: 34, rewardValue: 1314 },
-            crystal_ball: { name: '水晶球', cost: 66, overallRateText: '6.58%', guaranteeCount: 32, rewardValue: 1000 },
-            bobo: { name: '啵啵', cost: 50, overallRateText: '12.45%', guaranteeCount: 16, rewardValue: 399 }
+            deepsea_singer: { name: giftNames.deepsea_singer[lang], cost: 500, overallRateText: '1.6%', guaranteeCount: 148, rewardValue: 30000 },
+            sky_throne: { name: giftNames.sky_throne[lang], cost: 250, overallRateText: '2.49%', guaranteeCount: 83, rewardValue: 10000 },
+            proposal: { name: giftNames.proposal[lang], cost: 208, overallRateText: '3.98%', guaranteeCount: 52, rewardValue: 5200 },
+            wonderland: { name: giftNames.wonderland[lang], cost: 150, overallRateText: '4.97%', guaranteeCount: 41, rewardValue: 3000 },
+            white_bride: { name: giftNames.white_bride[lang], cost: 75, overallRateText: '5.7%', guaranteeCount: 34, rewardValue: 1314 },
+            crystal_ball: { name: giftNames.crystal_ball[lang], cost: 66, overallRateText: '6.58%', guaranteeCount: 32, rewardValue: 1000 },
+            bobo: { name: giftNames.bobo[lang], cost: 50, overallRateText: '12.45%', guaranteeCount: 16, rewardValue: 399 }
         };
 
         let currentGiftType = 'deepsea_singer';
@@ -20,15 +33,15 @@
             
             if (isSuccess) {
                 content.innerHTML = `
-                    <div>🎉 祈愿成功！</div>
-                    <div style="font-size: 2rem; margin: 15px 0;">🧜‍♀️ ${reward || '深海歌姬'}</div>
-                    <div style="font-size: 1.5rem; color: #f39c12;">价值: ${rewardValue || 30000} 电币</div>
-                    <div style="font-size: 1rem; color: #ccc; margin-top: 8px;">已放入背包，可在个人资料中送出</div>
-                    ${isGuaranteed ? '<div style="font-size: 1rem; color: #e74c3c; margin-top: 10px;">保底出货</div>' : ''}
+                    <div>🎉 ${t('祈愿成功！', 'Wish Success!')}</div>
+                    <div style="font-size: 2rem; margin: 15px 0;">🧜‍♀️ ${reward || giftNames.deepsea_singer[lang]}</div>
+                    <div style="font-size: 1.5rem; color: #f39c12;">${t('价值', 'Value')}: ${rewardValue || 30000} ${t('电币', 'coins')}</div>
+                    <div style="font-size: 1rem; color: #ccc; margin-top: 8px;">${t('已放入背包，可在个人资料中送出', 'Added to backpack, can be sent from your profile')}</div>
+                    ${isGuaranteed ? `<div style="font-size: 1rem; color: #e74c3c; margin-top: 10px;">${t('保底出货', 'Guaranteed drop')}</div>` : ''}
                 `;
                 content.className = 'modal-content modal-success';
             } else {
-                content.textContent = '😢 祈愿失败，再接再厉！';
+                content.textContent = t('😢 祈愿失败，再接再厉！', '😢 Wish failed, try again!');
                 content.className = 'modal-content modal-failure';
             }
             
@@ -62,7 +75,7 @@
                     csrfToken = match[1];
                 }
             } catch (e) {
-                console.error('刷新CSRF失败:', e);
+                console.error(t('刷新CSRF失败:', 'Failed to refresh CSRF:'), e);
             }
         }
 
@@ -73,7 +86,10 @@
             const currentBalance = parseInt(document.getElementById('current-balance').textContent);
 
             if (currentBalance < totalCost) {
-                alert(`⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${totalCost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`);
+                alert(t(
+                    `⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${totalCost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`,
+                    `⚡ Insufficient coins! Balance: ${currentBalance}, needed: ${totalCost}. For entertainment only, virtual coins cannot be exchanged for real money.`
+                ));
                 return;
             }
 
@@ -98,7 +114,7 @@
                 
                 if (response.status === 401 || response.status === 403) {
                     await refreshCsrf();
-                    alert('登录状态失效或令牌过期，请刷新后重试');
+                    alert(t('登录状态失效或令牌过期，请刷新后重试', 'Login expired or token invalid, please refresh and retry'));
                     return;
                 }
                 
@@ -117,7 +133,10 @@
                         const modal = document.getElementById('fullscreenModal');
                         const content = document.getElementById('modalContent');
                         const rate = ((result.successCount / count) * 100).toFixed(2);
-                        content.textContent = `${config.name} 十连完成！成功${result.successCount}次 (${rate}%)`;
+                        content.textContent = t(
+                            `${config.name} 十连完成！成功${result.successCount}次 (${rate}%)`,
+                            `${config.name} 10x complete! Success ${result.successCount} (${rate}%)`
+                        );
                         content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
                         modal.style.display = 'flex';
                         setTimeout(() => {
@@ -131,11 +150,11 @@
                     
                     updateDisplayNew();
                 } else {
-                    alert('祈愿失败：' + result.message);
+                    alert(t('祈愿失败：', 'Wish failed: ') + translateServerMessage(result.message));
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('网络错误，请重试');
+                alert(t('网络错误，请重试', 'Network error, please try again'));
             } finally {
                 buttons.forEach(btn => btn.disabled = false);
             }
@@ -155,7 +174,7 @@
                     updateDisplayNew();
                 }
             } catch (error) {
-                console.error('加载祈愿进度失败:', error);
+                console.error(t('加载祈愿进度失败:', 'Failed to load wish progress:'), error);
             }
         }
 
@@ -183,7 +202,7 @@
                 }
             } else {
                 bar.style.width = '0%';
-                text.textContent = '无保底';
+                text.textContent = t('无保底', 'No guarantee');
                 bar.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
             }
         }
@@ -198,7 +217,7 @@
                         updateGiftProgressDisplay(giftType, result.progress);
                     }
                 } catch (error) {
-                    console.error('加载祈愿进度失败:', error);
+                    console.error(t('加载祈愿进度失败:', 'Failed to load wish progress:'), error);
                 }
             }));
         }
@@ -254,26 +273,26 @@
         let socket;
         
         function initSocket() {
-            console.log('初始化Socket连接...');
+            console.log(t('初始化Socket连接...', 'Initializing socket connection...'));
             socket = io();
             
             socket.on('connect', () => {
-                console.log('Socket连接成功！');
+                console.log(t('Socket连接成功！', 'Socket connected'));
             });
             
             socket.on('disconnect', () => {
-                console.log('Socket连接断开');
+                console.log(t('Socket连接断开', 'Socket disconnected'));
             });
             
             
             socket.on('new_danmaku', (data) => {
-                console.log('收到飘屏消息:', data);
+                console.log(t('收到飘屏消息:', 'New danmaku:'), data);
                 danmakuManager.addMessage(data);
             });
             
             
             socket.on('recent_messages', (messages) => {
-                console.log('收到历史消息:', messages);
+                console.log(t('收到历史消息:', 'Recent messages:'), messages);
                 
                 messages.slice(0, 3).forEach((msg, index) => {
                     setTimeout(() => {
@@ -305,28 +324,33 @@
 
                 const result = await response.json();
                 if (!result.success) {
-                    alert(result.message || '测试失败');
+                    alert(translateServerMessage(result.message) || t('测试失败', 'Test failed'));
                     return;
                 }
 
                 const modal = document.getElementById('fullscreenModal');
                 const content = document.getElementById('modalContent');
-                content.textContent = `${result.giftName} 10万次测试：成功${result.successCount}次，命中率 ${result.rate}`;
+                const giftLabelZh = giftNames[giftType]?.zh || result.giftName;
+                const giftLabelEn = giftNames[giftType]?.en || result.giftName;
+                content.textContent = t(
+                    `${giftLabelZh} 10万次测试：成功${result.successCount}次，命中率 ${result.rate}`,
+                    `${giftLabelEn} 100k test: success ${result.successCount}, hit rate ${result.rate}`
+                );
                 content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
                 modal.style.display = 'flex';
                 setTimeout(() => {
                     modal.style.display = 'none';
                 }, 4000);
             } catch (error) {
-                console.error('测试失败:', error);
-                alert('网络错误，请重试');
+                console.error(t('测试失败:', 'Test failed:'), error);
+                alert(t('网络错误，请重试', 'Network error, please try again'));
             }
         }
 
         function openProbabilityModal() {
             const list = document.getElementById('probabilityList');
             const entries = Object.values(giftConfigs).map(item => {
-                return `• ${item.name}：综合概率 ${item.overallRateText}`;
+                return `• ${item.name} ${t('综合概率', 'Overall rate')}: ${item.overallRateText}`;
             }).join('<br>');
             list.innerHTML = entries;
             document.getElementById('probabilityModal').style.display = 'flex';

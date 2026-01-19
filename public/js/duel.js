@@ -1,4 +1,8 @@
 (() => {
+        const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+        const t = (zh, en) => (lang === 'zh' ? zh : en);
+        const translateServerMessage = window.translateServerMessage || ((message) => message);
+
     const { csrfToken } = document.body.dataset;
     const rewardList = document.getElementById('rewardList');
     const powerRange = document.getElementById('powerRange');
@@ -8,13 +12,22 @@
     const resultBox = document.getElementById('resultBox');
     const balanceEl = document.getElementById('current-balance');
 
+    const rewardNames = {
+        crown: { zh: '至尊奖', en: 'Crown Prize' },
+        dragon: { zh: '龙魂奖', en: 'Dragon Prize' },
+        phoenix: { zh: '凤羽奖', en: 'Phoenix Prize' },
+        jade: { zh: '玉阶奖', en: 'Jade Prize' },
+        bronze: { zh: '青铜奖', en: 'Bronze Prize' },
+        iron: { zh: '铁心奖', en: 'Iron Prize' }
+    };
+
     const rewards = [
-        { key: 'crown', name: '至尊奖', reward: 30000 },
-        { key: 'dragon', name: '龙魂奖', reward: 13140 },
-        { key: 'phoenix', name: '凤羽奖', reward: 5000 },
-        { key: 'jade', name: '玉阶奖', reward: 1000 },
-        { key: 'bronze', name: '青铜奖', reward: 500 },
-        { key: 'iron', name: '铁心奖', reward: 200 }
+        { key: 'crown', name: rewardNames.crown[lang], reward: 30000 },
+        { key: 'dragon', name: rewardNames.dragon[lang], reward: 13140 },
+        { key: 'phoenix', name: rewardNames.phoenix[lang], reward: 5000 },
+        { key: 'jade', name: rewardNames.jade[lang], reward: 1000 },
+        { key: 'bronze', name: rewardNames.bronze[lang], reward: 500 },
+        { key: 'iron', name: rewardNames.iron[lang], reward: 200 }
     ];
 
     let activeReward = rewards[0];
@@ -24,7 +37,7 @@
         rewards.forEach((reward) => {
             const item = document.createElement('div');
             item.className = 'reward-item' + (reward.key === activeReward.key ? ' active' : '');
-            item.innerHTML = `<span>${reward.name}</span><strong>${reward.reward} 电币</strong>`;
+            item.innerHTML = `<span>${reward.name}</span><strong>${reward.reward} ${t('电币', 'coins')}</strong>`;
             item.addEventListener('click', () => {
                 activeReward = reward;
                 renderRewards();
@@ -67,12 +80,12 @@
 
     duelBtn.addEventListener('click', async () => {
         duelBtn.disabled = true;
-        resultBox.textContent = '挑战中...';
+        resultBox.textContent = t('挑战中...', 'Challenging...');
         const power = Number(powerInput.value);
         const cost = calculateCost(power);
         const currentBalance = parseBalance(balanceEl.textContent);
         if (currentBalance !== null && currentBalance < cost) {
-            resultBox.textContent = '电币不足，无法挑战';
+            resultBox.textContent = t('电币不足，无法挑战', 'Insufficient coins');
             duelBtn.disabled = false;
             return;
         }
@@ -94,7 +107,7 @@
 
             const result = await response.json();
             if (!result.success) {
-                resultBox.textContent = result.message || '挑战失败';
+                resultBox.textContent = translateServerMessage(result.message) || t('挑战失败', 'Challenge failed');
                 if (Number.isFinite(result.balanceAfterBet)) {
                     balanceEl.textContent = result.balanceAfterBet;
                 } else if (Number.isFinite(currentBalance)) {
@@ -119,13 +132,16 @@
                 balanceEl.textContent = newBalance;
             }
             if (result.duelSuccess) {
-                resultBox.textContent = `🎉 挑战成功！获得 ${activeReward.reward} 电币`;
+                resultBox.textContent = t(
+                    `🎉 挑战成功！获得 ${activeReward.reward} 电币`,
+                    `🎉 Success! Earned ${activeReward.reward} coins`
+                );
             } else {
-                resultBox.textContent = '😢 挑战失败，再接再厉';
+                resultBox.textContent = t('😢 挑战失败，再接再厉', '😢 Challenge failed, try again');
             }
         } catch (error) {
             console.error('Duel error:', error);
-            resultBox.textContent = '网络错误，请稍后重试';
+            resultBox.textContent = t('网络错误，请稍后重试', 'Network error, please try again');
         } finally {
             duelBtn.disabled = false;
         }

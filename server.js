@@ -470,7 +470,7 @@ const requireAuthorized = (req, res, next) => {
         if (req.path.startsWith('/api/')) {
             return res.status(403).json({ success: false, message: '未授权访问' });
         }
-        return res.status(403).send("❌ 未授权访问");
+        return res.status(403).send(res.locals.lang === 'zh' ? '❌ 未授权访问' : '❌ Unauthorized access');
     }
     next();
 };
@@ -481,22 +481,22 @@ const requireAdmin = (req, res, next) => {
         if (req.path.startsWith('/api/')) {
             return res.status(403).json({ success: false, message: '无权访问管理员后台' });
         }
-        return res.status(403).send("🚫 无权访问管理员后台");
+        return res.status(403).send(res.locals.lang === 'zh' ? '🚫 无权访问管理员后台' : '🚫 Admin access denied');
     }
     next();
 };
 
-// 未授权用户只允许进入开发中页面或退出登录
+// 未授权用户只允许进入首页或退出登录
 app.use((req, res, next) => {
     if (req.session.user && !req.session.user.authorized) {
-        const allowedPaths = new Set(['/logout', '/coming-soon']);
-        if (allowedPaths.has(req.path)) {
+        const allowedPaths = new Set(['/', '/logout', '/login', '/register']);
+        if (allowedPaths.has(req.path) || req.path.startsWith('/set-language')) {
             return next();
         }
         if (req.path.startsWith('/api/')) {
             return res.status(403).json({ success: false, message: '未授权访问' });
         }
-        return res.redirect('/coming-soon');
+        return res.redirect('/?auth=pending');
     }
     next();
 });
@@ -657,6 +657,7 @@ setInterval(() => {
 // ====================
 // 认证路由
 // ====================
+const uiText = (res, zh, en) => (res.locals.lang === 'zh' ? zh : en);
 
 // 登录页面
 app.get('/login', (req, res) => {
@@ -664,7 +665,7 @@ app.get('/login', (req, res) => {
         return res.redirect('/');
     }
     res.render('login', {
-        title: '登录 - Minimal Games',
+        title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
         csrfToken: generateCSRFToken(req),
         error: req.query.error
     });
@@ -676,20 +677,16 @@ app.get('/register', (req, res) => {
         return res.redirect('/');
     }
     res.render('register', {
-        title: '注册 - Minimal Games',
+        title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
         csrfToken: generateCSRFToken(req),
         error: req.query.error
     });
 });
 
-app.get('/coming-soon', requireLogin, (req, res) => {
-    res.render('coming-soon');
-});
-
 // 个人资料页面
 app.get('/profile', requireLogin, (req, res, next) => {
     if (!req.session.user?.authorized) {
-        return res.redirect('/coming-soon');
+        return res.redirect('/?auth=pending');
     }
     next();
 }, async (req, res) => {
@@ -706,7 +703,7 @@ app.get('/profile', requireLogin, (req, res, next) => {
         );
         
         if (userResult.rows.length === 0) {
-            return res.status(404).send('用户不存在');
+            return res.status(404).send(uiText(res, '用户不存在', 'User not found'));
         }
         
         // 获取游戏记录统计
@@ -751,14 +748,14 @@ app.get('/profile', requireLogin, (req, res, next) => {
         const user = userResult.rows[0];
         
         res.render('profile', {
-            title: '个人资料 - Minimal Games',
+            title: uiText(res, '个人资料 - Minimal Games', 'Profile - Minimal Games'),
             user: user,
             gameStats: stats,
             csrfToken: req.session.csrfToken
         });
     } catch (error) {
         console.error('获取用户数据失败:', error);
-        res.status(500).send('服务器错误');
+        res.status(500).send(uiText(res, '服务器错误', 'Server error'));
     }
 });
 
@@ -768,14 +765,14 @@ app.post('/register', registerLimiter, async (req, res) => {
     
     // CSRF 验证
     if (_csrf !== req.session.csrfToken) {
-        return res.status(403).send('⚠️ CSRF token 校验失败');
+        return res.status(403).send(uiText(res, '⚠️ CSRF token 校验失败', '⚠️ CSRF token validation failed'));
     }
 
     // 输入验证
     if (!username || !password) {
         return res.render('register', {
-            title: '注册 - Minimal Games',
-            error: '用户名或密码不能为空！',
+            title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
+            error: uiText(res, '用户名或密码不能为空！', 'Username and password cannot be empty!'),
             csrfToken: generateCSRFToken(req)
         });
     }
@@ -783,8 +780,8 @@ app.post('/register', registerLimiter, async (req, res) => {
     // 密码强度验证
     if (password.length < 6) {
         return res.render('register', {
-            title: '注册 - Minimal Games',
-            error: '密码长度至少需要6个字符',
+            title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
+            error: uiText(res, '密码长度至少需要6个字符', 'Password must be at least 6 characters'),
             csrfToken: generateCSRFToken(req)
         });
     }
@@ -801,15 +798,15 @@ app.post('/register', registerLimiter, async (req, res) => {
     } catch (err) {
         if (err.code === '23505') {
             res.render('register', {
-                title: '注册 - Minimal Games',
-                error: '❌ 用户名已存在！',
+                title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
+                error: uiText(res, '❌ 用户名已存在！', '❌ Username already exists!'),
                 csrfToken: generateCSRFToken(req)
             });
         } else {
             console.error(err);
             res.render('register', {
-                title: '注册 - Minimal Games',
-                error: '❌ 注册失败，请稍后重试。',
+                title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
+                error: uiText(res, '❌ 注册失败，请稍后重试。', '❌ Registration failed, please try again.'),
                 csrfToken: generateCSRFToken(req)
             });
         }
@@ -834,13 +831,13 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
     const userAgent = req.userAgent;
     
     if (_csrf !== req.session.csrfToken) {
-        return res.status(403).send('⚠️ CSRF token 校验失败');
+        return res.status(403).send(uiText(res, '⚠️ CSRF token 校验失败', '⚠️ CSRF token validation failed'));
     }
 
     if (!username || !password) {
         return res.status(400).render('login', {
-            title: '登录 - Minimal Games',
-            error: '用户名或密码不能为空！',
+            title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+            error: uiText(res, '用户名或密码不能为空！', 'Username and password cannot be empty!'),
             csrfToken: generateCSRFToken(req)
         });
     }
@@ -860,8 +857,8 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
             await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_blocked');
             
             return res.status(403).render('login', {
-                title: '登录 - Minimal Games',
-                error: '当前网络环境存在安全风险，请稍后重试',
+                title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                error: uiText(res, '当前网络环境存在安全风险，请稍后重试', 'Current network environment is risky. Please try again later.'),
                 csrfToken: generateCSRFToken(req)
             });
         }
@@ -875,8 +872,8 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
         if (result.rows.length === 0) {
             await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
             return res.status(401).render('login', {
-                title: '登录 - Minimal Games',
-                error: '用户名或密码错误！',
+                title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                error: uiText(res, '用户名或密码错误！', 'Invalid username or password!'),
                 csrfToken: generateCSRFToken(req)
             });
         }
@@ -889,8 +886,8 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
             const lockMinutes = Math.ceil((new Date(user.locked_until) - now) / 60000);
             await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_locked');
             return res.status(423).render('login', {
-                title: '登录 - Minimal Games',
-                error: `账户已被锁定，请 ${lockMinutes} 分钟后再试！`,
+                title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                error: uiText(res, `账户已被锁定，请 ${lockMinutes} 分钟后再试！`, `Account locked. Try again in ${lockMinutes} minutes.`),
                 csrfToken: generateCSRFToken(req)
             });
         }
@@ -917,19 +914,19 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
                 await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
                 
                 const errorMsg = lockUntil ? 
-                    `密码错误！账户已被锁定 ${failures-2} 分钟` : 
-                    `密码错误！连续错误3次将被锁定 (当前${failures}次)`;
+                    uiText(res, `密码错误！账户已被锁定 ${failures-2} 分钟`, `Wrong password. Account locked for ${failures - 2} minutes.`) : 
+                    uiText(res, `密码错误！连续错误3次将被锁定 (当前${failures}次)`, `Wrong password. 3 consecutive failures will lock the account (current ${failures}).`);
                     
                 return res.status(401).render('login', {
-                    title: '登录 - Minimal Games',
+                    title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
                     error: errorMsg,
                     csrfToken: generateCSRFToken(req)
                 });
             } else {
                 await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
                 return res.status(401).render('login', {
-                    title: '登录 - Minimal Games',
-                    error: '用户名或密码错误！',
+                    title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                    error: uiText(res, '用户名或密码错误！', 'Invalid username or password!'),
                     csrfToken: generateCSRFToken(req)
                 });
             }
@@ -1015,8 +1012,8 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
         console.error('❌ 登录错误:', err);
         await IPManager.recordIPActivity(clientIP, username || 'unknown', userAgent, 'login_error');
         res.status(500).render('login', {
-            title: '登录 - Minimal Games',
-            error: '登录失败，请稍后再试。',
+            title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+            error: uiText(res, '登录失败，请稍后再试。', 'Login failed, please try again.'),
             csrfToken: generateCSRFToken(req)
         });
     }
@@ -1109,7 +1106,7 @@ app.get('/', async (req, res) => {
     }
     
     res.render('index', {
-        title: 'Minimal Games 游戏中心',
+        title: uiText(res, 'Minimal Games 游戏中心', 'Minimal Games Game Center'),
         user: req.session.user || null,
         balance: balance,
         req: req
