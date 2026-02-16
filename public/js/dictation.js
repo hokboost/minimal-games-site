@@ -228,6 +228,12 @@
         }
     }
 
+    function setInputsDisabled(disabled) {
+        if (gridEl) {
+            gridEl.classList.toggle('dictation-grid-disabled', disabled);
+        }
+    }
+
     function clearCells() {
         cells.forEach((cell) => {
             const ctx = cell.getContext('2d');
@@ -413,6 +419,7 @@
 
             submitted = true;
             setStatus(t('提交成功，等待人工审核', 'Submitted successfully, waiting for review.'), 'success');
+            setInputsDisabled(true);
             updateControls();
         } catch (error) {
             console.error('Dictation submit error:', error);
