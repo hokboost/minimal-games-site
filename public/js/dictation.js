@@ -14,6 +14,13 @@
     const confirmStartBtn = document.getElementById('confirm-start-btn');
     const cancelStartBtn = document.getElementById('cancel-start-btn');
     const clearGridBtn = document.getElementById('clear-grid-btn');
+    const eraserBtn = document.getElementById('eraser-btn');
+    const zoomModal = document.getElementById('dictation-zoom');
+    const zoomCanvas = document.getElementById('dictation-zoom-canvas');
+    const zoomCloseBtn = document.getElementById('zoom-close-btn');
+    const zoomSaveBtn = document.getElementById('zoom-save-btn');
+    const zoomClearBtn = document.getElementById('zoom-clear-btn');
+    const zoomEraserBtn = document.getElementById('zoom-eraser-btn');
 
     let csrf = document.body.dataset.csrfToken || '';
     let words = [];
@@ -24,6 +31,9 @@
     let voice = null;
     let startInProgress = false;
     const drawState = new Map();
+    let isEraser = false;
+    let activeCellIndex = null;
+    let zoomState = null;
 
     const dataUrl = '/api/dictation/words';
 
@@ -45,6 +55,21 @@
     if (clearGridBtn) {
         clearGridBtn.addEventListener('click', clearCells);
     }
+    if (eraserBtn) {
+        eraserBtn.addEventListener('click', () => toggleEraser());
+    }
+    if (zoomCloseBtn) {
+        zoomCloseBtn.addEventListener('click', () => closeZoom(false));
+    }
+    if (zoomSaveBtn) {
+        zoomSaveBtn.addEventListener('click', () => closeZoom(true));
+    }
+    if (zoomClearBtn) {
+        zoomClearBtn.addEventListener('click', () => clearZoomCanvas());
+    }
+    if (zoomEraserBtn) {
+        zoomEraserBtn.addEventListener('click', () => toggleEraser(true));
+    }
     cells.forEach((cell, index) => {
         setupCanvas(cell, index);
     });
@@ -61,6 +86,8 @@
         updateVoice();
         window.speechSynthesis.addEventListener('voiceschanged', updateVoice);
     }
+
+    let reviewTimer = null;
 
     function setStatus(message, type = 'info') {
         if (!statusEl) {
@@ -226,6 +253,9 @@
         if (clearGridBtn) {
             clearGridBtn.disabled = !active || submitted;
         }
+        if (eraserBtn) {
+            eraserBtn.disabled = !active || submitted;
+        }
     }
 
     function setInputsDisabled(disabled) {
@@ -241,7 +271,7 @@
             ctx.clearRect(0, 0, width, height);
             ctx.fillStyle = 'rgba(0, 0, 0, 0)';
             ctx.fillRect(0, 0, width, height);
-            drawState.set(cell, { drawing: false, hasInk: false, lastX: 0, lastY: 0 });
+            drawState.set(cell, { drawing: false, hasInk: false, lastX: 0, lastY: 0, moved: false, justDrew: false, ratio });
         });
     }
 
@@ -256,7 +286,7 @@
             ctx.lineJoin = 'round';
             ctx.lineWidth = 4 * ratio;
             ctx.strokeStyle = '#ffffff';
-            drawState.set(canvas, { drawing: false, hasInk: false, lastX: 0, lastY: 0 });
+            drawState.set(canvas, { drawing: false, hasInk: false, lastX: 0, lastY: 0, moved: false, justDrew: false, ratio });
         };
         resize();
         window.addEventListener('resize', resize);
@@ -265,6 +295,7 @@
             event.preventDefault();
             const state = drawState.get(canvas);
             if (!state) return;
+            state.moved = false;
             const { x, y } = getCanvasPoint(canvas, event);
             state.drawing = true;
             state.lastX = x;
@@ -275,6 +306,7 @@
             if (!state || !state.drawing) return;
             event.preventDefault();
             const ctx = canvas.getContext('2d');
+            applyBrush(ctx, state.ratio);
             const { x, y } = getCanvasPoint(canvas, event);
             ctx.beginPath();
             ctx.moveTo(state.lastX, state.lastY);
@@ -283,18 +315,157 @@
             state.lastX = x;
             state.lastY = y;
             state.hasInk = true;
+            state.moved = true;
         };
         const pointerUp = (event) => {
             const state = drawState.get(canvas);
             if (!state) return;
             event.preventDefault();
             state.drawing = false;
+            state.justDrew = state.moved;
         };
 
         canvas.addEventListener('pointerdown', pointerDown);
         canvas.addEventListener('pointermove', pointerMove);
         canvas.addEventListener('pointerup', pointerUp);
         canvas.addEventListener('pointerleave', pointerUp);
+        canvas.addEventListener('click', () => {
+            const state = drawState.get(canvas);
+            if (submitted || !currentWord) {
+                return;
+            }
+            if (state && state.justDrew) {
+                state.justDrew = false;
+                return;
+            }
+            openZoom(index);
+        });
+    }
+
+    function setupZoomCanvas() {
+        if (!zoomCanvas) {
+            return;
+        }
+        const resize = () => {
+            const ratio = window.devicePixelRatio || 1;
+            const rect = zoomCanvas.getBoundingClientRect();
+            zoomCanvas.width = Math.max(1, Math.floor(rect.width * ratio));
+            zoomCanvas.height = Math.max(1, Math.floor(rect.height * ratio));
+            const ctx = zoomCanvas.getContext('2d');
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 6 * ratio;
+            ctx.strokeStyle = '#ffffff';
+            zoomState = { drawing: false, hasInk: false, lastX: 0, lastY: 0, ratio };
+        };
+        resize();
+        window.addEventListener('resize', resize);
+
+        const pointerDown = (event) => {
+            event.preventDefault();
+            if (!zoomState) return;
+            const { x, y } = getCanvasPoint(zoomCanvas, event);
+            zoomState.drawing = true;
+            zoomState.lastX = x;
+            zoomState.lastY = y;
+        };
+        const pointerMove = (event) => {
+            if (!zoomState || !zoomState.drawing) return;
+            event.preventDefault();
+            const ctx = zoomCanvas.getContext('2d');
+            applyBrush(ctx, zoomState.ratio, true);
+            const { x, y } = getCanvasPoint(zoomCanvas, event);
+            ctx.beginPath();
+            ctx.moveTo(zoomState.lastX, zoomState.lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            zoomState.lastX = x;
+            zoomState.lastY = y;
+            zoomState.hasInk = true;
+        };
+        const pointerUp = (event) => {
+            if (!zoomState) return;
+            event.preventDefault();
+            zoomState.drawing = false;
+        };
+
+        zoomCanvas.addEventListener('pointerdown', pointerDown);
+        zoomCanvas.addEventListener('pointermove', pointerMove);
+        zoomCanvas.addEventListener('pointerup', pointerUp);
+        zoomCanvas.addEventListener('pointerleave', pointerUp);
+    }
+
+    function openZoom(index) {
+        if (!zoomModal || !zoomCanvas) {
+            return;
+        }
+        if (!zoomState) {
+            setupZoomCanvas();
+        }
+        activeCellIndex = index;
+        const cell = cells[index];
+        const ctx = zoomCanvas.getContext('2d');
+        ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+        if (cell) {
+            ctx.drawImage(cell, 0, 0, zoomCanvas.width, zoomCanvas.height);
+        }
+        zoomModal.hidden = false;
+        zoomModal.style.display = 'flex';
+    }
+
+    function closeZoom(save) {
+        if (!zoomModal || !zoomCanvas) {
+            return;
+        }
+        if (save && activeCellIndex !== null) {
+            const cell = cells[activeCellIndex];
+            if (cell) {
+                const ctx = cell.getContext('2d');
+                ctx.clearRect(0, 0, cell.width, cell.height);
+                ctx.drawImage(zoomCanvas, 0, 0, cell.width, cell.height);
+                const state = drawState.get(cell);
+                if (state) {
+                    state.hasInk = true;
+                }
+            }
+        }
+        zoomModal.hidden = true;
+        zoomModal.style.display = 'none';
+        activeCellIndex = null;
+    }
+
+    function clearZoomCanvas() {
+        if (!zoomCanvas) {
+            return;
+        }
+        const ctx = zoomCanvas.getContext('2d');
+        ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+    }
+
+    function toggleEraser(fromZoom = false) {
+        isEraser = !isEraser;
+        if (eraserBtn) {
+            eraserBtn.classList.toggle('active', isEraser);
+            eraserBtn.textContent = isEraser ? t('画笔', 'Pen') : t('橡皮擦', 'Eraser');
+        }
+        if (zoomEraserBtn || fromZoom) {
+            if (zoomEraserBtn) {
+                zoomEraserBtn.classList.toggle('active', isEraser);
+                zoomEraserBtn.textContent = isEraser ? t('画笔', 'Pen') : t('橡皮擦', 'Eraser');
+            }
+        }
+    }
+
+    function applyBrush(ctx, ratio, isZoom = false) {
+        if (isEraser) {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
+            ctx.lineWidth = (isZoom ? 14 : 12) * ratio;
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = (isZoom ? 6 : 4) * ratio;
+        }
     }
 
     function getCanvasPoint(canvas, event) {
@@ -369,7 +540,7 @@
         }
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'zh-CN';
-        utterance.rate = 0.9;
+        utterance.rate = 0.85;
         utterance.pitch = 1;
         if (voice) {
             utterance.voice = voice;
@@ -421,10 +592,85 @@
             setStatus(t('提交成功，等待人工审核', 'Submitted successfully, waiting for review.'), 'success');
             setInputsDisabled(true);
             updateControls();
+            startReviewPolling();
         } catch (error) {
             console.error('Dictation submit error:', error);
             submitBtn.disabled = false;
             setStatus(t('网络错误，请稍后重试', 'Network error, please try again.'), 'error');
         }
+    }
+
+    function startReviewPolling() {
+        stopReviewPolling();
+        reviewTimer = setInterval(checkReviewStatus, 4000);
+    }
+
+    function stopReviewPolling() {
+        if (reviewTimer) {
+            clearInterval(reviewTimer);
+            reviewTimer = null;
+        }
+    }
+
+    async function checkReviewStatus() {
+        try {
+            const resp = await safeFetch('/api/dictation/latest-status', { cache: 'no-store' });
+            const data = await resp.json();
+            if (!data.success || !data.status) {
+                return;
+            }
+            if (data.status === 'correct') {
+                stopReviewPolling();
+                setStatus(t('审核通过，进入下一关', 'Approved. Moving to next level.'), 'success');
+                await autoAdvance();
+            } else if (data.status === 'wrong') {
+                stopReviewPolling();
+                currentWord = null;
+                submitted = false;
+                setInputsDisabled(true);
+                updateControls();
+                setStatus(t('审核未通过，已回到第一关，请重新开始', 'Incorrect. Back to level 1, please start again.'), 'error');
+            } else if (data.status === 'rewrite') {
+                stopReviewPolling();
+                setStatus(t('请重新书写本关', 'Please rewrite this level.'), 'error');
+                await retryLevel();
+            }
+        } catch (error) {
+            console.error('Review status error:', error);
+        }
+    }
+
+    async function autoAdvance() {
+        const resp = await safeFetch('/api/dictation/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrf
+            },
+            body: JSON.stringify({})
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
+            return;
+        }
+        await startRound(Number(data.level) || 1);
+    }
+
+    async function retryLevel() {
+        const resp = await safeFetch('/api/dictation/retry', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrf
+            },
+            body: JSON.stringify({})
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
+            return;
+        }
+        await startRound(Number(data.level) || 1);
     }
 })();

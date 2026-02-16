@@ -690,6 +690,65 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
+    app.get('/api/dictation/latest-status', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+        try {
+            const username = req.session.user?.username || '';
+            const result = await pool.query(
+                `SELECT status, level
+                 FROM dictation_submissions
+                 WHERE username = $1
+                 ORDER BY created_at DESC
+                 LIMIT 1`,
+                [username]
+            );
+            if (!result.rows.length) {
+                return res.json({ success: true, status: null });
+            }
+            const row = result.rows[0];
+            res.json({
+                success: true,
+                status: row.status || null,
+                level: Number(row.level || 1)
+            });
+        } catch (error) {
+            console.error('Dictation latest status error:', error);
+            res.status(500).json({ success: false, message: '获取状态失败' });
+        }
+    });
+
+    app.post('/api/dictation/retry',
+        rejectWhenOverloaded,
+        requireLogin,
+        requireAuthorized,
+        basicRateLimit,
+        userActionRateLimit,
+        csrfProtection,
+        async (req, res) => {
+        try {
+            const username = req.session.user?.username || '';
+            const latest = await pool.query(
+                `SELECT status
+                 FROM dictation_submissions
+                 WHERE username = $1
+                 ORDER BY created_at DESC
+                 LIMIT 1`,
+                [username]
+            );
+            if (!latest.rows.length || latest.rows[0].status !== 'rewrite') {
+                return res.status(403).json({ success: false, message: '当前不支持重写' });
+            }
+            const progressResult = await pool.query(
+                'SELECT level FROM dictation_progress WHERE username = $1',
+                [username]
+            );
+            const level = progressResult.rows.length ? Number(progressResult.rows[0].level || 1) : 1;
+            res.json({ success: true, level });
+        } catch (error) {
+            console.error('Dictation retry error:', error);
+            res.status(500).json({ success: false, message: '开始失败' });
+        }
+    });
+
     app.get('/api/dictation/words', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
             const fs = require('fs');

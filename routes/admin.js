@@ -558,6 +558,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '参数错误' });
             }
 
+            let notifyUsername = '';
+            let notifyLevel = 1;
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
@@ -572,13 +574,15 @@ module.exports = function registerAdminRoutes(app, deps) {
                 const submission = submissionResult.rows[0];
                 const username = submission.username;
                 const level = Number(submission.level || 1);
+                notifyUsername = username;
+                notifyLevel = level;
 
                 await client.query(
                     'UPDATE dictation_submissions SET status = $1 WHERE id = $2',
                     [status, id]
                 );
 
-                if (username && status !== 'rewrite') {
+                if (username) {
                     const progressResult = await client.query(
                         'SELECT level FROM dictation_progress WHERE username = $1 FOR UPDATE',
                         [username]
