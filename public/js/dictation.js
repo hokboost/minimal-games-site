@@ -913,7 +913,7 @@
                         t(`审核通过，进入下一关。${answerText}`, `Approved. Moving to next level. ${answerText}`),
                         'success'
                     );
-                    await autoAdvance();
+                    await advanceFromProgress();
                 }
             } else if (data.status === 'wrong') {
                 stopReviewPolling();
@@ -936,7 +936,23 @@
         }
     }
 
-    async function autoAdvance() {
+    async function advanceFromProgress() {
+        try {
+            const resp = await safeFetch('/api/dictation/progress', { cache: 'no-store' });
+            const data = await resp.json();
+            if (!data.success) {
+                throw new Error(data.message || 'progress fetch failed');
+            }
+            currentSetId = Number(data.setId) || currentSetId;
+            const nextLevel = Math.min(Math.max(Number(data.level) || 1, 1), 3);
+            await startRound(nextLevel);
+        } catch (error) {
+            console.error('Dictation progress error:', error);
+            await autoAdvanceFallback();
+        }
+    }
+
+    async function autoAdvanceFallback() {
         const resp = await safeFetch('/api/dictation/start', {
             method: 'POST',
             headers: {
@@ -945,14 +961,14 @@
             },
             body: JSON.stringify({})
         });
-            const data = await resp.json();
-            if (!data.success) {
-                setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
-                return;
-            }
-            currentSetId = Number(data.setId) || currentSetId;
-            await startRound(Number(data.level) || 1);
+        const data = await resp.json();
+        if (!data.success) {
+            setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
+            return;
         }
+        currentSetId = Number(data.setId) || currentSetId;
+        await startRound(Number(data.level) || 1);
+    }
 
     async function retryLevel() {
         const resp = await safeFetch('/api/dictation/retry', {

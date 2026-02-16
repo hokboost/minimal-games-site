@@ -772,6 +772,28 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
+    app.get('/api/dictation/progress', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+        try {
+            const username = req.session.user?.username || '';
+            const result = await pool.query(
+                'SELECT level, set_id FROM dictation_progress WHERE username = $1',
+                [username]
+            );
+            if (!result.rows.length) {
+                return res.json({ success: true, level: 1, setId: null });
+            }
+            const row = result.rows[0];
+            res.json({
+                success: true,
+                level: Number(row.level || 1),
+                setId: row.set_id !== null ? Number(row.set_id) : null
+            });
+        } catch (error) {
+            console.error('Dictation progress error:', error);
+            res.status(500).json({ success: false, message: '获取进度失败' });
+        }
+    });
+
     app.post('/api/dictation/retry',
         rejectWhenOverloaded,
         requireLogin,
