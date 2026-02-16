@@ -274,7 +274,7 @@
                                         <td>
                                             <% if (row.image_path) { %>
                                                 <a href="<%= row.image_path %>" target="_blank" rel="noopener">
-                                                    <%= lang === 'zh' ? '查看' : 'View' %>
+                                                    <img src="<%= row.image_path %>" alt="dictation" style="width: 64px; height: 64px; object-fit: contain; background: #0b151b; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15);">
                                                 </a>
                                             <% } else { %>
                                                 -

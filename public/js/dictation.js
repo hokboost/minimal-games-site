@@ -541,14 +541,24 @@
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#0b151b';
         ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.lineWidth = Math.max(1, Math.floor(2 * ratio));
 
         cells.forEach((cell, idx) => {
             const row = Math.floor(idx / cols);
             const col = idx % cols;
             const x = col * (cellWidth + gap);
             const y = row * (cellHeight + gap);
+            const midX = x + cellWidth / 2;
+            const midY = y + cellHeight / 2;
+            ctx.beginPath();
+            ctx.moveTo(midX, y + 8 * ratio);
+            ctx.lineTo(midX, y + cellHeight - 8 * ratio);
+            ctx.moveTo(x + 8 * ratio, midY);
+            ctx.lineTo(x + cellWidth - 8 * ratio, midY);
+            ctx.stroke();
             ctx.drawImage(cell, x, y);
         });
         return canvas.toDataURL('image/png');
