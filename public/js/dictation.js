@@ -70,6 +70,10 @@
     if (zoomEraserBtn) {
         zoomEraserBtn.addEventListener('click', () => toggleEraser(true));
     }
+    if (zoomModal) {
+        zoomModal.hidden = true;
+        zoomModal.style.display = 'none';
+    }
     cells.forEach((cell, index) => {
         setupCanvas(cell, index);
     });
@@ -271,6 +275,8 @@
             ctx.clearRect(0, 0, width, height);
             ctx.fillStyle = 'rgba(0, 0, 0, 0)';
             ctx.fillRect(0, 0, width, height);
+            const prev = drawState.get(cell);
+            const ratio = prev?.ratio || window.devicePixelRatio || 1;
             drawState.set(cell, { drawing: false, hasInk: false, lastX: 0, lastY: 0, moved: false, justDrew: false, ratio });
         });
     }
@@ -323,6 +329,9 @@
             event.preventDefault();
             state.drawing = false;
             state.justDrew = state.moved;
+            if (!state.moved && !submitted && currentWord) {
+                openZoom(index);
+            }
         };
 
         canvas.addEventListener('pointerdown', pointerDown);
@@ -330,15 +339,7 @@
         canvas.addEventListener('pointerup', pointerUp);
         canvas.addEventListener('pointerleave', pointerUp);
         canvas.addEventListener('click', () => {
-            const state = drawState.get(canvas);
-            if (submitted || !currentWord) {
-                return;
-            }
-            if (state && state.justDrew) {
-                state.justDrew = false;
-                return;
-            }
-            openZoom(index);
+            // no-op: zoom is triggered by tap (pointerup) to avoid auto-open on draw.
         });
     }
 
