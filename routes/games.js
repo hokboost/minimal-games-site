@@ -631,31 +631,59 @@ module.exports = function registerGameRoutes(app, deps) {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
-                const attemptsResult = await client.query(
-                    'SELECT attempts FROM dictation_allowances WHERE username = $1 FOR UPDATE',
+                let level = 1;
+                const progressResult = await client.query(
+                    'SELECT level FROM dictation_progress WHERE username = $1 FOR UPDATE',
                     [username]
                 );
-                const currentAttempts = attemptsResult.rows.length
-                    ? Number(attemptsResult.rows[0].attempts || 0)
-                    : 0;
-                if (!attemptsResult.rows.length || currentAttempts <= 0) {
-                    await client.query('ROLLBACK');
-                    return res.status(403).json({ success: false, message: '听写次数不足' });
+                if (progressResult.rows.length) {
+                    level = Number(progressResult.rows[0].level || 1);
+                } else {
+                    await client.query(
+                        'INSERT INTO dictation_progress (username, level) VALUES ($1, 1)',
+                        [username]
+                    );
+                    level = 1;
+                }
+
+                if (!Number.isFinite(level) || level < 1) {
+                    level = 1;
+                } else if (level > 5) {
+                    level = 5;
                 }
 
                 await client.query(
-                    'UPDATE dictation_allowances SET attempts = GREATEST(attempts - 1, 0), updated_at = NOW() WHERE username = $1',
-                    [username]
+                    'UPDATE dictation_progress SET level = $1, updated_at = NOW() WHERE username = $2',
+                    [level, username]
                 );
+
+                if (level === 1) {
+                    const attemptsResult = await client.query(
+                        'SELECT attempts FROM dictation_allowances WHERE username = $1 FOR UPDATE',
+                        [username]
+                    );
+                    const currentAttempts = attemptsResult.rows.length
+                        ? Number(attemptsResult.rows[0].attempts || 0)
+                        : 0;
+                    if (!attemptsResult.rows.length || currentAttempts <= 0) {
+                        await client.query('ROLLBACK');
+                        return res.status(403).json({ success: false, message: '听写次数不足' });
+                    }
+
+                    await client.query(
+                        'UPDATE dictation_allowances SET attempts = GREATEST(attempts - 1, 0), updated_at = NOW() WHERE username = $1',
+                        [username]
+                    );
+                }
                 await client.query('COMMIT');
+
+                res.json({ success: true, message: '开始成功', level });
             } catch (error) {
                 await client.query('ROLLBACK').catch(() => {});
                 throw error;
             } finally {
                 client.release();
             }
-
-            res.json({ success: true, message: '开始成功' });
         } catch (error) {
             console.error('Dictation start error:', error);
             res.status(500).json({ success: false, message: '开始失败' });
@@ -690,11 +718,23 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const userId = req.session.user?.id || null;
             const username = req.session.user?.username || '';
+            let level = 1;
+            try {
+                const progressResult = await pool.query(
+                    'SELECT level FROM dictation_progress WHERE username = $1',
+                    [username]
+                );
+                if (progressResult.rows.length) {
+                    level = Number(progressResult.rows[0].level || 1);
+                }
+            } catch (progressError) {
+                console.error('Dictation progress fetch error:', progressError);
+            }
 
             await pool.query(
                 `INSERT INTO dictation_submissions
-                    (user_id, username, word_id, word, pronunciation, definition, user_input, ip_address, user_agent)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                    (user_id, username, word_id, word, pronunciation, definition, user_input, level, ip_address, user_agent)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
                 [
                     userId,
                     username,
@@ -703,6 +743,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     pronunciation || null,
                     definition || null,
                     userInput,
+                    Number.isFinite(level) ? level : 1,
                     req.ip,
                     req.get('User-Agent')
                 ]

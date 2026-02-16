@@ -18,6 +18,7 @@
     let words = [];
     let currentIndex = -1;
     let currentWord = null;
+    let currentLevel = 1;
     let submitted = false;
     let voice = null;
     let startInProgress = false;
@@ -140,7 +141,7 @@
                 toggleConfirm(true);
                 return;
             }
-            await startRound();
+            await startRound(Number(data.level) || 1);
         } catch (error) {
             console.error('Dictation start error:', error);
             setStatus(t('网络错误，请稍后重试', 'Network error, please try again.'), 'error');
@@ -153,12 +154,18 @@
         }
     }
 
-    async function startRound() {
+    async function startRound(level) {
         try {
             if (!words.length) {
                 await loadWords();
             }
-            currentIndex = Math.floor(Math.random() * words.length);
+            currentLevel = Math.min(Math.max(level, 1), 5);
+            const picked = pickWordByLevel(currentLevel);
+            if (!picked) {
+                throw new Error('No dictation word found for level');
+            }
+            currentWord = picked.word;
+            currentIndex = picked.index;
             updateWord();
             setStatus(t('已开始听写，请输入答案并提交', 'Dictation started. Please enter your answer.'));
         } catch (error) {
@@ -167,11 +174,22 @@
         }
     }
 
+    function pickWordByLevel(level) {
+        if (!words.length) {
+            return null;
+        }
+        const index = level - 1;
+        if (words[index]) {
+            return { word: words[index], index };
+        }
+        const fallbackIndex = Math.floor(Math.random() * words.length);
+        return { word: words[fallbackIndex], index: fallbackIndex };
+    }
+
     function updateWord() {
-        if (!words.length || currentIndex < 0 || currentIndex >= words.length) {
+        if (!currentWord) {
             return;
         }
-        currentWord = words[currentIndex];
         submitted = false;
         clearCells();
         setInputsDisabled(false);
@@ -184,7 +202,7 @@
         if (!progressEl || !words.length) {
             return;
         }
-        progressEl.textContent = t('本次听写', 'Current dictation');
+        progressEl.textContent = t(`第 ${currentLevel} 关 / 5`, `Level ${currentLevel} / 5`);
     }
 
     function updateControls() {
@@ -313,7 +331,6 @@
             }
 
             submitted = true;
-            hasActiveRound = false;
             setStatus(t('提交成功，等待人工审核', 'Submitted successfully, waiting for review.'), 'success');
             setInputsDisabled(true);
             updateControls();

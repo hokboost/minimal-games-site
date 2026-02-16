@@ -152,10 +152,12 @@ module.exports = function registerAdminRoutes(app, deps) {
                 const dictationResult = await pool.query(`
                     SELECT id,
                            username,
+                           word_id,
                            word,
                            pronunciation,
                            definition,
                            user_input,
+                           level,
                            status,
                            to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as submitted_at
                     FROM dictation_submissions
@@ -542,6 +544,75 @@ module.exports = function registerAdminRoutes(app, deps) {
             });
         } catch (error) {
             console.error('修改余额失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    // 审核听写提交
+    app.post('/api/admin/dictation/mark', ...adminApiGuards, requireCSRF, async (req, res) => {
+        try {
+            const { id, status } = req.body;
+            const allowed = new Set(['correct', 'wrong', 'rewrite']);
+            if (!id || !allowed.has(status)) {
+                return res.status(400).json({ success: false, message: '参数错误' });
+            }
+
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                const submissionResult = await client.query(
+                    'SELECT username, level FROM dictation_submissions WHERE id = $1 FOR UPDATE',
+                    [id]
+                );
+                if (!submissionResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ success: false, message: '记录不存在' });
+                }
+                const submission = submissionResult.rows[0];
+                const username = submission.username;
+                const level = Number(submission.level || 1);
+
+                await client.query(
+                    'UPDATE dictation_submissions SET status = $1 WHERE id = $2',
+                    [status, id]
+                );
+
+                if (username && status !== 'rewrite') {
+                    const progressResult = await client.query(
+                        'SELECT level FROM dictation_progress WHERE username = $1 FOR UPDATE',
+                        [username]
+                    );
+                    let nextLevel = 1;
+                    if (status === 'correct') {
+                        nextLevel = Math.min(Math.max(level, 1) + 1, 5);
+                    } else if (status === 'wrong') {
+                        nextLevel = 1;
+                    }
+
+                    if (progressResult.rows.length) {
+                        await client.query(
+                            'UPDATE dictation_progress SET level = $1, updated_at = NOW() WHERE username = $2',
+                            [nextLevel, username]
+                        );
+                    } else {
+                        await client.query(
+                            'INSERT INTO dictation_progress (username, level) VALUES ($1, $2)',
+                            [username, nextLevel]
+                        );
+                    }
+                }
+
+                await client.query('COMMIT');
+            } catch (txError) {
+                await client.query('ROLLBACK').catch(() => {});
+                throw txError;
+            } finally {
+                client.release();
+            }
+
+            res.json({ success: true, message: '已更新' });
+        } catch (error) {
+            console.error('Dictation mark error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         }
     });

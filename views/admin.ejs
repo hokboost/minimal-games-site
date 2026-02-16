@@ -248,11 +248,14 @@
                             <tr>
                                 <th><%= lang === 'zh' ? '提交时间' : 'Submitted At' %></th>
                                 <th><%= lang === 'zh' ? '用户名' : 'Username' %></th>
+                                <th><%= lang === 'zh' ? '关卡' : 'Level' %></th>
+                                <th><%= lang === 'zh' ? '题号' : 'Word ID' %></th>
                                 <th><%= lang === 'zh' ? '词语' : 'Word' %></th>
                                 <th><%= lang === 'zh' ? '读音' : 'Pronunciation' %></th>
                                 <th><%= lang === 'zh' ? '解释' : 'Definition' %></th>
                                 <th><%= lang === 'zh' ? '用户输入' : 'User Input' %></th>
                                 <th><%= lang === 'zh' ? '状态' : 'Status' %></th>
+                                <th><%= lang === 'zh' ? '审核' : 'Review' %></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -261,16 +264,31 @@
                                     <tr>
                                         <td><%= row.submitted_at %></td>
                                         <td><%= row.username || '-' %></td>
+                                        <td><%= row.level || '-' %></td>
+                                        <td><%= row.word_id || '-' %></td>
                                         <td><%= row.word || '-' %></td>
                                         <td><%= row.pronunciation || '-' %></td>
                                         <td><%= row.definition || '-' %></td>
                                         <td><%= row.user_input || '-' %></td>
                                         <td><%= row.status || '-' %></td>
+                                        <td>
+                                            <div class="dictation-review-actions">
+                                                <button class="btn-approve" data-action="dictation-mark" data-id="<%= row.id %>" data-status="correct">
+                                                    <%= lang === 'zh' ? '正确' : 'Correct' %>
+                                                </button>
+                                                <button class="btn-reject" data-action="dictation-mark" data-id="<%= row.id %>" data-status="wrong">
+                                                    <%= lang === 'zh' ? '错误' : 'Wrong' %>
+                                                </button>
+                                                <button class="btn-warn" data-action="dictation-mark" data-id="<%= row.id %>" data-status="rewrite">
+                                                    <%= lang === 'zh' ? '请重写' : 'Rewrite' %>
+                                                </button>
+                                            </div>
+                                        </td>
                                     </tr>
                                 <% }) %>
                             <% } else { %>
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: #aaa;">
+                                    <td colspan="10" style="text-align: center; color: #aaa;">
                                         <%= lang === 'zh' ? '暂无听写提交记录' : 'No dictation submissions yet' %>
                                     </td>
                                 </tr>
@@ -375,6 +393,12 @@
         text-align: left;
         font-weight: bold;
         font-size: 0.85rem;
+    }
+
+    .dictation-review-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
     }
 
     .records-table td {

@@ -38,6 +38,8 @@ document.addEventListener('click', (event) => {
                 return clearFailures(username, actionButton);
             case 'edit-balance':
                 return editBalance(username, Number(balance));
+            case 'dictation-mark':
+                return markDictation(actionButton);
             default:
                 return;
         }
@@ -204,6 +206,32 @@ function addElectricCoin(username, btn) {
         .finally(() => {
             btn.disabled = false;
             btn.textContent = t('🔑 重置密码', '🔑 Reset Password');
+        });
+    }
+
+    function markDictation(btn) {
+        const id = btn.dataset.id;
+        const status = btn.dataset.status;
+        if (!id || !status) {
+            return;
+        }
+        btn.disabled = true;
+        adminFetch('/api/admin/dictation/mark', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, status })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) {
+                alert(t('操作失败: ', 'Action failed: ') + translateServerMessage(data.message));
+                return;
+            }
+            location.reload();
+        })
+        .catch(() => alert(t('请求失败，请稍后再试', 'Request failed, please try again')))
+        .finally(() => {
+            btn.disabled = false;
         });
     }
 
