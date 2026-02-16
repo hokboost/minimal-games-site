@@ -320,6 +320,7 @@
         const resize = () => {
             const ratio = window.devicePixelRatio || 1;
             const rect = canvas.getBoundingClientRect();
+            const prevData = canvas.width ? canvas.toDataURL('image/png') : null;
             canvas.width = Math.max(1, Math.floor(rect.width * ratio));
             canvas.height = Math.max(1, Math.floor(rect.height * ratio));
             const ctx = canvas.getContext('2d');
@@ -327,7 +328,23 @@
             ctx.lineJoin = 'round';
             ctx.lineWidth = 6 * ratio;
             ctx.strokeStyle = '#ffffff';
-            drawState.set(canvas, { drawing: false, hasInk: false, lastX: 0, lastY: 0, moved: false, justDrew: false, ratio });
+            const prevState = drawState.get(canvas);
+            drawState.set(canvas, {
+                drawing: false,
+                hasInk: prevState?.hasInk || false,
+                lastX: 0,
+                lastY: 0,
+                moved: false,
+                justDrew: false,
+                ratio
+            });
+            if (prevData && prevState?.hasInk) {
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                };
+                img.src = prevData;
+            }
         };
         resize();
         window.addEventListener('resize', resize);
@@ -393,6 +410,7 @@
         const resize = () => {
             const ratio = window.devicePixelRatio || 1;
             const rect = zoomCanvas.getBoundingClientRect();
+            const prevData = zoomCanvas.width ? zoomCanvas.toDataURL('image/png') : null;
             zoomCanvas.width = Math.max(1, Math.floor(rect.width * ratio));
             zoomCanvas.height = Math.max(1, Math.floor(rect.height * ratio));
             const ctx = zoomCanvas.getContext('2d');
@@ -400,7 +418,15 @@
             ctx.lineJoin = 'round';
             ctx.lineWidth = 8 * ratio;
             ctx.strokeStyle = '#ffffff';
-            zoomState = { drawing: false, hasInk: false, lastX: 0, lastY: 0, ratio };
+            const hadInk = zoomState?.hasInk || false;
+            zoomState = { drawing: false, hasInk: hadInk, lastX: 0, lastY: 0, ratio };
+            if (prevData && hadInk) {
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, zoomCanvas.width, zoomCanvas.height);
+                };
+                img.src = prevData;
+            }
         };
         resize();
         window.addEventListener('resize', resize);
