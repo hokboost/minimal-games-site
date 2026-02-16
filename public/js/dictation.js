@@ -111,6 +111,7 @@
             return;
         }
         confirmModal.hidden = !show;
+        confirmModal.style.display = show ? 'flex' : 'none';
     }
 
     function startDictation() {
