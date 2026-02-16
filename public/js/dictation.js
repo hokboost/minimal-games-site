@@ -82,7 +82,8 @@
         const updateVoice = () => {
             const voices = window.speechSynthesis.getVoices();
             const zhVoices = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('zh'));
-            voice = zhVoices.find((v) => v.lang.toLowerCase().includes('zh-cn'))
+            voice = zhVoices.find((v) => /xiaoxiao|xiaoyi|huihui|hanhan|kangkang|yaoyao/i.test(v.name))
+                || zhVoices.find((v) => v.lang.toLowerCase().includes('zh-cn'))
                 || zhVoices.find((v) => /mandarin|chinese|putonghua/i.test(v.name))
                 || zhVoices[0]
                 || null;
@@ -592,7 +593,7 @@
         }
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'zh-CN';
-        utterance.rate = 0.85;
+        utterance.rate = 0.7;
         utterance.pitch = 1;
         if (voice) {
             utterance.voice = voice;
