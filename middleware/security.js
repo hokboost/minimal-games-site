@@ -247,6 +247,9 @@ const adminStrictLimit = (() => {
 
 // 管理接口 IP 白名单（通过 env 配置，逗号分隔），未配置则不拦截
 function adminIPWhitelist(req, res, next) {
+    if (req.session && req.session.user && req.session.user.is_admin) {
+        return next();
+    }
     const whitelist = (process.env.ADMIN_IP_WHITELIST || '').split(',').map((ip) => ip.trim()).filter(Boolean);
     if (whitelist.length === 0) {
         return next();
