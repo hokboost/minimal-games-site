@@ -49,7 +49,9 @@ const formatScratchResult = (result) => {
 
     const refreshBackpackBtn = document.getElementById('refresh-backpack');
     if (refreshBackpackBtn) {
-        refreshBackpackBtn.addEventListener('click', loadWishBackpack);
+        refreshBackpackBtn.addEventListener('click', () => {
+            loadWishBackpack(true);
+        });
     }
 
     const closeRecordsBtn = document.getElementById('close-records');
@@ -227,7 +229,7 @@ const formatScratchResult = (result) => {
 
     const backpackFailureCache = new Map();
 
-    async function loadWishBackpack() {
+    async function loadWishBackpack(showAlerts = false) {
         const container = document.getElementById('backpackContent');
         container.innerHTML = `<div class="loading">${t('加载中...', 'Loading...')}</div>`;
         
@@ -250,7 +252,7 @@ const formatScratchResult = (result) => {
             tableHTML += '<tbody>';
 
             data.items.forEach(item => {
-                if (item.last_failure_reason) {
+                if (showAlerts && item.last_failure_reason) {
                     const cachedReason = backpackFailureCache.get(item.id);
                     if (cachedReason !== item.last_failure_reason) {
                         const reason = item.last_failure_reason.toLowerCase();
@@ -565,7 +567,7 @@ const formatScratchResult = (result) => {
     }
 
     
-    loadWishBackpack();
+    loadWishBackpack(false);
     if (backpackContentEl) {
-        setInterval(loadWishBackpack, 10000);
+        setInterval(() => loadWishBackpack(false), 10000);
     }

@@ -668,7 +668,17 @@ module.exports = function registerGameRoutes(app, deps) {
                         await client.query('ROLLBACK');
                         return res.status(500).json({ success: false, message: '题库未配置' });
                     }
-                    setId = setIds[Math.floor(Math.random() * setIds.length)];
+                    if (username !== '尧顺宇') {
+                        const usedResult = await client.query(
+                            'SELECT DISTINCT set_id FROM dictation_sessions WHERE username = $1',
+                            [username]
+                        );
+                        const usedIds = new Set(usedResult.rows.map((row) => Number(row.set_id)).filter((v) => Number.isFinite(v)));
+                        const remaining = setIds.filter((id) => !usedIds.has(id));
+                        setId = (remaining.length ? remaining : setIds)[Math.floor(Math.random() * (remaining.length ? remaining : setIds).length)];
+                    } else {
+                        setId = setIds[Math.floor(Math.random() * setIds.length)];
+                    }
                     const sessionResult = await client.query(
                         'INSERT INTO dictation_sessions (username, set_id, started_at, result) VALUES ($1, $2, NOW(), $3) RETURNING id',
                         [username, setId, 'in_progress']

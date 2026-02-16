@@ -82,5 +82,68 @@
     "word": "伶俜",
     "pronunciation": "ling2 ping1",
     "definition": "形容孤单无依的样子。"
+  },
+  {
+    "id": "013",
+    "set_id": 5,
+    "word": "捉襟见肘",
+    "pronunciation": "zhuo1 jin1 jian4 zhou3",
+    "definition": "形容经济困难，顾此失彼。"
+  },
+  {
+    "id": "014",
+    "set_id": 5,
+    "word": "穷蹙",
+    "pronunciation": "qiong2 cu4",
+    "definition": "形容贫困窘迫。"
+  },
+  {
+    "id": "015",
+    "set_id": 5,
+    "word": "贫窭",
+    "pronunciation": "pin2 ju4",
+    "definition": "形容贫困窘乏。"
+  },
+  {
+    "id": "016",
+    "set_id": 6,
+    "word": "防患未然",
+    "pronunciation": "fang2 huan4 wei4 ran2",
+    "definition": "在祸huan4发生之前预先防备。"
+  },
+  {
+    "id": "017",
+    "set_id": 6,
+    "word": "未雨绸缪",
+    "pronunciation": "wei4 yu3 chou2 mou2",
+    "definition": "事情发生之前做好准备。"
+  },
+  {
+    "id": "018",
+    "set_id": 6,
+    "word": "曲突徙薪",
+    "pronunciation": "qu1 tu1 xi3 xin1",
+    "definition": "比喻事先采取措施以防止灾祸。"
+  },
+  {
+    "id": "019",
+    "set_id": 7,
+    "word": "糟蹋",
+    "pronunciation": "zao1 ta5",
+    "definition": "指不珍惜或不爱护而随意破坏。"
+  },
+  {
+    "id": "020",
+    "set_id": 7,
+    "word": "蹂躏",
+    "pronunciation": "rou2 lin4",
+    "definition": "践踏毁坏，任意摧残。"
+  },
+  {
+    "id": "021",
+    "set_id": 7,
+    "word": "摧铩",
+    "pronunciation": "cui1 sha1",
+    "definition": "伤残；损伤。"
   }
 ]
