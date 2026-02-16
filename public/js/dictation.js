@@ -440,18 +440,18 @@
         if (!zoomModal || !zoomCanvas) {
             return;
         }
-        if (!zoomState) {
-            setupZoomCanvas();
-        }
         activeCellIndex = index;
-        const cell = cells[index];
-        const ctx = zoomCanvas.getContext('2d');
-        ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
-        if (cell) {
-            ctx.drawImage(cell, 0, 0, zoomCanvas.width, zoomCanvas.height);
-        }
         zoomModal.hidden = false;
         zoomModal.style.display = 'flex';
+        requestAnimationFrame(() => {
+            setupZoomCanvas();
+            const cell = cells[index];
+            const ctx = zoomCanvas.getContext('2d');
+            ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+            if (cell) {
+                ctx.drawImage(cell, 0, 0, zoomCanvas.width, zoomCanvas.height);
+            }
+        });
     }
 
     function closeZoom(save) {
