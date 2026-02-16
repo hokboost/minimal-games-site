@@ -124,6 +124,7 @@
         if (confirmStartBtn) {
             confirmStartBtn.disabled = true;
         }
+        toggleConfirm(false);
         try {
             const response = await safeFetch('/api/dictation/start', {
                 method: 'POST',
@@ -136,13 +137,14 @@
             const data = await response.json();
             if (!data.success) {
                 setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
+                toggleConfirm(true);
                 return;
             }
-            toggleConfirm(false);
             await startRound();
         } catch (error) {
             console.error('Dictation start error:', error);
             setStatus(t('网络错误，请稍后重试', 'Network error, please try again.'), 'error');
+            toggleConfirm(true);
         } finally {
             startInProgress = false;
             if (confirmStartBtn) {
