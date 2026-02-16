@@ -290,12 +290,13 @@
             const ctx = canvas.getContext('2d');
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
-            ctx.lineWidth = 4 * ratio;
+            ctx.lineWidth = 6 * ratio;
             ctx.strokeStyle = '#ffffff';
             drawState.set(canvas, { drawing: false, hasInk: false, lastX: 0, lastY: 0, moved: false, justDrew: false, ratio });
         };
         resize();
         window.addEventListener('resize', resize);
+        canvas.style.touchAction = 'none';
 
         const pointerDown = (event) => {
             event.preventDefault();
@@ -306,6 +307,21 @@
             state.drawing = true;
             state.lastX = x;
             state.lastY = y;
+            if (event.pointerId !== undefined) {
+                canvas.setPointerCapture(event.pointerId);
+            }
+            const ctx = canvas.getContext('2d');
+            applyBrush(ctx, state.ratio);
+            ctx.beginPath();
+            ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2);
+            ctx.fillStyle = isEraser ? 'rgba(0,0,0,1)' : '#ffffff';
+            if (isEraser) {
+                ctx.globalCompositeOperation = 'destination-out';
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            ctx.fill();
+            state.hasInk = true;
         };
         const pointerMove = (event) => {
             const state = drawState.get(canvas);
@@ -329,6 +345,9 @@
             event.preventDefault();
             state.drawing = false;
             state.justDrew = state.moved;
+            if (event.pointerId !== undefined) {
+                canvas.releasePointerCapture(event.pointerId);
+            }
             if (!state.moved && !submitted && currentWord) {
                 openZoom(index);
             }
@@ -338,6 +357,7 @@
         canvas.addEventListener('pointermove', pointerMove);
         canvas.addEventListener('pointerup', pointerUp);
         canvas.addEventListener('pointerleave', pointerUp);
+        canvas.addEventListener('pointercancel', pointerUp);
         canvas.addEventListener('click', () => {
             // no-op: zoom is triggered by tap (pointerup) to avoid auto-open on draw.
         });
@@ -355,12 +375,13 @@
             const ctx = zoomCanvas.getContext('2d');
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
-            ctx.lineWidth = 6 * ratio;
+            ctx.lineWidth = 8 * ratio;
             ctx.strokeStyle = '#ffffff';
             zoomState = { drawing: false, hasInk: false, lastX: 0, lastY: 0, ratio };
         };
         resize();
         window.addEventListener('resize', resize);
+        zoomCanvas.style.touchAction = 'none';
 
         const pointerDown = (event) => {
             event.preventDefault();
@@ -369,6 +390,21 @@
             zoomState.drawing = true;
             zoomState.lastX = x;
             zoomState.lastY = y;
+            if (event.pointerId !== undefined) {
+                zoomCanvas.setPointerCapture(event.pointerId);
+            }
+            const ctx = zoomCanvas.getContext('2d');
+            applyBrush(ctx, zoomState.ratio, true);
+            ctx.beginPath();
+            ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2);
+            ctx.fillStyle = isEraser ? 'rgba(0,0,0,1)' : '#ffffff';
+            if (isEraser) {
+                ctx.globalCompositeOperation = 'destination-out';
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            ctx.fill();
+            zoomState.hasInk = true;
         };
         const pointerMove = (event) => {
             if (!zoomState || !zoomState.drawing) return;
@@ -388,12 +424,16 @@
             if (!zoomState) return;
             event.preventDefault();
             zoomState.drawing = false;
+            if (event.pointerId !== undefined) {
+                zoomCanvas.releasePointerCapture(event.pointerId);
+            }
         };
 
         zoomCanvas.addEventListener('pointerdown', pointerDown);
         zoomCanvas.addEventListener('pointermove', pointerMove);
         zoomCanvas.addEventListener('pointerup', pointerUp);
         zoomCanvas.addEventListener('pointerleave', pointerUp);
+        zoomCanvas.addEventListener('pointercancel', pointerUp);
     }
 
     function openZoom(index) {
@@ -461,11 +501,11 @@
         if (isEraser) {
             ctx.globalCompositeOperation = 'destination-out';
             ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
-            ctx.lineWidth = (isZoom ? 14 : 12) * ratio;
+            ctx.lineWidth = (isZoom ? 20 : 16) * ratio;
         } else {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = (isZoom ? 6 : 4) * ratio;
+            ctx.lineWidth = (isZoom ? 10 : 6) * ratio;
         }
     }
 
