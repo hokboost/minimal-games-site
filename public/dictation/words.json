@@ -1,21 +1,21 @@
 [
   {
     "id": "001",
-    "set_id": 1,
+    "set_id": 7,
     "word": "命途多舛",
     "pronunciation": "ming4 tu2 duo1 chuan3",
     "definition": "ming4运多波折，遭遇不顺。"
   },
   {
     "id": "002",
-    "set_id": 1,
+    "set_id": 7,
     "word": "时乖运蹇",
     "pronunciation": "shi2 guai1 yun4 jian3",
     "definition": "shi2运不佳，处境不顺。"
   },
   {
     "id": "003",
-    "set_id": 1,
+    "set_id": 7,
     "word": "黄杨厄闰",
     "pronunciation": "huang2 yang2 e4 run4",
     "definition": "比喻时运不济。宋．苏轼《监洞霄宫俞康直郎中所居四咏》之一：「园中草木春无数，只有huang2yang2e4run4年。」"
@@ -106,21 +106,21 @@
   },
   {
     "id": "019",
-    "set_id": 7,
+    "set_id": 1,
     "word": "糟蹋",
     "pronunciation": "zao1 ta5",
     "definition": "指不珍惜或不爱护而随意破坏。"
   },
   {
     "id": "020",
-    "set_id": 7,
+    "set_id": 1,
     "word": "蹂躏",
     "pronunciation": "rou2 lin4",
     "definition": "践踏毁坏，任意摧残。"
   },
   {
     "id": "021",
-    "set_id": 7,
+    "set_id": 1,
     "word": "摧铩",
     "pronunciation": "cui1 sha1",
     "definition": "伤残；损伤。"

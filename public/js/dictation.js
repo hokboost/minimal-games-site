@@ -229,9 +229,40 @@
                 startReviewPolling();
                 return;
             }
+            await reconcileDraftWithProgress();
             restoreDraft();
         } catch (error) {
             console.error('Pending status check error:', error);
+        }
+    }
+
+    async function reconcileDraftWithProgress() {
+        if (!draftKey) {
+            return;
+        }
+        const raw = localStorage.getItem(draftKey);
+        if (!raw) {
+            return;
+        }
+        try {
+            const resp = await safeFetch('/api/dictation/progress', { cache: 'no-store' });
+            const progress = await resp.json();
+            if (!progress.success) {
+                return;
+            }
+            const draft = JSON.parse(raw);
+            if (!draft || !draft.level) {
+                return;
+            }
+            const progressSetId = Number(progress.setId);
+            const progressLevel = Number(progress.level || 1);
+            if (Number.isFinite(progressSetId) && Number(draft.setId) !== progressSetId) {
+                clearDraft();
+            } else if (Number.isFinite(progressLevel) && Number(draft.level) !== progressLevel) {
+                clearDraft();
+            }
+        } catch (error) {
+            console.error('Dictation progress reconcile error:', error);
         }
     }
 
