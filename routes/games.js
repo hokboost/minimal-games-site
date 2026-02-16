@@ -892,6 +892,33 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const fs = require('fs');
             const path = require('path');
+            const bodySetId = Number(req.body?.setId);
+            const bodyLevel = Number(req.body?.level);
+            if (Number.isFinite(bodySetId)) {
+                setId = bodySetId;
+            }
+            if (Number.isFinite(bodyLevel)) {
+                level = bodyLevel;
+            }
+            try {
+                const wordsPath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
+                const raw = await fs.promises.readFile(wordsPath, 'utf8');
+                const data = JSON.parse(raw);
+                const matched = data.find((item) => String(item.id) === String(wordId));
+                const matchedSetId = matched && Number.isFinite(Number(matched.set_id)) ? Number(matched.set_id) : null;
+                if (setId === null && matchedSetId !== null) {
+                    setId = matchedSetId;
+                }
+                if (setId !== null) {
+                    const setWords = data.filter((item) => Number(item.set_id) === Number(setId));
+                    const index = setWords.findIndex((item) => String(item.id) === String(wordId));
+                    if (index >= 0) {
+                        level = index + 1;
+                    }
+                }
+            } catch (wordError) {
+                console.error('Dictation word lookup error:', wordError);
+            }
             const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'dictation');
             await fs.promises.mkdir(uploadDir, { recursive: true });
             const filename = `${Date.now()}_${Math.random().toString(16).slice(2)}.png`;

@@ -855,6 +855,8 @@
                     word: currentWord.word,
                     pronunciation: currentWord.pronunciation,
                     definition: currentWord.definition,
+                    setId: currentSetId,
+                    level: currentLevel,
                     input: '',
                     imageData
                 })
