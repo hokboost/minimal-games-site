@@ -670,6 +670,41 @@ module.exports = function registerGameRoutes(app, deps) {
                     level = 1;
                 }
 
+                if (level > 1 && !Number.isFinite(setId)) {
+                    const latestSubmission = await client.query(
+                        `SELECT set_id, session_id
+                         FROM dictation_submissions
+                         WHERE username = $1 AND set_id IS NOT NULL
+                         ORDER BY created_at DESC
+                         LIMIT 1
+                         FOR UPDATE`,
+                        [username]
+                    );
+                    if (latestSubmission.rows.length) {
+                        setId = Number(latestSubmission.rows[0].set_id);
+                        if (!sessionId) {
+                            sessionId = latestSubmission.rows[0].session_id || null;
+                        }
+                    }
+                }
+                if (level > 1 && !Number.isFinite(setId)) {
+                    const latestSession = await client.query(
+                        `SELECT id, set_id
+                         FROM dictation_sessions
+                         WHERE username = $1
+                         ORDER BY started_at DESC
+                         LIMIT 1
+                         FOR UPDATE`,
+                        [username]
+                    );
+                    if (latestSession.rows.length) {
+                        setId = Number(latestSession.rows[0].set_id);
+                        if (!sessionId) {
+                            sessionId = latestSession.rows[0].id;
+                        }
+                    }
+                }
+
                 if (!Number.isFinite(level) || level < 1) {
                     level = 1;
                 } else if (level > 3) {
@@ -688,22 +723,56 @@ module.exports = function registerGameRoutes(app, deps) {
                         await client.query('ROLLBACK');
                         return res.status(500).json({ success: false, message: '题库未配置' });
                     }
-                    if (username !== '尧顺宇') {
-                        const usedResult = await client.query(
-                            'SELECT DISTINCT set_id FROM dictation_sessions WHERE username = $1',
+                    const orderedSetIds = setIds.slice().sort((a, b) => a - b);
+                    try {
+                        const inProgress = await client.query(
+                            `SELECT id, set_id
+                             FROM dictation_sessions
+                             WHERE username = $1 AND result = 'in_progress'
+                             ORDER BY started_at DESC
+                             LIMIT 1
+                             FOR UPDATE`,
                             [username]
                         );
-                        const usedIds = new Set(usedResult.rows.map((row) => Number(row.set_id)).filter((v) => Number.isFinite(v)));
-                        const remaining = setIds.filter((id) => !usedIds.has(id));
-                        setId = (remaining.length ? remaining : setIds)[Math.floor(Math.random() * (remaining.length ? remaining : setIds).length)];
-                    } else {
-                        setId = setIds[Math.floor(Math.random() * setIds.length)];
+                        if (inProgress.rows.length) {
+                            setId = Number(inProgress.rows[0].set_id);
+                            sessionId = inProgress.rows[0].id;
+                        }
+                    } catch (progressError) {
+                        console.error('Dictation in-progress lookup error:', progressError);
                     }
-                    const sessionResult = await client.query(
-                        'INSERT INTO dictation_sessions (username, set_id, started_at, result) VALUES ($1, $2, NOW(), $3) RETURNING id',
-                        [username, setId, 'in_progress']
-                    );
-                    sessionId = sessionResult.rows[0].id;
+                    if (!Number.isFinite(setId)) {
+                        let lastCompletedId = null;
+                        try {
+                            const completed = await client.query(
+                                `SELECT set_id
+                                 FROM dictation_sessions
+                                 WHERE username = $1 AND result IN ('passed', 'failed')
+                                 ORDER BY ended_at DESC NULLS LAST, started_at DESC
+                                 LIMIT 1`,
+                                [username]
+                            );
+                            if (completed.rows.length) {
+                                lastCompletedId = Number(completed.rows[0].set_id);
+                            }
+                        } catch (completedError) {
+                            console.error('Dictation completed lookup error:', completedError);
+                        }
+                        if (Number.isFinite(lastCompletedId)) {
+                            const index = orderedSetIds.indexOf(lastCompletedId);
+                            const nextIndex = index >= 0 ? (index + 1) % orderedSetIds.length : 0;
+                            setId = orderedSetIds[nextIndex];
+                        } else {
+                            setId = orderedSetIds[0];
+                        }
+                    }
+                    if (!sessionId) {
+                        const sessionResult = await client.query(
+                            'INSERT INTO dictation_sessions (username, set_id, started_at, result) VALUES ($1, $2, NOW(), $3) RETURNING id',
+                            [username, setId, 'in_progress']
+                        );
+                        sessionId = sessionResult.rows[0].id;
+                    }
                 }
 
                 await client.query(
