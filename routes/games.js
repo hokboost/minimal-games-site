@@ -694,7 +694,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             const username = req.session.user?.username || '';
             const result = await pool.query(
-                `SELECT status, level
+                `SELECT status, level, word
                  FROM dictation_submissions
                  WHERE username = $1
                  ORDER BY created_at DESC
@@ -708,7 +708,8 @@ module.exports = function registerGameRoutes(app, deps) {
             res.json({
                 success: true,
                 status: row.status || null,
-                level: Number(row.level || 1)
+                level: Number(row.level || 1),
+                word: row.word || null
             });
         } catch (error) {
             console.error('Dictation latest status error:', error);

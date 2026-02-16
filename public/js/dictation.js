@@ -532,11 +532,12 @@
         const ratio = window.devicePixelRatio || 1;
         const cellWidth = cells[0]?.width || 200;
         const cellHeight = cells[0]?.height || 200;
+        const cellSize = Math.min(cellWidth, cellHeight);
         const gap = Math.floor(12 * ratio);
         const cols = 2;
         const rows = 2;
-        const width = cols * cellWidth + (cols - 1) * gap;
-        const height = rows * cellHeight + (rows - 1) * gap;
+        const width = cols * cellSize + (cols - 1) * gap;
+        const height = rows * cellSize + (rows - 1) * gap;
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
@@ -549,17 +550,17 @@
         cells.forEach((cell, idx) => {
             const row = Math.floor(idx / cols);
             const col = idx % cols;
-            const x = col * (cellWidth + gap);
-            const y = row * (cellHeight + gap);
-            const midX = x + cellWidth / 2;
-            const midY = y + cellHeight / 2;
+            const x = col * (cellSize + gap);
+            const y = row * (cellSize + gap);
+            const midX = x + cellSize / 2;
+            const midY = y + cellSize / 2;
             ctx.beginPath();
             ctx.moveTo(midX, y + 8 * ratio);
-            ctx.lineTo(midX, y + cellHeight - 8 * ratio);
+            ctx.lineTo(midX, y + cellSize - 8 * ratio);
             ctx.moveTo(x + 8 * ratio, midY);
-            ctx.lineTo(x + cellWidth - 8 * ratio, midY);
+            ctx.lineTo(x + cellSize - 8 * ratio, midY);
             ctx.stroke();
-            ctx.drawImage(cell, x, y);
+            ctx.drawImage(cell, x, y, cellSize, cellSize);
         });
         return canvas.toDataURL('image/png');
     }
@@ -672,7 +673,11 @@
             }
             if (data.status === 'correct') {
                 stopReviewPolling();
-                setStatus(t('审核通过，进入下一关', 'Approved. Moving to next level.'), 'success');
+                const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
+                setStatus(
+                    t(`审核通过，进入下一关。${answerText}`, `Approved. Moving to next level. ${answerText}`),
+                    'success'
+                );
                 await autoAdvance();
             } else if (data.status === 'wrong') {
                 stopReviewPolling();
@@ -680,7 +685,11 @@
                 submitted = false;
                 setInputsDisabled(true);
                 updateControls();
-                setStatus(t('审核未通过，已回到第一关，请重新开始', 'Incorrect. Back to level 1, please start again.'), 'error');
+                const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
+                setStatus(
+                    t(`审核未通过，已回到第一关，请重新开始。${answerText}`, `Incorrect. Back to level 1, please start again. ${answerText}`),
+                    'error'
+                );
             } else if (data.status === 'rewrite') {
                 stopReviewPolling();
                 setStatus(t('请重新书写本关', 'Please rewrite this level.'), 'error');
