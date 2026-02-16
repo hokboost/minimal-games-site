@@ -640,12 +640,10 @@ module.exports = function registerAdminRoutes(app, deps) {
                                 'UPDATE dictation_sessions SET result = $1, ended_at = NOW() WHERE id = $2',
                                 [result, sessionId]
                             );
-                            if (status === 'wrong') {
-                                await client.query(
-                                    'UPDATE dictation_progress SET level = 1, set_id = NULL, session_id = NULL, updated_at = NOW() WHERE username = $1',
-                                    [username]
-                                );
-                            }
+                            await client.query(
+                                'UPDATE dictation_progress SET level = 1, set_id = NULL, session_id = NULL, updated_at = NOW() WHERE username = $1',
+                                [username]
+                            );
                         }
                     }
                 }
