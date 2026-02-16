@@ -899,10 +899,11 @@
             if (!data.success || !data.status) {
                 return;
             }
+            const reportedLevel = Number(data.level) || currentLevel;
             if (data.status === 'correct') {
                 stopReviewPolling();
                 const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
-                if (Number(data.level) >= 3) {
+                if (reportedLevel >= 3 && currentLevel >= 3) {
                     setStatus(
                         t(`恭喜通关！${answerText}`, `Congratulations, cleared all levels. ${answerText}`),
                         'success'
