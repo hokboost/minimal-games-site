@@ -631,6 +631,26 @@ module.exports = function registerGameRoutes(app, deps) {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
+                const pendingResult = await client.query(
+                    `SELECT level, set_id
+                     FROM dictation_submissions
+                     WHERE username = $1 AND status = 'pending'
+                     ORDER BY created_at DESC
+                     LIMIT 1
+                     FOR UPDATE`,
+                    [username]
+                );
+                if (pendingResult.rows.length) {
+                    const pending = pendingResult.rows[0];
+                    await client.query('COMMIT');
+                    return res.json({
+                        success: true,
+                        message: '继续等待审核',
+                        level: Number(pending.level || 1),
+                        setId: pending.set_id !== null ? Number(pending.set_id) : null
+                    });
+                }
+
                 let level = 1;
                 let setId = null;
                 let sessionId = null;
@@ -728,7 +748,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             const username = req.session.user?.username || '';
             const result = await pool.query(
-                `SELECT status, level, word
+                `SELECT status, level, word, set_id
                  FROM dictation_submissions
                  WHERE username = $1
                  ORDER BY created_at DESC
@@ -743,7 +763,8 @@ module.exports = function registerGameRoutes(app, deps) {
                 success: true,
                 status: row.status || null,
                 level: Number(row.level || 1),
-                word: row.word || null
+                word: row.word || null,
+                setId: row.set_id !== null ? Number(row.set_id) : null
             });
         } catch (error) {
             console.error('Dictation latest status error:', error);

@@ -26,6 +26,8 @@
     const zoomEraserBtn = document.getElementById('zoom-eraser-btn');
 
     let csrf = document.body.dataset.csrfToken || '';
+    const username = document.body.dataset.username || '';
+    const draftKey = username ? `dictationDraft:${username}` : null;
     let words = [];
     let currentIndex = -1;
     let currentWord = null;
@@ -38,6 +40,8 @@
     let isEraser = false;
     let activeCellIndex = null;
     let zoomState = null;
+    let pendingCheckDone = false;
+    let draftSaveTimer = null;
 
     const dataUrl = '/api/dictation/words';
 
@@ -95,6 +99,10 @@
         updateVoice();
         window.speechSynthesis.addEventListener('voiceschanged', updateVoice);
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        checkPendingStatus();
+    });
 
     let reviewTimer = null;
 
@@ -174,6 +182,7 @@
         }
         toggleConfirm(false);
         try {
+            clearDraft();
             const response = await safeFetch('/api/dictation/start', {
                 method: 'POST',
                 headers: {
@@ -202,6 +211,98 @@
         }
     }
 
+    async function checkPendingStatus() {
+        if (pendingCheckDone) {
+            return;
+        }
+        pendingCheckDone = true;
+        try {
+            const resp = await safeFetch('/api/dictation/latest-status', { cache: 'no-store' });
+            const data = await resp.json();
+            if (data.success && data.status === 'pending') {
+                currentSetId = Number(data.setId) || currentSetId;
+                currentLevel = Math.min(Math.max(Number(data.level) || 1, 1), 3);
+                setStatus(t('已提交，等待审核...', 'Submitted, waiting for review...'));
+                if (startBtn) {
+                    startBtn.disabled = true;
+                }
+                startReviewPolling();
+                return;
+            }
+            restoreDraft();
+        } catch (error) {
+            console.error('Pending status check error:', error);
+        }
+    }
+
+    function restoreDraft() {
+        if (!draftKey) {
+            return;
+        }
+        const raw = localStorage.getItem(draftKey);
+        if (!raw) {
+            return;
+        }
+        try {
+            const draft = JSON.parse(raw);
+            if (!draft || !draft.wordId || !draft.setId || !draft.level) {
+                return;
+            }
+            const now = Date.now();
+            if (draft.updatedAt && now - draft.updatedAt > 6 * 60 * 60 * 1000) {
+                clearDraft();
+                return;
+            }
+            if (!words.length) {
+                loadWords().then(() => applyDraft(draft)).catch(() => {});
+            } else {
+                applyDraft(draft);
+            }
+        } catch (error) {
+            console.error('Draft restore error:', error);
+        }
+    }
+
+    function applyDraft(draft) {
+        currentSetId = Number(draft.setId) || currentSetId;
+        currentLevel = Math.min(Math.max(Number(draft.level) || 1, 1), 3);
+        const word = findWordById(draft.wordId);
+        if (!word) {
+            clearDraft();
+            return;
+        }
+        currentWord = word;
+        submitted = false;
+        setInputsDisabled(false);
+        updatePinyin();
+        updateDefinition();
+        updateProgress();
+        updateControls();
+        if (Array.isArray(draft.images)) {
+            draft.images.forEach((dataUrl, index) => {
+                const cell = cells[index];
+                if (cell && typeof dataUrl === 'string') {
+                    const ctx = cell.getContext('2d');
+                    const img = new Image();
+                    img.onload = () => {
+                        ctx.clearRect(0, 0, cell.width, cell.height);
+                        ctx.drawImage(img, 0, 0, cell.width, cell.height);
+                        const state = drawState.get(cell);
+                        if (state) {
+                            state.hasInk = true;
+                        }
+                    };
+                    img.src = dataUrl;
+                }
+            });
+        }
+        setStatus(t('已恢复未完成的书写', 'Restored your draft'), 'success');
+    }
+
+    function findWordById(wordId) {
+        return words.find((item) => String(item.id) === String(wordId)) || null;
+    }
+
     async function startRound(level) {
         try {
             if (!words.length) {
@@ -215,6 +316,7 @@
             currentWord = picked.word;
             currentIndex = picked.index;
             updateWord();
+            saveDraftMeta();
             setStatus(t('已开始听写，请输入答案并提交', 'Dictation started. Please enter your answer.'));
         } catch (error) {
             console.error('Load dictation words error:', error);
@@ -295,6 +397,9 @@
         if (eraserBtn) {
             eraserBtn.disabled = !active || submitted;
         }
+        if (startBtn && submitted) {
+            startBtn.disabled = true;
+        }
     }
 
     function setInputsDisabled(disabled) {
@@ -314,6 +419,7 @@
             const ratio = prev?.ratio || window.devicePixelRatio || 1;
             drawState.set(cell, { drawing: false, hasInk: false, lastX: 0, lastY: 0, moved: false, justDrew: false, ratio });
         });
+        scheduleDraftSave();
     }
 
     function setupCanvas(canvas, index) {
@@ -355,6 +461,7 @@
             const state = drawState.get(canvas);
             if (!state) return;
             state.moved = false;
+            state.downAt = Date.now();
             const { x, y } = getCanvasPoint(canvas, event);
             state.drawing = true;
             state.lastX = x;
@@ -388,8 +495,12 @@
             if (event.pointerId !== undefined) {
                 canvas.releasePointerCapture(event.pointerId);
             }
-            if (!state.moved && !submitted && currentWord) {
+            const tapDuration = state.downAt ? Date.now() - state.downAt : 0;
+            if (!state.moved && tapDuration < 300 && !submitted && currentWord) {
                 openZoom(index);
+            }
+            if (state.moved) {
+                scheduleDraftSave();
             }
         };
 
@@ -398,9 +509,38 @@
         canvas.addEventListener('pointerup', pointerUp);
         canvas.addEventListener('pointerleave', pointerUp);
         canvas.addEventListener('pointercancel', pointerUp);
-        canvas.addEventListener('click', () => {
-            // no-op: zoom is triggered by tap (pointerup) to avoid auto-open on draw.
-        });
+
+        // iOS Safari fallback for touch events when pointer events are unreliable.
+        let touchMoved = false;
+        let touchStartAt = 0;
+        const touchStart = (event) => {
+            touchMoved = false;
+            touchStartAt = Date.now();
+            const state = drawState.get(canvas);
+            if (state) {
+                state.moved = false;
+            }
+        };
+        const touchMove = () => {
+            touchMoved = true;
+            const state = drawState.get(canvas);
+            if (state) {
+                state.moved = true;
+            }
+        };
+        const touchEnd = (event) => {
+            if (touchMoved) {
+                return;
+            }
+            const duration = Date.now() - touchStartAt;
+            if (duration < 300 && !submitted && currentWord) {
+                event.preventDefault();
+                openZoom(index);
+            }
+        };
+        canvas.addEventListener('touchstart', touchStart, { passive: false });
+        canvas.addEventListener('touchmove', touchMove, { passive: false });
+        canvas.addEventListener('touchend', touchEnd, { passive: false });
     }
 
     function setupZoomCanvas() {
@@ -510,6 +650,9 @@
         zoomModal.hidden = true;
         zoomModal.style.display = 'none';
         activeCellIndex = null;
+        if (save) {
+            scheduleDraftSave();
+        }
     }
 
     function clearZoomCanvas() {
@@ -602,6 +745,53 @@
         return canvas.toDataURL('image/png');
     }
 
+    function saveDraftMeta() {
+        if (!draftKey || !currentWord) {
+            return;
+        }
+        const draft = {
+            setId: currentSetId,
+            level: currentLevel,
+            wordId: currentWord.id,
+            images: [],
+            updatedAt: Date.now()
+        };
+        localStorage.setItem(draftKey, JSON.stringify(draft));
+    }
+
+    function scheduleDraftSave() {
+        if (!draftKey || !currentWord) {
+            return;
+        }
+        if (draftSaveTimer) {
+            clearTimeout(draftSaveTimer);
+        }
+        draftSaveTimer = setTimeout(() => {
+            saveDraftImages();
+        }, 400);
+    }
+
+    function saveDraftImages() {
+        if (!draftKey || !currentWord) {
+            return;
+        }
+        const images = cells.map((cell) => cell.toDataURL('image/png'));
+        const draft = {
+            setId: currentSetId,
+            level: currentLevel,
+            wordId: currentWord.id,
+            images,
+            updatedAt: Date.now()
+        };
+        localStorage.setItem(draftKey, JSON.stringify(draft));
+    }
+
+    function clearDraft() {
+        if (draftKey) {
+            localStorage.removeItem(draftKey);
+        }
+    }
+
     function speakCurrent(force = false) {
         if (!currentWord) {
             return;
@@ -681,6 +871,7 @@
             setStatus(t('提交成功，等待人工审核', 'Submitted successfully, waiting for review.'), 'success');
             setInputsDisabled(true);
             updateControls();
+            clearDraft();
             startReviewPolling();
         } catch (error) {
             console.error('Dictation submit error:', error);
