@@ -188,6 +188,35 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
+    app.get('/dictation', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+        if (!req.session.initialized) {
+            req.session.initialized = true;
+            req.session.createdAt = Date.now();
+            generateCSRFToken(req);
+        }
+
+        const username = req.session.user.username;
+        let attempts = 0;
+        try {
+            const result = await pool.query(
+                'SELECT attempts FROM dictation_allowances WHERE username = $1',
+                [username]
+            );
+            if (result.rows.length) {
+                attempts = Number(result.rows[0].attempts || 0);
+            }
+        } catch (error) {
+            console.error('Dictation attempts fetch error:', error);
+        }
+        if (attempts <= 0) {
+            return res.redirect('/');
+        }
+        res.render('dictation', {
+            username,
+            csrfToken: req.session.csrfToken
+        });
+    });
+
     app.get('/spin', requireLogin, requireAuthorized, basicRateLimit, (req, res) => {
         // 初始化session
         if (!req.session.initialized) {
@@ -586,6 +615,128 @@ module.exports = function registerGameRoutes(app, deps) {
         } catch (error) {
             console.error('Balance logs error:', error);
             res.status(500).json({ success: false, message: '获取记录失败' });
+        }
+    });
+
+    app.post('/api/dictation/start',
+        rejectWhenOverloaded,
+        requireLogin,
+        requireAuthorized,
+        basicRateLimit,
+        userActionRateLimit,
+        csrfProtection,
+        async (req, res) => {
+        try {
+            if (req.session.dictationPending && req.session.dictationStartAt) {
+                const elapsed = Date.now() - req.session.dictationStartAt;
+                if (elapsed <= 30 * 60 * 1000) {
+                    return res.status(400).json({ success: false, message: '已有未提交的听写' });
+                }
+                req.session.dictationPending = false;
+                req.session.dictationStartAt = null;
+            }
+
+            const username = req.session.user?.username || '';
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                const attemptsResult = await client.query(
+                    'SELECT attempts FROM dictation_allowances WHERE username = $1 FOR UPDATE',
+                    [username]
+                );
+                const currentAttempts = attemptsResult.rows.length
+                    ? Number(attemptsResult.rows[0].attempts || 0)
+                    : 0;
+                if (!attemptsResult.rows.length || currentAttempts <= 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(403).json({ success: false, message: '听写次数不足' });
+                }
+
+                await client.query(
+                    'UPDATE dictation_allowances SET attempts = GREATEST(attempts - 1, 0), updated_at = NOW() WHERE username = $1',
+                    [username]
+                );
+                await client.query('COMMIT');
+            } catch (error) {
+                await client.query('ROLLBACK').catch(() => {});
+                throw error;
+            } finally {
+                client.release();
+            }
+
+            req.session.dictationPending = true;
+            req.session.dictationStartAt = Date.now();
+
+            res.json({ success: true, message: '开始成功' });
+        } catch (error) {
+            console.error('Dictation start error:', error);
+            res.status(500).json({ success: false, message: '开始失败' });
+        }
+    });
+
+    app.post('/api/dictation/submit',
+        rejectWhenOverloaded,
+        requireLogin,
+        requireAuthorized,
+        basicRateLimit,
+        userActionRateLimit,
+        csrfProtection,
+        async (req, res) => {
+        try {
+            const startAt = req.session.dictationStartAt;
+            if (!req.session.dictationPending || !startAt) {
+                return res.status(400).json({ success: false, message: '听写未开始' });
+            }
+            if (Date.now() - startAt > 30 * 60 * 1000) {
+                req.session.dictationPending = false;
+                req.session.dictationStartAt = null;
+                return res.status(400).json({ success: false, message: '听写已过期，请重新开始' });
+            }
+
+            const sanitizeText = (value, maxLen) => {
+                if (typeof value !== 'string') {
+                    return '';
+                }
+                return value.trim().slice(0, maxLen);
+            };
+
+            const wordId = sanitizeText(req.body?.wordId, 50);
+            const word = sanitizeText(req.body?.word, 120);
+            const pronunciation = sanitizeText(req.body?.pronunciation, 120);
+            const definition = sanitizeText(req.body?.definition, 400);
+            const userInput = sanitizeText(req.body?.input, 120);
+
+            if (!wordId || !userInput) {
+                return res.status(400).json({ success: false, message: '请填写听写内容后再提交' });
+            }
+
+            const userId = req.session.user?.id || null;
+            const username = req.session.user?.username || '';
+
+            await pool.query(
+                `INSERT INTO dictation_submissions
+                    (user_id, username, word_id, word, pronunciation, definition, user_input, ip_address, user_agent)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                [
+                    userId,
+                    username,
+                    wordId,
+                    word || null,
+                    pronunciation || null,
+                    definition || null,
+                    userInput,
+                    req.ip,
+                    req.get('User-Agent')
+                ]
+            );
+
+            req.session.dictationPending = false;
+            req.session.dictationStartAt = null;
+
+            res.json({ success: true, message: '提交成功，等待人工审核' });
+        } catch (error) {
+            console.error('Dictation submit error:', error);
+            res.status(500).json({ success: false, message: '提交失败' });
         }
     });
 

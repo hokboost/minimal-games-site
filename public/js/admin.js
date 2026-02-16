@@ -158,6 +158,7 @@ function addElectricCoin(username, btn) {
         .catch(() => alert(t('取消请求失败', 'Revoke request failed')));
     }
 
+
     function resetPassword(username, btn) {
         const confirmReset = confirm(t(
             `确定要重置用户 "${username}" 的密码吗？\\n\\n新密码将设置为: 123456`,

@@ -28,7 +28,12 @@
         '无效随机串': 'Invalid nonce',
         '请求过于频繁': 'Too many requests',
         '重复请求': 'Duplicate request',
-        '签名不匹配': 'Signature mismatch'
+        '签名不匹配': 'Signature mismatch',
+        '听写次数不足': 'No dictation attempts remaining',
+        '已有未提交的听写': 'There is already an active dictation',
+        '听写未开始': 'Dictation has not started',
+        '听写已过期，请重新开始': 'Dictation expired, please start again',
+        '开始失败': 'Failed to start dictation'
     };
 
     const translateServerMessage = (message) => {

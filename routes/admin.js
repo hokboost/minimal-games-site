@@ -147,6 +147,26 @@ module.exports = function registerAdminRoutes(app, deps) {
                 `)
             ]);
 
+            let dictationSubmissions = [];
+            try {
+                const dictationResult = await pool.query(`
+                    SELECT id,
+                           username,
+                           word,
+                           pronunciation,
+                           definition,
+                           user_input,
+                           status,
+                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as submitted_at
+                    FROM dictation_submissions
+                    ORDER BY created_at DESC
+                    LIMIT 100
+                `);
+                dictationSubmissions = dictationResult.rows;
+            } catch (error) {
+                console.error('Dictation submissions query error:', error);
+            }
+
             const latestRecords = {};
             users.forEach((user) => {
                 latestRecords[user.username] = {
@@ -212,6 +232,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 userLoggedIn: req.session.user?.username,
                 users: users,
                 latestRecords: latestRecords,
+                dictationSubmissions: dictationSubmissions,
                 csrfToken: req.session.csrfToken
             });
         } catch (err) {
@@ -430,6 +451,7 @@ module.exports = function registerAdminRoutes(app, deps) {
             res.status(500).json({ success: false, message: '服务器错误' });
         }
     });
+
 
     // 重置密码
     app.post('/api/admin/reset-password', ...adminApiGuards, requireCSRF, async (req, res) => {
