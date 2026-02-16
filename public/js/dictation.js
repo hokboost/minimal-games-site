@@ -25,7 +25,7 @@
     let startInProgress = false;
     const drawState = new Map();
 
-    const dataUrl = '/dictation/words.json';
+    const dataUrl = '/api/dictation/words';
 
     if (startBtn) {
         startBtn.addEventListener('click', startDictation);
@@ -102,7 +102,8 @@
         if (!resp.ok) {
             throw new Error('Failed to load dictation words');
         }
-        const data = await resp.json();
+        const payload = await resp.json();
+        const data = Array.isArray(payload) ? payload : payload.words;
         if (!Array.isArray(data) || data.length === 0) {
             throw new Error('No dictation words found');
         }

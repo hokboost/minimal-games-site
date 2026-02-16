@@ -690,6 +690,20 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     });
 
+    app.get('/api/dictation/words', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            const filePath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
+            const raw = await fs.promises.readFile(filePath, 'utf8');
+            const data = JSON.parse(raw);
+            res.json({ success: true, words: data });
+        } catch (error) {
+            console.error('Dictation words load error:', error);
+            res.status(500).json({ success: false, message: '加载听写词库失败' });
+        }
+    });
+
     app.post('/api/dictation/submit',
         rejectWhenOverloaded,
         requireLogin,
