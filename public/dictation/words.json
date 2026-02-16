@@ -25,7 +25,7 @@
     "set_id": 2,
     "word": "以管窥天",
     "pronunciation": "yi3 guan3 kui1 tian1",
-    "definition": "比喻见识狭小，用yi3管窥tian1。"
+    "definition": "从竹guan3里面看tian1，比喻见识狭窄。"
   },
   {
     "id": "005",
@@ -40,5 +40,47 @@
     "word": "以莛撞钟",
     "pronunciation": "yi3 ting2 zhuang4 zhong1",
     "definition": "比喻用微薄之力，做难以奏效的事。例句：以管窥天，以蠡测海，yi3 ting2 zhuang4 zhong1。"
+  },
+  {
+    "id": "007",
+    "set_id": 3,
+    "word": "寡妇",
+    "pronunciation": "gua3 fu5",
+    "definition": "丈夫去世的女子。"
+  },
+  {
+    "id": "008",
+    "set_id": 3,
+    "word": "茕茕孑立",
+    "pronunciation": "qiong2 qiong2 jie2 li4",
+    "definition": "形容孤孤单单，无依无靠。"
+  },
+  {
+    "id": "009",
+    "set_id": 3,
+    "word": "鳏寡孤独",
+    "pronunciation": "guan1 gua3 gu1 du2",
+    "definition": "泛指无依无靠的人。"
+  },
+  {
+    "id": "010",
+    "set_id": 4,
+    "word": "孤苦伶仃",
+    "pronunciation": "gu1 ku3 ling2 ding1",
+    "definition": "形容gu1单困苦，无依无靠。"
+  },
+  {
+    "id": "011",
+    "set_id": 4,
+    "word": "踽踽独行",
+    "pronunciation": "ju3 ju3 du2 xing2",
+    "definition": "形容du2自走路，孤单寂寞。"
+  },
+  {
+    "id": "012",
+    "set_id": 4,
+    "word": "伶俜",
+    "pronunciation": "ling2 ping1",
+    "definition": "形容孤单无依的样子。"
   }
 ]

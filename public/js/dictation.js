@@ -345,18 +345,6 @@
             if (event.pointerId !== undefined) {
                 canvas.setPointerCapture(event.pointerId);
             }
-            const ctx = canvas.getContext('2d');
-            applyBrush(ctx, state.ratio);
-            ctx.beginPath();
-            ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2);
-            ctx.fillStyle = isEraser ? 'rgba(0,0,0,1)' : '#ffffff';
-            if (isEraser) {
-                ctx.globalCompositeOperation = 'destination-out';
-            } else {
-                ctx.globalCompositeOperation = 'source-over';
-            }
-            ctx.fill();
-            state.hasInk = true;
         };
         const pointerMove = (event) => {
             const state = drawState.get(canvas);
@@ -428,18 +416,6 @@
             if (event.pointerId !== undefined) {
                 zoomCanvas.setPointerCapture(event.pointerId);
             }
-            const ctx = zoomCanvas.getContext('2d');
-            applyBrush(ctx, zoomState.ratio, true);
-            ctx.beginPath();
-            ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2);
-            ctx.fillStyle = isEraser ? 'rgba(0,0,0,1)' : '#ffffff';
-            if (isEraser) {
-                ctx.globalCompositeOperation = 'destination-out';
-            } else {
-                ctx.globalCompositeOperation = 'source-over';
-            }
-            ctx.fill();
-            zoomState.hasInk = true;
         };
         const pointerMove = (event) => {
             if (!zoomState || !zoomState.drawing) return;
@@ -709,11 +685,18 @@
             if (data.status === 'correct') {
                 stopReviewPolling();
                 const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
-                setStatus(
-                    t(`审核通过，进入下一关。${answerText}`, `Approved. Moving to next level. ${answerText}`),
-                    'success'
-                );
-                await autoAdvance();
+                if (Number(data.level) >= 3) {
+                    setStatus(
+                        t(`恭喜通关！${answerText}`, `Congratulations, cleared all levels. ${answerText}`),
+                        'success'
+                    );
+                } else {
+                    setStatus(
+                        t(`审核通过，进入下一关。${answerText}`, `Approved. Moving to next level. ${answerText}`),
+                        'success'
+                    );
+                    await autoAdvance();
+                }
             } else if (data.status === 'wrong') {
                 stopReviewPolling();
                 currentWord = null;
@@ -722,7 +705,7 @@
                 updateControls();
                 const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
                 setStatus(
-                    t(`审核未通过，已回到第一关，请重新开始。${answerText}`, `Incorrect. Back to level 1, please start again. ${answerText}`),
+                    t(`闯关失败。${answerText}`, `Challenge failed. ${answerText}`),
                     'error'
                 );
             } else if (data.status === 'rewrite') {
