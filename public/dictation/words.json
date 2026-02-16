@@ -1,20 +1,44 @@
 [
   {
     "id": "001",
+    "set_id": 1,
     "word": "命途多舛",
     "pronunciation": "ming4 tu2 duo1 chuan3",
     "definition": "ming4运多波折，遭遇不顺。"
   },
   {
     "id": "002",
+    "set_id": 1,
     "word": "时乖运蹇",
     "pronunciation": "shi2 guai1 yun4 jian3",
     "definition": "shi2运不佳，处境不顺。"
   },
   {
     "id": "003",
+    "set_id": 1,
     "word": "黄杨厄闰",
     "pronunciation": "huang2 yang2 e4 run4",
-    "definition": "比喻遭遇不顺或艰难huang2yang2e4run4之时。"
+    "definition": "比喻时运不济。宋．苏轼《监洞霄宫俞康直郎中所居四咏》之一：「园中草木春无数，只有huang2yang2e4run4年。」"
+  },
+  {
+    "id": "004",
+    "set_id": 2,
+    "word": "以管窥天",
+    "pronunciation": "yi3 guan3 kui1 tian1",
+    "definition": "比喻见识狭小，用yi3管窥tian1。"
+  },
+  {
+    "id": "005",
+    "set_id": 2,
+    "word": "管窥蠡测",
+    "pronunciation": "guan3 kui1 li2 ce4",
+    "definition": "比喻见识短浅，所知有限。"
+  },
+  {
+    "id": "006",
+    "set_id": 2,
+    "word": "以莛撞钟",
+    "pronunciation": "yi3 ting2 zhuang4 zhong1",
+    "definition": "比喻用微薄之力，做难以奏效的事。例句：以管窥天，以蠡测海，yi3 ting2 zhuang4 zhong1。"
   }
 ]

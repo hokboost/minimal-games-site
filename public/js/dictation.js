@@ -12,6 +12,7 @@
     const cells = gridEl ? Array.from(gridEl.querySelectorAll('.dictation-cell')) : [];
     const pinyinRow = document.getElementById('dictation-pinyin');
     const pinyinCells = pinyinRow ? Array.from(pinyinRow.querySelectorAll('.dictation-pinyin-cell')) : [];
+    const definitionEl = document.getElementById('dictation-definition');
     const confirmModal = document.getElementById('dictation-confirm');
     const confirmStartBtn = document.getElementById('confirm-start-btn');
     const cancelStartBtn = document.getElementById('cancel-start-btn');
@@ -29,6 +30,7 @@
     let currentIndex = -1;
     let currentWord = null;
     let currentLevel = 1;
+    let currentSetId = null;
     let submitted = false;
     let voice = null;
     let startInProgress = false;
@@ -143,6 +145,7 @@
         }
         words = data.map((item, index) => ({
             id: String(item.id || index + 1),
+            set_id: Number(item.set_id || 1),
             word: typeof item.word === 'string' ? item.word.trim() : '',
             pronunciation: typeof item.pronunciation === 'string' ? item.pronunciation.trim() : '',
             definition: typeof item.definition === 'string' ? item.definition.trim() : ''
@@ -185,6 +188,7 @@
                 toggleConfirm(true);
                 return;
             }
+            currentSetId = Number(data.setId) || null;
             await startRound(Number(data.level) || 1);
         } catch (error) {
             console.error('Dictation start error:', error);
@@ -222,12 +226,19 @@
         if (!words.length) {
             return null;
         }
-        const index = level - 1;
-        if (words[index]) {
-            return { word: words[index], index };
+        if (currentSetId === null) {
+            return null;
         }
-        const fallbackIndex = Math.floor(Math.random() * words.length);
-        return { word: words[fallbackIndex], index: fallbackIndex };
+        const setWords = words.filter((item) => Number(item.set_id) === Number(currentSetId));
+        const index = level - 1;
+        if (setWords[index]) {
+            const globalIndex = words.findIndex((item) => item.id === setWords[index].id);
+            return { word: setWords[index], index: globalIndex };
+        }
+        const fallbackIndex = Math.floor(Math.random() * setWords.length);
+        const fallback = setWords[fallbackIndex];
+        const globalIndex = words.findIndex((item) => item.id === fallback.id);
+        return { word: fallback, index: globalIndex };
     }
 
     function updateWord() {
@@ -238,6 +249,7 @@
         clearCells();
         setInputsDisabled(false);
         updatePinyin();
+        updateDefinition();
         updateProgress();
         updateControls();
         speakCurrent(false);
@@ -259,6 +271,14 @@
         pinyinCells.forEach((cell, index) => {
             cell.textContent = parts[index] || '-';
         });
+    }
+
+    function updateDefinition() {
+        if (!definitionEl) {
+            return;
+        }
+        const definition = currentWord?.definition || '';
+        definitionEl.textContent = definition;
     }
 
     function updateControls() {
@@ -724,13 +744,14 @@
             },
             body: JSON.stringify({})
         });
-        const data = await resp.json();
-        if (!data.success) {
-            setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
-            return;
+            const data = await resp.json();
+            if (!data.success) {
+                setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
+                return;
+            }
+            currentSetId = Number(data.setId) || currentSetId;
+            await startRound(Number(data.level) || 1);
         }
-        await startRound(Number(data.level) || 1);
-    }
 
     async function retryLevel() {
         const resp = await safeFetch('/api/dictation/retry', {

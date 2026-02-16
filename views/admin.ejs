@@ -249,6 +249,7 @@
                                 <th><%= lang === 'zh' ? '提交时间' : 'Submitted At' %></th>
                                 <th><%= lang === 'zh' ? '用户名' : 'Username' %></th>
                                 <th><%= lang === 'zh' ? '关卡' : 'Level' %></th>
+                                <th><%= lang === 'zh' ? '套题' : 'Set' %></th>
                                 <th><%= lang === 'zh' ? '题号' : 'Word ID' %></th>
                                 <th><%= lang === 'zh' ? '词语' : 'Word' %></th>
                                 <th><%= lang === 'zh' ? '读音' : 'Pronunciation' %></th>
@@ -266,6 +267,7 @@
                                         <td><%= row.submitted_at %></td>
                                         <td><%= row.username || '-' %></td>
                                         <td><%= row.level || '-' %></td>
+                                        <td><%= row.set_id || '-' %></td>
                                         <td><%= row.word_id || '-' %></td>
                                         <td><%= row.word || '-' %></td>
                                         <td><%= row.pronunciation || '-' %></td>
@@ -298,8 +300,44 @@
                                 <% }) %>
                             <% } else { %>
                                 <tr>
-                                    <td colspan="11" style="text-align: center; color: #aaa;">
+                                    <td colspan="12" style="text-align: center; color: #aaa;">
                                         <%= lang === 'zh' ? '暂无听写提交记录' : 'No dictation submissions yet' %>
+                                    </td>
+                                </tr>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="dictation-latest">
+                <h2>🧾 <%= lang === 'zh' ? '听写套题最近结果' : 'Dictation Latest Results' %></h2>
+                <div class="records-table-wrap">
+                    <table class="records-table">
+                        <thead>
+                            <tr>
+                                <th><%= lang === 'zh' ? '用户名' : 'Username' %></th>
+                                <th><%= lang === 'zh' ? '套题' : 'Set' %></th>
+                                <th><%= lang === 'zh' ? '结果' : 'Result' %></th>
+                                <th><%= lang === 'zh' ? '开始时间' : 'Started At' %></th>
+                                <th><%= lang === 'zh' ? '结束时间' : 'Ended At' %></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (dictationLatest && dictationLatest.length) { %>
+                                <% dictationLatest.forEach(row => { %>
+                                    <tr>
+                                        <td><%= row.username %></td>
+                                        <td><%= row.set_id %></td>
+                                        <td><%= row.result %></td>
+                                        <td><%= row.started_at || '-' %></td>
+                                        <td><%= row.ended_at || '-' %></td>
+                                    </tr>
+                                <% }) %>
+                            <% } else { %>
+                                <tr>
+                                    <td colspan="5" style="text-align: center; color: #aaa;">
+                                        <%= lang === 'zh' ? '暂无记录' : 'No records' %>
                                     </td>
                                 </tr>
                             <% } %>
@@ -380,6 +418,15 @@
     .dictation-records h2 {
         margin-bottom: 0.8rem;
         color: #4dd0e1;
+    }
+
+    .dictation-latest {
+        margin-top: 2rem;
+    }
+
+    .dictation-latest h2 {
+        margin-bottom: 0.8rem;
+        color: #81ecec;
     }
 
     .records-table-wrap {

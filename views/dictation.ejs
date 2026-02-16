@@ -47,13 +47,14 @@
                     <canvas class="dictation-cell" data-cell="1"></canvas>
                     <canvas class="dictation-cell" data-cell="2"></canvas>
                     <canvas class="dictation-cell" data-cell="3"></canvas>
+                </div>
+                <div class="dictation-grid-actions">
+                    <button id="eraser-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '橡皮擦' : 'Eraser' %></button>
+                    <button id="clear-grid-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '清空重写' : 'Clear' %></button>
+                    <span class="dictation-grid-hint"><%= lang === 'zh' ? '请手写在田字格内' : 'Write by hand in the grid' %></span>
+                </div>
+                <div class="dictation-definition" id="dictation-definition"></div>
             </div>
-            <div class="dictation-grid-actions">
-                <button id="eraser-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '橡皮擦' : 'Eraser' %></button>
-                <button id="clear-grid-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '清空重写' : 'Clear' %></button>
-                <span class="dictation-grid-hint"><%= lang === 'zh' ? '请手写在田字格内' : 'Write by hand in the grid' %></span>
-            </div>
-        </div>
 
             <div class="submit-controls">
                 <button id="submit-btn" class="primary-btn" disabled>✅ <%= lang === 'zh' ? '确认提交' : 'Submit' %></button>
@@ -303,6 +304,18 @@
         .dictation-grid-hint {
             color: #b2bec3;
             font-size: 0.85rem;
+        }
+
+        .dictation-definition {
+            margin-top: 0.8rem;
+            padding: 0.7rem 0.9rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            color: #e0f7fa;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            max-width: 520px;
         }
 
         .ghost-btn.active {

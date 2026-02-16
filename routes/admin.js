@@ -158,6 +158,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                            definition,
                            user_input,
                            level,
+                           set_id,
+                           session_id,
                            image_path,
                            status,
                            to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as submitted_at
@@ -168,6 +170,23 @@ module.exports = function registerAdminRoutes(app, deps) {
                 dictationSubmissions = dictationResult.rows;
             } catch (error) {
                 console.error('Dictation submissions query error:', error);
+            }
+
+            let dictationLatest = [];
+            try {
+                const latestResult = await pool.query(`
+                    SELECT DISTINCT ON (username)
+                           username,
+                           set_id,
+                           result,
+                           to_char(ended_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as ended_at,
+                           to_char(started_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as started_at
+                    FROM dictation_sessions
+                    ORDER BY username, COALESCE(ended_at, started_at) DESC
+                `);
+                dictationLatest = latestResult.rows;
+            } catch (error) {
+                console.error('Dictation latest session query error:', error);
             }
 
             const latestRecords = {};
@@ -236,6 +255,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 users: users,
                 latestRecords: latestRecords,
                 dictationSubmissions: dictationSubmissions,
+                dictationLatest: dictationLatest,
                 csrfToken: req.session.csrfToken
             });
         } catch (err) {
@@ -564,7 +584,7 @@ module.exports = function registerAdminRoutes(app, deps) {
             try {
                 await client.query('BEGIN');
                 const submissionResult = await client.query(
-                    'SELECT username, level FROM dictation_submissions WHERE id = $1 FOR UPDATE',
+                    'SELECT username, level, set_id, session_id FROM dictation_submissions WHERE id = $1 FOR UPDATE',
                     [id]
                 );
                 if (!submissionResult.rows.length) {
@@ -574,6 +594,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                 const submission = submissionResult.rows[0];
                 const username = submission.username;
                 const level = Number(submission.level || 1);
+                const setId = submission.set_id !== null ? Number(submission.set_id) : null;
+                const sessionId = submission.session_id || null;
                 notifyUsername = username;
                 notifyLevel = level;
 
@@ -596,14 +618,35 @@ module.exports = function registerAdminRoutes(app, deps) {
 
                     if (progressResult.rows.length) {
                         await client.query(
-                            'UPDATE dictation_progress SET level = $1, updated_at = NOW() WHERE username = $2',
-                            [nextLevel, username]
+                            'UPDATE dictation_progress SET level = $1, set_id = $2, session_id = $3, updated_at = NOW() WHERE username = $4',
+                            [nextLevel, setId, sessionId, username]
                         );
                     } else {
                         await client.query(
-                            'INSERT INTO dictation_progress (username, level) VALUES ($1, $2)',
-                            [username, nextLevel]
+                            'INSERT INTO dictation_progress (username, level, set_id, session_id) VALUES ($1, $2, $3, $4)',
+                            [username, nextLevel, setId, sessionId]
                         );
+                    }
+
+                    if (sessionId) {
+                        let result = null;
+                        if (status === 'wrong') {
+                            result = 'failed';
+                        } else if (status === 'correct' && level >= 3) {
+                            result = 'passed';
+                        }
+                        if (result) {
+                            await client.query(
+                                'UPDATE dictation_sessions SET result = $1, ended_at = NOW() WHERE id = $2',
+                                [result, sessionId]
+                            );
+                            if (status === 'wrong') {
+                                await client.query(
+                                    'UPDATE dictation_progress SET level = 1, set_id = NULL, session_id = NULL, updated_at = NOW() WHERE username = $1',
+                                    [username]
+                                );
+                            }
+                        }
                     }
                 }
 

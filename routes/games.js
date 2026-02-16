@@ -632,12 +632,16 @@ module.exports = function registerGameRoutes(app, deps) {
             try {
                 await client.query('BEGIN');
                 let level = 1;
+                let setId = null;
+                let sessionId = null;
                 const progressResult = await client.query(
-                    'SELECT level FROM dictation_progress WHERE username = $1 FOR UPDATE',
+                    'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1 FOR UPDATE',
                     [username]
                 );
                 if (progressResult.rows.length) {
                     level = Number(progressResult.rows[0].level || 1);
+                    setId = progressResult.rows[0].set_id !== null ? Number(progressResult.rows[0].set_id) : null;
+                    sessionId = progressResult.rows[0].session_id || null;
                 } else {
                     await client.query(
                         'INSERT INTO dictation_progress (username, level) VALUES ($1, 1)',
@@ -652,9 +656,29 @@ module.exports = function registerGameRoutes(app, deps) {
                     level = 3;
                 }
 
+                if (level === 1 || !setId) {
+                    const fs = require('fs');
+                    const path = require('path');
+                    const filePath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
+                    const raw = await fs.promises.readFile(filePath, 'utf8');
+                    const data = JSON.parse(raw);
+                    const setIds = Array.from(new Set(data.map((item) => Number(item.set_id || 1))))
+                        .filter((v) => Number.isFinite(v));
+                    if (setIds.length === 0) {
+                        await client.query('ROLLBACK');
+                        return res.status(500).json({ success: false, message: '题库未配置' });
+                    }
+                    setId = setIds[Math.floor(Math.random() * setIds.length)];
+                    const sessionResult = await client.query(
+                        'INSERT INTO dictation_sessions (username, set_id, started_at, result) VALUES ($1, $2, NOW(), $3) RETURNING id',
+                        [username, setId, 'in_progress']
+                    );
+                    sessionId = sessionResult.rows[0].id;
+                }
+
                 await client.query(
-                    'UPDATE dictation_progress SET level = $1, updated_at = NOW() WHERE username = $2',
-                    [level, username]
+                    'UPDATE dictation_progress SET level = $1, set_id = $2, session_id = $3, updated_at = NOW() WHERE username = $4',
+                    [level, setId, sessionId, username]
                 );
 
                 if (level === 1) {
@@ -677,7 +701,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 }
                 await client.query('COMMIT');
 
-                res.json({ success: true, message: '开始成功', level });
+                res.json({ success: true, message: '开始成功', level, setId });
             } catch (error) {
                 await client.query('ROLLBACK').catch(() => {});
                 throw error;
@@ -797,13 +821,17 @@ module.exports = function registerGameRoutes(app, deps) {
             const userId = req.session.user?.id || null;
             const username = req.session.user?.username || '';
             let level = 1;
+            let setId = null;
+            let sessionId = null;
             try {
                 const progressResult = await pool.query(
-                    'SELECT level FROM dictation_progress WHERE username = $1',
+                    'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1',
                     [username]
                 );
                 if (progressResult.rows.length) {
                     level = Number(progressResult.rows[0].level || 1);
+                    setId = progressResult.rows[0].set_id !== null ? Number(progressResult.rows[0].set_id) : null;
+                    sessionId = progressResult.rows[0].session_id || null;
                 }
             } catch (progressError) {
                 console.error('Dictation progress fetch error:', progressError);
@@ -821,8 +849,8 @@ module.exports = function registerGameRoutes(app, deps) {
 
             await pool.query(
                 `INSERT INTO dictation_submissions
-                    (user_id, username, word_id, word, pronunciation, definition, user_input, level, image_path, ip_address, user_agent)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                    (user_id, username, word_id, word, pronunciation, definition, user_input, level, set_id, session_id, image_path, ip_address, user_agent)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
                 [
                     userId,
                     username,
@@ -832,6 +860,8 @@ module.exports = function registerGameRoutes(app, deps) {
                     definition || null,
                     userInput,
                     Number.isFinite(level) ? level : 1,
+                    Number.isFinite(setId) ? setId : null,
+                    sessionId || null,
                     imagePath,
                     req.ip,
                     req.get('User-Agent')
