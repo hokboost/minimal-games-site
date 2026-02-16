@@ -589,7 +589,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                     );
                     let nextLevel = 1;
                     if (status === 'correct') {
-                        nextLevel = Math.min(Math.max(level, 1) + 1, 5);
+                        nextLevel = Math.min(Math.max(level, 1) + 1, 3);
                     } else if (status === 'wrong') {
                         nextLevel = 1;
                     }

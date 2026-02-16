@@ -10,6 +10,8 @@
     const progressEl = document.getElementById('dictation-progress');
     const gridEl = document.getElementById('dictation-grid');
     const cells = gridEl ? Array.from(gridEl.querySelectorAll('.dictation-cell')) : [];
+    const pinyinRow = document.getElementById('dictation-pinyin');
+    const pinyinCells = pinyinRow ? Array.from(pinyinRow.querySelectorAll('.dictation-pinyin-cell')) : [];
     const confirmModal = document.getElementById('dictation-confirm');
     const confirmStartBtn = document.getElementById('confirm-start-btn');
     const cancelStartBtn = document.getElementById('cancel-start-btn');
@@ -201,7 +203,7 @@
             if (!words.length) {
                 await loadWords();
             }
-            currentLevel = Math.min(Math.max(level, 1), 5);
+            currentLevel = Math.min(Math.max(level, 1), 3);
             const picked = pickWordByLevel(currentLevel);
             if (!picked) {
                 throw new Error('No dictation word found for level');
@@ -235,6 +237,7 @@
         submitted = false;
         clearCells();
         setInputsDisabled(false);
+        updatePinyin();
         updateProgress();
         updateControls();
         speakCurrent(false);
@@ -244,7 +247,18 @@
         if (!progressEl || !words.length) {
             return;
         }
-        progressEl.textContent = t(`第 ${currentLevel} 关 / 5`, `Level ${currentLevel} / 5`);
+        progressEl.textContent = t(`第 ${currentLevel} 关 / 3`, `Level ${currentLevel} / 3`);
+    }
+
+    function updatePinyin() {
+        if (!pinyinCells.length) {
+            return;
+        }
+        const pinyin = (currentWord?.pronunciation || '').trim();
+        const parts = pinyin ? pinyin.split(/\s+/) : [];
+        pinyinCells.forEach((cell, index) => {
+            cell.textContent = parts[index] || '-';
+        });
     }
 
     function updateControls() {

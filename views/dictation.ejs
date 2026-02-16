@@ -36,11 +36,17 @@
 
             <div class="input-section">
                 <label><%= lang === 'zh' ? '田字格听写' : 'Dictation Grid' %></label>
-            <div class="dictation-grid" id="dictation-grid">
-                <canvas class="dictation-cell" data-cell="0"></canvas>
-                <canvas class="dictation-cell" data-cell="1"></canvas>
-                <canvas class="dictation-cell" data-cell="2"></canvas>
-                <canvas class="dictation-cell" data-cell="3"></canvas>
+                <div class="dictation-pinyin" id="dictation-pinyin">
+                    <span class="dictation-pinyin-cell">-</span>
+                    <span class="dictation-pinyin-cell">-</span>
+                    <span class="dictation-pinyin-cell">-</span>
+                    <span class="dictation-pinyin-cell">-</span>
+                </div>
+                <div class="dictation-grid" id="dictation-grid">
+                    <canvas class="dictation-cell" data-cell="0"></canvas>
+                    <canvas class="dictation-cell" data-cell="1"></canvas>
+                    <canvas class="dictation-cell" data-cell="2"></canvas>
+                    <canvas class="dictation-cell" data-cell="3"></canvas>
             </div>
             <div class="dictation-grid-actions">
                 <button id="eraser-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '橡皮擦' : 'Eraser' %></button>
@@ -252,6 +258,22 @@
             grid-template-columns: repeat(4, minmax(60px, 1fr));
             gap: 0.8rem;
             max-width: 360px;
+        }
+
+        .dictation-pinyin {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(60px, 1fr));
+            gap: 0.8rem;
+            max-width: 360px;
+            margin-bottom: 0.4rem;
+            color: #4dd0e1;
+            font-size: 0.85rem;
+            text-align: center;
+            letter-spacing: 0.5px;
+        }
+
+        .dictation-pinyin-cell {
+            min-height: 1rem;
         }
 
         .dictation-cell {

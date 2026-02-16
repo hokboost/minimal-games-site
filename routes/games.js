@@ -648,8 +648,8 @@ module.exports = function registerGameRoutes(app, deps) {
 
                 if (!Number.isFinite(level) || level < 1) {
                     level = 1;
-                } else if (level > 5) {
-                    level = 5;
+                } else if (level > 3) {
+                    level = 3;
                 }
 
                 await client.query(

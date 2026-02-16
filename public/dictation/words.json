@@ -1,32 +1,20 @@
 [
   {
     "id": "001",
-    "word": "山河",
-    "pronunciation": "shan1 he2",
-    "definition": "山与河流，泛指自然景观。"
+    "word": "命途多舛",
+    "pronunciation": "ming4 tu2 duo1 chuan3",
+    "definition": "命运多波折，遭遇不顺。"
   },
   {
     "id": "002",
-    "word": "温暖",
-    "pronunciation": "wen1 nuan3",
-    "definition": "温和使人感到舒服或亲切。"
+    "word": "时乖运蹇",
+    "pronunciation": "shi2 guai1 yun4 jian3",
+    "definition": "时运不佳，处境不顺。"
   },
   {
     "id": "003",
-    "word": "勤奋",
-    "pronunciation": "qin2 fen4",
-    "definition": "努力不懈地学习或工作。"
-  },
-  {
-    "id": "004",
-    "word": "测试",
-    "pronunciation": "ce4 shi4",
-    "definition": "用于检验或试验的过程。"
-  },
-  {
-    "id": "005",
-    "word": "人山人海",
-    "pronunciation": "ren2 shan1 ren2 hai3",
-    "definition": "形容人非常多，像山和海一样密集。"
+    "word": "黄杨厄闰",
+    "pronunciation": "huang2 yang2 e4 run4",
+    "definition": "比喻遭遇不顺或艰难时运。"
   }
 ]
