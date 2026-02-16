@@ -13,6 +13,7 @@
     const confirmModal = document.getElementById('dictation-confirm');
     const confirmStartBtn = document.getElementById('confirm-start-btn');
     const cancelStartBtn = document.getElementById('cancel-start-btn');
+    const clearGridBtn = document.getElementById('clear-grid-btn');
 
     let csrf = document.body.dataset.csrfToken || '';
     let words = [];
@@ -22,6 +23,7 @@
     let submitted = false;
     let voice = null;
     let startInProgress = false;
+    const drawState = new Map();
 
     const dataUrl = '/dictation/words.json';
 
@@ -40,15 +42,21 @@
     if (cancelStartBtn) {
         cancelStartBtn.addEventListener('click', () => toggleConfirm(false));
     }
+    if (clearGridBtn) {
+        clearGridBtn.addEventListener('click', clearCells);
+    }
     cells.forEach((cell, index) => {
-        cell.addEventListener('input', () => handleCellInput(index));
-        cell.addEventListener('keydown', (event) => handleCellKeydown(event, index));
+        setupCanvas(cell, index);
     });
 
     if ('speechSynthesis' in window) {
         const updateVoice = () => {
             const voices = window.speechSynthesis.getVoices();
-            voice = voices.find((v) => v.lang && v.lang.toLowerCase().startsWith('zh')) || null;
+            const zhVoices = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('zh'));
+            voice = zhVoices.find((v) => v.lang.toLowerCase().includes('zh-cn'))
+                || zhVoices.find((v) => /mandarin|chinese|putonghua/i.test(v.name))
+                || zhVoices[0]
+                || null;
         };
         updateVoice();
         window.speechSynthesis.addEventListener('voiceschanged', updateVoice);
@@ -214,49 +222,117 @@
         if (submitBtn) {
             submitBtn.disabled = !active || submitted;
         }
-    }
-
-    function setInputsDisabled(disabled) {
-        cells.forEach((cell) => {
-            cell.disabled = disabled;
-        });
+        if (clearGridBtn) {
+            clearGridBtn.disabled = !active || submitted;
+        }
     }
 
     function clearCells() {
         cells.forEach((cell) => {
-            cell.value = '';
+            const ctx = cell.getContext('2d');
+            const { width, height } = cell;
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+            ctx.fillRect(0, 0, width, height);
+            drawState.set(cell, { drawing: false, hasInk: false, lastX: 0, lastY: 0 });
         });
-        if (cells[0]) {
-            cells[0].focus();
-        }
     }
 
-    function handleCellInput(index) {
-        const cell = cells[index];
-        if (!cell) {
-            return;
-        }
-        const value = cell.value.trim();
-        if (value.length > 1) {
-            cell.value = value.charAt(0);
-        }
-        if (value && cells[index + 1]) {
-            cells[index + 1].focus();
-        }
-    }
+    function setupCanvas(canvas, index) {
+        const resize = () => {
+            const ratio = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+            canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+            const ctx = canvas.getContext('2d');
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 4 * ratio;
+            ctx.strokeStyle = '#ffffff';
+            drawState.set(canvas, { drawing: false, hasInk: false, lastX: 0, lastY: 0 });
+        };
+        resize();
+        window.addEventListener('resize', resize);
 
-    function handleCellKeydown(event, index) {
-        if (event.key === 'Backspace' && !cells[index].value && cells[index - 1]) {
-            cells[index - 1].focus();
-        }
-        if (event.key === 'Enter') {
+        const pointerDown = (event) => {
             event.preventDefault();
-            submitAnswer();
-        }
+            const state = drawState.get(canvas);
+            if (!state) return;
+            const { x, y } = getCanvasPoint(canvas, event);
+            state.drawing = true;
+            state.lastX = x;
+            state.lastY = y;
+        };
+        const pointerMove = (event) => {
+            const state = drawState.get(canvas);
+            if (!state || !state.drawing) return;
+            event.preventDefault();
+            const ctx = canvas.getContext('2d');
+            const { x, y } = getCanvasPoint(canvas, event);
+            ctx.beginPath();
+            ctx.moveTo(state.lastX, state.lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            state.lastX = x;
+            state.lastY = y;
+            state.hasInk = true;
+        };
+        const pointerUp = (event) => {
+            const state = drawState.get(canvas);
+            if (!state) return;
+            event.preventDefault();
+            state.drawing = false;
+        };
+
+        canvas.addEventListener('pointerdown', pointerDown);
+        canvas.addEventListener('pointermove', pointerMove);
+        canvas.addEventListener('pointerup', pointerUp);
+        canvas.addEventListener('pointerleave', pointerUp);
     }
 
-    function collectInput() {
-        return cells.map((cell) => cell.value.trim()).join('').trim();
+    function getCanvasPoint(canvas, event) {
+        const rect = canvas.getBoundingClientRect();
+        const ratioX = canvas.width / rect.width;
+        const ratioY = canvas.height / rect.height;
+        const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+        const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+        return {
+            x: (clientX - rect.left) * ratioX,
+            y: (clientY - rect.top) * ratioY
+        };
+    }
+
+    function hasAnyInk() {
+        return cells.some((cell) => {
+            const state = drawState.get(cell);
+            return state && state.hasInk;
+        });
+    }
+
+    function buildCompositeImage() {
+        const ratio = window.devicePixelRatio || 1;
+        const cellWidth = cells[0]?.width || 200;
+        const cellHeight = cells[0]?.height || 200;
+        const gap = Math.floor(12 * ratio);
+        const cols = 2;
+        const rows = 2;
+        const width = cols * cellWidth + (cols - 1) * gap;
+        const height = rows * cellHeight + (rows - 1) * gap;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+
+        cells.forEach((cell, idx) => {
+            const row = Math.floor(idx / cols);
+            const col = idx % cols;
+            const x = col * (cellWidth + gap);
+            const y = row * (cellHeight + gap);
+            ctx.drawImage(cell, x, y);
+        });
+        return canvas.toDataURL('image/png');
     }
 
     function speakCurrent(force = false) {
@@ -286,6 +362,8 @@
         }
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'zh-CN';
+        utterance.rate = 0.9;
+        utterance.pitch = 1;
         if (voice) {
             utterance.voice = voice;
         }
@@ -299,11 +377,11 @@
         if (!currentWord || submitted) {
             return;
         }
-        const input = collectInput();
-        if (!input) {
-            setStatus(t('请先输入听写内容', 'Please enter your answer.'), 'error');
+        if (!hasAnyInk()) {
+            setStatus(t('请先手写内容', 'Please write your answer.'), 'error');
             return;
         }
+        const imageData = buildCompositeImage();
 
         submitBtn.disabled = true;
         setStatus(t('提交中...', 'Submitting...'));
@@ -320,7 +398,8 @@
                     word: currentWord.word,
                     pronunciation: currentWord.pronunciation,
                     definition: currentWord.definition,
-                    input
+                    input: '',
+                    imageData
                 })
             });
 
@@ -333,7 +412,6 @@
 
             submitted = true;
             setStatus(t('提交成功，等待人工审核', 'Submitted successfully, waiting for review.'), 'success');
-            setInputsDisabled(true);
             updateControls();
         } catch (error) {
             console.error('Dictation submit error:', error);

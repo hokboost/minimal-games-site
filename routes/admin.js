@@ -158,6 +158,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                            definition,
                            user_input,
                            level,
+                           image_path,
                            status,
                            to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as submitted_at
                     FROM dictation_submissions

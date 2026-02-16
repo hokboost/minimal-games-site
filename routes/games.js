@@ -711,9 +711,13 @@ module.exports = function registerGameRoutes(app, deps) {
             const pronunciation = sanitizeText(req.body?.pronunciation, 120);
             const definition = sanitizeText(req.body?.definition, 400);
             const userInput = sanitizeText(req.body?.input, 120);
+            const imageData = req.body?.imageData;
 
-            if (!wordId || !userInput) {
-                return res.status(400).json({ success: false, message: '请填写听写内容后再提交' });
+            if (!wordId) {
+                return res.status(400).json({ success: false, message: '缺少题目信息' });
+            }
+            if (!imageData || typeof imageData !== 'string' || !imageData.startsWith('data:image/png;base64,')) {
+                return res.status(400).json({ success: false, message: '请先手写内容' });
             }
 
             const userId = req.session.user?.id || null;
@@ -731,10 +735,20 @@ module.exports = function registerGameRoutes(app, deps) {
                 console.error('Dictation progress fetch error:', progressError);
             }
 
+            const fs = require('fs');
+            const path = require('path');
+            const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'dictation');
+            await fs.promises.mkdir(uploadDir, { recursive: true });
+            const filename = `${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
+            const filePath = path.join(uploadDir, filename);
+            const base64Data = imageData.replace(/^data:image\/png;base64,/, '');
+            await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'));
+            const imagePath = `/uploads/dictation/${filename}`;
+
             await pool.query(
                 `INSERT INTO dictation_submissions
-                    (user_id, username, word_id, word, pronunciation, definition, user_input, level, ip_address, user_agent)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                    (user_id, username, word_id, word, pronunciation, definition, user_input, level, image_path, ip_address, user_agent)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
                 [
                     userId,
                     username,
@@ -744,6 +758,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     definition || null,
                     userInput,
                     Number.isFinite(level) ? level : 1,
+                    imagePath,
                     req.ip,
                     req.get('User-Agent')
                 ]

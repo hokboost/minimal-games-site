@@ -37,10 +37,14 @@
             <div class="input-section">
                 <label><%= lang === 'zh' ? '田字格听写' : 'Dictation Grid' %></label>
                 <div class="dictation-grid" id="dictation-grid">
-                    <input class="dictation-cell" type="text" inputmode="text" maxlength="1" autocomplete="off" disabled>
-                    <input class="dictation-cell" type="text" inputmode="text" maxlength="1" autocomplete="off" disabled>
-                    <input class="dictation-cell" type="text" inputmode="text" maxlength="1" autocomplete="off" disabled>
-                    <input class="dictation-cell" type="text" inputmode="text" maxlength="1" autocomplete="off" disabled>
+                    <canvas class="dictation-cell" data-cell="0"></canvas>
+                    <canvas class="dictation-cell" data-cell="1"></canvas>
+                    <canvas class="dictation-cell" data-cell="2"></canvas>
+                    <canvas class="dictation-cell" data-cell="3"></canvas>
+                </div>
+                <div class="dictation-grid-actions">
+                    <button id="clear-grid-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '清空重写' : 'Clear' %></button>
+                    <span class="dictation-grid-hint"><%= lang === 'zh' ? '请手写在田字格内' : 'Write by hand in the grid' %></span>
                 </div>
             </div>
 
@@ -243,15 +247,19 @@
                 rgba(0, 0, 0, 0.45);
             border: 1px solid rgba(77, 208, 225, 0.4);
             border-radius: 10px;
-            text-align: center;
-            font-size: 1.6rem;
-            color: #fff;
+            touch-action: none;
         }
 
-        .dictation-cell:focus {
-            outline: none;
-            border-color: #1de9b6;
-            box-shadow: 0 0 0 3px rgba(29, 233, 182, 0.2);
+        .dictation-grid-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            margin-top: 0.6rem;
+        }
+
+        .dictation-grid-hint {
+            color: #b2bec3;
+            font-size: 0.85rem;
         }
 
         .dictation-status {
