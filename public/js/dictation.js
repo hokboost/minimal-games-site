@@ -988,7 +988,8 @@
                 const adminNote = data.adminMessage
                     ? `\n${t('管理员留言：', 'Admin note: ')}${data.adminMessage}`
                     : '';
-                setStatus(t(`请重新书写${adminNote}`, `Please rewrite.${adminNote}`), 'error');
+                const baseMessage = t(`请重新书写${adminNote}`, `Please rewrite.${adminNote}`);
+                await showRewriteCountdown(baseMessage, 5);
                 await retryLevel();
             }
         } catch (error) {
@@ -1045,5 +1046,17 @@
             return;
         }
         await startRound(Number(data.level) || 1);
+    }
+
+    async function showRewriteCountdown(message, seconds) {
+        let remaining = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+        while (remaining > 0) {
+            setStatus(
+                t(`${message}\n${remaining} 秒后重新开始`, `${message}\nRestarting in ${remaining}s`),
+                'error'
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            remaining -= 1;
+        }
     }
 })();
