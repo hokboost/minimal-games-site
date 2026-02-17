@@ -845,20 +845,41 @@
             setStatus(t('当前词条没有读音信息', 'No pronunciation available.'), 'error');
             return;
         }
-        if (force) {
-            window.speechSynthesis.cancel();
+        const doSpeak = () => {
+            if (force) {
+                window.speechSynthesis.cancel();
+            }
+            if (window.speechSynthesis.paused) {
+                window.speechSynthesis.resume();
+            }
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-CN';
+            utterance.rate = 0.7;
+            utterance.pitch = 1;
+            if (voice) {
+                utterance.voice = voice;
+            }
+            utterance.onstart = () => setStatus(t('正在朗读...', 'Speaking...'));
+            utterance.onend = () => setStatus('');
+            utterance.onerror = () => setStatus(t('朗读失败，请重试', 'Speech failed, please retry.'), 'error');
+            window.speechSynthesis.speak(utterance);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        if (!voices || voices.length === 0) {
+            setStatus(t('加载语音中...', 'Loading voice...'));
+            const handleVoices = () => {
+                window.speechSynthesis.removeEventListener('voiceschanged', handleVoices);
+                doSpeak();
+            };
+            window.speechSynthesis.addEventListener('voiceschanged', handleVoices, { once: true });
+            setTimeout(() => {
+                if (window.speechSynthesis.getVoices().length === 0) {
+                    doSpeak();
+                }
+            }, 800);
+            return;
         }
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'zh-CN';
-        utterance.rate = 0.7;
-        utterance.pitch = 1;
-        if (voice) {
-            utterance.voice = voice;
-        }
-        utterance.onstart = () => setStatus(t('正在朗读...', 'Speaking...'));
-        utterance.onend = () => setStatus('');
-        utterance.onerror = () => setStatus(t('朗读失败，请重试', 'Speech failed, please retry.'), 'error');
-        window.speechSynthesis.speak(utterance);
+        doSpeak();
     }
 
     async function submitAnswer() {
