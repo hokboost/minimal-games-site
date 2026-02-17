@@ -976,13 +976,19 @@
                 setInputsDisabled(true);
                 updateControls();
                 const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
+                const adminNote = data.adminMessage
+                    ? `\n${t('管理员留言：', 'Admin note: ')}${data.adminMessage}`
+                    : '';
                 setStatus(
-                    t(`闯关失败。${answerText}`, `Challenge failed. ${answerText}`),
+                    t(`闯关失败。${answerText}${adminNote}`, `Challenge failed. ${answerText}${adminNote}`),
                     'error'
                 );
             } else if (data.status === 'rewrite') {
                 stopReviewPolling();
-                setStatus(t('请重新书写本关', 'Please rewrite this level.'), 'error');
+                const adminNote = data.adminMessage
+                    ? `\n${t('管理员留言：', 'Admin note: ')}${data.adminMessage}`
+                    : '';
+                setStatus(t(`请重新书写${adminNote}`, `Please rewrite.${adminNote}`), 'error');
                 await retryLevel();
             }
         } catch (error) {

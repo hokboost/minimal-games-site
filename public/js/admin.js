@@ -215,11 +215,22 @@ function addElectricCoin(username, btn) {
         if (!id || !status) {
             return;
         }
+        let message = '';
+        if (status === 'wrong' || status === 'rewrite') {
+            const input = prompt(
+                t('请输入给用户的提示（可留空）：', 'Enter a note for the user (optional):'),
+                ''
+            );
+            if (input === null) {
+                return;
+            }
+            message = input.trim();
+        }
         btn.disabled = true;
         adminFetch('/api/admin/dictation/mark', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, status })
+            body: JSON.stringify({ id, status, message })
         })
         .then(res => res.json())
         .then(data => {

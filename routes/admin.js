@@ -577,6 +577,13 @@ module.exports = function registerAdminRoutes(app, deps) {
             if (!id || !allowed.has(status)) {
                 return res.status(400).json({ success: false, message: '参数错误' });
             }
+            let adminMessage = null;
+            if (typeof req.body?.message === 'string') {
+                const trimmed = req.body.message.trim();
+                if (trimmed) {
+                    adminMessage = trimmed.slice(0, 300);
+                }
+            }
 
             let notifyUsername = '';
             let notifyLevel = 1;
@@ -600,8 +607,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                 notifyLevel = level;
 
                 await client.query(
-                    'UPDATE dictation_submissions SET status = $1 WHERE id = $2',
-                    [status, id]
+                    'UPDATE dictation_submissions SET status = $1, admin_message = $2 WHERE id = $3',
+                    [status, adminMessage, id]
                 );
 
                 if (username) {
