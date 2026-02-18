@@ -21,6 +21,10 @@ class WindowsGiftListener {
         this.isProcessing = false;
         this.pythonScript = 'C:/Users/user/minimal-games-site/bilibili_gift_sender.py';
         this.pythonPath = 'python'; // 直接用python命令
+        this.threeServerUrl = 'http://127.0.0.1:9876';
+        this.threeServerRoomId = null;
+        this.threeServerLastCheck = 0;
+        this.threeServerCheckTtl = 5000;
     }
 
     // 启动监听服务
@@ -31,6 +35,7 @@ class WindowsGiftListener {
         console.log('🚀 Windows B站礼物发送监听服务已启动');
         console.log(`📡 监听服务器: ${this.serverUrl}`);
         console.log(`⏰ 轮询间隔: ${this.pollInterval}ms`);
+        console.log(`⚡ threeserver: ${this.threeServerUrl}`);
         console.log(`🐍 Python路径: ${this.pythonPath}`);
         console.log(`📜 脚本路径: ${this.pythonScript}`);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -101,18 +106,47 @@ class WindowsGiftListener {
             // 🛡️ 安全修复：任务已在获取时通过原子操作标记为processing，无需再次标记
             console.log(`🔄 任务 ${task.id} 已通过原子操作获取，开始执行...`);
             
-            // 调用Python脚本，传递数量参数
-            const quantity = task.quantity || 1;
+            const quantity = Number(task.quantity) > 0 ? Number(task.quantity) : 1;
+            const roomId = task.roomId ? String(task.roomId) : '';
+            const threeServerRoomId = await this.getThreeServerRoomId();
+            const canUseThreeServer = roomId && threeServerRoomId && roomId === threeServerRoomId;
+
+            if (canUseThreeServer) {
+                const sendResult = await this.sendToThreeServer(task.giftId, quantity);
+                if (sendResult.success) {
+                    const markResult = await this.markTaskComplete(task.id, {
+                        actualQuantity: quantity,
+                        requestedQuantity: quantity,
+                        partialSuccess: false
+                    });
+                    if (markResult) {
+                        console.log(`✅ 任务 ${task.id} 已提交到threeserver: ${task.giftName} x${quantity}`);
+                    } else {
+                        console.log(`❌ 任务 ${task.id} 处理成功但标记失败，将在下次轮询重试`);
+                    }
+                    return;
+                }
+
+                if (sendResult.balance_insufficient) {
+                    const markResult = await this.markTaskFailed(task.id, sendResult.error || '余额不足', sendResult);
+                    if (markResult) {
+                        console.log(`🚫 任务 ${task.id} 失败: ${sendResult.error || '余额不足'}`);
+                    } else {
+                        console.log(`❌ 任务 ${task.id} 失败且标记失败，将在下次轮询重试`);
+                    }
+                    return;
+                }
+
+                console.log(`⚠️ threeserver发送失败，回退Python发送: ${sendResult.error || '未知错误'}`);
+            }
+
             const result = await this.callPythonScript(task.giftId, task.roomId, quantity);
-            
             if (result.success || result.partial_success) {
-                // 🛡️ 部分成功处理：传递实际发送数量
                 const markResult = await this.markTaskComplete(task.id, {
                     actualQuantity: result.actual_quantity,
                     requestedQuantity: result.requested_quantity,
                     partialSuccess: result.partial_success
                 });
-                
                 if (markResult) {
                     if (result.partial_success) {
                         console.log(`⚠️ 任务 ${task.id} 部分完成: ${task.giftName} ${result.actual_quantity}/${result.requested_quantity} 已发送到房间 ${task.roomId}`);
@@ -123,13 +157,10 @@ class WindowsGiftListener {
                     console.log(`❌ 任务 ${task.id} 处理成功但标记失败，将在下次轮询重试`);
                 }
             } else {
-                // 检查是否是余额不足
                 if (result.balance_insufficient) {
                     console.log(`🚫 任务 ${task.id} 失败: 余额不足！请充值后再试。`);
                     console.log(`⚠️  建议暂停送礼服务直到充值完成`);
                 }
-                
-                // 任务失败，通知服务器
                 const markResult = await this.markTaskFailed(task.id, result.error, result);
                 if (markResult) {
                     console.log(`❌ 任务 ${task.id} 失败: ${result.error}`);
@@ -144,13 +175,53 @@ class WindowsGiftListener {
         }
     }
 
+    async sendToThreeServer(giftId, quantity) {
+        const gifts = Array.from({ length: quantity }, () => String(giftId));
+        try {
+            const response = await axios.post(`${this.threeServerUrl}/send`, { gifts }, { timeout: 3000 });
+            if (response.data?.status === 'ok') {
+                return { success: true };
+            }
+            return { success: false, error: response.data?.error || 'threeserver响应异常' };
+        } catch (error) {
+            return {
+                success: false,
+                balance_insufficient: error.response?.status === 402 || error.response?.data?.balance_insufficient === true,
+                error: error.response?.data?.error || error.message || 'threeserver请求失败'
+            };
+        }
+    }
+
+    async getThreeServerRoomId() {
+        const now = Date.now();
+        if (this.threeServerRoomId && now - this.threeServerLastCheck < this.threeServerCheckTtl) {
+            return this.threeServerRoomId;
+        }
+        try {
+            const response = await axios.get(`${this.threeServerUrl}/`, { timeout: 1000 });
+            const roomId = response.data?.room_id ? String(response.data.room_id) : null;
+            if (roomId) {
+                this.threeServerRoomId = roomId;
+                this.threeServerLastCheck = now;
+                return roomId;
+            }
+            return null;
+        } catch (error) {
+            return null;
+        }
+    }
+
     // 调用Python Playwright脚本
     async callPythonScript(giftId, roomId, quantity = 1) {
         return new Promise((resolve) => {
             console.log(`🐍 调用Python脚本: ${this.pythonPath} ${this.pythonScript} ${giftId} ${roomId} ${quantity}`);
             
             const pythonProcess = spawn(this.pythonPath, [this.pythonScript, giftId, roomId, quantity], {
-                stdio: ['pipe', 'pipe', 'pipe']
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: {
+                    ...process.env,
+                    BILI_COOKIE_PATH: process.env.BILI_COOKIE_PATH || 'C:/Users/user/Desktop/jiaobenbili/cookie.txt'
+                }
             });
 
             let output = '';

@@ -39,18 +39,46 @@ def load_cookies_from_txt(file_path):
                 if line.strip().startswith("#") or not line.strip():
                     continue
                 parts = line.strip().split("\t")
-                if len(parts) >= 7:
+                if len(parts) == 1:
+                    parts = line.strip().split()
+                if len(parts) >= 7 and (parts[0].startswith(".") or parts[0].endswith(".com") or parts[0].endswith(".cn")):
                     domain, _, path, _, _, name, value = parts[:7]
-                    cookies.append({
-                        "name": name,
-                        "value": value,
-                        "domain": domain,
-                        "path": path
-                    })
+                elif len(parts) >= 4:
+                    name, value, domain, path = parts[:4]
+                    if name.lower() in ("name", "cookie") or not domain:
+                        continue
+                else:
+                    continue
+                cookies.append({
+                    "name": name,
+                    "value": value,
+                    "domain": domain,
+                    "path": path
+                })
         return cookies
     except Exception as e:
         safe_print(f"加载cookie文件失败: {e}")
         return []
+
+def normalize_live_cookies(cookies):
+    """补全 live.bilibili.com 需要的关键cookie域名"""
+    key_names = {"SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5"}
+    live_domains = {".live.bilibili.com", "live.bilibili.com"}
+    existing = {(c.get("name"), c.get("domain")) for c in cookies}
+    extras = []
+    for c in cookies:
+        name = c.get("name")
+        if name not in key_names:
+            continue
+        for domain in live_domains:
+            if (name, domain) in existing:
+                continue
+            extra = dict(c)
+            extra["domain"] = domain
+            extras.append(extra)
+    if extras:
+        cookies.extend(extras)
+    return cookies
 
 def get_current_balance(page):
     """获取当前B币余额，完全参考threeserver.py实现"""
@@ -219,8 +247,16 @@ def send_gift_simple(gift_id, room_id, quantity=1):
 
         # 加载cookies
         safe_print("Loading cookies...")
-        cookie_path = 'C:/Users/user/minimal-games-site/cookie.txt'
+        cookie_path = os.environ.get('BILI_COOKIE_PATH', 'C:/Users/user/Desktop/jiaobenbili/cookie.txt')
+        safe_print(f"Cookie path: {cookie_path}")
         cookies = load_cookies_from_txt(cookie_path)
+        cookies = normalize_live_cookies(cookies)
+        if not cookies:
+            return {"success": False, "error": "no_cookies_loaded", "message": "cookie文件为空或解析失败"}
+        cookie_names = {c.get("name") for c in cookies}
+        if "SESSDATA" not in cookie_names or "bili_jct" not in cookie_names:
+            return {"success": False, "error": "missing_key_cookies", "message": "缺少SESSDATA或bili_jct"}
+        safe_print(f"Cookies loaded: {len(cookies)}; has SESSDATA={'SESSDATA' in cookie_names}")
         page.goto("https://www.bilibili.com/")
         page.context.add_cookies(cookies)
         time.sleep(1)

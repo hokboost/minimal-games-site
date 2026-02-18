@@ -40,6 +40,7 @@
     let isEraser = false;
     let activeCellIndex = null;
     let zoomState = null;
+    let lastZoomAt = 0;
     let pendingCheckDone = false;
     let draftSaveTimer = null;
 
@@ -542,36 +543,38 @@
         canvas.addEventListener('pointercancel', pointerUp);
 
         // iOS Safari fallback for touch events when pointer events are unreliable.
-        let touchMoved = false;
-        let touchStartAt = 0;
-        const touchStart = (event) => {
-            touchMoved = false;
-            touchStartAt = Date.now();
-            const state = drawState.get(canvas);
-            if (state) {
-                state.moved = false;
-            }
-        };
-        const touchMove = () => {
-            touchMoved = true;
-            const state = drawState.get(canvas);
-            if (state) {
-                state.moved = true;
-            }
-        };
-        const touchEnd = (event) => {
-            if (touchMoved) {
-                return;
-            }
-            const duration = Date.now() - touchStartAt;
-            if (duration < 300 && !submitted && currentWord) {
-                event.preventDefault();
-                openZoom(index);
-            }
-        };
-        canvas.addEventListener('touchstart', touchStart, { passive: false });
-        canvas.addEventListener('touchmove', touchMove, { passive: false });
-        canvas.addEventListener('touchend', touchEnd, { passive: false });
+        if (!window.PointerEvent) {
+            let touchMoved = false;
+            let touchStartAt = 0;
+            const touchStart = (event) => {
+                touchMoved = false;
+                touchStartAt = Date.now();
+                const state = drawState.get(canvas);
+                if (state) {
+                    state.moved = false;
+                }
+            };
+            const touchMove = () => {
+                touchMoved = true;
+                const state = drawState.get(canvas);
+                if (state) {
+                    state.moved = true;
+                }
+            };
+            const touchEnd = (event) => {
+                if (touchMoved) {
+                    return;
+                }
+                const duration = Date.now() - touchStartAt;
+                if (duration < 300 && !submitted && currentWord) {
+                    event.preventDefault();
+                    openZoom(index);
+                }
+            };
+            canvas.addEventListener('touchstart', touchStart, { passive: false });
+            canvas.addEventListener('touchmove', touchMove, { passive: false });
+            canvas.addEventListener('touchend', touchEnd, { passive: false });
+        }
     }
 
     function setupZoomCanvas() {
@@ -648,6 +651,14 @@
         if (!zoomModal || !zoomCanvas) {
             return;
         }
+        if (!zoomModal.hidden) {
+            return;
+        }
+        const now = Date.now();
+        if (now - lastZoomAt < 350) {
+            return;
+        }
+        lastZoomAt = now;
         activeCellIndex = index;
         zoomModal.hidden = false;
         zoomModal.style.display = 'flex';

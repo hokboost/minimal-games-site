@@ -1,5 +1,6 @@
 @echo off
 cd /d C:\Users\user\minimal-games-site
+set BILI_COOKIE_PATH=C:\Users\user\AppData\Local\BiliPKTool\cookie.txt
 echo.
 echo ========================================
 echo    Windows B站礼物发送监听服务
