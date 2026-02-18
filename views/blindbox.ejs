@@ -276,7 +276,7 @@
         }
     </style>
 </head>
-<body data-csrf-token="<%= csrfToken %>">
+<body data-csrf-token="<%= csrfToken %>" data-blindbox-rates="<%= encodeURIComponent(JSON.stringify(blindboxConfigs || {})) %>">
     <div class="container">
         <div class="header">
             <h1>🎁 <%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></h1>
@@ -325,9 +325,6 @@
             <button class="rate-close" id="rateClose"><%= lang === 'zh' ? '关闭' : 'Close' %></button>
         </div>
     </div>
-    <script>
-        window.__blindboxRates = <%- JSON.stringify(blindboxConfigs || {}) %>;
-    </script>
     <script src="/js/blindbox.js"></script>
 </body>
 </html>

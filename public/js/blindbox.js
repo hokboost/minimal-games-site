@@ -159,7 +159,15 @@
 
     function renderRates() {
         if (!rateContent) return;
-        const config = window.__blindboxRates || {};
+        const rawRates = document.body.dataset.blindboxRates || '';
+        let config = {};
+        if (rawRates) {
+            try {
+                config = JSON.parse(decodeURIComponent(rawRates));
+            } catch (error) {
+                console.error('Blindbox rates parse error:', error);
+            }
+        }
         const tierTitles = {
             starmoon: t('星月盲盒', 'Star Moon Box'),
             heart: t('心动盲盒', 'Heart Box'),

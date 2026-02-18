@@ -333,6 +333,62 @@
             });
         });
 
+        const pkToggleBtn = document.getElementById('pkToggleBtn');
+        const pkStatusText = document.getElementById('pkStatusText');
+        const { csrfToken } = document.body.dataset;
+
+        async function updatePkStatus() {
+            if (!pkToggleBtn) return;
+            try {
+                const response = await fetch('/api/pk/status');
+                const result = await response.json();
+                const running = !!result.running;
+                pkToggleBtn.classList.toggle('stop', running);
+                pkToggleBtn.textContent = running
+                    ? t('关闭自动打PK', 'Stop Auto PK')
+                    : t('开启自动打PK', 'Start Auto PK');
+                if (pkStatusText) {
+                    pkStatusText.textContent = running
+                        ? t('状态：运行中', 'Status: Running')
+                        : t('状态：未运行', 'Status: Stopped');
+                }
+            } catch (error) {
+                console.error('PK status error:', error);
+            }
+        }
+
+        async function togglePk() {
+            if (!pkToggleBtn) return;
+            const isStopping = pkToggleBtn.classList.contains('stop');
+            pkToggleBtn.disabled = true;
+            try {
+                const path = isStopping ? '/api/pk/stop' : '/api/pk/start';
+                const response = await fetch(path, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken || ''
+                    },
+                    body: JSON.stringify({})
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    showMessage(translateServerMessage(result.message) || t('操作失败', 'Action failed'), 'error');
+                }
+            } catch (error) {
+                console.error('PK toggle error:', error);
+                showMessage(t('操作失败', 'Action failed'), 'error');
+            } finally {
+                pkToggleBtn.disabled = false;
+                updatePkStatus();
+            }
+        }
+
+        if (pkToggleBtn) {
+            pkToggleBtn.addEventListener('click', togglePk);
+            updatePkStatus();
+        }
+
         
         const heartboxQuantity = document.getElementById('heartbox-quantity');
         const fanlightQuantity = document.getElementById('fanlight-quantity');

@@ -373,6 +373,20 @@ async function initializeDatabase() {
         } else {
             console.log('✅ batch_value字段已存在');
         }
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS pk_gift_logs (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) NOT NULL,
+                room_id VARCHAR(50),
+                gift_ids JSONB NOT NULL,
+                script_name VARCHAR(50),
+                success BOOLEAN,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
+            )
+        `);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_gift_logs_username ON pk_gift_logs(username, created_at DESC)`);
         
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);

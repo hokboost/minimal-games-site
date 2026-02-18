@@ -11,6 +11,7 @@ module.exports = function registerGiftRoutes(app, deps) {
         enqueueWishInventorySend
     } = deps;
     const crypto = require('crypto');
+    const pkManager = require('../pk-manager');
 
     // 自动处理卡住的礼物任务，超时退款
     const monitorStuckGiftTasks = () => {
@@ -109,6 +110,65 @@ module.exports = function registerGiftRoutes(app, deps) {
         } catch (err) {
             console.error(err);
             res.status(500).send('服务器错误');
+        }
+    });
+
+    app.get('/api/pk/status', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
+        const username = req.session.user.username;
+        res.json({ success: true, running: pkManager.isRunning(username) });
+    });
+
+    app.post('/api/pk/start', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        try {
+            const username = req.session.user.username;
+            const roomResult = await pool.query(
+                'SELECT bilibili_room_id FROM users WHERE username = $1',
+                [username]
+            );
+            const roomId = roomResult.rows[0]?.bilibili_room_id;
+            if (!roomId) {
+                return res.status(400).json({ success: false, message: '请先绑定B站房间号' });
+            }
+            const result = pkManager.startPk(username, roomId);
+            return res.json({ success: true, running: true, started: result.started, pid: result.pid });
+        } catch (error) {
+            console.error('PK start error:', error);
+            return res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    app.post('/api/pk/stop', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, (req, res) => {
+        try {
+            const username = req.session.user.username;
+            const result = pkManager.stopPk(username);
+            return res.json({ success: true, running: false, stopped: result.stopped });
+        } catch (error) {
+            console.error('PK stop error:', error);
+            return res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    app.post('/api/pk/report', requireApiKey, async (req, res) => {
+        try {
+            const { username, roomId, giftIds, script, success, reason } = req.body || {};
+            if (!username || !Array.isArray(giftIds)) {
+                return res.status(400).json({ success: false, message: '参数不完整' });
+            }
+            await pool.query(`
+                INSERT INTO pk_gift_logs (username, room_id, gift_ids, script_name, success, reason)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [
+                username,
+                roomId ? String(roomId) : null,
+                JSON.stringify(giftIds),
+                script ? String(script) : null,
+                typeof success === 'boolean' ? success : null,
+                reason ? String(reason) : null
+            ]);
+            return res.json({ success: true });
+        } catch (error) {
+            console.error('PK report error:', error);
+            return res.status(500).json({ success: false, message: '服务器错误' });
         }
     });
 
