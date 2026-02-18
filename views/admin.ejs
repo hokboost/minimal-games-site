@@ -279,7 +279,7 @@
                                                     <img src="<%= row.image_path %>" alt="dictation" style="width: 64px; height: 64px; object-fit: contain; background: #0b151b; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15);">
                                                 </a>
                                             <% } else { %>
-                                                -
+                                                <%= lang === 'zh' ? '文本提交' : 'Text submission' %>
                                             <% } %>
                                         </td>
                                         <td><%= row.status || '-' %></td>

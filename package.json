@@ -26,6 +26,8 @@
     "ioredis": "^5.7.0",
     "node-fetch": "^2.7.0",
     "pg": "^8.16.0",
+    "pinyin": "^4.0.0",
+    "pinyin-dict": "^0.0.1",
     "playwright": "^1.57.0",
     "redis": "^5.8.1",
     "socket.io": "^4.7.2",

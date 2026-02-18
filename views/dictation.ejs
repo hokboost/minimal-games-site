@@ -35,23 +35,17 @@
             </div>
 
             <div class="input-section">
-                <label><%= lang === 'zh' ? '田字格听写' : 'Dictation Grid' %></label>
-                <div class="dictation-pinyin" id="dictation-pinyin">
-                    <span class="dictation-pinyin-cell">-</span>
-                    <span class="dictation-pinyin-cell">-</span>
-                    <span class="dictation-pinyin-cell">-</span>
-                    <span class="dictation-pinyin-cell">-</span>
-                </div>
-                <div class="dictation-grid" id="dictation-grid">
-                    <canvas class="dictation-cell" data-cell="0"></canvas>
-                    <canvas class="dictation-cell" data-cell="1"></canvas>
-                    <canvas class="dictation-cell" data-cell="2"></canvas>
-                    <canvas class="dictation-cell" data-cell="3"></canvas>
-                </div>
-                <div class="dictation-grid-actions">
-                    <button id="eraser-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '橡皮擦' : 'Eraser' %></button>
-                    <button id="clear-grid-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '清空重写' : 'Clear' %></button>
-                    <span class="dictation-grid-hint"><%= lang === 'zh' ? '请手写在田字格内' : 'Write by hand in the grid' %></span>
+                <label><%= lang === 'zh' ? '同音字选择' : 'Homophone Selection' %></label>
+                <div class="dictation-pinyin" id="dictation-pinyin"></div>
+                <div class="dictation-choice" id="dictation-choice">
+                    <div class="dictation-phrase" id="dictation-phrase"></div>
+                    <div class="dictation-homophone-panel">
+                        <div class="dictation-homophone-title" id="dictation-homophone-title"></div>
+                        <div class="dictation-homophone-list" id="dictation-homophone-list"></div>
+                        <div class="dictation-choice-actions">
+                            <button id="clear-choice-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '清空选择' : 'Clear selection' %></button>
+                        </div>
+                    </div>
                 </div>
                 <div class="dictation-definition" id="dictation-definition"></div>
             </div>
@@ -65,9 +59,9 @@
 
         <div class="dictation-note">
             <% if (lang === 'zh') { %>
-                <strong>使用说明：</strong>点击开始后系统会自动播报词语与解释，请在田字格内输入汉字并提交。提交后进入人工审核，结果以后台人工判定为准。
+                <strong>使用说明：</strong>点击开始后系统会自动播报词语与解释，请按拼音逐字选择同音字完成词语并提交。提交后进入人工审核，结果以后台人工判定为准。
             <% } else { %>
-                <strong>How it works:</strong> After you start, the page reads the word and meaning aloud. Enter the characters in the grid and submit. Submissions are manually reviewed on the backend.
+                <strong>How it works:</strong> After you start, the page reads the word and meaning aloud. Pick a homophone for each syllable and submit. Submissions are manually reviewed on the backend.
             <% } %>
         </div>
     </div>
@@ -79,21 +73,6 @@
             <div class="dictation-confirm-actions">
                 <button id="confirm-start-btn" class="primary-btn"><%= lang === 'zh' ? '确认开始' : 'Confirm' %></button>
                 <button id="cancel-start-btn" class="ghost-btn"><%= lang === 'zh' ? '取消' : 'Cancel' %></button>
-            </div>
-        </div>
-    </div>
-
-    <div id="dictation-zoom" class="dictation-zoom" hidden>
-        <div class="dictation-zoom-card">
-            <div class="dictation-zoom-header">
-                <span><%= lang === 'zh' ? '放大书写' : 'Zoom Writing' %></span>
-                <button id="zoom-close-btn" class="ghost-btn" type="button">✕</button>
-            </div>
-            <canvas id="dictation-zoom-canvas"></canvas>
-            <div class="dictation-zoom-actions">
-                <button id="zoom-eraser-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '橡皮擦' : 'Eraser' %></button>
-                <button id="zoom-clear-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '清空' : 'Clear' %></button>
-                <button id="zoom-save-btn" class="primary-btn" type="button"><%= lang === 'zh' ? '保存' : 'Save' %></button>
             </div>
         </div>
     </div>
@@ -262,19 +241,110 @@
         }
 
         .dictation-pinyin {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(60px, 1fr));
-            gap: 0.8rem;
-            max-width: 360px;
-            margin-bottom: 0.4rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin-bottom: 0.6rem;
             color: #4dd0e1;
             font-size: 0.85rem;
-            text-align: center;
             letter-spacing: 0.5px;
         }
 
         .dictation-pinyin-cell {
-            min-height: 1rem;
+            min-width: 3.2rem;
+            text-align: center;
+            padding: 0.2rem 0.4rem;
+            background: rgba(77, 208, 225, 0.08);
+            border-radius: 6px;
+        }
+
+        .dictation-choice {
+            display: grid;
+            gap: 0.9rem;
+            align-items: start;
+            max-width: 640px;
+        }
+
+        .dictation-phrase {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+
+        .dictation-phrase-cell {
+            width: 64px;
+            height: 64px;
+            border-radius: 12px;
+            border: 2px solid rgba(77, 208, 225, 0.35);
+            background: rgba(0, 0, 0, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.7rem;
+            color: #fff;
+            cursor: pointer;
+            transition: border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .dictation-phrase-cell.active {
+            border-color: rgba(77, 208, 225, 0.9);
+            transform: translateY(-2px);
+        }
+
+        .dictation-homophone-panel {
+            padding: 0.8rem 0.9rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .dictation-homophone-title {
+            font-size: 0.95rem;
+            color: #f6e58d;
+            margin-bottom: 0.6rem;
+        }
+
+        .dictation-homophone-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            max-height: 240px;
+            overflow-y: auto;
+            padding-right: 0.2rem;
+        }
+
+        .dictation-homophone-btn {
+            min-width: 36px;
+            padding: 0.35rem 0.5rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+        }
+
+        .dictation-homophone-btn:hover {
+            border-color: rgba(77, 208, 225, 0.8);
+            background: rgba(77, 208, 225, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .dictation-choice-actions {
+            margin-top: 0.7rem;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .dictation-choice-disabled {
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        .dictation-homophone-empty {
+            color: #b2bec3;
+            font-size: 0.9rem;
         }
 
         .dictation-cell {

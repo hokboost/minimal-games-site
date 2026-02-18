@@ -38,6 +38,140 @@ module.exports = function registerGameRoutes(app, deps) {
     const fs = require('fs');
     const path = require('path');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
+    const dictationHomophoneCache = {
+        map: null
+    };
+    const dictationCharSetCache = {
+        loaded: false,
+        set: null
+    };
+
+    const toneMarkMap = new Map([
+        ['ā', ['a', 1]], ['á', ['a', 2]], ['ǎ', ['a', 3]], ['à', ['a', 4]],
+        ['ē', ['e', 1]], ['é', ['e', 2]], ['ě', ['e', 3]], ['è', ['e', 4]],
+        ['ī', ['i', 1]], ['í', ['i', 2]], ['ǐ', ['i', 3]], ['ì', ['i', 4]],
+        ['ō', ['o', 1]], ['ó', ['o', 2]], ['ǒ', ['o', 3]], ['ò', ['o', 4]],
+        ['ū', ['u', 1]], ['ú', ['u', 2]], ['ǔ', ['u', 3]], ['ù', ['u', 4]],
+        ['ǖ', ['v', 1]], ['ǘ', ['v', 2]], ['ǚ', ['v', 3]], ['ǜ', ['v', 4]],
+        ['ń', ['n', 2]], ['ň', ['n', 3]], ['ǹ', ['n', 4]],
+        ['ḿ', ['m', 2]]
+    ]);
+
+    const toneMarkToNumber = (raw) => {
+        if (!raw) {
+            return '';
+        }
+        let tone = 5;
+        let base = '';
+        for (const ch of String(raw)) {
+            const mapped = toneMarkMap.get(ch);
+            if (mapped) {
+                base += mapped[0];
+                tone = mapped[1];
+                continue;
+            }
+            if (ch === 'ü') {
+                base += 'v';
+                continue;
+            }
+            if (/[a-z]/i.test(ch)) {
+                base += ch.toLowerCase();
+            }
+        }
+        if (!base) {
+            return '';
+        }
+        return `${base}${tone}`;
+    };
+
+    const normalizeNumberSyllable = (raw) => {
+        if (!raw) {
+            return '';
+        }
+        const text = String(raw).trim().toLowerCase().replace(/ü/g, 'v');
+        const match = text.match(/^([a-z]+)([1-5])$/);
+        if (match) {
+            return `${match[1]}${match[2]}`;
+        }
+        const letters = text.replace(/[^a-z]/g, '');
+        if (!letters) {
+            return '';
+        }
+        return `${letters}5`;
+    };
+
+    const loadHomophoneMap = () => {
+        if (dictationHomophoneCache.map) {
+            return dictationHomophoneCache.map;
+        }
+        const fs = require('fs');
+        let sourcePath = null;
+        try {
+            sourcePath = require.resolve('pinyin/lib/cjs/pinyin.js');
+        } catch (error) {
+            console.error('Homophone map resolve error:', error);
+            dictationHomophoneCache.map = new Map();
+            return dictationHomophoneCache.map;
+        }
+        let raw = '';
+        try {
+            raw = fs.readFileSync(sourcePath, 'utf8');
+        } catch (error) {
+            console.error('Homophone map read error:', error);
+            dictationHomophoneCache.map = new Map();
+            return dictationHomophoneCache.map;
+        }
+        const regex = /dict\\[0x([0-9a-f]+)\\] = \"([^\"]+)\"/gi;
+        const map = new Map();
+        let match;
+        while ((match = regex.exec(raw)) !== null) {
+            const codepoint = Number.parseInt(match[1], 16);
+            if (!Number.isFinite(codepoint)) {
+                continue;
+            }
+            const char = String.fromCodePoint(codepoint);
+            const pinyinList = String(match[2]).split(',');
+            for (const entry of pinyinList) {
+                const key = toneMarkToNumber(entry);
+                if (!key) {
+                    continue;
+                }
+                if (!map.has(key)) {
+                    map.set(key, new Set());
+                }
+                map.get(key).add(char);
+            }
+        }
+        const normalized = new Map();
+        for (const [key, set] of map.entries()) {
+            normalized.set(key, Array.from(set));
+        }
+        dictationHomophoneCache.map = normalized;
+        return dictationHomophoneCache.map;
+    };
+
+    const loadDictationCharSet = () => {
+        if (dictationCharSetCache.loaded) {
+            return dictationCharSetCache.set;
+        }
+        dictationCharSetCache.loaded = true;
+        const fs = require('fs');
+        const path = require('path');
+        const filePath = path.join(__dirname, '..', 'public', 'dictation', '8105.txt');
+        if (!fs.existsSync(filePath)) {
+            dictationCharSetCache.set = null;
+            return dictationCharSetCache.set;
+        }
+        try {
+            const raw = fs.readFileSync(filePath, 'utf8');
+            const chars = raw.replace(/\s+/g, '').split('');
+            dictationCharSetCache.set = new Set(chars);
+        } catch (error) {
+            console.error('Dictation 8105 load error:', error);
+            dictationCharSetCache.set = null;
+        }
+        return dictationCharSetCache.set;
+    };
 
     const blindboxTiers = [
         { key: 'starmoon', nameZh: '星月盲盒', nameEn: 'Star Moon Box', cost: 50 },
@@ -1022,7 +1156,25 @@ module.exports = function registerGameRoutes(app, deps) {
             const filePath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
             const raw = await fs.promises.readFile(filePath, 'utf8');
             const data = JSON.parse(raw);
-            res.json({ success: true, words: data });
+            const homophoneMap = loadHomophoneMap();
+            const dictationCharSet = loadDictationCharSet();
+            const words = data.map((item) => {
+                const pronunciation = typeof item.pronunciation === 'string' ? item.pronunciation.trim() : '';
+                const syllables = pronunciation ? pronunciation.split(/\s+/) : [];
+                const homophones = syllables.map((syllable) => {
+                    const key = normalizeNumberSyllable(syllable);
+                    const list = homophoneMap.get(key) || [];
+                    if (!dictationCharSet) {
+                        return list;
+                    }
+                    return list.filter((char) => dictationCharSet.has(char));
+                });
+                return {
+                    ...item,
+                    homophones
+                };
+            });
+            res.json({ success: true, words });
         } catch (error) {
             console.error('Dictation words load error:', error);
             res.status(500).json({ success: false, message: '加载听写词库失败' });
@@ -1055,8 +1207,8 @@ module.exports = function registerGameRoutes(app, deps) {
             if (!wordId) {
                 return res.status(400).json({ success: false, message: '缺少题目信息' });
             }
-            if (!imageData || typeof imageData !== 'string' || !imageData.startsWith('data:image/png;base64,')) {
-                return res.status(400).json({ success: false, message: '请先手写内容' });
+            if (!userInput) {
+                return res.status(400).json({ success: false, message: '请先选择答案' });
             }
 
             const userId = req.session.user?.id || null;
@@ -1108,12 +1260,15 @@ module.exports = function registerGameRoutes(app, deps) {
                 console.error('Dictation word lookup error:', wordError);
             }
             const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'dictation');
-            await fs.promises.mkdir(uploadDir, { recursive: true });
-            const filename = `${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
-            const filePath = path.join(uploadDir, filename);
-            const base64Data = imageData.replace(/^data:image\/png;base64,/, '');
-            await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'));
-            const imagePath = `/uploads/dictation/${filename}`;
+            let imagePath = null;
+            if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/png;base64,')) {
+                await fs.promises.mkdir(uploadDir, { recursive: true });
+                const filename = `${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
+                const filePath = path.join(uploadDir, filename);
+                const base64Data = imageData.replace(/^data:image\/png;base64,/, '');
+                await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'));
+                imagePath = `/uploads/dictation/${filename}`;
+            }
 
             await pool.query(
                 `INSERT INTO dictation_submissions

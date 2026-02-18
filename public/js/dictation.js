@@ -13,6 +13,11 @@
     const pinyinRow = document.getElementById('dictation-pinyin');
     const pinyinCells = pinyinRow ? Array.from(pinyinRow.querySelectorAll('.dictation-pinyin-cell')) : [];
     const definitionEl = document.getElementById('dictation-definition');
+    const choiceEl = document.getElementById('dictation-choice');
+    const phraseEl = document.getElementById('dictation-phrase');
+    const homophoneTitleEl = document.getElementById('dictation-homophone-title');
+    const homophoneListEl = document.getElementById('dictation-homophone-list');
+    const clearChoiceBtn = document.getElementById('clear-choice-btn');
     const confirmModal = document.getElementById('dictation-confirm');
     const confirmStartBtn = document.getElementById('confirm-start-btn');
     const cancelStartBtn = document.getElementById('cancel-start-btn');
@@ -34,6 +39,10 @@
     let currentLevel = 1;
     let currentSetId = null;
     let submitted = false;
+    let currentSyllables = [];
+    let currentHomophones = [];
+    let selectedChars = [];
+    let currentCharIndex = 0;
     let voice = null;
     let startInProgress = false;
     const drawState = new Map();
@@ -66,6 +75,9 @@
     }
     if (eraserBtn) {
         eraserBtn.addEventListener('click', () => toggleEraser());
+    }
+    if (clearChoiceBtn) {
+        clearChoiceBtn.addEventListener('click', clearSelection);
     }
     if (zoomCloseBtn) {
         zoomCloseBtn.addEventListener('click', () => closeZoom(false));
@@ -157,7 +169,8 @@
             set_id: Number(item.set_id || 1),
             word: typeof item.word === 'string' ? item.word.trim() : '',
             pronunciation: typeof item.pronunciation === 'string' ? item.pronunciation.trim() : '',
-            definition: typeof item.definition === 'string' ? item.definition.trim() : ''
+            definition: typeof item.definition === 'string' ? item.definition.trim() : '',
+            homophones: Array.isArray(item.homophones) ? item.homophones : []
         }));
     }
 
@@ -306,29 +319,11 @@
         currentWord = word;
         submitted = false;
         setInputsDisabled(false);
-        updatePinyin();
+        initializeSelection(Array.isArray(draft.selection) ? draft.selection : null);
         updateDefinition();
         updateProgress();
         updateControls();
-        if (Array.isArray(draft.images)) {
-            draft.images.forEach((dataUrl, index) => {
-                const cell = cells[index];
-                if (cell && typeof dataUrl === 'string') {
-                    const ctx = cell.getContext('2d');
-                    const img = new Image();
-                    img.onload = () => {
-                        ctx.clearRect(0, 0, cell.width, cell.height);
-                        ctx.drawImage(img, 0, 0, cell.width, cell.height);
-                        const state = drawState.get(cell);
-                        if (state) {
-                            state.hasInk = true;
-                        }
-                    };
-                    img.src = dataUrl;
-                }
-            });
-        }
-        setStatus(t('已恢复未完成的书写', 'Restored your draft'), 'success');
+        setStatus(t('已恢复未完成的选择', 'Restored your draft'), 'success');
     }
 
     function findWordById(wordId) {
@@ -349,7 +344,7 @@
             currentIndex = picked.index;
             updateWord();
             saveDraftMeta();
-            setStatus(t('已开始听写，请输入答案并提交', 'Dictation started. Please enter your answer.'));
+            setStatus(t('已开始听写，请选择答案并提交', 'Dictation started. Please choose your answer.'));
         } catch (error) {
             console.error('Load dictation words error:', error);
             setStatus(t('加载听写词语失败，请检查词库文件', 'Failed to load dictation words.'), 'error');
@@ -382,7 +377,7 @@
         submitted = false;
         clearCells();
         setInputsDisabled(false);
-        updatePinyin();
+        initializeSelection();
         updateDefinition();
         updateProgress();
         updateControls();
@@ -397,13 +392,18 @@
     }
 
     function updatePinyin() {
-        if (!pinyinCells.length) {
+        if (!pinyinRow) {
             return;
         }
         const pinyin = (currentWord?.pronunciation || '').trim();
         const parts = pinyin ? pinyin.split(/\s+/) : [];
-        pinyinCells.forEach((cell, index) => {
-            cell.textContent = parts[index] || '-';
+        pinyinRow.innerHTML = '';
+        parts.forEach((part, index) => {
+            const cell = document.createElement('span');
+            cell.className = 'dictation-pinyin-cell';
+            cell.textContent = part || '-';
+            cell.addEventListener('click', () => setActiveIndex(index));
+            pinyinRow.appendChild(cell);
         });
     }
 
@@ -415,19 +415,136 @@
         definitionEl.textContent = definition;
     }
 
+    function initializeSelection(selectionOverride = null) {
+        const pinyin = (currentWord?.pronunciation || '').trim();
+        currentSyllables = pinyin ? pinyin.split(/\s+/) : [];
+        currentHomophones = Array.isArray(currentWord?.homophones) ? currentWord.homophones : [];
+        if (currentHomophones.length < currentSyllables.length) {
+            currentHomophones = currentSyllables.map(() => []);
+        }
+        selectedChars = currentSyllables.map((_, index) => {
+            if (selectionOverride && selectionOverride[index]) {
+                return String(selectionOverride[index]).trim();
+            }
+            return '';
+        });
+        const firstEmpty = selectedChars.findIndex((char) => !char);
+        currentCharIndex = firstEmpty >= 0 ? firstEmpty : Math.max(0, currentSyllables.length - 1);
+        renderSelection();
+    }
+
+    function renderSelection() {
+        updatePinyin();
+        renderPhrase();
+        renderHomophoneList();
+    }
+
+    function renderPhrase() {
+        if (!phraseEl) {
+            return;
+        }
+        phraseEl.innerHTML = '';
+        currentSyllables.forEach((_, index) => {
+            const cell = document.createElement('div');
+            cell.className = 'dictation-phrase-cell';
+            if (index === currentCharIndex) {
+                cell.classList.add('active');
+            }
+            cell.dataset.index = String(index);
+            cell.textContent = selectedChars[index] || '·';
+            cell.addEventListener('click', () => setActiveIndex(index));
+            phraseEl.appendChild(cell);
+        });
+    }
+
+    function renderHomophoneList() {
+        if (!homophoneListEl) {
+            return;
+        }
+        const syllable = currentSyllables[currentCharIndex] || '';
+        const list = currentHomophones[currentCharIndex] || [];
+        if (homophoneTitleEl) {
+            homophoneTitleEl.textContent = t(
+                `选择第${currentCharIndex + 1}个字（${syllable || '-'}）`,
+                `Pick char ${currentCharIndex + 1} (${syllable || '-'})`
+            );
+        }
+        homophoneListEl.innerHTML = '';
+        if (!list.length) {
+            const empty = document.createElement('div');
+            empty.className = 'dictation-homophone-empty';
+            empty.textContent = t('暂无同音字', 'No homophones');
+            homophoneListEl.appendChild(empty);
+            return;
+        }
+        list.forEach((char) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'dictation-homophone-btn';
+            btn.textContent = char;
+            btn.addEventListener('click', () => selectHomophone(char));
+            homophoneListEl.appendChild(btn);
+        });
+    }
+
+    function setActiveIndex(index) {
+        if (!Number.isFinite(index) || index < 0 || index >= currentSyllables.length) {
+            return;
+        }
+        currentCharIndex = index;
+        renderPhrase();
+        renderHomophoneList();
+    }
+
+    function selectHomophone(char) {
+        if (!currentSyllables.length) {
+            return;
+        }
+        selectedChars[currentCharIndex] = char;
+        const nextIndex = currentCharIndex + 1;
+        if (nextIndex < currentSyllables.length) {
+            currentCharIndex = nextIndex;
+        }
+        renderSelection();
+        updateControls();
+        scheduleDraftSave();
+    }
+
+    function isSelectionComplete() {
+        return currentSyllables.length > 0 && selectedChars.every((char) => char);
+    }
+
+    function getSelectionText() {
+        return selectedChars.join('');
+    }
+
+    function clearSelection() {
+        if (!currentSyllables.length) {
+            return;
+        }
+        selectedChars = currentSyllables.map(() => '');
+        currentCharIndex = 0;
+        renderSelection();
+        updateControls();
+        scheduleDraftSave();
+    }
+
     function updateControls() {
         const active = currentWord !== null;
         if (playBtn) {
             playBtn.disabled = !active;
         }
         if (submitBtn) {
-            submitBtn.disabled = !active || submitted;
+            submitBtn.disabled = !active || submitted || !isSelectionComplete();
         }
         if (clearGridBtn) {
             clearGridBtn.disabled = !active || submitted;
         }
         if (eraserBtn) {
             eraserBtn.disabled = !active || submitted;
+        }
+        if (clearChoiceBtn) {
+            clearChoiceBtn.disabled = !active || submitted;
         }
         if (startBtn && submitted) {
             startBtn.disabled = true;
@@ -437,6 +554,9 @@
     function setInputsDisabled(disabled) {
         if (gridEl) {
             gridEl.classList.toggle('dictation-grid-disabled', disabled);
+        }
+        if (choiceEl) {
+            choiceEl.classList.toggle('dictation-choice-disabled', disabled);
         }
     }
 
@@ -801,7 +921,7 @@
             setId: currentSetId,
             level: currentLevel,
             wordId: currentWord.id,
-            images: [],
+            selection: selectedChars.slice(),
             updatedAt: Date.now()
         };
         localStorage.setItem(draftKey, JSON.stringify(draft));
@@ -815,20 +935,19 @@
             clearTimeout(draftSaveTimer);
         }
         draftSaveTimer = setTimeout(() => {
-            saveDraftImages();
+            saveDraftSelection();
         }, 400);
     }
 
-    function saveDraftImages() {
+    function saveDraftSelection() {
         if (!draftKey || !currentWord) {
             return;
         }
-        const images = cells.map((cell) => cell.toDataURL('image/png'));
         const draft = {
             setId: currentSetId,
             level: currentLevel,
             wordId: currentWord.id,
-            images,
+            selection: selectedChars.slice(),
             updatedAt: Date.now()
         };
         localStorage.setItem(draftKey, JSON.stringify(draft));
@@ -903,11 +1022,11 @@
         if (!currentWord || submitted) {
             return;
         }
-        if (!hasAnyInk()) {
-            setStatus(t('请先手写内容', 'Please write your answer.'), 'error');
+        if (!isSelectionComplete()) {
+            setStatus(t('请先选择完整答案', 'Please complete your selection.'), 'error');
             return;
         }
-        const imageData = buildCompositeImage();
+        const input = getSelectionText();
 
         submitBtn.disabled = true;
         setStatus(t('提交中...', 'Submitting...'));
@@ -926,8 +1045,7 @@
                     definition: currentWord.definition,
                     setId: currentSetId,
                     level: currentLevel,
-                    input: '',
-                    imageData
+                    input
                 })
             });
 
