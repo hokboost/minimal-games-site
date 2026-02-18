@@ -127,17 +127,17 @@ class WindowsGiftListener {
                     return;
                 }
 
-                if (sendResult.balance_insufficient) {
-                    const markResult = await this.markTaskFailed(task.id, sendResult.error || '余额不足', sendResult);
+                if (sendResult.reachable) {
+                    const markResult = await this.markTaskFailed(task.id, sendResult.error || 'threeserver发送失败', sendResult);
                     if (markResult) {
-                        console.log(`🚫 任务 ${task.id} 失败: ${sendResult.error || '余额不足'}`);
+                        console.log(`❌ 任务 ${task.id} 失败: ${sendResult.error || 'threeserver发送失败'}`);
                     } else {
                         console.log(`❌ 任务 ${task.id} 失败且标记失败，将在下次轮询重试`);
                     }
                     return;
                 }
 
-                console.log(`⚠️ threeserver发送失败，回退Python发送: ${sendResult.error || '未知错误'}`);
+                console.log(`⚠️ threeserver不可达，回退Python发送: ${sendResult.error || '未知错误'}`);
             }
 
             const result = await this.callPythonScript(task.giftId, task.roomId, quantity);
@@ -179,14 +179,19 @@ class WindowsGiftListener {
         const gifts = Array.from({ length: quantity }, () => String(giftId));
         try {
             const response = await axios.post(`${this.threeServerUrl}/send`, { gifts }, { timeout: 3000 });
-            if (response.data?.status === 'ok') {
-                return { success: true };
+            if (response.data?.success === true) {
+                return { success: true, reachable: true, results: response.data.results };
             }
-            return { success: false, error: response.data?.error || 'threeserver响应异常' };
+            return {
+                success: false,
+                reachable: true,
+                error: response.data?.error || 'threeserver响应异常',
+                results: response.data?.results || []
+            };
         } catch (error) {
             return {
                 success: false,
-                balance_insufficient: error.response?.status === 402 || error.response?.data?.balance_insufficient === true,
+                reachable: Boolean(error.response),
                 error: error.response?.data?.error || error.message || 'threeserver请求失败'
             };
         }

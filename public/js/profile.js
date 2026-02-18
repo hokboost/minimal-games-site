@@ -2,7 +2,7 @@ const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
 const t = (zh, en) => (lang === 'zh' ? zh : en);
 const translateServerMessage = window.translateServerMessage || ((message) => message);
 const giftNameMap = {
-    deepsea_singer: { zh: '深海歌姬', en: 'Deep Sea Diva' },
+    deepsea_singer: { zh: '梦幻游乐园', en: 'Dreamland Park' },
     sky_throne: { zh: '飞天转椅', en: 'Sky Throne' },
     proposal: { zh: '原地求婚', en: 'On-the-Spot Proposal' },
     wonderland: { zh: '梦游仙境', en: 'Wonderland Dream' },

@@ -664,12 +664,17 @@
         zoomModal.style.display = 'flex';
         requestAnimationFrame(() => {
             setupZoomCanvas();
-            const cell = cells[index];
-            const ctx = zoomCanvas.getContext('2d');
-            ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
-            if (cell) {
-                ctx.drawImage(cell, 0, 0, zoomCanvas.width, zoomCanvas.height);
-            }
+            requestAnimationFrame(() => {
+                if (!zoomCanvas.width || !zoomCanvas.height) {
+                    setupZoomCanvas();
+                }
+                const cell = cells[index];
+                const ctx = zoomCanvas.getContext('2d');
+                ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+                if (cell) {
+                    ctx.drawImage(cell, 0, 0, zoomCanvas.width, zoomCanvas.height);
+                }
+            });
         });
     }
 
@@ -677,6 +682,7 @@
         if (!zoomModal || !zoomCanvas) {
             return;
         }
+        lastZoomAt = Date.now();
         if (save && activeCellIndex !== null) {
             const cell = cells[activeCellIndex];
             if (cell) {

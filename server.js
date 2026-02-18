@@ -1132,8 +1132,8 @@ app.get('/', async (req, res) => {
 const wishConfigs = {
     deepsea_singer: {
         giftType: 'deepsea_singer',
-        name: '深海歌姬',
-        bilibiliGiftId: '35082',
+        name: '梦幻游乐园',
+        bilibiliGiftId: '34383',
         cost: 500,
         successRate: 0.014,
         guaranteeCount: 148,

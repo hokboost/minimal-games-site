@@ -6,7 +6,7 @@
         const canWishTest = document.body.dataset.canTest === 'true';
 
         const giftNames = {
-            deepsea_singer: { zh: '深海歌姬', en: 'Deep Sea Diva' },
+            deepsea_singer: { zh: '梦幻游乐园', en: 'Dreamland Park' },
             sky_throne: { zh: '飞天转椅', en: 'Sky Throne' },
             proposal: { zh: '原地求婚', en: 'On-the-Spot Proposal' },
             wonderland: { zh: '梦游仙境', en: 'Wonderland Dream' },
@@ -32,10 +32,12 @@
             const content = document.getElementById('modalContent');
             
             if (isSuccess) {
+                const displayName = reward || giftNames[currentGiftType]?.[lang] || t('礼物', 'Gift');
+                const displayValue = rewardValue || giftConfigs[currentGiftType]?.rewardValue || 0;
                 content.innerHTML = `
                     <div>🎉 ${t('祈愿成功！', 'Wish Success!')}</div>
-                    <div style="font-size: 2rem; margin: 15px 0;">🧜‍♀️ ${reward || giftNames.deepsea_singer[lang]}</div>
-                    <div style="font-size: 1.5rem; color: #f39c12;">${t('价值', 'Value')}: ${rewardValue || 30000} ${t('电币', 'coins')}</div>
+                    <div style="font-size: 2rem; margin: 15px 0;">🎠 ${displayName}</div>
+                    <div style="font-size: 1.5rem; color: #f39c12;">${t('价值', 'Value')}: ${displayValue} ${t('电币', 'coins')}</div>
                     <div style="font-size: 1rem; color: #ccc; margin-top: 8px;">${t('已放入背包，可在个人资料中送出', 'Added to backpack, can be sent from your profile')}</div>
                     ${isGuaranteed ? `<div style="font-size: 1rem; color: #e74c3c; margin-top: 10px;">${t('保底出货', 'Guaranteed drop')}</div>` : ''}
                 `;
