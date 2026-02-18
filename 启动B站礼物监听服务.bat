@@ -1,6 +1,10 @@
 @echo off
 cd /d C:\Users\user\minimal-games-site
 set BILI_COOKIE_PATH=C:\Users\user\AppData\Local\BiliPKTool\cookie.txt
+set SERVER_URL=https://www.wuguijiang.com
+set BILIPK_SCRIPT=C:\Users\user\Desktop\jiaobenbili\checkpk.py
+set BILIPK_PYTHON=python
+set BILIPK_CONFIG=C:\Users\user\Desktop\jiaobenbili\config_gift_only.json
 echo.
 echo ========================================
 echo    Windows B站礼物发送监听服务

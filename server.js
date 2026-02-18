@@ -387,6 +387,31 @@ async function initializeDatabase() {
             )
         `);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_gift_logs_username ON pk_gift_logs(username, created_at DESC)`);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS pk_tasks (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) NOT NULL,
+                room_id VARCHAR(50),
+                action VARCHAR(20) NOT NULL,
+                status VARCHAR(20) DEFAULT 'pending',
+                error TEXT,
+                created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                processed_at TIMESTAMP
+            )
+        `);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_tasks_status ON pk_tasks(status, created_at ASC)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_tasks_user ON pk_tasks(username, created_at DESC)`);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS pk_runner_state (
+                username VARCHAR(50) PRIMARY KEY,
+                room_id VARCHAR(50),
+                running BOOLEAN DEFAULT FALSE,
+                pid INTEGER,
+                updated_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
+            )
+        `);
         
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);

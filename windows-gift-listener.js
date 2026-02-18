@@ -14,7 +14,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 class WindowsGiftListener {
     constructor() {
         // 配置服务器URL（根据实际部署地址修改）
-        this.serverUrl = 'https://minimal-games-site.onrender.com';  // 或者你的实际Render URL
+        this.serverUrl = process.env.SERVER_URL || 'https://minimal-games-site.onrender.com';  // 或者你的实际Render URL
         this.apiKey = process.env.WINDOWS_API_KEY || 'bilibili-gift-service-secret-key-2024-secure'; // API密钥
         this.hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || ''; // 签名密钥
         this.pollInterval = 2000; // 2秒轮询一次
@@ -25,6 +25,10 @@ class WindowsGiftListener {
         this.threeServerRoomId = null;
         this.threeServerLastCheck = 0;
         this.threeServerCheckTtl = 5000;
+        this.pkScript = process.env.BILIPK_SCRIPT || 'C:/Users/user/Desktop/jiaobenbili/checkpk.py';
+        this.pkPythonPath = process.env.BILIPK_PYTHON || 'python';
+        this.pkConfigPath = process.env.BILIPK_CONFIG || 'C:/Users/user/Desktop/jiaobenbili/config_gift_only.json';
+        this.pkProcesses = new Map();
     }
 
     // 启动监听服务
@@ -38,17 +42,159 @@ class WindowsGiftListener {
         console.log(`⚡ threeserver: ${this.threeServerUrl}`);
         console.log(`🐍 Python路径: ${this.pythonPath}`);
         console.log(`📜 脚本路径: ${this.pythonScript}`);
+        console.log(`🗡️ PK脚本: ${this.pkScript}`);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
         // 启动时重置卡住的任务
         await this.resetStuckTasks();
         
         this.pollForTasks();
+        this.pollForPkTasks();
         
         // 设置定时轮询
         setInterval(() => {
             this.pollForTasks();
+            this.pollForPkTasks();
         }, this.pollInterval);
+    }
+
+    async pollForPkTasks() {
+        try {
+            const path = '/api/pk-tasks';
+            const headers = this.buildSignedHeaders('GET', path, null);
+            const response = await axios.get(`${this.serverUrl}${path}`, {
+                timeout: 10000,
+                headers: {
+                    ...headers,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });
+
+            if (response.data.success && response.data.tasks.length > 0) {
+                const taskPromises = response.data.tasks.map(task => this.processPkTask(task));
+                await Promise.all(taskPromises);
+            }
+        } catch (error) {
+            if (error.response?.status === 401) {
+                console.error('❌ PK任务鉴权失败，请检查密钥/签名设置');
+            }
+        }
+    }
+
+    async processPkTask(task) {
+        try {
+            if (task.action === 'start') {
+                await this.startPkProcess(task.username, task.room_id);
+                await this.markPkTaskComplete(task.id);
+            } else if (task.action === 'stop') {
+                await this.stopPkProcess(task.username);
+                await this.markPkTaskComplete(task.id);
+            } else {
+                await this.markPkTaskFailed(task.id, '未知动作');
+            }
+        } catch (error) {
+            console.error(`❌ PK任务处理失败 (${task.id}):`, error.message);
+            await this.markPkTaskFailed(task.id, error.message || '执行失败');
+        }
+    }
+
+    async startPkProcess(username, roomId) {
+        if (this.pkProcesses.has(username)) {
+            await this.updatePkRunnerState(username, true, roomId, this.pkProcesses.get(username)?.pid);
+            return;
+        }
+        const child = spawn(this.pkPythonPath, [this.pkScript, String(roomId)], {
+            cwd: path.dirname(this.pkScript),
+            env: {
+                ...process.env,
+                BILIPK_CONFIG: this.pkConfigPath,
+                PK_REPORT_URL: `${this.serverUrl}/api/pk/report`,
+                PK_REPORT_KEY: this.apiKey,
+                PK_REPORT_USERNAME: username
+            },
+            windowsHide: true
+        });
+        this.pkProcesses.set(username, child);
+
+        child.stdout.on('data', (data) => {
+            console.log(`[PK:${username}] ${data.toString().trim()}`);
+        });
+        child.stderr.on('data', (data) => {
+            console.error(`[PK:${username}][ERR] ${data.toString().trim()}`);
+        });
+        child.on('close', () => {
+            this.pkProcesses.delete(username);
+            this.updatePkRunnerState(username, false, roomId, null).catch(() => {});
+        });
+        child.on('error', () => {
+            this.pkProcesses.delete(username);
+        });
+
+        await this.updatePkRunnerState(username, true, roomId, child.pid);
+    }
+
+    async stopPkProcess(username) {
+        const child = this.pkProcesses.get(username);
+        if (!child) {
+            await this.updatePkRunnerState(username, false, null, null);
+            return;
+        }
+        try {
+            child.kill('SIGTERM');
+        } catch (error) {
+            console.error(`[PK:${username}] stop error:`, error.message);
+        }
+        this.pkProcesses.delete(username);
+        await this.updatePkRunnerState(username, false, null, null);
+    }
+
+    async updatePkRunnerState(username, running, roomId, pid) {
+        try {
+            const path = '/api/pk/runner/update';
+            const payload = {
+                username,
+                running: !!running,
+                roomId: roomId ? String(roomId) : null,
+                pid: pid || null
+            };
+            const headers = this.buildSignedHeaders('POST', path, payload);
+            await axios.post(`${this.serverUrl}${path}`, payload, {
+                timeout: 5000,
+                headers: {
+                    ...headers,
+                    'Content-Type': 'application/json'
+                }
+            });
+        } catch (error) {
+            console.error('PK runner update error:', error.message);
+        }
+    }
+
+    async markPkTaskComplete(taskId) {
+        const path = `/api/pk-tasks/${taskId}/complete`;
+        const payload = {};
+        const headers = this.buildSignedHeaders('POST', path, payload);
+        await axios.post(`${this.serverUrl}${path}`, payload, {
+            timeout: 5000,
+            headers: {
+                ...headers,
+                'Content-Type': 'application/json'
+            }
+        });
+    }
+
+    async markPkTaskFailed(taskId, errorMessage) {
+        const path = `/api/pk-tasks/${taskId}/fail`;
+        const payload = { error: errorMessage };
+        const headers = this.buildSignedHeaders('POST', path, payload);
+        await axios.post(`${this.serverUrl}${path}`, payload, {
+            timeout: 5000,
+            headers: {
+                ...headers,
+                'Content-Type': 'application/json'
+            }
+        });
     }
 
     // 轮询服务器获取任务

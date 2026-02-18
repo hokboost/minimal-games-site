@@ -11,7 +11,6 @@ module.exports = function registerGiftRoutes(app, deps) {
         enqueueWishInventorySend
     } = deps;
     const crypto = require('crypto');
-    const pkManager = require('../pk-manager');
 
     // 自动处理卡住的礼物任务，超时退款
     const monitorStuckGiftTasks = () => {
@@ -113,9 +112,19 @@ module.exports = function registerGiftRoutes(app, deps) {
         }
     });
 
-    app.get('/api/pk/status', requireLogin, requireAuthorized, security.basicRateLimit, (req, res) => {
-        const username = req.session.user.username;
-        res.json({ success: true, running: pkManager.isRunning(username) });
+    app.get('/api/pk/status', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
+        try {
+            const username = req.session.user.username;
+            const stateResult = await pool.query(
+                'SELECT running FROM pk_runner_state WHERE username = $1',
+                [username]
+            );
+            const running = stateResult.rows.length > 0 ? !!stateResult.rows[0].running : false;
+            res.json({ success: true, running });
+        } catch (error) {
+            console.error('PK status error:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
     });
 
     app.post('/api/pk/start', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
@@ -129,8 +138,19 @@ module.exports = function registerGiftRoutes(app, deps) {
             if (!roomId) {
                 return res.status(400).json({ success: false, message: '请先绑定B站房间号' });
             }
-            const result = pkManager.startPk(username, roomId);
-            return res.json({ success: true, running: true, started: result.started, pid: result.pid });
+            const pendingResult = await pool.query(
+                "SELECT COUNT(*) AS count FROM pk_tasks WHERE username = $1 AND status IN ('pending','processing') AND action = 'start'",
+                [username]
+            );
+            if (Number(pendingResult.rows[0]?.count || 0) > 0) {
+                return res.json({ success: true, queued: true, message: '已在队列中' });
+            }
+            await pool.query(
+                `INSERT INTO pk_tasks (username, room_id, action, status)
+                 VALUES ($1, $2, 'start', 'pending')`,
+                [username, String(roomId)]
+            );
+            return res.json({ success: true, queued: true });
         } catch (error) {
             console.error('PK start error:', error);
             return res.status(500).json({ success: false, message: '服务器错误' });
@@ -140,11 +160,108 @@ module.exports = function registerGiftRoutes(app, deps) {
     app.post('/api/pk/stop', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, (req, res) => {
         try {
             const username = req.session.user.username;
-            const result = pkManager.stopPk(username);
-            return res.json({ success: true, running: false, stopped: result.stopped });
+            pool.query(
+                "SELECT COUNT(*) AS count FROM pk_tasks WHERE username = $1 AND status IN ('pending','processing') AND action = 'stop'",
+                [username]
+            ).then((pendingResult) => {
+                if (Number(pendingResult.rows[0]?.count || 0) > 0) {
+                    return res.json({ success: true, queued: true, message: '已在队列中' });
+                }
+                return pool.query(
+                    `INSERT INTO pk_tasks (username, action, status)
+                     VALUES ($1, 'stop', 'pending')`,
+                    [username]
+                ).then(() => res.json({ success: true, queued: true }));
+            }).catch((error) => {
+                console.error('PK stop error:', error);
+                res.status(500).json({ success: false, message: '服务器错误' });
+            });
         } catch (error) {
             console.error('PK stop error:', error);
             return res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    app.get('/api/pk-tasks', requireApiKey, async (req, res) => {
+        try {
+            const result = await pool.query(`
+                UPDATE pk_tasks
+                SET status = 'processing', processed_at = NOW()
+                WHERE id IN (
+                    SELECT id FROM pk_tasks
+                    WHERE status = 'pending'
+                    ORDER BY created_at ASC
+                    LIMIT 10
+                )
+                RETURNING id, username, room_id, action, created_at
+            `);
+            res.json({ success: true, tasks: result.rows });
+        } catch (error) {
+            console.error('获取PK任务失败:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    app.post('/api/pk-tasks/:id/complete', requireApiKey, async (req, res) => {
+        try {
+            const taskId = parseInt(req.params.id, 10);
+            const result = await pool.query(`
+                UPDATE pk_tasks
+                SET status = 'completed', processed_at = NOW()
+                WHERE id = $1
+                RETURNING id
+            `, [taskId]);
+            if (result.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '任务不存在' });
+            }
+            return res.json({ success: true });
+        } catch (error) {
+            console.error('PK任务完成失败:', error);
+            return res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    app.post('/api/pk-tasks/:id/fail', requireApiKey, async (req, res) => {
+        try {
+            const taskId = parseInt(req.params.id, 10);
+            const errorMessage = req.body?.error || '执行失败';
+            const result = await pool.query(`
+                UPDATE pk_tasks
+                SET status = 'failed', error = $2, processed_at = NOW()
+                WHERE id = $1
+                RETURNING id
+            `, [taskId, errorMessage]);
+            if (result.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '任务不存在' });
+            }
+            return res.json({ success: true });
+        } catch (error) {
+            console.error('PK任务失败处理错误:', error);
+            return res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    app.post('/api/pk/runner/update', requireApiKey, async (req, res) => {
+        try {
+            const { username, running, roomId, pid } = req.body || {};
+            if (!username || typeof running !== 'boolean') {
+                return res.status(400).json({ success: false, message: '参数不完整' });
+            }
+            await pool.query(`
+                INSERT INTO pk_runner_state (username, room_id, running, pid, updated_at)
+                VALUES ($1, $2, $3, $4, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                ON CONFLICT (username)
+                DO UPDATE SET room_id = EXCLUDED.room_id, running = EXCLUDED.running, pid = EXCLUDED.pid, updated_at = EXCLUDED.updated_at
+            `, [
+                username,
+                roomId ? String(roomId) : null,
+                running,
+                Number.isFinite(Number(pid)) ? Number(pid) : null
+            ]);
+            res.json({ success: true });
+        } catch (error) {
+            console.error('PK runner update error:', error);
+            res.status(500).json({ success: false, message: '服务器错误' });
         }
     });
 
