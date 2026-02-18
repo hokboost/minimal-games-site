@@ -2,6 +2,7 @@
     const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
     const t = (zh, en) => (lang === 'zh' ? zh : en);
     const translateServerMessage = window.translateServerMessage || ((message) => message);
+    const dictationSlotCount = 4;
 
     const startBtn = document.getElementById('start-btn');
     const playBtn = document.getElementById('play-btn');
@@ -398,13 +399,19 @@
         const pinyin = (currentWord?.pronunciation || '').trim();
         const parts = pinyin ? pinyin.split(/\s+/) : [];
         pinyinRow.innerHTML = '';
-        parts.forEach((part, index) => {
+        const slots = Math.max(dictationSlotCount, parts.length);
+        for (let index = 0; index < slots; index += 1) {
+            const part = parts[index];
             const cell = document.createElement('span');
             cell.className = 'dictation-pinyin-cell';
             cell.textContent = part || '-';
-            cell.addEventListener('click', () => setActiveIndex(index));
+            if (index >= currentSyllables.length) {
+                cell.classList.add('disabled');
+            } else {
+                cell.addEventListener('click', () => setActiveIndex(index));
+            }
             pinyinRow.appendChild(cell);
-        });
+        }
     }
 
     function updateDefinition() {
@@ -444,21 +451,31 @@
             return;
         }
         phraseEl.innerHTML = '';
-        currentSyllables.forEach((_, index) => {
+        const slots = Math.max(dictationSlotCount, currentSyllables.length);
+        for (let index = 0; index < slots; index += 1) {
             const cell = document.createElement('div');
             cell.className = 'dictation-phrase-cell';
-            if (index === currentCharIndex) {
+            if (index >= currentSyllables.length) {
+                cell.classList.add('disabled');
+            } else if (index === currentCharIndex) {
                 cell.classList.add('active');
             }
             cell.dataset.index = String(index);
             cell.textContent = selectedChars[index] || '·';
             cell.addEventListener('click', () => setActiveIndex(index));
             phraseEl.appendChild(cell);
-        });
+        }
     }
 
     function renderHomophoneList() {
         if (!homophoneListEl) {
+            return;
+        }
+        if (currentSyllables.length === 0) {
+            homophoneListEl.innerHTML = '';
+            if (homophoneTitleEl) {
+                homophoneTitleEl.textContent = t('暂无可选音节', 'No syllables available');
+            }
             return;
         }
         const syllable = currentSyllables[currentCharIndex] || '';

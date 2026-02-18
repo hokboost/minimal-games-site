@@ -100,6 +100,14 @@ module.exports = function registerGameRoutes(app, deps) {
         return `${letters}5`;
     };
 
+    const getSyllableBase = (raw) => {
+        const normalized = normalizeNumberSyllable(raw);
+        if (!normalized) {
+            return '';
+        }
+        return normalized.replace(/[1-5]$/, '');
+    };
+
     const loadHomophoneMap = () => {
         if (dictationHomophoneCache.map) {
             return dictationHomophoneCache.map;
@@ -1162,12 +1170,21 @@ module.exports = function registerGameRoutes(app, deps) {
                 const pronunciation = typeof item.pronunciation === 'string' ? item.pronunciation.trim() : '';
                 const syllables = pronunciation ? pronunciation.split(/\s+/) : [];
                 const homophones = syllables.map((syllable) => {
-                    const key = normalizeNumberSyllable(syllable);
-                    const list = homophoneMap.get(key) || [];
-                    if (!dictationCharSet) {
-                        return list;
+                    const base = getSyllableBase(syllable);
+                    if (!base) {
+                        return [];
                     }
-                    return list.filter((char) => dictationCharSet.has(char));
+                    const merged = new Set();
+                    for (let tone = 1; tone <= 5; tone += 1) {
+                        const key = `${base}${tone}`;
+                        const list = homophoneMap.get(key) || [];
+                        list.forEach((char) => merged.add(char));
+                    }
+                    let result = Array.from(merged);
+                    if (dictationCharSet) {
+                        result = result.filter((char) => dictationCharSet.has(char));
+                    }
+                    return result;
                 });
                 return {
                     ...item,
