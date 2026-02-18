@@ -153,7 +153,14 @@
     function getGiftIcon(giftType) {
         const icons = {
             'heartbox': '💝',
-            'fanlight': '🏮'
+            'fanlight': '🏮',
+            'deepsea_singer': '🎠',
+            'sky_throne': '💺',
+            'proposal': '💍',
+            'wonderland': '🌙',
+            'white_bride': '🤍',
+            'crystal_ball': '🔮',
+            'bobo': '🫧'
         };
         return icons[giftType] || '🎁';
     }
@@ -162,7 +169,14 @@
     function getGiftName(giftType) {
         const names = {
             'heartbox': t('心动盲盒', 'Mystery Gift Box'),
-            'fanlight': t('粉丝团灯牌', 'Fan Light Badge')
+            'fanlight': t('粉丝团灯牌', 'Fan Light Badge'),
+            'deepsea_singer': t('梦幻游乐园', 'Dreamland Park'),
+            'sky_throne': t('飞天转椅', 'Sky Throne'),
+            'proposal': t('原地求婚', 'On-the-Spot Proposal'),
+            'wonderland': t('梦游仙境', 'Wonderland Dream'),
+            'white_bride': t('纯白花嫁', 'Pure White Bride'),
+            'crystal_ball': t('水晶球', 'Crystal Ball'),
+            'bobo': t('啵啵', 'Bubbles')
         };
         return names[giftType] || t('未知礼物', 'Unknown Gift');
     }

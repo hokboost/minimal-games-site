@@ -128,9 +128,10 @@ class WindowsGiftListener {
                 }
 
                 if (sendResult.reachable) {
-                    const markResult = await this.markTaskFailed(task.id, sendResult.error || 'threeserver发送失败', sendResult);
+                    const failureReason = sendResult.balance_insufficient ? '余额不足' : (sendResult.error || 'threeserver发送失败');
+                    const markResult = await this.markTaskFailed(task.id, failureReason, sendResult);
                     if (markResult) {
-                        console.log(`❌ 任务 ${task.id} 失败: ${sendResult.error || 'threeserver发送失败'}`);
+                        console.log(`❌ 任务 ${task.id} 失败: ${failureReason}`);
                     } else {
                         console.log(`❌ 任务 ${task.id} 失败且标记失败，将在下次轮询重试`);
                     }
@@ -179,12 +180,13 @@ class WindowsGiftListener {
         const gifts = Array.from({ length: quantity }, () => String(giftId));
         try {
             const response = await axios.post(`${this.threeServerUrl}/send`, { gifts }, { timeout: 3000 });
-            if (response.data?.success === true) {
+            if (response.data?.success === true || response.data?.status === 'ok') {
                 return { success: true, reachable: true, results: response.data.results };
             }
             return {
                 success: false,
                 reachable: true,
+                balance_insufficient: response.data?.balance_insufficient === true,
                 error: response.data?.error || 'threeserver响应异常',
                 results: response.data?.results || []
             };
@@ -192,6 +194,7 @@ class WindowsGiftListener {
             return {
                 success: false,
                 reachable: Boolean(error.response),
+                balance_insufficient: error.response?.status === 402 || error.response?.data?.balance_insufficient === true,
                 error: error.response?.data?.error || error.message || 'threeserver请求失败'
             };
         }

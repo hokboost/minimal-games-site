@@ -569,5 +569,5 @@ const formatScratchResult = (result) => {
     
     loadWishBackpack(false);
     if (backpackContentEl) {
-        setInterval(() => loadWishBackpack(false), 10000);
+        setInterval(() => loadWishBackpack(true), 10000);
     }
