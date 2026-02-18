@@ -8,6 +8,8 @@
 const { spawn } = require('child_process');
 const axios = require('axios');
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
@@ -25,6 +27,10 @@ class WindowsGiftListener {
         this.threeServerRoomId = null;
         this.threeServerLastCheck = 0;
         this.threeServerCheckTtl = 5000;
+        this.threeServerScript = process.env.THREESERVER_SCRIPT || 'C:/Users/user/Desktop/jiaobenbili/threeserver.py';
+        this.threeServerPythonPath = process.env.THREESERVER_PYTHON || 'python';
+        this.threeServerProcess = null;
+        this.threeServerProcessRoomId = null;
         this.pkScript = process.env.BILIPK_SCRIPT || 'C:/Users/user/Desktop/jiaobenbili/checkpk.py';
         this.pkPythonPath = process.env.BILIPK_PYTHON || 'python';
         this.pkConfigPath = process.env.BILIPK_CONFIG || 'C:/Users/user/Desktop/jiaobenbili/config_gift_only.json';
@@ -40,6 +46,7 @@ class WindowsGiftListener {
         console.log(`📡 监听服务器: ${this.serverUrl}`);
         console.log(`⏰ 轮询间隔: ${this.pollInterval}ms`);
         console.log(`⚡ threeserver: ${this.threeServerUrl}`);
+        console.log(`🧠 threeserver脚本: ${this.threeServerScript}`);
         console.log(`🐍 Python路径: ${this.pythonPath}`);
         console.log(`📜 脚本路径: ${this.pythonScript}`);
         console.log(`🗡️ PK脚本: ${this.pkScript}`);
@@ -104,11 +111,13 @@ class WindowsGiftListener {
             await this.updatePkRunnerState(username, true, roomId, this.pkProcesses.get(username)?.pid);
             return;
         }
+        await this.ensureThreeServerForRoom(roomId, username);
+        const pkConfigPath = await this.ensureRoomConfig(roomId);
         const child = spawn(this.pkPythonPath, [this.pkScript, String(roomId)], {
             cwd: path.dirname(this.pkScript),
             env: {
                 ...process.env,
-                BILIPK_CONFIG: this.pkConfigPath,
+                BILIPK_CONFIG: pkConfigPath,
                 PK_REPORT_URL: `${this.serverUrl}/api/pk/report`,
                 PK_REPORT_KEY: this.apiKey,
                 PK_REPORT_USERNAME: username
@@ -346,9 +355,9 @@ class WindowsGiftListener {
         }
     }
 
-    async getThreeServerRoomId() {
+    async getThreeServerRoomId(force = false) {
         const now = Date.now();
-        if (this.threeServerRoomId && now - this.threeServerLastCheck < this.threeServerCheckTtl) {
+        if (!force && this.threeServerRoomId && now - this.threeServerLastCheck < this.threeServerCheckTtl) {
             return this.threeServerRoomId;
         }
         try {
@@ -363,6 +372,111 @@ class WindowsGiftListener {
         } catch (error) {
             return null;
         }
+    }
+
+    getAppDataDir() {
+        return process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    }
+
+    async ensureRoomConfig(roomId) {
+        const appDataDir = this.getAppDataDir();
+        const configDir = path.join(appDataDir, 'BiliPKTool');
+        const targetPath = path.join(configDir, `config_gift_only.room_${roomId}.json`);
+        if (fs.existsSync(targetPath)) {
+            return targetPath;
+        }
+        if (!fs.existsSync(this.pkConfigPath)) {
+            throw new Error(`找不到基础配置文件: ${this.pkConfigPath}`);
+        }
+        const raw = fs.readFileSync(this.pkConfigPath, 'utf8');
+        const config = JSON.parse(raw);
+        config['房间配置'] = config['房间配置'] || {};
+        config['房间配置']['房间号列表'] = [String(roomId)];
+        config['送礼房间配置'] = config['送礼房间配置'] || {};
+        config['送礼房间配置']['送礼房间'] = String(roomId);
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(targetPath, JSON.stringify(config, null, 2), 'utf8');
+        return targetPath;
+    }
+
+    async ensureThreeServerForRoom(roomId, username) {
+        const desiredRoomId = String(roomId);
+        const activeRoomId = await this.getThreeServerRoomId();
+        if (activeRoomId && activeRoomId === desiredRoomId) {
+            return;
+        }
+        if (activeRoomId && activeRoomId !== desiredRoomId) {
+            console.log(`⚠️ threeserver房间不匹配(${activeRoomId} -> ${desiredRoomId})，准备重启`);
+            if (!this.threeServerProcess) {
+                console.log('⚠️ 检测到外部threeserver正在占用端口，可能需要手动关闭旧实例');
+            }
+        }
+        if (this.threeServerProcess) {
+            await this.stopThreeServerProcess();
+        }
+
+        const configPath = await this.ensureRoomConfig(desiredRoomId);
+        const child = spawn(this.threeServerPythonPath, [this.threeServerScript], {
+            cwd: path.dirname(this.threeServerScript),
+            env: {
+                ...process.env,
+                BILIPK_CONFIG: configPath
+            },
+            windowsHide: false
+        });
+        this.threeServerProcess = child;
+        this.threeServerProcessRoomId = desiredRoomId;
+        this.threeServerRoomId = null;
+        this.threeServerLastCheck = 0;
+
+        child.stdout.on('data', (data) => {
+            console.log(`[threeserver:${username}] ${data.toString().trim()}`);
+        });
+        child.stderr.on('data', (data) => {
+            console.error(`[threeserver:${username}][ERR] ${data.toString().trim()}`);
+        });
+        child.on('close', () => {
+            this.threeServerProcess = null;
+            this.threeServerProcessRoomId = null;
+            this.threeServerRoomId = null;
+        });
+        child.on('error', () => {
+            this.threeServerProcess = null;
+            this.threeServerProcessRoomId = null;
+            this.threeServerRoomId = null;
+        });
+
+        const ready = await this.waitForThreeServerRoom(desiredRoomId, 12000);
+        if (!ready) {
+            throw new Error('threeserver启动失败或房间不匹配');
+        }
+    }
+
+    async stopThreeServerProcess() {
+        const child = this.threeServerProcess;
+        if (!child) {
+            return;
+        }
+        try {
+            child.kill('SIGTERM');
+        } catch (error) {
+            console.error('threeserver stop error:', error.message);
+        }
+        this.threeServerProcess = null;
+        this.threeServerProcessRoomId = null;
+        this.threeServerRoomId = null;
+    }
+
+    async waitForThreeServerRoom(roomId, timeoutMs = 10000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const current = await this.getThreeServerRoomId(true);
+            if (current && String(current) === String(roomId)) {
+                return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        return false;
     }
 
     // 调用Python Playwright脚本
