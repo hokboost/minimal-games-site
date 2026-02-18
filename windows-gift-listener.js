@@ -9,6 +9,7 @@ const { spawn } = require('child_process');
 const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
+const net = require('net');
 const os = require('os');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -31,6 +32,7 @@ class WindowsGiftListener {
         this.threeServerPythonPath = process.env.THREESERVER_PYTHON || 'python';
         this.threeServerProcess = null;
         this.threeServerProcessRoomId = null;
+        this.pkThreeServers = new Map();
         this.pkScript = process.env.BILIPK_SCRIPT || 'C:/Users/user/Desktop/jiaobenbili/checkpk.py';
         this.pkPythonPath = process.env.BILIPK_PYTHON || 'python';
         this.pkConfigPath = process.env.BILIPK_CONFIG || 'C:/Users/user/Desktop/jiaobenbili/config_gift_only.json';
@@ -111,50 +113,47 @@ class WindowsGiftListener {
             await this.updatePkRunnerState(username, true, roomId, this.pkProcesses.get(username)?.pid);
             return;
         }
-        await this.ensureThreeServerForRoom(roomId, username);
         const pkConfigPath = await this.ensureRoomConfig(roomId);
-        const child = spawn(this.pkPythonPath, [this.pkScript, String(roomId)], {
-            cwd: path.dirname(this.pkScript),
-            env: {
-                ...process.env,
-                BILIPK_CONFIG: pkConfigPath,
-                PK_REPORT_URL: `${this.serverUrl}/api/pk/report`,
-                PK_REPORT_KEY: this.apiKey,
-                PK_REPORT_USERNAME: username
-            },
-            windowsHide: true
+        const pkThreeServerUrl = await this.ensurePkThreeServer(username, roomId);
+        console.log(`[PK:${username}] 启动checkpk窗口，房间=${roomId}, threeserver=${pkThreeServerUrl}`);
+        const cmd = this.buildPkCommand({
+            roomId,
+            configPath: pkConfigPath,
+            threeServerUrl: pkThreeServerUrl,
+            reportUrl: `${this.serverUrl}/api/pk/report`,
+            reportKey: this.apiKey,
+            reportUsername: username
         });
-        this.pkProcesses.set(username, child);
-
-        child.stdout.on('data', (data) => {
-            console.log(`[PK:${username}] ${data.toString().trim()}`);
-        });
-        child.stderr.on('data', (data) => {
-            console.error(`[PK:${username}][ERR] ${data.toString().trim()}`);
-        });
-        child.on('close', () => {
-            this.pkProcesses.delete(username);
-            this.updatePkRunnerState(username, false, roomId, null).catch(() => {});
-        });
-        child.on('error', () => {
-            this.pkProcesses.delete(username);
+        const windowTitle = `checkpk-${username}-${Date.now()}`;
+        const pid = await this.launchPkWindow(cmd, windowTitle);
+        this.pkProcesses.set(username, {
+            pid,
+            roomId: String(roomId),
+            windowTitle
         });
 
-        await this.updatePkRunnerState(username, true, roomId, child.pid);
+        await this.updatePkRunnerState(username, true, roomId, pid || null);
     }
 
     async stopPkProcess(username) {
-        const child = this.pkProcesses.get(username);
-        if (!child) {
+        const entry = this.pkProcesses.get(username);
+        if (!entry) {
             await this.updatePkRunnerState(username, false, null, null);
+            await this.stopPkThreeServer(username);
             return;
         }
         try {
-            child.kill('SIGTERM');
+            if (entry.pid) {
+                await this.killWindowsPid(entry.pid);
+            }
+            if (entry.windowTitle) {
+                await this.killWindowByTitle(entry.windowTitle);
+            }
         } catch (error) {
             console.error(`[PK:${username}] stop error:`, error.message);
         }
         this.pkProcesses.delete(username);
+        await this.stopPkThreeServer(username);
         await this.updatePkRunnerState(username, false, null, null);
     }
 
@@ -399,59 +398,6 @@ class WindowsGiftListener {
         return targetPath;
     }
 
-    async ensureThreeServerForRoom(roomId, username) {
-        const desiredRoomId = String(roomId);
-        const activeRoomId = await this.getThreeServerRoomId();
-        if (activeRoomId && activeRoomId === desiredRoomId) {
-            return;
-        }
-        if (activeRoomId && activeRoomId !== desiredRoomId) {
-            console.log(`⚠️ threeserver房间不匹配(${activeRoomId} -> ${desiredRoomId})，准备重启`);
-            if (!this.threeServerProcess) {
-                console.log('⚠️ 检测到外部threeserver正在占用端口，可能需要手动关闭旧实例');
-            }
-        }
-        if (this.threeServerProcess) {
-            await this.stopThreeServerProcess();
-        }
-
-        const configPath = await this.ensureRoomConfig(desiredRoomId);
-        const child = spawn(this.threeServerPythonPath, [this.threeServerScript], {
-            cwd: path.dirname(this.threeServerScript),
-            env: {
-                ...process.env,
-                BILIPK_CONFIG: configPath
-            },
-            windowsHide: false
-        });
-        this.threeServerProcess = child;
-        this.threeServerProcessRoomId = desiredRoomId;
-        this.threeServerRoomId = null;
-        this.threeServerLastCheck = 0;
-
-        child.stdout.on('data', (data) => {
-            console.log(`[threeserver:${username}] ${data.toString().trim()}`);
-        });
-        child.stderr.on('data', (data) => {
-            console.error(`[threeserver:${username}][ERR] ${data.toString().trim()}`);
-        });
-        child.on('close', () => {
-            this.threeServerProcess = null;
-            this.threeServerProcessRoomId = null;
-            this.threeServerRoomId = null;
-        });
-        child.on('error', () => {
-            this.threeServerProcess = null;
-            this.threeServerProcessRoomId = null;
-            this.threeServerRoomId = null;
-        });
-
-        const ready = await this.waitForThreeServerRoom(desiredRoomId, 12000);
-        if (!ready) {
-            throw new Error('threeserver启动失败或房间不匹配');
-        }
-    }
-
     async stopThreeServerProcess() {
         const child = this.threeServerProcess;
         if (!child) {
@@ -467,16 +413,156 @@ class WindowsGiftListener {
         this.threeServerRoomId = null;
     }
 
-    async waitForThreeServerRoom(roomId, timeoutMs = 10000) {
+    async waitForThreeServerRoom(roomId, timeoutMs = 10000, serverUrl = this.threeServerUrl) {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
-            const current = await this.getThreeServerRoomId(true);
+            const current = await this.fetchThreeServerRoomId(serverUrl);
             if (current && String(current) === String(roomId)) {
                 return true;
             }
             await new Promise(resolve => setTimeout(resolve, 500));
         }
         return false;
+    }
+
+    async fetchThreeServerRoomId(serverUrl) {
+        try {
+            const response = await axios.get(`${serverUrl}/`, { timeout: 1000 });
+            return response.data?.room_id ? String(response.data.room_id) : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    async getFreePort() {
+        return new Promise((resolve, reject) => {
+            const server = net.createServer();
+            server.unref();
+            server.on('error', reject);
+            server.listen(0, '127.0.0.1', () => {
+                const { port } = server.address();
+                server.close(() => resolve(port));
+            });
+        });
+    }
+
+    async ensurePkThreeServer(username, roomId) {
+        const desiredRoomId = String(roomId);
+        const existing = this.pkThreeServers.get(username);
+        if (existing && existing.roomId === desiredRoomId) {
+            return existing.url;
+        }
+        if (existing) {
+            await this.stopPkThreeServer(username);
+        }
+
+        const port = await this.getFreePort();
+        const url = `http://127.0.0.1:${port}`;
+        const configPath = await this.ensureRoomConfig(desiredRoomId);
+        const child = spawn(this.threeServerPythonPath, [this.threeServerScript], {
+            cwd: path.dirname(this.threeServerScript),
+            env: {
+                ...process.env,
+                BILIPK_CONFIG: configPath,
+                THREESERVER_PORT: String(port)
+            },
+            windowsHide: true
+        });
+
+        this.pkThreeServers.set(username, {
+            process: child,
+            port,
+            url,
+            roomId: desiredRoomId
+        });
+
+        child.stdout.on('data', (data) => {
+            console.log(`[threeserver:${username}] ${data.toString().trim()}`);
+        });
+        child.stderr.on('data', (data) => {
+            console.error(`[threeserver:${username}][ERR] ${data.toString().trim()}`);
+        });
+        child.on('close', () => {
+            this.pkThreeServers.delete(username);
+        });
+        child.on('error', () => {
+            this.pkThreeServers.delete(username);
+        });
+
+        const ready = await this.waitForThreeServerRoom(desiredRoomId, 20000, url);
+        if (!ready) {
+            console.log(`⚠️ threeserver(${username})未在超时内确认房间，先继续执行PK`);
+        }
+        return url;
+    }
+
+    async stopPkThreeServer(username) {
+        const entry = this.pkThreeServers.get(username);
+        if (!entry) {
+            return;
+        }
+        try {
+            entry.process.kill('SIGTERM');
+        } catch (error) {
+            console.error(`[threeserver:${username}] stop error:`, error.message);
+        }
+        this.pkThreeServers.delete(username);
+    }
+
+    buildPkCommand({ roomId, configPath, threeServerUrl, reportUrl, reportKey, reportUsername }) {
+        const parts = [
+            `set BILIPK_CONFIG=${configPath}`,
+            `set THREESERVER_URL=${threeServerUrl}`,
+            `set PK_REPORT_URL=${reportUrl}`,
+            `set PK_REPORT_KEY=${reportKey}`,
+            `set PK_REPORT_USERNAME=${reportUsername}`,
+            `"${this.pkPythonPath}" "${this.pkScript}" "${roomId}"`
+        ];
+        return parts.join(' && ');
+    }
+
+    async launchPkWindow(cmd, windowTitle) {
+        const escapedTitle = this.escapePowerShellSingleQuote(`title ${windowTitle} && ${cmd}`);
+        const psCommand = [
+            `$p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k','${escapedTitle}') -PassThru;`,
+            'Write-Output $p.Id'
+        ].join(' ');
+
+        return new Promise((resolve) => {
+            const child = spawn('powershell.exe', ['-NoProfile', '-Command', psCommand], {
+                windowsHide: true
+            });
+            let output = '';
+            child.stdout.on('data', (data) => {
+                output += data.toString();
+            });
+            child.on('close', () => {
+                const pid = Number(output.trim());
+                resolve(Number.isFinite(pid) ? pid : null);
+            });
+            child.on('error', () => resolve(null));
+        });
+    }
+
+    escapePowerShellSingleQuote(value) {
+        return String(value).replace(/'/g, "''");
+    }
+
+    async killWindowsPid(pid) {
+        return new Promise((resolve) => {
+            const killer = spawn('taskkill', ['/F', '/PID', String(pid), '/T'], { windowsHide: true });
+            killer.on('close', () => resolve());
+            killer.on('error', () => resolve());
+        });
+    }
+
+    async killWindowByTitle(windowTitle) {
+        const filter = `WINDOWTITLE eq ${windowTitle}*`;
+        return new Promise((resolve) => {
+            const killer = spawn('taskkill', ['/F', '/FI', filter], { windowsHide: true });
+            killer.on('close', () => resolve());
+            killer.on('error', () => resolve());
+        });
     }
 
     // 调用Python Playwright脚本

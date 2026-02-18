@@ -374,13 +374,24 @@
                 const result = await response.json();
                 if (!result.success) {
                     showMessage(translateServerMessage(result.message) || t('操作失败', 'Action failed'), 'error');
+                } else {
+                    const runningNext = !isStopping;
+                    pkToggleBtn.classList.toggle('stop', runningNext);
+                    pkToggleBtn.textContent = runningNext
+                        ? t('关闭自动打PK', 'Stop Auto PK')
+                        : t('开启自动打PK', 'Start Auto PK');
+                    if (pkStatusText) {
+                        pkStatusText.textContent = runningNext
+                            ? t('状态：启动中', 'Status: Starting')
+                            : t('状态：停止中', 'Status: Stopping');
+                    }
                 }
             } catch (error) {
                 console.error('PK toggle error:', error);
                 showMessage(t('操作失败', 'Action failed'), 'error');
             } finally {
                 pkToggleBtn.disabled = false;
-                updatePkStatus();
+                setTimeout(updatePkStatus, 1200);
             }
         }
 
