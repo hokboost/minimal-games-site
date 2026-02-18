@@ -267,21 +267,60 @@ module.exports = function registerGiftRoutes(app, deps) {
 
     app.post('/api/pk/report', requireApiKey, async (req, res) => {
         try {
-            const { username, roomId, giftIds, script, success, reason } = req.body || {};
+            const { username, roomId, giftIds, script, success, reason, ticketCount } = req.body || {};
             if (!username || !Array.isArray(giftIds)) {
                 return res.status(400).json({ success: false, message: '参数不完整' });
             }
+            const parseTicketCount = (value) => {
+                const num = Number(value);
+                if (!Number.isFinite(num) || num <= 0) {
+                    return null;
+                }
+                return Math.round(num);
+            };
+            const computeTicketCountFromGifts = () => {
+                const poolConfig = giftConfig?.礼物池配置 || {};
+                let total = 0;
+                giftIds.forEach((gid) => {
+                    const entry = poolConfig[String(gid)];
+                    if (!entry) {
+                        return;
+                    }
+                    const price = Array.isArray(entry) ? Number(entry[1]) : Number(entry?.value);
+                    if (!Number.isFinite(price)) {
+                        return;
+                    }
+                    total += Math.round(price * 10);
+                });
+                return total > 0 ? total : null;
+            };
+            const resolvedTicketCount = parseTicketCount(ticketCount) ?? computeTicketCountFromGifts();
             await pool.query(`
-                INSERT INTO pk_gift_logs (username, room_id, gift_ids, script_name, success, reason)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO pk_gift_logs (username, room_id, gift_ids, ticket_count, script_name, success, reason)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
             `, [
                 username,
                 roomId ? String(roomId) : null,
                 JSON.stringify(giftIds),
+                Number.isFinite(resolvedTicketCount) ? resolvedTicketCount : null,
                 script ? String(script) : null,
                 typeof success === 'boolean' ? success : null,
                 reason ? String(reason) : null
             ]);
+            if (success === true && Number.isFinite(resolvedTicketCount) && resolvedTicketCount > 0) {
+                try {
+                    await BalanceLogger.updateBalance({
+                        username,
+                        amount: -resolvedTicketCount,
+                        operationType: 'pk_ticket',
+                        description: `PK自动上票扣费：${resolvedTicketCount} 电币`,
+                        ipAddress: req.ip,
+                        userAgent: req.get('User-Agent')
+                    });
+                } catch (balanceError) {
+                    console.error('PK ticket balance deduct error:', balanceError);
+                }
+            }
             return res.json({ success: true });
         } catch (error) {
             console.error('PK report error:', error);

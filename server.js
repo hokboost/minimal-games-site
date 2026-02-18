@@ -380,6 +380,7 @@ async function initializeDatabase() {
                 username VARCHAR(50) NOT NULL,
                 room_id VARCHAR(50),
                 gift_ids JSONB NOT NULL,
+                ticket_count INTEGER,
                 script_name VARCHAR(50),
                 success BOOLEAN,
                 reason TEXT,
@@ -387,6 +388,20 @@ async function initializeDatabase() {
             )
         `);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_gift_logs_username ON pk_gift_logs(username, created_at DESC)`);
+
+        const checkPkTicketCount = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'pk_gift_logs'
+              AND column_name = 'ticket_count'
+        `);
+        if (checkPkTicketCount.rows.length === 0) {
+            console.log('➕ 添加ticket_count字段到pk_gift_logs表...');
+            await pool.query(`ALTER TABLE pk_gift_logs ADD COLUMN ticket_count INTEGER`);
+            console.log('✅ ticket_count字段添加完成');
+        } else {
+            console.log('✅ ticket_count字段已存在');
+        }
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS pk_tasks (
