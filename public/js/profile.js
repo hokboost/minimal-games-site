@@ -189,6 +189,7 @@ const formatScratchResult = (result) => {
             slot: t('🎰 老虎机记录', '🎰 Slot Records'),
             scratch: t('🎟️ 刮刮乐记录', '🎟️ Scratch Records'),
             wish: t('🌟 祈愿记录', '🌟 Wish Records'),
+            blindbox: t('🎁 盲盒记录', '🎁 Blind Box Records'),
             stone: t('🪨 合石头记录', '🪨 Stone Match Records'),
             flip: t('🃏 翻卡牌记录', '🃏 Card Flip Records'),
             duel: t('⚔️ 决斗挑战记录', '⚔️ Duel Records')
@@ -355,6 +356,8 @@ const formatScratchResult = (result) => {
             tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('档位', 'Tier')}</th><th>${t('匹配数', 'Matches')}</th></tr></thead>`;
         } else if (gameType === 'wish') {
             tableHTML += `<thead><tr><th>${t('祈愿时间', 'Wish Time')}</th><th>${t('次数', 'Count')}</th><th>${t('消耗电币', 'Cost')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
+        } else if (gameType === 'blindbox') {
+            tableHTML += `<thead><tr><th>${t('抽取时间', 'Time')}</th><th>${t('档位', 'Tier')}</th><th>${t('数量', 'Count')}</th><th>${t('消耗电币', 'Cost')}</th><th>${t('总价值', 'Total Value')}</th></tr></thead>`;
         } else if (gameType === 'stone') {
             tableHTML += `<thead><tr><th>${t('操作时间', 'Time')}</th><th>${t('操作', 'Action')}</th><th>${t('花费', 'Cost')}</th><th>${t('变化', 'Change')}</th></tr></thead>`;
         } else if (gameType === 'flip') {
@@ -408,6 +411,16 @@ const formatScratchResult = (result) => {
                         <td>${record.batch_count}</td>
                         <td>${record.total_cost} ${t('电币', 'coins')}</td>
                         <td>${resultText}</td>
+                    </tr>
+                `;
+            } else if (gameType === 'blindbox') {
+                tableHTML += `
+                    <tr>
+                        <td>${playedAt}</td>
+                        <td>${record.tier_name}</td>
+                        <td>${record.box_count}</td>
+                        <td>${record.total_cost} ${t('电币', 'coins')}</td>
+                        <td>${record.total_reward_value} ${t('电币', 'coins')}</td>
                     </tr>
                 `;
             } else if (gameType === 'stone') {

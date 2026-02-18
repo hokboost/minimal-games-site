@@ -2178,12 +2178,14 @@ module.exports = function registerGameRoutes(app, deps) {
                 }
                 return a.originalIndex - b.originalIndex;
             });
+        const totalRewardValue = sortedRewards.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
 
         const client = await pool.connect();
         let balanceAfter = null;
         let batchId = null;
         let firstInventoryId = null;
         let bilibiliRoomId = null;
+        const postCommitTasks = [];
         try {
             await client.query('BEGIN');
 
@@ -2274,6 +2276,32 @@ module.exports = function registerGameRoutes(app, deps) {
             return res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
             client.release();
+        }
+
+        postCommitTasks.push(async () => {
+            try {
+                await pool.query(
+                    `INSERT INTO blindbox_logs (
+                        username, tier_key, tier_name, box_count, total_cost, total_reward_value, rewards, batch_id, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                    [
+                        username,
+                        tierKey,
+                        tier.nameZh,
+                        countNum,
+                        totalCost,
+                        totalRewardValue,
+                        JSON.stringify(sortedRewards),
+                        batchId
+                    ]
+                );
+            } catch (dbError) {
+                console.error('Blindbox log error:', dbError);
+            }
+        });
+
+        for (const task of postCommitTasks) {
+            task().catch((err) => console.error('Blindbox post-commit log failed:', err));
         }
 
         let enqueueResult = null;
@@ -2501,6 +2529,25 @@ module.exports = function registerGameRoutes(app, deps) {
                     `;
                     params = [username, limit, offset];
                     countQuery = 'SELECT COUNT(*) FROM wish_sessions WHERE username = $1';
+                    countParams = [username];
+                    break;
+
+                case 'blindbox':
+                    query = `
+                        SELECT id,
+                               tier_name,
+                               box_count,
+                               total_cost,
+                               total_reward_value,
+                               rewards,
+                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
+                        FROM blindbox_logs
+                        WHERE username = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2 OFFSET $3
+                    `;
+                    params = [username, limit, offset];
+                    countQuery = 'SELECT COUNT(*) FROM blindbox_logs WHERE username = $1';
                     countParams = [username];
                     break;
 

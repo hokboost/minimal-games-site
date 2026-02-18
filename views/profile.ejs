@@ -94,6 +94,18 @@
                 </div>
 
                 <div class="stat-card">
+                    <div class="stat-icon">🎁</div>
+                    <div class="stat-content">
+                        <h3><%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></h3>
+                        <div class="stat-numbers">
+                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.blindbox.total %></span>
+                            <span class="stat-sub"><%= lang === 'zh' ? '记录以抽取为准' : 'Records by openings' %></span>
+                        </div>
+                        <button class="view-records-btn" data-records="blindbox"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
+                    </div>
+                </div>
+
+                <div class="stat-card">
                     <div class="stat-icon">🪨</div>
                     <div class="stat-content">
                         <h3><%= lang === 'zh' ? '合石头' : 'Stone Match' %></h3>

@@ -724,6 +724,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 await client.query('DELETE FROM wish_sessions WHERE username = $1', [username]);
                 await client.query('DELETE FROM wish_progress WHERE username = $1', [username]);
                 await client.query('DELETE FROM wish_inventory WHERE username = $1', [username]);
+                await client.query('DELETE FROM blindbox_logs WHERE username = $1', [username]);
 
                 await client.query('DELETE FROM stone_logs WHERE username = $1', [username]);
                 await client.query('DELETE FROM stone_states WHERE username = $1', [username]);

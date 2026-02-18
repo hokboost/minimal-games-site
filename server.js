@@ -827,6 +827,7 @@ app.get('/profile', requireLogin, (req, res, next) => {
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN won != \'lost\' THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count FROM blindbox_logs WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count FROM stone_logs WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count FROM flip_logs WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count FROM duel_logs WHERE username = $1', [username])
@@ -849,14 +850,17 @@ app.get('/profile', requireLogin, (req, res, next) => {
                 total: parseInt(gameStats[3].rows[0].count) || 0,
                 wins: parseInt(gameStats[3].rows[0].wins) || 0
             },
-            stone: {
+            blindbox: {
                 total: parseInt(gameStats[4].rows[0].count) || 0
             },
-            flip: {
+            stone: {
                 total: parseInt(gameStats[5].rows[0].count) || 0
             },
-            duel: {
+            flip: {
                 total: parseInt(gameStats[6].rows[0].count) || 0
+            },
+            duel: {
+                total: parseInt(gameStats[7].rows[0].count) || 0
             }
         };
         

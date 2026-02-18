@@ -139,21 +139,18 @@ class WindowsGiftListener {
         const entry = this.pkProcesses.get(username);
         if (!entry) {
             await this.updatePkRunnerState(username, false, null, null);
-            await this.stopPkThreeServer(username);
+            this.stopPkThreeServer(username);
             return;
         }
         try {
-            if (entry.pid) {
-                await this.killWindowsPid(entry.pid);
-            }
             if (entry.windowTitle) {
-                await this.killWindowByTitle(entry.windowTitle);
+                await this.closeWindowByTitle(entry.windowTitle);
             }
         } catch (error) {
             console.error(`[PK:${username}] stop error:`, error.message);
         }
         this.pkProcesses.delete(username);
-        await this.stopPkThreeServer(username);
+        this.stopPkThreeServer(username);
         await this.updatePkRunnerState(username, false, null, null);
     }
 
@@ -548,18 +545,16 @@ class WindowsGiftListener {
         return String(value).replace(/'/g, "''");
     }
 
-    async killWindowsPid(pid) {
-        return new Promise((resolve) => {
-            const killer = spawn('taskkill', ['/F', '/PID', String(pid), '/T'], { windowsHide: true });
-            killer.on('close', () => resolve());
-            killer.on('error', () => resolve());
-        });
-    }
+    async closeWindowByTitle(windowTitle) {
+        const escaped = this.escapePowerShellSingleQuote(windowTitle);
+        const psCommand = [
+            `$t='${escaped}';`,
+            "$procs=Get-Process | Where-Object { $_.MainWindowTitle -like ('*' + $t + '*') };",
+            "$procs | ForEach-Object { $_.CloseMainWindow() | Out-Null }"
+        ].join(' ');
 
-    async killWindowByTitle(windowTitle) {
-        const filter = `WINDOWTITLE eq ${windowTitle}*`;
         return new Promise((resolve) => {
-            const killer = spawn('taskkill', ['/F', '/FI', filter], { windowsHide: true });
+            const killer = spawn('powershell.exe', ['-NoProfile', '-Command', psCommand], { windowsHide: true });
             killer.on('close', () => resolve());
             killer.on('error', () => resolve());
         });
