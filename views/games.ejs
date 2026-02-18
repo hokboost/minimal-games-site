@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><%= lang === 'zh' ? '游戏中心' : 'Game Center' %></title>
+    <title><%= lang === 'zh' ? '游戏专区' : 'Game Zone' %></title>
     <link rel="stylesheet" href="/styles.css">
     <style>
     .header {
@@ -165,11 +165,6 @@
         display: inline-block;
     }
     
-    .status-new {
-        color: #4ecdc4;
-        border: 1px solid #4ecdc4;
-    }
-    
     .status-hot {
         color: #ff6b6b;
         border: 1px solid #ff6b6b;
@@ -178,25 +173,6 @@
     .status-classic {
         color: #f0c040;
         border: 1px solid #f0c040;
-    }
-    
-    .status-developing {
-        color: #9e9e9e;
-        border: 1px solid #9e9e9e;
-    }
-    
-    .game-card-disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        pointer-events: none;
-        filter: grayscale(0.5);
-    }
-    
-    .game-card-disabled:hover {
-        transform: none;
-        box-shadow: none;
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(255, 255, 255, 0.2);
     }
     
     @media (max-width: 768px) {
@@ -217,11 +193,12 @@
     <div class="container">
 
         <div class="header">
-            <h1 class="title">🎮 Minimal Games <%= lang === 'zh' ? '游戏中心' : 'Game Center' %></h1>
+            <h1 class="title">🧭 <%= lang === 'zh' ? '游戏专区' : 'Game Zone' %></h1>
             <div class="user-info">
                 <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
                     <span><%= lang === 'zh' ? '欢迎' : 'Welcome' %>，<%= req.session.user.username %>!</span>
                     <div class="user-menu">
+                        <a href="/" class="btn-profile">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
                         <a href="/profile" class="btn-profile">👤 <%= lang === 'zh' ? '个人资料' : 'Profile' %></a>
                         <% if (req.session.user.is_admin) { %>
                             <a href="/admin" class="btn-admin">👑 <%= lang === 'zh' ? '管理后台' : 'Admin' %></a>
@@ -238,92 +215,46 @@
         </div>
         
         <% if (typeof user !== 'undefined' && user && user.authorized) { %>
-            
-            
             <div class="spins-reminder">
                 <h3>⚡ <%= lang === 'zh' ? '电币余额' : 'Coin Balance' %>：<%= balance !== null ? balance : 0 %> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
                 <p><%= lang === 'zh' ? '仅供娱乐，虚拟电币不可兑换真实货币' : 'For entertainment only, virtual coins cannot be exchanged for real money' %></p>
             </div>
 
             <div class="games-grid">
-                <a href="/games" class="game-card">
-                    <span class="game-icon">🧭</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '游戏专区' : 'Game Zone' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '集结更多玩法：祈愿、合石头、翻牌、决斗' : 'More modes: wish, stones, card flip, duel' %></p>
-                    <span class="game-status status-hot">✨ <%= lang === 'zh' ? '专区' : 'Zone' %></span>
-                </a>
-
-                <a href="/quiz" class="game-card">
-                    <span class="game-icon">🧠</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '知识问答' : 'Quiz Game' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '测试你的知识，答对越多奖励越丰厚' : 'Test your knowledge, more correct answers mean bigger rewards' %></p>
-                    <span class="game-status status-hot">🔥 <%= lang === 'zh' ? '热门' : 'Hot' %></span>
-                </a>
-
-                <a href="/slot" class="game-card">
-                    <span class="game-icon">🎰</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '幸运老虎机' : 'Slot Machine' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '经典老虎机游戏，三个相同图案即可获胜' : 'Classic slot game, match three symbols to win' %></p>
+                <a href="/wish" class="game-card">
+                    <span class="game-icon">🌟</span>
+                    <h2 class="game-title"><%= lang === 'zh' ? '幸运祈愿' : 'Lucky Wish' %></h2>
+                    <p class="game-description"><%= lang === 'zh' ? '许下心愿，看看幸运女神是否眷顾你' : 'Make a wish and see if Lady Luck favors you' %></p>
                     <span class="game-status status-classic">⭐ <%= lang === 'zh' ? '经典' : 'Classic' %></span>
                 </a>
 
-                <a href="/scratch" class="game-card">
-                    <span class="game-icon">🎟️</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '刮开涂层，发现隐藏的奖励，简单又刺激' : 'Scratch to reveal hidden rewards, simple and exciting' %></p>
-                    <span class="game-status status-classic">⭐ <%= lang === 'zh' ? '经典' : 'Classic' %></span>
-                </a>
-
-                <a href="/dictation" class="game-card">
-                    <span class="game-icon">✍️</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '汉字听写' : 'Chinese Dictation' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '听读音写汉字，提交后人工审核' : 'Listen and write Chinese characters, manual review' %></p>
-                    <span class="game-status status-classic">📚 <%= lang === 'zh' ? '学习' : 'Study' %></span>
-                </a>
-
-                
-                <a href="/gifts" class="game-card" style="background: linear-gradient(135deg, rgba(255, 152, 0, 0.2), rgba(255, 193, 7, 0.1));">
+                <a href="/blindbox" class="game-card">
                     <span class="game-icon">🎁</span>
-                    <h2 class="game-title"><%= t.nav.gifts %></h2>
-                    <p class="game-description">
-                        <%= lang === 'zh'
-                            ? '用电币兑换精美礼物，为主播送上心意'
-                            : 'Exchange coins for beautiful gifts, show your support to streamers'
-                        %>
-                    </p>
-                    <span class="game-status" style="background: linear-gradient(135deg, #ff9800, #ffc107); color: white;">
-                        ✨ <%= lang === 'zh' ? '核心功能' : 'Core Feature' %>
-                    </span>
+                    <h2 class="game-title"><%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></h2>
+                    <p class="game-description"><%= lang === 'zh' ? '选择档位，惊喜礼物即刻送出' : 'Pick a tier and send surprise gifts instantly' %></p>
+                    <span class="game-status status-hot">🎉 <%= lang === 'zh' ? '新上架' : 'New' %></span>
                 </a>
-            </div>
-            
-            
-            <div style="
-                max-width: 800px;
-                margin: 3rem auto 0;
-                padding: 1.5rem;
-                background: rgba(255, 255, 255, 0.05);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 10px;
-                font-size: 0.9rem;
-                color: #ccc;
-                text-align: center;
-                line-height: 1.6;
-            ">
-                <div style="margin-bottom: 10px; font-weight: bold; color: #ff9800;">
-                    ⚠️ <%= lang === 'zh' ? '重要声明' : 'Important Notice' %>
-                </div>
-                <% if (lang === 'zh') { %>
-                    本平台所有游戏功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币交易。<br>
-                    平台内虚拟积分、余额等均为娱乐道具，无法兑换为真实货币或有价物品。<br>
-                    参与完全免费，无需任何付费，符合中华人民共和国相关法律法规。<br>
-                    <strong>严禁未满18周岁用户使用，请理性娱乐，适度游戏。</strong>
-                <% } else { %>
-                    All games on this platform are for entertainment purposes only and do not involve any form of gambling, betting, or real money transactions.<br>
-                    Virtual points and balances are entertainment items only and cannot be exchanged for real currency or valuable goods.<br>
-                    Participation is completely free with no payment required, in compliance with relevant laws and regulations.<br>
-                    <strong>Strictly prohibited for users under 18 years old. Please enjoy responsibly and game in moderation.</strong>
-                <% } %>
+
+                <a href="/stone" class="game-card">
+                    <span class="game-icon">🪨</span>
+                    <h2 class="game-title"><%= lang === 'zh' ? '合石头' : 'Stone Match' %></h2>
+                    <p class="game-description"><%= lang === 'zh' ? '放入彩色石头，拼出更高奖励' : 'Place colored stones to earn bigger rewards' %></p>
+                    <span class="game-status status-hot">🧩 <%= lang === 'zh' ? '新玩法' : 'New' %></span>
+                </a>
+
+                <a href="/flip" class="game-card">
+                    <span class="game-icon">🃏</span>
+                    <h2 class="game-title"><%= lang === 'zh' ? '翻卡牌' : 'Card Flip' %></h2>
+                    <p class="game-description"><%= lang === 'zh' ? '翻开好牌，随时退出拿奖励' : 'Flip good cards, cash out anytime for rewards' %></p>
+                    <span class="game-status status-hot">✨ <%= lang === 'zh' ? '刺激' : 'Exciting' %></span>
+                </a>
+
+                <a href="/duel" class="game-card">
+                    <span class="game-icon">⚔️</span>
+                    <h2 class="game-title"><%= lang === 'zh' ? '决斗挑战' : 'Duel Challenge' %></h2>
+                    <p class="game-description"><%= lang === 'zh' ? '选择功力，挑战高额奖品' : 'Choose your power, challenge for big prizes' %></p>
+                    <span class="game-status status-hot">🔥 <%= lang === 'zh' ? '热血' : 'Intense' %></span>
+                </a>
             </div>
         <% } else { %>
             <div style="
@@ -355,8 +286,8 @@
                     </h2>
                     <p style="color: #ccc; font-size: 1.1rem; line-height: 1.6;">
                         <%= lang === 'zh'
-                            ? '登录后即可开始游戏并兑换礼物。'
-                            : 'Sign in to start playing games and redeem gifts.'
+                            ? '登录后即可进入游戏专区。'
+                            : 'Sign in to enter the game zone.'
                         %>
                     </p>
                     <div style="margin-top: 1.5rem; display: inline-flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center;">

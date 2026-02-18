@@ -13,11 +13,11 @@ module.exports = function registerGameRoutes(app, deps) {
         quizSessions,
         questionMap,
         randomStoneColor,
-    normalizeStoneSlots,
-    getMaxSameCount,
-    getStoneState,
-    saveStoneState,
-    logStoneAction,
+        normalizeStoneSlots,
+        getMaxSameCount,
+        getStoneState,
+        saveStoneState,
+        logStoneAction,
         stoneRewards,
         stoneReplaceCosts,
         flipCosts,
@@ -26,15 +26,60 @@ module.exports = function registerGameRoutes(app, deps) {
         getFlipState,
         saveFlipState,
         logFlipAction,
-    duelRewards,
-    calculateDuelCost
-} = deps;
+        duelRewards,
+        calculateDuelCost,
+        enqueueWishInventorySend
+    } = deps;
     // 兜底，防止 security 中未提供特定中间件时报 undefined
     const userActionRateLimit = security.userActionRateLimit || ((req, res, next) => next());
     const basicRateLimit = security.basicRateLimit || ((req, res, next) => next());
     const csrfProtection = security.csrfProtection || ((req, res, next) => next());
     const { randomInt, randomBytes } = require('crypto');
+    const fs = require('fs');
+    const path = require('path');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
+
+    const blindboxTiers = [
+        { key: 'starmoon', nameZh: '星月盲盒', nameEn: 'Star Moon Box', cost: 50 },
+        { key: 'heart', nameZh: '心动盲盒', nameEn: 'Heart Box', cost: 150 },
+        { key: 'supreme', nameZh: '至尊盲盒', nameEn: 'Supreme Box', cost: 1000 }
+    ];
+    const blindboxCounts = [1, 10, 50];
+    const blindboxConfigs = {
+        starmoon: {
+            cost: 50,
+            items: [
+                { giftId: '34999', name: '原地求婚', weight: 0.0002 },
+                { giftId: '31122', name: '水晶球', weight: 0.0005 },
+                { giftId: '33668', name: '啵啵', weight: 0.003 },
+                { giftId: '31053', name: '告白花束', weight: 0.005 },
+                { giftId: '34315', name: '喜欢你', weight: 0.0664 },
+                { giftId: '31044', name: '情书', weight: 0.7249 },
+                { giftId: '34500', name: '你真好看', weight: 0.2 }
+            ]
+        },
+        heart: {
+            cost: 150,
+            items: [
+                { giftId: '31028', name: '探索者启航', weight: 0.0004 },
+                { giftId: '31122', name: '水晶球', weight: 0.02 },
+                { giftId: '33668', name: '啵啵', weight: 0.05 },
+                { giftId: '31053', name: '告白花束', weight: 0.184876 },
+                { giftId: '34315', name: '喜欢你', weight: 0.544724 },
+                { giftId: '31044', name: '情书', weight: 0.2 }
+            ]
+        },
+        supreme: {
+            cost: 1000,
+            items: [
+                { giftId: '34998', name: '小电视飞船', weight: 0.003 },
+                { giftId: '34381', name: '飞屋环游', weight: 0.085 },
+                { giftId: '31122', name: '水晶球', weight: 0.3 },
+                { giftId: '33668', name: '啵啵', weight: 0.3162 },
+                { giftId: '31053', name: '告白花束', weight: 0.2958 }
+            ]
+        }
+    };
 
     const rejectWhenOverloaded = (req, res, next) => {
         // 等待队列过多时快速失败，防止池子耗尽
@@ -42,6 +87,49 @@ module.exports = function registerGameRoutes(app, deps) {
             return res.status(503).json({ success: false, message: '服务器繁忙，请稍后重试' });
         }
         return next();
+    };
+
+    const blindboxGiftConfigPath = path.join(__dirname, '..', 'gift-codes.json');
+
+    const loadBlindboxGiftMap = () => {
+        const raw = fs.readFileSync(blindboxGiftConfigPath, 'utf8');
+        const config = JSON.parse(raw);
+        const poolConfig = config.礼物池配置 || {};
+        return Object.entries(poolConfig).reduce((acc, [giftId, info]) => {
+            const name = Array.isArray(info) ? info[0] : info?.name;
+            const value = Array.isArray(info) ? info[1] : info?.value;
+            acc[giftId] = {
+                name: name || giftId,
+                value: Number(value) || 0
+            };
+            return acc;
+        }, {});
+    };
+
+    const buildBlindboxPool = (tierConfig) => {
+        const giftMap = loadBlindboxGiftMap();
+        return (tierConfig.items || []).map((item) => ({
+            giftId: String(item.giftId),
+            name: item.name || giftMap[item.giftId]?.name || String(item.giftId),
+            value: Number(giftMap[item.giftId]?.value) || 0,
+            weight: Number(item.weight) || 0
+        })).filter((item) => item.giftId && item.weight > 0);
+    };
+
+    const pickBlindboxReward = (pool) => {
+        const totalWeight = pool.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
+        if (totalWeight <= 0) {
+            return null;
+        }
+        const roll = randomFloat() * totalWeight;
+        let acc = 0;
+        for (const item of pool) {
+            acc += Number(item.weight) || 0;
+            if (roll <= acc) {
+                return item;
+            }
+        }
+        return pool[pool.length - 1] || null;
     };
 
     app.get('/quiz', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
@@ -310,6 +398,36 @@ module.exports = function registerGameRoutes(app, deps) {
             });
         } catch (error) {
             console.error('Duel page error:', error);
+            res.status(500).send('服务器错误');
+        }
+    });
+
+    app.get('/blindbox', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+        try {
+            if (!req.session.initialized) {
+                req.session.initialized = true;
+                req.session.createdAt = Date.now();
+                generateCSRFToken(req);
+            }
+
+            const username = req.session.user.username;
+            const userResult = await pool.query(
+                'SELECT balance FROM users WHERE username = $1',
+                [username]
+            );
+
+            const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+
+            res.render('blindbox', {
+                username,
+                balance,
+                tiers: blindboxTiers,
+                counts: blindboxCounts,
+                blindboxConfigs,
+                csrfToken: req.session.csrfToken
+            });
+        } catch (error) {
+            console.error('Blindbox page error:', error);
             res.status(500).send('服务器错误');
         }
     });
@@ -2005,6 +2123,175 @@ module.exports = function registerGameRoutes(app, deps) {
         } finally {
             client.release();
         }
+    });
+
+    // 惊喜盲盒
+    app.post('/api/blindbox/open', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
+        const username = req.session.user.username;
+        const tierKey = String(req.body.tier || '').trim();
+        const countNum = Number.parseInt(req.body.count, 10);
+
+        const tier = blindboxTiers.find((item) => item.key === tierKey);
+        if (!tier) {
+            return res.status(400).json({ success: false, message: '无效的盲盒档位' });
+        }
+        if (!blindboxCounts.includes(countNum)) {
+            return res.status(400).json({ success: false, message: '无效的盲盒数量' });
+        }
+
+        const tierConfig = blindboxConfigs[tierKey];
+        if (!tierConfig) {
+            return res.status(400).json({ success: false, message: '盲盒配置不存在' });
+        }
+
+        let blindboxPool;
+        try {
+            blindboxPool = buildBlindboxPool(tierConfig);
+        } catch (error) {
+            console.error('Blindbox pool load error:', error);
+            return res.status(500).json({ success: false, message: '礼物池加载失败' });
+        }
+
+        if (!blindboxPool.length) {
+            return res.status(500).json({ success: false, message: '礼物池为空' });
+        }
+
+        const totalCost = tier.cost * countNum;
+        const rewards = [];
+        for (let i = 0; i < countNum; i += 1) {
+            const reward = pickBlindboxReward(blindboxPool);
+            if (!reward) {
+                return res.status(500).json({ success: false, message: '抽取失败，请稍后再试' });
+            }
+            rewards.push({
+                giftId: String(reward.giftId),
+                name: reward.name,
+                value: Number(reward.value) || 0
+            });
+        }
+
+        const sortedRewards = rewards
+            .map((item, index) => ({ ...item, originalIndex: index }))
+            .sort((a, b) => {
+                if (b.value !== a.value) {
+                    return b.value - a.value;
+                }
+                return a.originalIndex - b.originalIndex;
+            });
+
+        const client = await pool.connect();
+        let balanceAfter = null;
+        let batchId = null;
+        let firstInventoryId = null;
+        let bilibiliRoomId = null;
+        try {
+            await client.query('BEGIN');
+
+            const lock = await client.query(
+                'SELECT pg_try_advisory_xact_lock(hashtext($1 || \':blindbox\')) AS locked',
+                [username]
+            );
+            if (!lock.rows[0]?.locked) {
+                await client.query('ROLLBACK');
+                return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
+            }
+
+            const betResult = await BalanceLogger.updateBalance({
+                username,
+                amount: -totalCost,
+                operationType: 'blindbox_open',
+                description: `惊喜盲盒：${tier.nameZh} x${countNum}`,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
+            });
+
+            if (!betResult.success) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: betResult.message });
+            }
+            balanceAfter = betResult.balance;
+
+            const roomResult = await client.query(
+                'SELECT bilibili_room_id FROM users WHERE username = $1',
+                [username]
+            );
+            bilibiliRoomId = roomResult.rows[0]?.bilibili_room_id || null;
+            const expiresAt = bilibiliRoomId
+                ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
+                : "'infinity'::timestamptz";
+
+            batchId = randomBytes(8).toString('hex');
+
+            for (let i = 0; i < sortedRewards.length; i += 1) {
+                const reward = sortedRewards[i];
+                const insertResult = await client.query(`
+                    INSERT INTO wish_inventory (
+                        username,
+                        gift_type,
+                        gift_name,
+                        bilibili_gift_id,
+                        status,
+                        expires_at,
+                        created_at,
+                        updated_at,
+                        source_type,
+                        source_batch_id,
+                        batch_order,
+                        batch_value
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, 'stored',
+                        ${expiresAt},
+                        (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                        (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                        'blindbox',
+                        $5,
+                        $6,
+                        $7
+                    )
+                    RETURNING id
+                `, [
+                    username,
+                    reward.giftId,
+                    reward.name,
+                    reward.giftId,
+                    batchId,
+                    i + 1,
+                    reward.value
+                ]);
+
+                if (i === 0) {
+                    firstInventoryId = insertResult.rows[0]?.id || null;
+                }
+            }
+
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('Blindbox open error:', error);
+            return res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client.release();
+        }
+
+        let enqueueResult = null;
+        if (bilibiliRoomId && firstInventoryId && enqueueWishInventorySend) {
+            enqueueResult = await enqueueWishInventorySend({
+                inventoryId: firstInventoryId,
+                username
+            });
+        }
+
+        return res.json({
+            success: true,
+            balanceAfter,
+            batchId,
+            rewards,
+            queued: !!enqueueResult?.success,
+            enqueueMessage: enqueueResult?.message || null
+        });
     });
 
     // 决斗挑战 Duel 游戏API

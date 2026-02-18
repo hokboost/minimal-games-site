@@ -313,6 +313,66 @@ async function initializeDatabase() {
         } else {
             console.log('✅ last_failure_reason字段已存在');
         }
+
+        const checkWishSourceType = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'wish_inventory'
+            AND column_name = 'source_type'
+        `);
+
+        if (checkWishSourceType.rows.length === 0) {
+            console.log('➕ 添加source_type字段到wish_inventory表...');
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN source_type TEXT`);
+            console.log('✅ source_type字段添加完成');
+        } else {
+            console.log('✅ source_type字段已存在');
+        }
+
+        const checkWishBatchId = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'wish_inventory'
+            AND column_name = 'source_batch_id'
+        `);
+
+        if (checkWishBatchId.rows.length === 0) {
+            console.log('➕ 添加source_batch_id字段到wish_inventory表...');
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN source_batch_id TEXT`);
+            console.log('✅ source_batch_id字段添加完成');
+        } else {
+            console.log('✅ source_batch_id字段已存在');
+        }
+
+        const checkWishBatchOrder = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'wish_inventory'
+            AND column_name = 'batch_order'
+        `);
+
+        if (checkWishBatchOrder.rows.length === 0) {
+            console.log('➕ 添加batch_order字段到wish_inventory表...');
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN batch_order INTEGER`);
+            console.log('✅ batch_order字段添加完成');
+        } else {
+            console.log('✅ batch_order字段已存在');
+        }
+
+        const checkWishBatchValue = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'wish_inventory'
+            AND column_name = 'batch_value'
+        `);
+
+        if (checkWishBatchValue.rows.length === 0) {
+            console.log('➕ 添加batch_value字段到wish_inventory表...');
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN batch_value INTEGER`);
+            console.log('✅ batch_value字段添加完成');
+        } else {
+            console.log('✅ batch_value字段已存在');
+        }
         
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);
@@ -1129,6 +1189,34 @@ app.get('/', async (req, res) => {
     });
 });
 
+app.get('/games', async (req, res) => {
+    if (!req.session.initialized) {
+        req.session.initialized = true;
+        req.session.createdAt = Date.now();
+        generateCSRFToken(req);
+    }
+
+    let balance = null;
+    if (req.session.user && req.session.user.authorized) {
+        try {
+            const result = await pool.query(
+                'SELECT balance FROM users WHERE username = $1',
+                [req.session.user.username]
+            );
+            balance = result.rows.length > 0 ? result.rows[0].balance : 0;
+        } catch (dbError) {
+            console.error('Database query error:', dbError);
+        }
+    }
+
+    res.render('games', {
+        title: uiText(res, '游戏专区', 'Game Zone'),
+        user: req.session.user || null,
+        balance: balance,
+        req: req
+    });
+});
+
 const wishConfigs = {
     deepsea_singer: {
         giftType: 'deepsea_singer',
@@ -1627,7 +1715,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'stone', 'flip', 'duel'],
+        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'blindbox', 'stone', 'flip', 'duel'],
         questions: questions.length
     });
 });
@@ -1808,7 +1896,8 @@ registerGiftRoutes(app, {
     requireAuthorized,
     requireApiKey,
     security,
-    generateCSRFToken
+    generateCSRFToken,
+    enqueueWishInventorySend
 });
 
 registerWishRoutes(app, {
@@ -1852,7 +1941,8 @@ registerGameRoutes(app, {
     saveFlipState,
     logFlipAction,
     duelRewards,
-    calculateDuelCost
+    calculateDuelCost,
+    enqueueWishInventorySend
 });
 
 // 404 处理（必须在所有API路由之后）

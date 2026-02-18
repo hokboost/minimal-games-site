@@ -7,7 +7,8 @@ module.exports = function registerGiftRoutes(app, deps) {
         requireAuthorized,
         requireApiKey,
         security,
-        generateCSRFToken
+        generateCSRFToken,
+        enqueueWishInventorySend
     } = deps;
     const crypto = require('crypto');
 
@@ -639,6 +640,38 @@ module.exports = function registerGiftRoutes(app, deps) {
                             updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                         WHERE gift_exchange_id = $1
                     `, [taskId]);
+
+                    if (enqueueWishInventorySend) {
+                        const batchInfo = await pool.query(`
+                            SELECT id, username, source_type, source_batch_id, batch_order
+                            FROM wish_inventory
+                            WHERE gift_exchange_id = $1
+                            LIMIT 1
+                        `, [taskId]);
+
+                        const batchRow = batchInfo.rows[0];
+                        if (batchRow?.source_type === 'blindbox' && batchRow.source_batch_id) {
+                            const nextItem = await pool.query(`
+                                SELECT id
+                                FROM wish_inventory
+                                WHERE username = $1
+                                  AND source_type = 'blindbox'
+                                  AND source_batch_id = $2
+                                  AND status = 'stored'
+                                ORDER BY batch_order ASC
+                                LIMIT 1
+                            `, [batchRow.username, batchRow.source_batch_id]);
+
+                            if (nextItem.rows.length > 0) {
+                                enqueueWishInventorySend({
+                                    inventoryId: nextItem.rows[0].id,
+                                    username: batchRow.username
+                                }).catch((err) => {
+                                    console.error('Blindbox enqueue next failed:', err);
+                                });
+                            }
+                        }
+                    }
                 } catch (dbError) {
                     console.error('更新背包发送状态失败:', dbError);
                 }

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: rgba(0, 0, 0, 0.85);
+            border-radius: 16px;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+            color: #fff;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #ffb300;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #ffb300;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: #fff;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            transition: all 0.3s ease;
+        }
+
+        .nav-links a:hover {
+            background: rgba(255, 179, 0, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .balance-box {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .balance-box h3 {
+            margin: 0 0 0.5rem;
+            color: #ffe082;
+        }
+
+        .tier-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .tier-card {
+            padding: 1.2rem;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            position: relative;
+        }
+
+        .tier-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(255, 179, 0, 0.5);
+        }
+
+        .tier-card.active {
+            border-color: #ffb300;
+            box-shadow: 0 8px 18px rgba(255, 179, 0, 0.2);
+        }
+
+        .tier-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin: 0 0 0.4rem;
+        }
+
+        .tier-cost {
+            font-size: 0.95rem;
+            color: #ffd54f;
+        }
+
+        .count-group {
+            display: flex;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .count-btn {
+            padding: 0.6rem 1.2rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .count-btn.active {
+            background: #ffb300;
+            color: #1a1a1a;
+            border-color: #ffb300;
+        }
+
+        .action-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .open-btn {
+            background: linear-gradient(45deg, #ffb300, #ff6f00);
+            border: none;
+            border-radius: 999px;
+            color: #1a1a1a;
+            padding: 0.9rem 2.6rem;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 8px 18px rgba(255, 179, 0, 0.2);
+        }
+
+        .open-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .rate-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 999px;
+            color: #fff;
+            padding: 0.7rem 1.6rem;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .rate-btn:hover {
+            border-color: #ffb300;
+            color: #ffecb3;
+        }
+
+        .summary {
+            color: #ccc;
+            font-size: 0.95rem;
+        }
+
+        .result-panel {
+            margin-top: 2rem;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .result-panel h3 {
+            margin-top: 0;
+            color: #ffecb3;
+        }
+
+        .result-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.8rem;
+            margin-top: 1rem;
+        }
+
+        .result-item {
+            padding: 0.8rem;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .result-item strong {
+            display: block;
+            margin-bottom: 0.2rem;
+        }
+
+        .notice {
+            margin-top: 1rem;
+            color: #9fa8da;
+            font-size: 0.9rem;
+        }
+
+        .rate-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            z-index: 20;
+        }
+
+        .rate-modal.active {
+            display: flex;
+        }
+
+        .rate-dialog {
+            background: #141414;
+            border-radius: 14px;
+            padding: 1.5rem;
+            width: min(640px, 100%);
+            max-height: 80vh;
+            overflow: auto;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .rate-dialog h3 {
+            margin-top: 0;
+            color: #ffecb3;
+        }
+
+        .rate-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1.2rem;
+        }
+
+        .rate-table th,
+        .rate-table td {
+            padding: 0.5rem 0.4rem;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 0.9rem;
+        }
+
+        .rate-table th {
+            color: #ffe082;
+            font-weight: 600;
+        }
+
+        .rate-close {
+            margin-top: 0.6rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border-radius: 10px;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 1.2rem;
+            }
+            .action-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body data-csrf-token="<%= csrfToken %>">
+    <div class="container">
+        <div class="header">
+            <h1>🎁 <%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></h1>
+            <div class="nav-links">
+                <a href="/games">🧭 <%= lang === 'zh' ? '游戏专区' : 'Game Zone' %></a>
+                <a href="/profile">👤 <%= lang === 'zh' ? '个人资料' : 'Profile' %></a>
+            </div>
+        </div>
+
+        <div class="balance-box">
+            <h3><%= lang === 'zh' ? '当前电币余额' : 'Current Balance' %>: <span id="current-balance"><%= balance %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
+            <p><%= lang === 'zh' ? '盲盒奖励会立刻按价值从高到低送出' : 'Rewards are sent immediately from highest value to lowest' %></p>
+        </div>
+
+        <div class="tier-grid" id="tierGrid">
+            <% tiers.forEach((tier, index) => { %>
+                <div class="tier-card <%= index === 0 ? 'active' : '' %>" data-tier="<%= tier.key %>" data-cost="<%= tier.cost %>" data-name-zh="<%= tier.nameZh %>" data-name-en="<%= tier.nameEn %>">
+                    <div class="tier-title"><%= lang === 'zh' ? tier.nameZh : tier.nameEn %></div>
+                    <div class="tier-cost"><%= tier.cost %> <%= lang === 'zh' ? '电币/次' : 'coins per box' %></div>
+                </div>
+            <% }) %>
+        </div>
+
+        <div class="count-group" id="countGroup">
+            <% counts.forEach((count, index) => { %>
+                <button class="count-btn <%= index === 0 ? 'active' : '' %>" data-count="<%= count %>">x<%= count %></button>
+            <% }) %>
+        </div>
+
+        <div class="action-row">
+            <button class="open-btn" id="openBtn"><%= lang === 'zh' ? '开启盲盒' : 'Open Boxes' %></button>
+            <button class="rate-btn" id="rateBtn"><%= lang === 'zh' ? '概率公示' : 'Rates' %></button>
+            <div class="summary" id="summaryText"></div>
+        </div>
+
+        <div class="result-panel" id="resultPanel" style="display: none;">
+            <h3><%= lang === 'zh' ? '本次开箱结果' : 'Results' %></h3>
+            <div class="result-list" id="resultList"></div>
+            <div class="notice" id="noticeText"></div>
+        </div>
+    </div>
+    <div class="rate-modal" id="rateModal">
+        <div class="rate-dialog">
+            <h3><%= lang === 'zh' ? '盲盒概率公示' : 'Blind Box Rates' %></h3>
+            <div id="rateContent"></div>
+            <button class="rate-close" id="rateClose"><%= lang === 'zh' ? '关闭' : 'Close' %></button>
+        </div>
+    </div>
+    <script>
+        window.__blindboxRates = <%- JSON.stringify(blindboxConfigs || {}) %>;
+    </script>
+    <script src="/js/blindbox.js"></script>
+</body>
+</html>
