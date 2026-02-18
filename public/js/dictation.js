@@ -1074,7 +1074,7 @@
             }
 
             submitted = true;
-            setStatus(t('提交成功，等待人工审核', 'Submitted successfully, waiting for review.'), 'success');
+            setStatus(t('提交成功，自动审核中', 'Submitted successfully, auto-reviewing.'), 'success');
             setInputsDisabled(true);
             updateControls();
             clearDraft();

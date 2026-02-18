@@ -1233,6 +1233,7 @@ module.exports = function registerGameRoutes(app, deps) {
             let level = 1;
             let setId = null;
             let sessionId = null;
+            let correctWord = word || '';
             try {
                 const progressResult = await pool.query(
                     'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1',
@@ -1263,6 +1264,9 @@ module.exports = function registerGameRoutes(app, deps) {
                 const data = JSON.parse(raw);
                 const matched = data.find((item) => String(item.id) === String(wordId));
                 const matchedSetId = matched && Number.isFinite(Number(matched.set_id)) ? Number(matched.set_id) : null;
+                if (matched && typeof matched.word === 'string') {
+                    correctWord = matched.word.trim();
+                }
                 if (setId === null && matchedSetId !== null) {
                     setId = matchedSetId;
                 }
@@ -1276,6 +1280,11 @@ module.exports = function registerGameRoutes(app, deps) {
             } catch (wordError) {
                 console.error('Dictation word lookup error:', wordError);
             }
+            const normalizeAnswer = (value) => String(value || '').replace(/\s+/g, '');
+            const normalizedInput = normalizeAnswer(userInput);
+            const normalizedWord = normalizeAnswer(correctWord);
+            const isCorrect = normalizedInput && normalizedWord && normalizedInput === normalizedWord;
+            const status = isCorrect ? 'correct' : 'wrong';
             const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'dictation');
             let imagePath = null;
             if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/png;base64,')) {
@@ -1287,28 +1296,76 @@ module.exports = function registerGameRoutes(app, deps) {
                 imagePath = `/uploads/dictation/${filename}`;
             }
 
-            await pool.query(
-                `INSERT INTO dictation_submissions
-                    (user_id, username, word_id, word, pronunciation, definition, user_input, level, set_id, session_id, image_path, ip_address, user_agent)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-                [
-                    userId,
-                    username,
-                    wordId,
-                    word || null,
-                    pronunciation || null,
-                    definition || null,
-                    userInput,
-                    Number.isFinite(level) ? level : 1,
-                    Number.isFinite(setId) ? setId : null,
-                    sessionId || null,
-                    imagePath,
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                await client.query(
+                    `INSERT INTO dictation_submissions
+                        (user_id, username, word_id, word, pronunciation, definition, user_input, status, level, set_id, session_id, image_path, ip_address, user_agent)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+                    [
+                        userId,
+                        username,
+                        wordId,
+                        correctWord || null,
+                        pronunciation || null,
+                        definition || null,
+                        userInput,
+                        status,
+                        Number.isFinite(level) ? level : 1,
+                        Number.isFinite(setId) ? setId : null,
+                        sessionId || null,
+                        imagePath,
+                        req.ip,
+                        req.get('User-Agent')
+                    ]
+                );
 
-            res.json({ success: true, message: '提交成功，等待人工审核' });
+                if (username) {
+                    let nextLevel = 1;
+                    if (status === 'correct') {
+                        nextLevel = Math.min(Math.max(Number(level || 1), 1) + 1, 3);
+                    }
+                    const progressUpdate = await client.query(
+                        'UPDATE dictation_progress SET level = $1, set_id = $2, session_id = $3, updated_at = NOW() WHERE username = $4',
+                        [nextLevel, setId, sessionId, username]
+                    );
+                    if (progressUpdate.rowCount === 0) {
+                        await client.query(
+                            'INSERT INTO dictation_progress (username, level, set_id, session_id) VALUES ($1, $2, $3, $4)',
+                            [username, nextLevel, setId, sessionId]
+                        );
+                    }
+
+                    if (sessionId) {
+                        let sessionResult = null;
+                        if (status === 'wrong') {
+                            sessionResult = 'failed';
+                        } else if (status === 'correct' && level >= 3) {
+                            sessionResult = 'passed';
+                        }
+                        if (sessionResult) {
+                            await client.query(
+                                'UPDATE dictation_sessions SET result = $1, ended_at = NOW() WHERE id = $2',
+                                [sessionResult, sessionId]
+                            );
+                            await client.query(
+                                'UPDATE dictation_progress SET level = 1, set_id = NULL, session_id = NULL, updated_at = NOW() WHERE username = $1',
+                                [username]
+                            );
+                        }
+                    }
+                }
+
+                await client.query('COMMIT');
+            } catch (txError) {
+                await client.query('ROLLBACK').catch(() => {});
+                throw txError;
+            } finally {
+                client.release();
+            }
+
+            res.json({ success: true, message: isCorrect ? '自动审核通过' : '自动审核未通过', status });
         } catch (error) {
             console.error('Dictation submit error:', error);
             res.status(500).json({ success: false, message: '提交失败' });
