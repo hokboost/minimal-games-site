@@ -121,7 +121,7 @@ module.exports = function registerGameRoutes(app, deps) {
             dictationHomophoneCache.map = new Map();
             return dictationHomophoneCache.map;
         }
-        const regex = /dict\\[0x([0-9a-f]+)\\] = \"([^\"]+)\"/gi;
+        const regex = /dict\[0x([0-9a-f]+)\] = "([^"]+)"/gi;
         const map = new Map();
         let match;
         while ((match = regex.exec(raw)) !== null) {
