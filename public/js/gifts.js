@@ -154,6 +154,7 @@
         const icons = {
             'heartbox': '💝',
             'fanlight': '🏮',
+            'tiedu_one': '🛳️',
             'deepsea_singer': '🎠',
             'sky_throne': '💺',
             'proposal': '💍',
@@ -170,6 +171,7 @@
         const names = {
             'heartbox': t('心动盲盒', 'Mystery Gift Box'),
             'fanlight': t('粉丝团灯牌', 'Fan Light Badge'),
+            'tiedu_one': t('提督一号', 'Admiral One'),
             'deepsea_singer': t('梦幻游乐园', 'Dreamland Park'),
             'sky_throne': t('飞天转椅', 'Sky Throne'),
             'proposal': t('原地求婚', 'On-the-Spot Proposal'),
@@ -403,6 +405,7 @@
         
         const heartboxQuantity = document.getElementById('heartbox-quantity');
         const fanlightQuantity = document.getElementById('fanlight-quantity');
+        const tieduOneQuantity = document.getElementById('tiedu_one-quantity');
         
         heartboxQuantity.addEventListener('input', () => updateGiftTotal('heartbox', 150));
         heartboxQuantity.addEventListener('change', () => {
@@ -418,5 +421,13 @@
             if (value < 1) fanlightQuantity.value = 1;
             if (value > 100) fanlightQuantity.value = 100;
             updateGiftTotal('fanlight', 1);
+        });
+
+        tieduOneQuantity.addEventListener('input', () => updateGiftTotal('tiedu_one', 19980));
+        tieduOneQuantity.addEventListener('change', () => {
+            const value = parseInt(tieduOneQuantity.value);
+            if (value < 1) tieduOneQuantity.value = 1;
+            if (value > 100) tieduOneQuantity.value = 100;
+            updateGiftTotal('tiedu_one', 19980);
         });
     });
