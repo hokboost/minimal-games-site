@@ -1,4 +1,6 @@
 module.exports = function registerAdminRoutes(app, deps) {
+    const crypto = require('crypto');
+    const net = require('net');
     const {
         pool,
         bcrypt,
@@ -13,6 +15,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         IPManager,
         SessionManager,
         notifySecurityEvent,
+        disconnectUserSockets,
         path
     } = deps;
 
@@ -46,8 +49,9 @@ module.exports = function registerAdminRoutes(app, deps) {
                 `${action}: ${targetUsername} - ${JSON.stringify(details)}`
             ]);
 
-            if (adminUsername !== 'hokboost') {
-                notifySecurityEvent('hokboost', {
+            const securityOwner = process.env.SECURITY_NOTIFICATION_USER;
+            if (securityOwner && adminUsername !== securityOwner) {
+                notifySecurityEvent(securityOwner, {
                     type: 'admin_action',
                     title: '管理员操作通知',
                     message: `${adminUsername} 执行了 ${action} 操作`,
@@ -211,13 +215,13 @@ module.exports = function registerAdminRoutes(app, deps) {
 
             slotResult.rows.forEach((row) => {
                 if (latestRecords[row.username]) {
-                    latestRecords[row.username].slot = `${row.played_at} | ${row.payout}电币`;
+                    latestRecords[row.username].slot = `${row.played_at} | ${row.payout}积分`;
                 }
             });
 
             scratchResult.rows.forEach((row) => {
                 if (latestRecords[row.username]) {
-                    latestRecords[row.username].scratch = `${row.played_at} | ${row.reward_text}电币`;
+                    latestRecords[row.username].scratch = `${row.played_at} | ${row.reward_text}积分`;
                 }
             });
 
@@ -230,13 +234,13 @@ module.exports = function registerAdminRoutes(app, deps) {
 
             stoneResult.rows.forEach((row) => {
                 if (latestRecords[row.username]) {
-                    latestRecords[row.username].stone = `${row.played_at} | ${row.action_type} | ${row.reward}电币`;
+                    latestRecords[row.username].stone = `${row.played_at} | ${row.action_type} | ${row.reward}积分`;
                 }
             });
 
             flipResult.rows.forEach((row) => {
                 if (latestRecords[row.username]) {
-                    latestRecords[row.username].flip = `${row.played_at} | 好${row.good_count}坏${row.bad_count} | ${row.reward}电币`;
+                    latestRecords[row.username].flip = `${row.played_at} | 好${row.good_count}坏${row.bad_count} | ${row.reward}积分`;
                 }
             });
 
@@ -244,7 +248,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 if (latestRecords[row.username]) {
                     const giftLabel = row.gift_type ? row.gift_type : '礼物';
                     const resultLabel = row.success ? '成功' : '失败';
-                    latestRecords[row.username].duel = `${row.played_at} | ${giftLabel} | ${resultLabel} | ${row.reward}电币`;
+                    latestRecords[row.username].duel = `${row.played_at} | ${giftLabel} | ${resultLabel} | ${row.reward}积分`;
                 }
             });
 
@@ -389,25 +393,26 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
-    // 添加电币
+    // 添加积分
     app.post('/api/admin/add-electric-coin', ...adminApiGuards, requireCSRF, async (req, res) => {
         try {
-            const { username, amount } = req.body;
+            const { username } = req.body;
+            const amount = Number(req.body.amount);
 
-            if (!username || !amount || amount <= 0) {
-                return res.status(400).json({ success: false, message: '参数错误：用户名和电币数量必须有效' });
+            if (!username || !Number.isSafeInteger(amount) || amount <= 0) {
+                return res.status(400).json({ success: false, message: '参数错误：用户名和积分数量必须有效' });
             }
 
             if (amount > 100000) {
-                return res.status(400).json({ success: false, message: '单次添加不能超过100,000电币' });
+                return res.status(400).json({ success: false, message: '单次添加不能超过100,000积分' });
             }
 
             // 使用余额日志系统进行管理员充值
             const balanceResult = await BalanceLogger.updateBalance({
                 username: username,
-                amount: parseFloat(amount),
+                amount,
                 operationType: 'admin_add',
-                description: `管理员充值：添加 ${amount} 电币`,
+                description: `管理员充值：添加 ${amount} 积分`,
                 gameData: {
                     admin_user: req.session.user.username,
                     amount: amount,
@@ -425,10 +430,10 @@ module.exports = function registerAdminRoutes(app, deps) {
             res.json({
                 success: true,
                 newBalance: balanceResult.balance,
-                addedAmount: parseFloat(amount)
+                addedAmount: amount
             });
         } catch (error) {
-            console.error('添加电币失败:', error);
+            console.error('添加积分失败:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         }
     });
@@ -442,10 +447,14 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '缺少用户名' });
             }
 
-            await pool.query(
-                'UPDATE users SET authorized = true WHERE username = $1',
+            const result = await pool.query(
+                'UPDATE users SET authorized = true WHERE username = $1 RETURNING username',
                 [username]
             );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
 
             res.json({ success: true, message: '授权成功' });
         } catch (error) {
@@ -463,10 +472,24 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '缺少用户名' });
             }
 
-            await pool.query(
-                'UPDATE users SET authorized = false WHERE username = $1',
+            const result = await pool.query(
+                `UPDATE users
+                 SET authorized = false
+                 WHERE username = $1 AND is_admin = false
+                 RETURNING username`,
                 [username]
             );
+
+            if (result.rows.length === 0) {
+                const user = await pool.query('SELECT is_admin FROM users WHERE username = $1', [username]);
+                if (user.rows[0]?.is_admin) {
+                    return res.status(403).json({ success: false, message: '不能取消管理员授权' });
+                }
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
+
+            await SessionManager.forceLogoutUser(username, 'authorization_revoked');
+            disconnectUserSockets(username);
 
             res.json({ success: true, message: '取消授权成功' });
         } catch (error) {
@@ -478,51 +501,93 @@ module.exports = function registerAdminRoutes(app, deps) {
 
     // 重置密码
     app.post('/api/admin/reset-password', ...adminApiGuards, requireCSRF, async (req, res) => {
+        let client;
         try {
-            const { username, newPassword = '123456' } = req.body;
+            const { username } = req.body;
 
             if (!username) {
                 return res.status(400).json({ success: false, message: '缺少用户名' });
             }
 
-            const hashedPassword = await bcrypt.hash(newPassword, 12);
-            await pool.query(
+            const temporaryPassword = `${crypto.randomBytes(9).toString('base64url')}A1`;
+            const hashedPassword = await bcrypt.hash(temporaryPassword, 12);
+
+            client = await pool.connect();
+            await client.query('BEGIN');
+            const target = await client.query(
+                'SELECT is_admin FROM users WHERE username = $1 FOR UPDATE',
+                [username]
+            );
+            if (target.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
+            if (target.rows[0].is_admin) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({ success: false, message: '管理员请使用本人密码修改功能' });
+            }
+
+            await client.query(
                 'UPDATE users SET password_hash = $1 WHERE username = $2',
                 [hashedPassword, username]
             );
+            const sessions = await client.query(
+                'SELECT session_id FROM active_sessions WHERE username = $1 AND is_active = true FOR UPDATE',
+                [username]
+            );
+            const sessionIds = sessions.rows.map((row) => row.session_id);
+            await client.query(
+                `UPDATE active_sessions
+                 SET is_active = false, terminated_at = NOW(), termination_reason = 'password_reset'
+                 WHERE username = $1 AND is_active = true`,
+                [username]
+            );
+            if (sessionIds.length > 0) {
+                await client.query('DELETE FROM user_sessions WHERE sid = ANY($1::text[])', [sessionIds]);
+            }
+            await client.query('COMMIT');
 
-            res.json({ success: true, message: '密码重置成功' });
+            disconnectUserSockets(username, sessionIds);
+
+            res.json({ success: true, message: '密码重置成功', temporaryPassword });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('重置密码失败:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
     // 修改用户余额 - 添加CSRF保护
     app.post('/api/admin/update-balance', ...adminApiGuards, requireCSRF, async (req, res) => {
+        let client;
         try {
-            const { username, balance } = req.body;
+            client = await pool.connect();
+            const { username } = req.body;
+            const balance = Number(req.body.balance);
             const adminUsername = req.session.user.username;
 
             if (!username) {
                 return res.status(400).json({ success: false, message: '缺少用户名' });
             }
 
-            if (balance === undefined || balance < 0) {
+            if (!Number.isSafeInteger(balance) || balance < 0 || balance > 100000000) {
                 return res.status(400).json({ success: false, message: '无效的余额数值' });
             }
 
-            // 获取当前余额
-            const currentBalanceResult = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
+            await client.query('BEGIN');
+            const currentBalanceResult = await client.query(
+                'SELECT balance FROM users WHERE username = $1 FOR UPDATE',
                 [username]
             );
 
             if (currentBalanceResult.rows.length === 0) {
+                await client.query('ROLLBACK');
                 return res.status(404).json({ success: false, message: '用户不存在' });
             }
 
-            const currentBalance = currentBalanceResult.rows[0].balance;
+            const currentBalance = Number(currentBalanceResult.rows[0].balance);
             const delta = balance - currentBalance;
 
             // 使用BalanceLogger进行安全的余额修改（带审计和原子锁）
@@ -539,15 +604,19 @@ module.exports = function registerAdminRoutes(app, deps) {
                 },
                 ipAddress: req.clientIP,
                 userAgent: req.userAgent,
-                requireSufficientBalance: false // 管理员操作允许负余额调整
+                requireSufficientBalance: false,
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(500).json({
                     success: false,
                     message: `余额修改失败: ${balanceResult.message}`
                 });
             }
+            await client.query('COMMIT');
 
             await auditAdminAction({
                 adminUsername,
@@ -564,8 +633,11 @@ module.exports = function registerAdminRoutes(app, deps) {
                 oldBalance: currentBalance
             });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('修改余额失败:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
@@ -590,9 +662,29 @@ module.exports = function registerAdminRoutes(app, deps) {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
-                const submissionResult = await client.query(
-                    'SELECT username, level, set_id, session_id FROM dictation_submissions WHERE id = $1 FOR UPDATE',
+                const preliminarySubmission = await client.query(
+                    'SELECT username FROM dictation_submissions WHERE id = $1',
                     [id]
+                );
+                if (preliminarySubmission.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ success: false, message: '记录不存在' });
+                }
+                const submissionUsername = preliminarySubmission.rows[0].username;
+                const lockedUser = await client.query(
+                    'SELECT is_admin FROM users WHERE username = $1 FOR UPDATE',
+                    [submissionUsername]
+                );
+                if (lockedUser.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ success: false, message: '用户不存在' });
+                }
+                const submissionResult = await client.query(
+                    `SELECT username, level, set_id, session_id
+                     FROM dictation_submissions
+                     WHERE id = $1 AND username = $2
+                     FOR UPDATE`,
+                    [id, submissionUsername]
                 );
                 if (!submissionResult.rows.length) {
                     await client.query('ROLLBACK');
@@ -612,6 +704,15 @@ module.exports = function registerAdminRoutes(app, deps) {
                 );
 
                 if (username) {
+                    const newerSubmission = await client.query(
+                        'SELECT 1 FROM dictation_submissions WHERE username = $1 AND id > $2 LIMIT 1',
+                        [username, id]
+                    );
+                    if (newerSubmission.rows.length > 0) {
+                        await client.query('COMMIT');
+                        return res.json({ success: true, message: '记录已更新，较新的进度保持不变' });
+                    }
+
                     const progressResult = await client.query(
                         'SELECT level FROM dictation_progress WHERE username = $1 FOR UPDATE',
                         [username]
@@ -621,6 +722,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                         nextLevel = Math.min(Math.max(level, 1) + 1, 3);
                     } else if (status === 'wrong') {
                         nextLevel = 1;
+                    } else if (status === 'rewrite') {
+                        nextLevel = Math.max(level, 1);
                     }
 
                     if (progressResult.rows.length) {
@@ -641,6 +744,13 @@ module.exports = function registerAdminRoutes(app, deps) {
                             result = 'failed';
                         } else if (status === 'correct' && level >= 3) {
                             result = 'passed';
+                        } else if (status === 'rewrite') {
+                            await client.query(
+                                `UPDATE dictation_sessions
+                                 SET result = 'in_progress', ended_at = NULL
+                                 WHERE id = $1 AND username = $2`,
+                                [sessionId, username]
+                            );
                         }
                         if (result) {
                             await client.query(
@@ -679,28 +789,31 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '缺少用户名' });
             }
 
-            // 防止删除管理员账户
-            const userResult = await pool.query(
-                'SELECT is_admin FROM users WHERE username = $1',
-                [username]
-            );
-
-            if (userResult.rows[0]?.is_admin) {
-                return res.status(403).json({ success: false, message: '不能删除管理员账户' });
-            }
-
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
 
+                const userResult = await client.query(
+                    'SELECT is_admin FROM users WHERE username = $1 FOR UPDATE',
+                    [username]
+                );
+                if (userResult.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ success: false, message: '用户不存在' });
+                }
+                if (userResult.rows[0].is_admin) {
+                    await client.query('ROLLBACK');
+                    return res.status(403).json({ success: false, message: '不能删除管理员账户' });
+                }
+
                 const sessionResult = await client.query(
-                    'SELECT session_id FROM active_sessions WHERE username = $1',
+                    'SELECT session_id FROM active_sessions WHERE username = $1 FOR UPDATE',
                     [username]
                 );
                 const sessionIds = sessionResult.rows.map(row => row.session_id);
                 if (sessionIds.length > 0) {
                     await client.query(
-                        'DELETE FROM user_sessions WHERE sid = ANY($1)',
+                        'DELETE FROM user_sessions WHERE sid = ANY($1::text[])',
                         [sessionIds]
                     );
                 }
@@ -711,6 +824,12 @@ module.exports = function registerAdminRoutes(app, deps) {
                 await client.query('DELETE FROM security_events WHERE username = $1', [username]);
                 await client.query('DELETE FROM balance_logs WHERE username = $1', [username]);
                 await client.query('DELETE FROM gift_exchanges WHERE username = $1', [username]);
+                await client.query('DELETE FROM idempotency_keys WHERE username = $1', [username]);
+
+                await client.query(
+                    'DELETE FROM quiz_sessions WHERE username = $1',
+                    [username]
+                );
 
                 await client.query(
                     'DELETE FROM submission_details WHERE submission_id IN (SELECT id FROM submissions WHERE username = $1)',
@@ -726,6 +845,14 @@ module.exports = function registerAdminRoutes(app, deps) {
                 await client.query('DELETE FROM wish_inventory WHERE username = $1', [username]);
                 await client.query('DELETE FROM blindbox_logs WHERE username = $1', [username]);
 
+                await client.query('DELETE FROM dictation_submissions WHERE username = $1', [username]);
+                await client.query('DELETE FROM dictation_progress WHERE username = $1', [username]);
+                await client.query('DELETE FROM dictation_sessions WHERE username = $1', [username]);
+                await client.query('DELETE FROM dictation_allowances WHERE username = $1', [username]);
+                await client.query('DELETE FROM pk_tasks WHERE username = $1', [username]);
+                await client.query('DELETE FROM pk_runner_state WHERE username = $1', [username]);
+                await client.query('DELETE FROM pk_gift_logs WHERE username = $1', [username]);
+
                 await client.query('DELETE FROM stone_logs WHERE username = $1', [username]);
                 await client.query('DELETE FROM stone_states WHERE username = $1', [username]);
                 await client.query('DELETE FROM flip_logs WHERE username = $1', [username]);
@@ -740,6 +867,8 @@ module.exports = function registerAdminRoutes(app, deps) {
             } finally {
                 client.release();
             }
+
+            disconnectUserSockets(username);
 
             res.json({ success: true, message: '账户删除成功' });
         } catch (error) {
@@ -757,10 +886,17 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '缺少用户名' });
             }
 
-            await pool.query(
-                'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
+            const result = await pool.query(
+                `UPDATE users
+                 SET login_failures = 0, last_failure_time = NULL, locked_until = NULL
+                 WHERE username = $1
+                 RETURNING username`,
                 [username]
             );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
 
             res.json({ success: true, message: '账户解锁成功' });
         } catch (error) {
@@ -778,10 +914,17 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '缺少用户名' });
             }
 
-            await pool.query(
-                'UPDATE users SET login_failures = 0, last_failure_time = NULL WHERE username = $1',
+            const result = await pool.query(
+                `UPDATE users
+                 SET login_failures = 0, last_failure_time = NULL
+                 WHERE username = $1
+                 RETURNING username`,
                 [username]
             );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
 
             res.json({ success: true, message: '失败记录清除成功' });
         } catch (error) {
@@ -792,7 +935,9 @@ module.exports = function registerAdminRoutes(app, deps) {
 
     // 管理员修改自己密码
     app.post('/api/admin/change-self-password', ...adminApiGuards, requireCSRF, async (req, res) => {
+        let client;
         try {
+            client = await pool.connect();
             const { oldPassword, newPassword } = req.body;
             const username = req.session.user.username;
 
@@ -800,20 +945,27 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '缺少必要参数' });
             }
 
-            if (newPassword.length < 6) {
-                return res.status(400).json({ success: false, message: '新密码长度至少需要6位' });
+            if (newPassword.length < 12 || newPassword.length > 128
+                || Buffer.byteLength(newPassword, 'utf8') > 72
+                || !/\p{L}/u.test(newPassword) || !/\p{N}/u.test(newPassword)) {
+                return res.status(400).json({ success: false, message: '新密码须为12-128位，并同时包含字母和数字' });
             }
 
-            // 验证当前密码
-            const userResult = await pool.query('SELECT password FROM users WHERE username = $1', [username]);
+            await client.query('BEGIN');
+            const userResult = await client.query(
+                'SELECT password_hash FROM users WHERE username = $1 FOR UPDATE',
+                [username]
+            );
 
             if (userResult.rows.length === 0) {
+                await client.query('ROLLBACK');
                 return res.status(404).json({ success: false, message: '用户不存在' });
             }
 
-            const isOldPasswordValid = await bcrypt.compare(oldPassword, userResult.rows[0].password);
+            const isOldPasswordValid = await bcrypt.compare(oldPassword, userResult.rows[0].password_hash);
 
             if (!isOldPasswordValid) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '当前密码错误' });
             }
 
@@ -821,15 +973,38 @@ module.exports = function registerAdminRoutes(app, deps) {
             const hashedNewPassword = await bcrypt.hash(newPassword, 12);
 
             // 更新密码
-            await pool.query(
-                'UPDATE users SET password = $1 WHERE username = $2',
+            await client.query(
+                'UPDATE users SET password_hash = $1 WHERE username = $2',
                 [hashedNewPassword, username]
             );
+            const otherSessions = await client.query(
+                `SELECT session_id
+                 FROM active_sessions
+                 WHERE username = $1 AND session_id != $2 AND is_active = true
+                 FOR UPDATE`,
+                [username, req.sessionID]
+            );
+            const otherSessionIds = otherSessions.rows.map((row) => row.session_id);
+            await client.query(
+                `UPDATE active_sessions
+                 SET is_active = false, terminated_at = NOW(), termination_reason = 'password_changed'
+                 WHERE username = $1 AND session_id != $2 AND is_active = true`,
+                [username, req.sessionID]
+            );
+            if (otherSessionIds.length > 0) {
+                await client.query('DELETE FROM user_sessions WHERE sid = ANY($1::text[])', [otherSessionIds]);
+            }
+            await client.query('COMMIT');
+
+            disconnectUserSockets(username, otherSessionIds);
 
             res.json({ success: true, message: '密码修改成功' });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('修改密码失败:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
@@ -897,78 +1072,90 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 绑定或更新B站房间号 (仅管理员)
-    app.post('/api/bilibili/room', ...adminApiGuards, async (req, res) => {
+    app.post('/api/bilibili/room', ...adminApiGuards, requireCSRF, async (req, res) => {
+        let client;
         try {
             const { roomId, targetUsername } = req.body;
             const adminUsername = req.session.user.username;
             const usernameToUpdate = targetUsername || adminUsername; // 允许管理员为其他用户设置房间号
+            const normalizedRoomId = String(roomId || '');
 
             // 验证房间号格式（数字，6-12位）
-            if (!roomId || !/^\d{6,12}$/.test(roomId.toString())) {
+            if (!/^\d{6,12}$/.test(normalizedRoomId)) {
                 return res.status(400).json({
                     success: false,
                     message: '房间号格式不正确，应为6-12位数字'
                 });
             }
 
-            // 如果指定了目标用户，验证用户是否存在
-            if (targetUsername) {
-                const userExistsResult = await pool.query(`
-                    SELECT username FROM users WHERE username = $1
-                `, [targetUsername]);
-
-                if (userExistsResult.rows.length === 0) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `用户 ${targetUsername} 不存在`
-                    });
-                }
+            client = await pool.connect();
+            await client.query('BEGIN');
+            await client.query(
+                "SELECT pg_advisory_xact_lock(hashtext('bilibili-room:' || $1))",
+                [normalizedRoomId]
+            );
+            const target = await client.query(
+                'SELECT username FROM users WHERE username = $1 FOR UPDATE',
+                [usernameToUpdate]
+            );
+            if (target.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({
+                    success: false,
+                    message: `用户 ${usernameToUpdate} 不存在`
+                });
             }
 
             // 检查房间号是否已被其他用户绑定
-            const existingResult = await pool.query(`
+            const existingResult = await client.query(`
                 SELECT username FROM users 
                 WHERE bilibili_room_id = $1 AND username != $2
-            `, [roomId, usernameToUpdate]);
+                FOR UPDATE
+            `, [normalizedRoomId, usernameToUpdate]);
 
             if (existingResult.rows.length > 0) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({
                     success: false,
-                    message: `房间号 ${roomId} 已被用户 ${existingResult.rows[0].username} 绑定`
+                    message: `房间号 ${normalizedRoomId} 已被用户 ${existingResult.rows[0].username} 绑定`
                 });
             }
 
             // 更新用户的房间号
-            await pool.query(`
+            await client.query(`
                 UPDATE users 
                 SET bilibili_room_id = $1 
                 WHERE username = $2
-            `, [roomId, usernameToUpdate]);
+            `, [normalizedRoomId, usernameToUpdate]);
+            await client.query('COMMIT');
 
             autoSendWishInventoryOnBind(usernameToUpdate).catch((error) => {
                 console.error('绑定后自动送出任务失败:', error);
             });
 
-            console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功绑定B站房间号: ${roomId}`);
+            console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功绑定B站房间号: ${normalizedRoomId}`);
 
             res.json({
                 success: true,
-                message: `成功为用户 ${usernameToUpdate} 绑定B站房间号: ${roomId}`,
-                roomId: roomId,
+                message: `成功为用户 ${usernameToUpdate} 绑定B站房间号: ${normalizedRoomId}`,
+                roomId: normalizedRoomId,
                 targetUser: usernameToUpdate
             });
 
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('绑定房间号失败:', error);
             res.status(500).json({
                 success: false,
                 message: '服务器错误'
             });
+        } finally {
+            client?.release();
         }
     });
 
     // 手动刷新B站Cookie (仅管理员)
-    app.post('/api/bilibili/cookies/refresh', ...adminApiGuards, async (req, res) => {
+    app.post('/api/bilibili/cookies/refresh', ...adminApiGuards, requireCSRF, async (req, res) => {
         try {
             console.log(`🔄 管理员 ${req.session.user.username} 请求刷新B站Cookie`);
 
@@ -1025,39 +1212,37 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 解除房间号绑定 (仅管理员)
-    app.delete('/api/bilibili/room', ...adminApiGuards, async (req, res) => {
+    app.delete('/api/bilibili/room', ...adminApiGuards, requireCSRF, async (req, res) => {
+        let client;
         try {
             const { targetUsername } = req.body;
             const adminUsername = req.session.user.username;
             const usernameToUpdate = targetUsername || adminUsername; // 允许管理员为其他用户解除绑定
 
-            // 如果指定了目标用户，验证用户是否存在
-            if (targetUsername) {
-                const userExistsResult = await pool.query(`
-                    SELECT username FROM users WHERE username = $1
-                `, [targetUsername]);
-
-                if (userExistsResult.rows.length === 0) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `用户 ${targetUsername} 不存在`
-                    });
-                }
-            }
-
-            await pool.query(`
+            client = await pool.connect();
+            await client.query('BEGIN');
+            const result = await client.query(`
                 UPDATE users 
                 SET bilibili_room_id = NULL 
                 WHERE username = $1
+                RETURNING username
             `, [usernameToUpdate]);
+            if (result.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({
+                    success: false,
+                    message: `用户 ${usernameToUpdate} 不存在`
+                });
+            }
 
-            await pool.query(`
+            await client.query(`
                 UPDATE wish_inventory
                 SET expires_at = 'infinity'::timestamptz,
                     updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                 WHERE username = $1
                   AND status = 'stored'
             `, [usernameToUpdate]);
+            await client.query('COMMIT');
 
             console.log(`✅ 管理员 ${adminUsername} 为用户 ${usernameToUpdate} 成功解除B站房间号绑定`);
 
@@ -1068,19 +1253,22 @@ module.exports = function registerAdminRoutes(app, deps) {
             });
 
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('解除房间号绑定失败:', error);
             res.status(500).json({
                 success: false,
                 message: '服务器错误'
             });
+        } finally {
+            client?.release();
         }
     });
 
     // 管理员查看所有余额记录 API
     app.get('/api/admin/balance/logs', ...adminApiGuards, async (req, res) => {
         try {
-            const page = parseInt(req.query.page) || 1;
-            const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const limit = Math.min(200, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
             const offset = (page - 1) * limit;
             const operationType = req.query.type || null;
 
@@ -1103,6 +1291,9 @@ module.exports = function registerAdminRoutes(app, deps) {
     app.get('/api/admin/ip/:ip', ...adminApiGuards, async (req, res) => {
         try {
             const ip = req.params.ip;
+            if (!net.isIP(ip)) {
+                return res.status(400).json({ success: false, message: 'IP格式无效' });
+            }
             const [riskData, stats] = await Promise.all([
                 IPManager.getIPRiskScore(ip),
                 IPManager.getIPStats(ip)
@@ -1123,10 +1314,11 @@ module.exports = function registerAdminRoutes(app, deps) {
     // 添加IP到黑名单
     app.post('/api/admin/ip/blacklist', ...adminApiGuards, requireCSRF, async (req, res) => {
         try {
-            const { ip, reason } = req.body;
+            const ip = typeof req.body.ip === 'string' ? req.body.ip.trim() : '';
+            const reason = typeof req.body.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
             const adminUser = req.session.user.username;
 
-            if (!ip || !reason) {
+            if (!net.isIP(ip) || !reason) {
                 return res.status(400).json({ success: false, message: 'IP和原因不能为空' });
             }
 
@@ -1147,10 +1339,11 @@ module.exports = function registerAdminRoutes(app, deps) {
     // 添加IP到白名单
     app.post('/api/admin/ip/whitelist', ...adminApiGuards, requireCSRF, async (req, res) => {
         try {
-            const { ip, reason } = req.body;
+            const ip = typeof req.body.ip === 'string' ? req.body.ip.trim() : '';
+            const reason = typeof req.body.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
             const adminUser = req.session.user.username;
 
-            if (!ip || !reason) {
+            if (!net.isIP(ip) || !reason) {
                 return res.status(400).json({ success: false, message: 'IP和原因不能为空' });
             }
 
@@ -1171,10 +1364,10 @@ module.exports = function registerAdminRoutes(app, deps) {
     // 移除IP黑名单
     app.post('/api/admin/ip/remove-blacklist', ...adminApiGuards, requireCSRF, async (req, res) => {
         try {
-            const { ip } = req.body;
+            const ip = typeof req.body.ip === 'string' ? req.body.ip.trim() : '';
             const adminUser = req.session.user.username;
 
-            if (!ip) {
+            if (!net.isIP(ip)) {
                 return res.status(400).json({ success: false, message: 'IP不能为空' });
             }
 
@@ -1202,16 +1395,16 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '用户名不能为空' });
             }
 
-            // 特别保护hokboost管理员账号
-            if (username === 'hokboost') {
-                console.log(`⚠️ 管理员 ${adminUser} 试图强制注销hokboost - 已拒绝`);
-                return res.status(403).json({
-                    success: false,
-                    message: '不能对hokboost管理员账号执行此操作'
-                });
+            const target = await pool.query('SELECT is_admin FROM users WHERE username = $1', [username]);
+            if (target.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '用户不存在' });
+            }
+            if (target.rows[0].is_admin) {
+                return res.status(403).json({ success: false, message: '不能强制注销管理员账户' });
             }
 
             const sessionCount = await SessionManager.forceLogoutUser(username, 'admin_force_logout');
+            disconnectUserSockets(username);
 
             console.log(`管理员 ${adminUser} 强制注销用户 ${username} 的 ${sessionCount} 个会话`);
             res.json({
@@ -1286,7 +1479,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 SELECT id, username, gift_name, cost, created_at
                 FROM gift_exchanges 
                 WHERE status = 'funds_locked' 
-                  AND delivery_status IN ('pending', 'processing')
+                  AND delivery_status = 'pending'
                   AND created_at < NOW() - INTERVAL '10 minutes'
                 ORDER BY created_at
             `);
@@ -1298,29 +1491,58 @@ module.exports = function registerAdminRoutes(app, deps) {
                 const client = await pool.connect();
                 try {
                     await client.query('BEGIN');
+                    const lockedTaskResult = await client.query(`
+                        SELECT username, gift_name, cost, created_at
+                        FROM gift_exchanges
+                        WHERE id = $1
+                          AND status = 'funds_locked'
+                          AND delivery_status = 'pending'
+                        FOR UPDATE
+                    `, [task.id]);
+                    if (lockedTaskResult.rows.length === 0) {
+                        await client.query('ROLLBACK');
+                        continue;
+                    }
+                    const lockedTask = lockedTaskResult.rows[0];
 
-                    // 退还资金
-                    await client.query(
-                        'UPDATE users SET balance = balance + $1 WHERE username = $2',
-                        [task.cost, task.username]
-                    );
+                    const refundResult = await BalanceLogger.updateBalance({
+                        username: lockedTask.username,
+                        amount: Number(lockedTask.cost),
+                        operationType: 'admin_stuck_gift_refund',
+                        description: `管理员 ${adminUser} 重置礼物任务 ${task.id}`,
+                        requireSufficientBalance: false,
+                        client,
+                        managedTransaction: true
+                    });
+                    if (!refundResult.success) {
+                        throw new Error(refundResult.message || '退款失败');
+                    }
 
                     // 标记任务为失败
                     await client.query(
                         'UPDATE gift_exchanges SET status = $1, delivery_status = $2, processed_at = NOW() WHERE id = $3',
                         ['failed', 'failed', task.id]
                     );
+                    await client.query(`
+                        UPDATE wish_inventory
+                        SET status = 'stored',
+                            gift_exchange_id = NULL,
+                            last_failure_reason = '管理员取消未领取的发送任务',
+                            expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
+                            updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                        WHERE gift_exchange_id = $1
+                    `, [task.id]);
 
                     await client.query('COMMIT');
 
-                    console.log(`✅ 重置任务 ${task.id}: 退还 ${task.cost} 电币给 ${task.username}`);
+                    console.log(`✅ 重置任务 ${task.id}: 退还 ${lockedTask.cost} 积分给 ${lockedTask.username}`);
                     resetCount++;
                     results.push({
                         taskId: task.id,
-                        username: task.username,
-                        giftName: task.gift_name,
-                        refundedAmount: task.cost,
-                        createdAt: task.created_at
+                        username: lockedTask.username,
+                        giftName: lockedTask.gift_name,
+                        refundedAmount: lockedTask.cost,
+                        createdAt: lockedTask.created_at
                     });
 
                 } catch (error) {

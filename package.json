@@ -1,14 +1,15 @@
 {
   "name": "minimal-games-site",
   "version": "1.0.0",
-  "description": "完全独立的4合1小游戏网站 - 包含题库和游戏逻辑",
+  "description": "包含10款玩法、题库和完整游戏逻辑的轻量小游戏网站",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "preview": "node scripts/preview-ui.js",
     "debug-env": "node debug-env.js",
     "test-db": "node test-db.js",
-    "test": "echo 'No tests specified'"
+    "test": "node scripts/security-regression.js && node tests/security-unit.test.js"
   },
   "dependencies": {
     "axios": "^1.13.2",

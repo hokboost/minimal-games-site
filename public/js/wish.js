@@ -35,15 +35,15 @@
                 const displayName = reward || giftNames[currentGiftType]?.[lang] || t('礼物', 'Gift');
                 const displayValue = rewardValue || giftConfigs[currentGiftType]?.rewardValue || 0;
                 content.innerHTML = `
-                    <div>🎉 ${t('祈愿成功！', 'Wish Success!')}</div>
-                    <div style="font-size: 2rem; margin: 15px 0;">🎠 ${displayName}</div>
-                    <div style="font-size: 1.5rem; color: #f39c12;">${t('价值', 'Value')}: ${displayValue} ${t('电币', 'coins')}</div>
+                    <div>${t('祈愿成功！', 'Wish Success!')}</div>
+                    <div style="font-size: 2rem; margin: 15px 0;">${displayName}</div>
+                    <div style="font-size: 1.5rem; color: #f39c12;">${t('价值', 'Value')}: ${displayValue} ${t('积分', 'points')}</div>
                     <div style="font-size: 1rem; color: #ccc; margin-top: 8px;">${t('已放入背包，可在个人资料中送出', 'Added to backpack, can be sent from your profile')}</div>
                     ${isGuaranteed ? `<div style="font-size: 1rem; color: #e74c3c; margin-top: 10px;">${t('保底出货', 'Guaranteed drop')}</div>` : ''}
                 `;
                 content.className = 'modal-content modal-success';
             } else {
-                content.textContent = t('😢 祈愿失败，再接再厉！', '😢 Wish failed, try again!');
+                content.textContent = t('祈愿失败，再接再厉！', 'Wish failed, try again!');
                 content.className = 'modal-content modal-failure';
             }
             
@@ -89,8 +89,8 @@
 
             if (currentBalance < totalCost) {
                 alert(t(
-                    `⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${totalCost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`,
-                    `⚡ Insufficient coins! Balance: ${currentBalance}, needed: ${totalCost}. For entertainment only, virtual coins cannot be exchanged for real money.`
+                    `积分不足！当前余额: ${currentBalance} 积分，需要: ${totalCost} 积分。仅供娱乐，虚拟积分不可兑换真实货币。`,
+                    `Insufficient points! Balance: ${currentBalance}, needed: ${totalCost}. For entertainment only, virtual points cannot be exchanged for real money.`
                 ));
                 return;
             }
@@ -102,7 +102,7 @@
                 if (!csrfToken) {
                     await refreshCsrf();
                 }
-                const response = await fetch(count === 10 ? '/api/wish-batch' : '/api/wish/play', {
+                const response = await window.idempotentFetch(count === 10 ? '/api/wish-batch' : '/api/wish/play', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -198,14 +198,14 @@
                 text.textContent = `${progressData.consecutive_fails} / ${config.guaranteeCount}`;
 
                 if (progressData.consecutive_fails >= (config.guaranteeCount - 1)) {
-                    bar.style.background = 'linear-gradient(45deg, #f39c12, #e67e22)';
+                    bar.style.background = '#c98708';
                 } else {
-                    bar.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
+                    bar.style.background = '#eb655c';
                 }
             } else {
                 bar.style.width = '0%';
                 text.textContent = t('无保底', 'No guarantee');
-                bar.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
+                bar.style.background = '#eb655c';
             }
         }
 

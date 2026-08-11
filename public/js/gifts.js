@@ -16,13 +16,13 @@
         const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
         
         if (currentBalance < totalCost) {
-            showMessage(t('电币余额不足！', 'Insufficient coin balance.'), 'error');
+            showMessage(t('积分余额不足！', 'Insufficient point balance.'), 'error');
             return;
         }
 
         if (!confirm(t(
-            `确定要花费 ${totalCost} 电币兑换 ${quantity} 个礼物吗？`,
-            `Exchange ${quantity} gift(s) for ${totalCost} coins?`
+            `确定要花费 ${totalCost} 积分兑换 ${quantity} 个礼物吗？`,
+            `Exchange ${quantity} gift(s) for ${totalCost} points?`
         ))) {
             return;
         }
@@ -30,7 +30,7 @@
         try {
             showMessage(t('正在处理兑换...', 'Processing exchange...'), 'info');
             
-            const response = await fetch('/api/gifts/exchange', {
+            const response = await window.idempotentFetch('/api/gifts/exchange', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -71,13 +71,13 @@
         const currentBalance = parseInt(document.getElementById('currentBalance').textContent);
         
         if (currentBalance < cost) {
-            showMessage(t('电币余额不足！', 'Insufficient coin balance.'), 'error');
+            showMessage(t('积分余额不足！', 'Insufficient point balance.'), 'error');
             return;
         }
 
         if (!confirm(t(
-            `确定要花费 ${cost} 电币兑换这个礼物吗？`,
-            `Exchange this gift for ${cost} coins?`
+            `确定要花费 ${cost} 积分兑换这个礼物吗？`,
+            `Exchange this gift for ${cost} points?`
         ))) {
             return;
         }
@@ -85,7 +85,7 @@
         try {
             showMessage(t('正在处理兑换...', 'Processing exchange...'), 'info');
             
-            const response = await fetch('/api/gifts/exchange', {
+            const response = await window.idempotentFetch('/api/gifts/exchange', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -133,7 +133,7 @@
                         <div class="history-gift">
                             <span>${getGiftIcon(item.gift_type)}</span>
                             <span>${getGiftName(item.gift_type)} ${item.quantity > 1 ? 'x' + item.quantity : ''}</span>
-                            <span style="color: #ff9800;">(-${item.cost} ${t('电币', 'coins')})</span>
+                            <span style="color: #ff9800;">(-${item.cost} ${t('积分', 'points')})</span>
                             ${getDeliveryStatusBadge(item)}
                         </div>
                         <div class="history-time">${formatTime(item.created_at)}</div>
@@ -152,18 +152,18 @@
     
     function getGiftIcon(giftType) {
         const icons = {
-            'heartbox': '💝',
-            'fanlight': '🏮',
-            'tiedu_one': '🛳️',
-            'deepsea_singer': '🎠',
-            'sky_throne': '💺',
-            'proposal': '💍',
-            'wonderland': '🌙',
-            'white_bride': '🤍',
-            'crystal_ball': '🔮',
-            'bobo': '🫧'
+            'heartbox': 'BOX',
+            'fanlight': 'FAN',
+            'tiedu_one': 'ADM',
+            'deepsea_singer': 'PAR',
+            'sky_throne': 'SKY',
+            'proposal': 'PRP',
+            'wonderland': 'WON',
+            'white_bride': 'WB',
+            'crystal_ball': 'ORB',
+            'bobo': 'BB'
         };
-        return icons[giftType] || '🎁';
+        return icons[giftType] || 'GFT';
     }
 
     
@@ -212,20 +212,24 @@
             'success': '#4caf50',      
             'partial_success': '#ff5722', 
             'failed': '#f44336',       
+            'timeout': '#f44336',
+            'uncertain': '#795548',
             'no_room': '#9e9e9e'       
         };
         
         const statusTexts = {
-            'pending': t('⏳ 等待发送', '⏳ Pending'),
-            'processing': t('🔄 发送中', '🔄 Sending'),
-            'success': t('✅ 发送成功', '✅ Sent'),
-            'partial_success': t('⚠️ 部分成功', '⚠️ Partial'),
-            'failed': t('❌ 发送失败', '❌ Failed'),
-            'no_room': t('📍 无房间号', '📍 No Room')
+            'pending': t('等待发送', 'Pending'),
+            'processing': t('发送中', 'Sending'),
+            'success': t('发送成功', 'Sent'),
+            'partial_success': t('部分成功', 'Partial'),
+            'failed': t('发送失败', 'Failed'),
+            'timeout': t('排队超时，已退款', 'Queue timed out, refunded'),
+            'uncertain': t('结果待确认', 'Awaiting confirmation'),
+            'no_room': t('无房间号', 'No Room')
         };
         
         const color = statusColors[status] || '#9e9e9e';
-        const text = statusTexts[status] || t('❓ 未知状态', '❓ Unknown');
+        const text = statusTexts[status] || t('未知状态', 'Unknown');
         
         return `<span style="color: ${color}; font-size: 0.8rem; margin-left: 8px;">${text}</span>`;
     }
@@ -242,10 +246,7 @@
         
         
         for (const newItem of newHistory) {
-            const oldItem = lastHistory.find(item => 
-                item.gift_type === newItem.gift_type && 
-                item.created_at === newItem.created_at
-            );
+            const oldItem = lastHistory.find(item => item.id === newItem.id);
             
             if (oldItem && oldItem.delivery_status !== newItem.delivery_status) {
                 
@@ -268,10 +269,20 @@
                         ), 'error');
                     } else {
                         showMessage(t(
-                            `礼物${getGiftName(newItem.gift_type)}发送失败，已退还电币。`,
-                            `Gift ${getGiftName(newItem.gift_type)} failed to send. Coins refunded.`
+                            `礼物${getGiftName(newItem.gift_type)}发送失败，已退还积分。`,
+                            `Gift ${getGiftName(newItem.gift_type)} failed to send. Points refunded.`
                         ), 'error');
                     }
+                } else if (newItem.delivery_status === 'timeout') {
+                    showMessage(t(
+                        `礼物${getGiftName(newItem.gift_type)}排队超时，积分已退还。`,
+                        `Gift ${getGiftName(newItem.gift_type)} timed out in queue. Points were refunded.`
+                    ), 'error');
+                } else if (newItem.delivery_status === 'uncertain') {
+                    showMessage(t(
+                        `礼物${getGiftName(newItem.gift_type)}已被发送服务领取，但结果尚未确认，请勿重复兑换。`,
+                        `Gift ${getGiftName(newItem.gift_type)} was claimed by the sender, but the result is not confirmed. Do not exchange it again.`
+                    ), 'info');
                 }
             }
         }
@@ -289,9 +300,9 @@
         `;
         
         const colors = {
-            success: 'linear-gradient(135deg, #4caf50, #45a049)',
-            error: 'linear-gradient(135deg, #f44336, #d32f2f)',
-            info: 'linear-gradient(135deg, #2196f3, #1976d2)'
+            success: '#23835a',
+            error: '#c84b44',
+            info: '#326fad'
         };
         
         messageDiv.style.background = colors[type] || colors.info;
@@ -365,7 +376,7 @@
             pkToggleBtn.disabled = true;
             try {
                 const path = isStopping ? '/api/pk/stop' : '/api/pk/start';
-                const response = await fetch(path, {
+                const response = await window.idempotentFetch(path, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

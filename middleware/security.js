@@ -8,11 +8,7 @@ const suspiciousPatterns = new Map();
 
 // 获取真实IP地址
 function getRealIP(req) {
-    return req.headers['cf-connecting-ip'] ||
-        req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-        req.headers['x-real-ip'] ||
-        req.connection.remoteAddress ||
-        req.ip;
+    return req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
 }
 
 // 生成设备指纹
@@ -247,9 +243,6 @@ const adminStrictLimit = (() => {
 
 // 管理接口 IP 白名单（通过 env 配置，逗号分隔），未配置则不拦截
 function adminIPWhitelist(req, res, next) {
-    if (req.session && req.session.user && req.session.user.is_admin) {
-        return next();
-    }
     const whitelist = (process.env.ADMIN_IP_WHITELIST || '').split(',').map((ip) => ip.trim()).filter(Boolean);
     if (whitelist.length === 0) {
         return next();
@@ -292,7 +285,9 @@ function verifyAdminSignature(req, res, next) {
     const raw = `${tsNum}:${req.method}:${req.originalUrl}:${payload}`;
     const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
 
-    if (expected !== sign) {
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    const signBuffer = Buffer.from(sign, 'hex');
+    if (expectedBuffer.length !== signBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signBuffer)) {
         return res.status(401).json({ success: false, message: '签名校验失败' });
     }
 
@@ -345,7 +340,7 @@ function requireSession(req, res, next) {
 // CSRF保护
 function csrfProtection(req, res, next) {
     // 测试/脚本模式下允许跳过（仅当明确开启）
-    if (process.env.CSRF_TEST_MODE === 'true') {
+    if (process.env.NODE_ENV !== 'production' && process.env.CSRF_TEST_MODE === 'true') {
         return next();
     }
 
@@ -354,7 +349,7 @@ function csrfProtection(req, res, next) {
         const sessionToken = req.session?.csrfToken;
 
         // 脚本/自动模式：若开启 CSRF_AUTO_FILL 且缺少token，则尝试使用会话中的token
-        if (!token && process.env.CSRF_AUTO_FILL === 'true') {
+        if (!token && process.env.NODE_ENV !== 'production' && process.env.CSRF_AUTO_FILL === 'true') {
             token = sessionToken;
         }
         
@@ -399,7 +394,8 @@ function cleanupOldData() {
 }
 
 // 每小时清理一次
-setInterval(cleanupOldData, 60 * 60 * 1000);
+const securityCleanupInterval = setInterval(cleanupOldData, 60 * 60 * 1000);
+securityCleanupInterval.unref?.();
 
 // 启动时立即清理一次，特别清理Cloudflare IP
 function initialCleanup() {

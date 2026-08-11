@@ -2,6 +2,7 @@
     const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
     const t = (zh, en) => (lang === 'zh' ? zh : en);
     const translateServerMessage = window.translateServerMessage || ((message) => message);
+    const escapeHTML = window.escapeHTML || ((value) => String(value ?? ''));
 
     const { csrfToken } = document.body.dataset;
     const tierGrid = document.getElementById('tierGrid');
@@ -23,7 +24,7 @@
 
     function updateSummary() {
         const totalCost = selectedCost * selectedCount;
-        summaryText.textContent = t(`本次消耗 ${totalCost} 电币`, `Cost ${totalCost} coins`);
+        summaryText.textContent = t(`本次消耗 ${totalCost} 积分`, `Cost ${totalCost} points`);
     }
 
     function updateActiveTier(card) {
@@ -69,7 +70,7 @@
         const totalCost = selectedCost * selectedCount;
         const currentBalance = parseBalance();
         if (currentBalance !== null && currentBalance < totalCost) {
-            summaryText.textContent = t('电币不足，无法开启', 'Insufficient coins');
+            summaryText.textContent = t('积分不足，无法开启', 'Insufficient points');
             return;
         }
 
@@ -81,7 +82,7 @@
         }
 
         try {
-            const response = await fetch('/api/blindbox/open', {
+            const response = await window.idempotentFetch('/api/blindbox/open', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -114,8 +115,8 @@
                 const div = document.createElement('div');
                 div.className = 'result-item';
                 div.innerHTML = `
-                    <strong>${item.name}</strong>
-                    <span>${t('价值', 'Value')}: ${item.value} ${t('电币', 'coins')}</span>
+                    <strong>${escapeHTML(item.name)}</strong>
+                    <span>${t('价值', 'Value')}: ${escapeHTML(item.value)} ${t('积分', 'points')}</span>
                 `;
                 resultList.appendChild(div);
             });

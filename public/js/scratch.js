@@ -13,7 +13,7 @@
         formatted = formatted.replace('未中奖', 'No Win');
         formatted = formatted.replace('中奖', 'Win');
         formatted = formatted.replace('返还', 'Returned');
-        formatted = formatted.replace('电币', 'coins');
+        formatted = formatted.replace('积分', 'points');
         return formatted;
     };
 
@@ -58,7 +58,7 @@
         let bgStyle = '';
 
         const hasCoinPrize = typeof prize === 'string'
-            && (prize.includes('电币') || prize.toLowerCase().includes('coin'));
+            && (prize.includes('积分') || prize.toLowerCase().includes('point'));
         const isThankYou = typeof prize === 'string'
             && (prize.includes('谢谢') || prize.toLowerCase().includes('thanks'));
 
@@ -92,8 +92,8 @@
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
         if (currentBalance < cost) {
             alert(t(
-                `⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${cost} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`,
-                `⚡ Insufficient coins! Balance: ${currentBalance}, needed: ${cost}. For entertainment only, virtual coins cannot be exchanged for real money.`
+                `积分不足！当前余额: ${currentBalance} 积分，需要: ${cost} 积分。仅供娱乐，虚拟积分不可兑换真实货币。`,
+                `Insufficient points! Balance: ${currentBalance}, needed: ${cost}. For entertainment only, virtual points cannot be exchanged for real money.`
             ));
             return;
         }
@@ -101,7 +101,7 @@
         selectedTier = { cost, winCount };
 
         try {
-            const response = await fetch('/api/scratch/play', {
+            const response = await window.idempotentFetch('/api/scratch/play', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -124,7 +124,7 @@
             const outcomeText = data.outcome
                 ? formatScratchOutcome(data.outcome)
                 : (payoutValue > 0
-                    ? t(`中奖 ${payoutValue} 电币`, `Won ${payoutValue} coins`)
+                    ? t(`中奖 ${payoutValue} 积分`, `Won ${payoutValue} points`)
                     : t('未中奖', 'No win'));
             const normalized = {
                 reward: data.reward ?? payoutValue,
@@ -155,8 +155,8 @@
 
         const userCount = gameData.slots.length;
         document.getElementById('current-tier-info').innerHTML = `
-            <div>${t('当前档位', 'Current Tier')}: ${selectedTier.cost} ${t('电币', 'coins')} | ${t('中奖号码', 'Winning Numbers')}: ${gameData.winningNumbers.length} ${t('个', '')} | ${t('我的号码', 'My Numbers')}: ${userCount} ${t('个', '')}</div>
-            <div style="color: #ffeb3b;">🎯 ${t('刮开涂层，点击验证查看中奖结果！', 'Scratch off and click verify to reveal your result!')}</div>
+            <div>${t('当前档位', 'Current Tier')}: ${selectedTier.cost} ${t('积分', 'points')} | ${t('中奖号码', 'Winning Numbers')}: ${gameData.winningNumbers.length} ${t('个', '')} | ${t('我的号码', 'My Numbers')}: ${userCount} ${t('个', '')}</div>
+            <div style="color: #ffeb3b;">${t('刮开涂层，点击验证查看中奖结果！', 'Scratch off and click verify to reveal your result!')}</div>
         `;
 
         const canvas = document.getElementById('scratchCanvas');
@@ -272,25 +272,25 @@
 
         if ((currentGameData.payout || 0) === 0) {
             resultMessage = t(
-                `😢 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，未中奖`,
-                `😢 ${currentGameData.outcome}! Bet: ${selectedTier.cost} coins, no win`
+                `${currentGameData.outcome}！投注: ${selectedTier.cost} 积分，未中奖`,
+                `${currentGameData.outcome}! Bet: ${selectedTier.cost} points, no win`
             );
         } else if (currentGameData.payout === selectedTier.cost) {
             resultMessage = t(
-                `🎯 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，返还: ${currentGameData.payout} 电币`,
-                `🎯 ${currentGameData.outcome}! Bet: ${selectedTier.cost} coins, returned: ${currentGameData.payout} coins`
+                `${currentGameData.outcome}！投注: ${selectedTier.cost} 积分，返还: ${currentGameData.payout} 积分`,
+                `${currentGameData.outcome}! Bet: ${selectedTier.cost} points, returned: ${currentGameData.payout} points`
             );
         } else {
             resultMessage = t(
-                `🎉 ${currentGameData.outcome}！投注: ${selectedTier.cost} 电币，获得: ${currentGameData.payout} 电币`,
-                `🎉 ${currentGameData.outcome}! Bet: ${selectedTier.cost} coins, earned: ${currentGameData.payout} coins`
+                `${currentGameData.outcome}！投注: ${selectedTier.cost} 积分，获得: ${currentGameData.payout} 积分`,
+                `${currentGameData.outcome}! Bet: ${selectedTier.cost} points, earned: ${currentGameData.payout} points`
             );
         }
 
         result.innerHTML = `
             <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
                 <div style="color: #ffeb3b; font-size: 1.1rem; margin-bottom: 0.5rem;">${resultMessage}</div>
-                <div style="color: #ccc;">${t('匹配号码', 'Matches')}: ${matched.length} ${t('个', '')} | ${t('余额', 'Balance')}: ${currentGameData.finalBalance ?? '--'} ${t('电币', 'coins')}</div>
+                <div style="color: #ccc;">${t('匹配号码', 'Matches')}: ${matched.length} ${t('个', '')} | ${t('余额', 'Balance')}: ${currentGameData.finalBalance ?? '--'} ${t('积分', 'points')}</div>
             </div>
         `;
 

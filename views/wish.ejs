@@ -342,22 +342,22 @@
         }
     </style>
 </head>
-<body data-csrf-token="<%= csrfToken %>" data-can-test="<%= canWishTest ? 'true' : 'false' %>">
+<body class="app-redesign game-page page-wish" data-csrf-token="<%= csrfToken %>" data-can-test="<%= canWishTest ? 'true' : 'false' %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="header">
-            <h1>🌟 <%= lang === 'zh' ? '幸运祈愿' : 'Lucky Wish' %></h1>
+            <h1><%= lang === 'zh' ? '幸运祈愿' : 'Lucky Wish' %></h1>
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
-                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
-                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
+                <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/profile"><%= lang === 'zh' ? '个人记录' : 'Activity' %></a>
             </div>
         </div>
 
         <div class="balance-wish-section">
             <div class="balance-info">
-                <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
+                <h3><%= lang === 'zh' ? '当前积分' : 'Current Points' %> <span id="current-balance"><%= balance || 0 %></span></h3>
             </div>
             <div class="wish-container">
                 <p style="color: #ccc;">
@@ -372,8 +372,8 @@
         <div class="wish-container">
             <div class="wish-gift-grid">
                 <div class="gift-card gift-card-large" data-gift="deepsea_singer">
-                    <div class="gift-title">🎠 <%= lang === 'zh' ? '梦幻游乐园' : 'Dreamland Park' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 30000 电币 · 500 电币/次' : 'Value 30000 coins · 500 coins/draw' %></div>
+                    <div class="gift-title"><%= lang === 'zh' ? '梦幻游乐园' : 'Dreamland Park' %></div>
+                    <div class="gift-meta"><%= lang === 'zh' ? '价值 30000 积分 · 500 积分/次' : 'Value 30000 points · 500 points/draw' %></div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="deepsea_singer" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="deepsea_singer" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
@@ -386,8 +386,8 @@
                 </div>
 
                 <div class="gift-card" data-gift="sky_throne">
-                    <div class="gift-title">💺 <%= lang === 'zh' ? '飞天转椅' : 'Sky Throne' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 10000 电币 · 250 电币/次' : 'Value 10000 coins · 250 coins/draw' %></div>
+                    <div class="gift-title"><%= lang === 'zh' ? '飞天转椅' : 'Sky Throne' %></div>
+                    <div class="gift-meta"><%= lang === 'zh' ? '价值 10000 积分 · 250 积分/次' : 'Value 10000 points · 250 points/draw' %></div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="sky_throne" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="sky_throne" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
@@ -400,8 +400,8 @@
                 </div>
 
                 <div class="gift-card" data-gift="proposal">
-                    <div class="gift-title">💍 <%= lang === 'zh' ? '原地求婚' : 'On-the-Spot Proposal' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 5200 电币 · 208 电币/次' : 'Value 5200 coins · 208 coins/draw' %></div>
+                    <div class="gift-title"><%= lang === 'zh' ? '原地求婚' : 'On-the-Spot Proposal' %></div>
+                    <div class="gift-meta"><%= lang === 'zh' ? '价值 5200 积分 · 208 积分/次' : 'Value 5200 points · 208 points/draw' %></div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="proposal" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="proposal" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
@@ -413,10 +413,24 @@
                     </div>
                 </div>
 
+                <div class="gift-card" data-gift="wonderland">
+                    <div class="gift-title"><%= lang === 'zh' ? '梦游仙境' : 'Wonderland Dream' %></div>
+                    <div class="gift-meta"><%= lang === 'zh' ? '价值 3000 积分 · 150 积分/次' : 'Value 3000 points · 150 points/draw' %></div>
+                    <div class="gift-actions">
+                        <button class="gift-action-btn" data-gift="wonderland" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
+                        <button class="gift-action-btn secondary" data-gift="wonderland" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="wonderland" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                    </div>
+                    <div class="gift-progress">
+                        <div class="gift-progress-bar" data-progress-bar="wonderland"></div>
+                        <div class="gift-progress-text" data-progress-text="wonderland">0 / 41</div>
+                    </div>
+                </div>
+
 
                 <div class="gift-card" data-gift="white_bride">
-                    <div class="gift-title">🤍 <%= lang === 'zh' ? '纯白花嫁' : 'Pure White Bride' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 1314 电币 · 75 电币/次' : 'Value 1314 coins · 75 coins/draw' %></div>
+                    <div class="gift-title"><%= lang === 'zh' ? '纯白花嫁' : 'Pure White Bride' %></div>
+                    <div class="gift-meta"><%= lang === 'zh' ? '价值 1314 积分 · 75 积分/次' : 'Value 1314 points · 75 points/draw' %></div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="white_bride" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="white_bride" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
@@ -429,8 +443,8 @@
                 </div>
 
                 <div class="gift-card" data-gift="crystal_ball">
-                    <div class="gift-title">🔮 <%= lang === 'zh' ? '水晶球' : 'Crystal Ball' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 1000 电币 · 66 电币/次' : 'Value 1000 coins · 66 coins/draw' %></div>
+                    <div class="gift-title"><%= lang === 'zh' ? '水晶球' : 'Crystal Ball' %></div>
+                    <div class="gift-meta"><%= lang === 'zh' ? '价值 1000 积分 · 66 积分/次' : 'Value 1000 points · 66 points/draw' %></div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="crystal_ball" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="crystal_ball" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
@@ -443,8 +457,8 @@
                 </div>
 
                 <div class="gift-card" data-gift="bobo">
-                    <div class="gift-title">🫧 <%= lang === 'zh' ? '啵啵' : 'Bubbles' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 399 电币 · 50 电币/次' : 'Value 399 coins · 50 coins/draw' %></div>
+                    <div class="gift-title"><%= lang === 'zh' ? '啵啵' : 'Bubbles' %></div>
+                    <div class="gift-meta"><%= lang === 'zh' ? '价值 399 积分 · 50 积分/次' : 'Value 399 points · 50 points/draw' %></div>
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="bobo" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="bobo" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
@@ -476,9 +490,9 @@
                 text-align: center;
             ">
                 <% if (lang === 'zh') { %>
-                    ⚠️ <strong>免责声明：</strong>本许愿功能仅供娱乐消遣，祈愿结果为随机娱乐内容，不涉及任何迷信或超自然因素。平台内所有积分、进度均为虚拟娱乐道具，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。严禁未满18周岁用户使用，请理性娱乐。
+                    <strong>免责声明：</strong>本许愿功能仅供娱乐消遣，祈愿结果为随机娱乐内容，不涉及任何迷信或超自然因素。平台内所有积分、进度均为虚拟娱乐道具，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。严禁未满18周岁用户使用，请理性娱乐。
                 <% } else { %>
-                    ⚠️ <strong>Disclaimer:</strong> This wishing feature is for entertainment only. Wish results are random entertainment content and do not involve any superstition or supernatural factors. All points and progress on the platform are virtual entertainment items that cannot be exchanged for real money or valuable goods. Participation is completely free and complies with relevant laws. Strictly prohibited for users under 18 years old. Please enjoy responsibly.
+                    <strong>Disclaimer:</strong> This wishing feature is for entertainment only. Wish results are random entertainment content and do not involve any superstition or supernatural factors. All points and progress on the platform are virtual entertainment items that cannot be exchanged for real money or valuable goods. Participation is completely free and complies with relevant laws. Strictly prohibited for users under 18 years old. Please enjoy responsibly.
                 <% } %>
             </div>
         </div>
@@ -496,7 +510,7 @@
     <div id="probabilityModal" class="fullscreen-modal">
         <div class="modal-content" style="font-size: 1.2rem; max-width: 680px;">
             <div style="font-size: 1.6rem; margin-bottom: 1rem;">
-                📢 <%= lang === 'zh' ? '概率公示' : 'Odds Disclosure' %>
+                <%= lang === 'zh' ? '概率公示' : 'Odds Disclosure' %>
             </div>
             <div id="probabilityList" style="text-align: left;"></div>
             <div style="margin-top: 1rem;">

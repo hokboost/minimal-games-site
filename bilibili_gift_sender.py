@@ -80,6 +80,29 @@ def normalize_live_cookies(cookies):
         cookies.extend(extras)
     return cookies
 
+def build_guard_gift_ids():
+    config_path = os.environ.get('BILIPK_CONFIG', 'C:/Users/user/Desktop/jiaobenbili/config_gift_only.json')
+    if not os.path.exists(config_path):
+        return {"34636", "34638", "34639"}
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+        gift_pool = config_data.get("礼物池配置", {})
+        guard_ids = set()
+        for gid, info in gift_pool.items():
+            name = ""
+            if isinstance(info, (list, tuple)) and info:
+                name = info[0]
+            if isinstance(name, str) and any(token in name for token in ("舰长", "提督", "总督", "大航海")):
+                guard_ids.add(str(gid))
+        guard_ids.update({"34636", "34638", "34639"})
+        return guard_ids
+    except Exception as e:
+        safe_print(f"加载航海礼物配置失败: {e}")
+        return {"34636", "34638", "34639"}
+
+GUARD_GIFT_IDS = build_guard_gift_ids()
+
 def get_current_balance(page):
     """获取当前B币余额，完全参考threeserver.py实现"""
     try:
@@ -96,11 +119,17 @@ def get_current_balance(page):
                         text = element.text_content() or ""
                         safe_print(f"[余额检测] 余额元素{i}: '{text}'")
                         
-                        # 尝试提取数字
+                        # 尝试提取数字（支持万/亿）
                         import re
-                        match = re.search(r'余额[:\s]*(\d+)', text)
+                        match = re.search(r'余额[:\s]*([\d.]+)\s*([万亿]?)', text)
                         if match:
-                            balance = int(match.group(1))
+                            value = float(match.group(1))
+                            unit = match.group(2)
+                            if unit == "万":
+                                value *= 10000
+                            elif unit == "亿":
+                                value *= 100000000
+                            balance = float(value)
                             safe_print(f"✅ [余额检测] 找到余额: {balance} B币")
                             return balance
                 except Exception as e:
@@ -128,11 +157,17 @@ def get_current_balance(page):
                         balance_text = element.text_content() or ""
                         safe_print(f"[余额检测] 选择器'{selector}' 元素{i}文本: '{balance_text}'")
                         
-                        # 提取数字 "余额: 811" -> 811
+                        # 提取数字（支持万/亿）
                         import re
-                        match = re.search(r'余额[:\s]*(\d+)', balance_text)
+                        match = re.search(r'余额[:\s]*([\d.]+)\s*([万亿]?)', balance_text)
                         if match:
-                            balance = int(match.group(1))
+                            value = float(match.group(1))
+                            unit = match.group(2)
+                            if unit == "万":
+                                value *= 10000
+                            elif unit == "亿":
+                                value *= 100000000
+                            balance = float(value)
                             safe_print(f"📊 [余额检测] 解析余额成功: {balance} B币")
                             return balance
             except Exception as e:
@@ -148,24 +183,12 @@ def get_current_balance(page):
 def check_balance_insufficient(page):
     """检测页面是否出现余额不足提示或余额过低，完全参考threeserver"""
     try:
-        # 首先尝试读取当前余额
-        balance_info = get_current_balance(page)
-        if balance_info is not None:
-            current_balance = balance_info
-            safe_print(f"💰 当前余额: {current_balance} B币")
-            
-            # 如果余额过低（小于1），认为余额不足
-            if current_balance < 1:
-                safe_print(f"🚫 余额过低: {current_balance} B币")
-                return True
-        
         # 检查常见的余额不足提示
         insufficient_selectors = [
             ".insufficient-balance",  # 余额不足类名
             "[class*='insufficient']",  # 包含insufficient的类名
             "text='余额不足'",  # 直接文本匹配
             "text='B币不足'",
-            "text='余额'",
             ".toast-message",  # 通用toast消息
             ".error-message",  # 错误消息
             ".gift-send-error"  # 送礼错误
@@ -177,7 +200,10 @@ def check_balance_insufficient(page):
                 try:
                     if element.is_visible():
                         text_content = element.text_content() or ""
-                        if any(keyword in text_content for keyword in ["余额", "不足", "B币", "充值"]):
+                        normalized_text = "".join(text_content.split())
+                        if any(keyword in normalized_text for keyword in [
+                            "余额不足", "B币不足", "电池不足", "请充值", "充值后"
+                        ]):
                             try:
                                 safe_print(f"🚫 检测到余额不足提示: {text_content}")
                             except UnicodeEncodeError:
@@ -237,6 +263,7 @@ def check_gift_send_result(page, gift_id, max_wait=3):
 def send_gift_simple(gift_id, room_id, quantity=1):
     """简单的礼物发送函数 - 每次独立运行"""
     safe_print(f"Starting gift sending - Gift ID: {gift_id}, Room: {room_id}, Quantity: {quantity}")
+    send_attempted = False
     
     with sync_playwright() as p:
         # 启动浏览器（完全按threeserver的配置）
@@ -302,7 +329,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
         # 发送礼物并验证结果
         safe_print(f"Sending gift ID: {gift_id}")
         try:
-            # ✅ B站所有礼物价格映射表（价格单位：电币，原价格/100）
+            # ✅ B站所有礼物价格映射表（价格单位：电池）
             GIFT_PRICE_MAP = {
                 "13000": 0, "30606": 50, "30628": 1000, "30688": 899, "30732": 6660, "30733": 280, "30758": 1, "30847": 12450, "30869": 1, "30873": 299,
                 "31028": 22330, "31036": 1, "31039": 1, "31044": 52, "31053": 199, "31087": 12450, "31088": 4000, "31115": 10000, "31122": 1000, "31164": 1,
@@ -315,15 +342,30 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 "34500": 10, "34526": 1000, "34527": 100, "34547": 1000, "34551": 1000, "34657": 199, "34684": 1520, "34908": 6666, "34931": 49, "34970": 3000,
                 "34989": 9, "34990": 299, "34991": 666, "34992": 6666, "34997": 1990, "34998": 29990, "34999": 5200, "35017": 1000, "35019": 1000, "35081": 199,
                 "35082": 30000, "35165": 30000, "35206": 50, "35212": 500, "35228": 199, "35261": 299, "35282": 299, "35283": 1888, "35284": 3000, "35287": 250,
-                "35289": 199, "35292": 666, "35293": 888, "35301": 1, "35302": 990, "35303": 30000, "35405": 1990
+                "35289": 199, "35292": 666, "35293": 888, "35301": 1, "35302": 990, "35303": 30000, "35405": 1990,
+                "34636": 1980, "34638": 19980, "34639": 199980
             }
             price = GIFT_PRICE_MAP.get(str(gift_id), 1)
+            price_bcoin = price / 1000.0
             before_balance = None
             try:
                 before_balance = get_current_balance(page)
-                safe_print(f"💰 [余额差计算] 发送前余额: {before_balance} (price={price})")
+                safe_print(f"💰 [余额差计算] 发送前余额: {before_balance} (price={price}电池≈{price_bcoin:.2f}B币)")
             except Exception as e:
                 safe_print(f"⚠️ [余额差计算] 获取发送前余额失败: {e}")
+            if before_balance is not None and price_bcoin > 0 and before_balance < price_bcoin:
+                safe_print(f"🚫 余额不足: {before_balance} B币 < {price_bcoin:.2f} B币")
+                return {
+                    "success": False,
+                    "error": "insufficient_balance",
+                    "balance_insufficient": True,
+                    "gift_id": gift_id,
+                    "room_id": room_id,
+                    "requested_quantity": quantity,
+                    "actual_quantity": 0,
+                    "partial_success": False,
+                    "coins_spent": 0
+                }
 
             safe_print(f"Gift {gift_id} clicked, now handling quantity: {quantity}")
             
@@ -331,23 +373,209 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             successful_sends = 0
             stopped_for_balance = False
             for i in range(quantity):
+                guard_ids_js = json.dumps(sorted(GUARD_GIFT_IDS))
+                send_attempted = True
                 click_result = page.evaluate(f'''
-                    () => {{
+                    async () => {{
                         const giftId = "{gift_id}";
-                        const selector = '.gift-id-' + giftId;
-                        const el = document.querySelector(selector);
-                        if (el) {{
+                        const guardGiftIds = new Set({guard_ids_js});
+                        const isGuardGift = guardGiftIds.has(String(giftId));
+
+                        const clickBySelector = (selector) => {{
+                            const node = document.querySelector(selector);
+                            if (!node) return false;
                             const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
-                            el.dispatchEvent(evt);
+                            node.dispatchEvent(evt);
                             return true;
+                        }};
+
+                        const clickTabByText = (text) => {{
+                            const tabs = document.querySelectorAll('.gift-tabs .gift-tab');
+                            for (const tab of tabs) {{
+                                const nameEl = tab.querySelector('.name');
+                                const label = (nameEl ? nameEl.textContent : tab.textContent || '').replace(/\\s+/g, '');
+                                if (label.includes(text)) {{
+                                    const target = nameEl || tab;
+                                    target.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }}));
+                                    return true;
+                                }}
+                            }}
+                            return false;
+                        }};
+
+                        const getGiftPanel = () => {{
+                            return document.querySelector('.gift-panel.extend-panel')
+                                || document.querySelector('.gift-panel')
+                                || document.body;
+                        }};
+
+                        const ensureGiftPanelOpen = () => {{
+                            const switchSelectors = [
+                                '.gift-panel-switch',
+                                '.gift-panel-switch.pointer',
+                                '.gift-panel-switch-icon',
+                                '.gift-panel-switch-btn'
+                            ];
+                            for (const sel of switchSelectors) {{
+                                if (clickBySelector(sel)) return true;
+                            }}
+                            return false;
+                        }};
+
+                        const scrollGiftContainers = () => {{
+                            const panel = getGiftPanel();
+                            const containers = Array.from(panel.querySelectorAll('*')).filter((el) => {{
+                                try {{
+                                    return el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY !== 'visible';
+                                }} catch (e) {{
+                                    return false;
+                                }}
+                            }});
+                            if (panel && panel.scrollHeight > panel.clientHeight) {{
+                                containers.unshift(panel);
+                            }}
+                            for (const el of containers) {{
+                                el.scrollTop = 0;
+                            }}
+                            return containers;
+                        }};
+
+                        const findGiftElement = (id) => {{
+                            const panel = getGiftPanel();
+                            const selectors = [
+                                '.gift-id-' + id,
+                                '[class*="gift-id-' + id + '"]',
+                                '[data-gift-id="' + id + '"]'
+                            ];
+                            for (const selector of selectors) {{
+                                const el = panel.querySelector(selector);
+                                if (el) return el;
+                            }}
+                            const reportCandidates = Array.from(panel.querySelectorAll('[data-report]'));
+                            for (const el of reportCandidates) {{
+                                const report = el.getAttribute('data-report') || '';
+                                if (report.includes(`"gift_id":${id}`)) {{
+                                    return el;
+                                }}
+                            }}
+                            for (const selector of selectors) {{
+                                const el = document.querySelector(selector);
+                                if (el) return el;
+                            }}
+                            return null;
+                        }};
+
+                        if (isGuardGift) {{
+                            clickTabByText('航海');
+                            await new Promise((resolve) => setTimeout(resolve, 300));
                         }}
-                        return false;
+
+                        let el = findGiftElement(giftId);
+                        if (!el) {{
+                            ensureGiftPanelOpen();
+                            if (isGuardGift) {{
+                                clickTabByText('航海');
+                                await new Promise((resolve) => setTimeout(resolve, 300));
+                            }}
+                            el = findGiftElement(giftId);
+                        }}
+                        if (!el) {{
+                            const containers = scrollGiftContainers();
+                            for (const container of containers) {{
+                                container.scrollTop = Math.floor(container.scrollHeight / 2);
+                            }}
+                            await new Promise((resolve) => setTimeout(resolve, 150));
+                            el = findGiftElement(giftId);
+                        }}
+                        if (!el) {{
+                            const containers = scrollGiftContainers();
+                            for (const container of containers) {{
+                                container.scrollTop = container.scrollHeight;
+                            }}
+                            el = findGiftElement(giftId);
+                        }}
+
+                        if (el) {{
+                            const target = el.querySelector('.gift-item-content') || el;
+                            if (target.scrollIntoView) {{
+                                target.scrollIntoView({{ block: 'center', inline: 'center' }});
+                            }}
+                            const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }});
+                            target.dispatchEvent(evt);
+
+                            const actionButton = el.querySelector('.bottom-btn-section button, .bottom-btn-section .btn, .bottom-btn-section .buy-btn, .bottom-btn-section .send-btn');
+                            if (actionButton && actionButton.offsetParent !== null) {{
+                                actionButton.dispatchEvent(evt);
+                            }}
+                            return {{ success: true, guard: isGuardGift }};
+                        }}
+
+                        const activeTab = document.querySelector('.gift-tabs .gift-tab.active .name');
+                        const panel = getGiftPanel();
+                        const panelClass = panel ? panel.className : '';
+                        const panelCount = document.querySelectorAll('.gift-panel').length;
+                        const panelGiftCount = panel ? panel.querySelectorAll('.gift-item').length : 0;
+                        const globalGiftCount = document.querySelectorAll('.gift-item').length;
+                        const targetByClass = document.querySelector('.gift-id-' + giftId) ? true : false;
+                        const reportCandidates = Array.from(document.querySelectorAll('[data-report]'))
+                            .some((node) => (node.getAttribute('data-report') || '').includes('"gift_id":' + giftId));
+                        const sampleGiftClasses = Array.from((panel || document).querySelectorAll('[class*="gift-id-"]'))
+                            .slice(0, 5)
+                            .map((node) => node.className)
+                            .join(' | ');
+                        return {{
+                            success: false,
+                            debug: {{
+                                isGuardGift,
+                                activeTab: activeTab ? activeTab.textContent.trim() : '',
+                                panelClass,
+                                panelCount,
+                                panelGiftCount,
+                                globalGiftCount,
+                                targetByClass,
+                                targetByReport: reportCandidates,
+                                sampleGiftClasses
+                            }}
+                        }};
                     }}
                 ''')
 
-                if not click_result:
+                if not click_result or not click_result.get("success"):
+                    debug = click_result.get("debug") if isinstance(click_result, dict) else None
                     safe_print(f"⚠️ 第{i+1}次点击失败，礼物元素不可用")
+                    if debug:
+                        safe_print(
+                            "🔎 送礼调试: "
+                            f"isGuard={debug.get('isGuardGift')}, "
+                            f"tab={debug.get('activeTab')}, "
+                            f"panelClass={debug.get('panelClass')}, "
+                            f"panelCount={debug.get('panelCount')}, "
+                            f"panelGiftCount={debug.get('panelGiftCount')}, "
+                            f"globalGiftCount={debug.get('globalGiftCount')}, "
+                            f"targetByClass={debug.get('targetByClass')}, "
+                            f"targetByReport={debug.get('targetByReport')}"
+                        )
+                        if debug.get("sampleGiftClasses"):
+                            safe_print(f"🔎 礼物样本class: {debug.get('sampleGiftClasses')}")
                     break
+
+                if click_result.get("guard"):
+                    try:
+                        confirm_clicked = page.evaluate(r'''() => {
+                            const buttons = Array.from(document.querySelectorAll('button, .btn, .confirm, .confirm-btn'));
+                            for (const btn of buttons) {
+                                const text = (btn.textContent || '').replace(/\s+/g, '');
+                                if (text.includes('同意并投喂') || text.includes('确认投喂') || text.includes('同意')) {
+                                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }''')
+                        if confirm_clicked:
+                            safe_print("✅ 已点击弹窗确认")
+                    except Exception as e:
+                        safe_print(f"⚠️ 弹窗确认失败: {e}")
 
                 time.sleep(0.3)  # 每次点击间隔0.3秒，便于观察余额变化
                 if check_balance_insufficient(page):
@@ -383,6 +611,64 @@ def send_gift_simple(gift_id, room_id, quantity=1):
             # 使用threeserver的完整验证逻辑
             safe_print("Checking gift send result using threeserver validation logic...")
             result = check_gift_send_result(page, gift_id, max_wait=3)
+            after_balance = None
+            try:
+                after_balance = get_current_balance(page)
+                safe_print(f"💰 [余额差计算] 发送后余额: {after_balance}")
+            except Exception as e:
+                safe_print(f"⚠️ [余额差计算] 获取发送后余额失败: {e}")
+
+            error_message = result.get("message") or ""
+            if (result.get("reason") == "other_error" or "打Call" in error_message) and str(gift_id) in GUARD_GIFT_IDS:
+                safe_print(f"⚠️ 检测到提示弹窗: {error_message}")
+
+                # 点击“同意并投喂”确认弹窗
+                try:
+                    confirm_clicked = page.evaluate(r'''() => {
+                        const buttons = Array.from(document.querySelectorAll('button, .btn, .confirm, .confirm-btn'));
+                        for (const btn of buttons) {
+                            const text = (btn.textContent || '').replace(/\s+/g, '');
+                            if (text.includes('同意并投喂') || text.includes('确认投喂') || text.includes('同意')) {
+                                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                                return true;
+                            }
+                        }
+                        const dialog = document.querySelector('.dialog, .modal, .popup, .confirm');
+                        if (dialog) {
+                            const ok = dialog.querySelector('button, .btn');
+                            if (ok) {
+                                ok.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                                return true;
+                            }
+                        }
+                        return false;
+                    }''')
+                except Exception as e:
+                    safe_print(f"⚠️ 弹窗确认失败: {e}")
+                    confirm_clicked = False
+
+                if confirm_clicked:
+                    safe_print("✅ 已点击弹窗确认，等待结果...")
+                    time.sleep(1.2)
+                    result = check_gift_send_result(page, gift_id, max_wait=2)
+                    try:
+                        after_balance = get_current_balance(page)
+                        safe_print(f"💰 [余额差计算] 发送后余额: {after_balance}")
+                    except Exception as e:
+                        safe_print(f"⚠️ [余额差计算] 获取发送后余额失败: {e}")
+                else:
+                    safe_print("❌ 弹窗确认按钮未找到")
+                    return {
+                        "success": False,
+                        "error": error_message or "send_failed",
+                        "balance_insufficient": False,
+                        "gift_id": gift_id,
+                        "room_id": room_id,
+                        "requested_quantity": quantity,
+                        "actual_quantity": 0,
+                        "partial_success": False,
+                        "coins_spent": 0
+                    }
             
             # 根据验证结果返回适当的响应
             # 🛡️ 正确的成功失败判断：余额不足时必须返回失败
@@ -398,9 +684,9 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                     safe_print(f"⚠️ [余额差计算] 获取发送后余额失败: {e}")
 
                 sent = successful_sends
-                if before_balance is not None and after_balance is not None and price > 0:
-                    delta = max(0, int(before_balance) - int(after_balance))
-                    sent = min(quantity, delta // price)
+                if before_balance is not None and after_balance is not None and price_bcoin >= 1:
+                    delta_bcoin = max(0.0, float(before_balance) - float(after_balance))
+                    sent = min(quantity, int((delta_bcoin * 1000 + 1e-6) // price))
 
                 # 余额不足：如果全部送完则算成功，否则部分成功并返回失败状态
                 if sent == quantity:
@@ -429,7 +715,21 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                         "partial_success": sent > 0,
                         "coins_spent": sent * price
                     }
-            elif result["success"] or successful_sends > 0:
+            elif result.get("success"):
+                if result.get("reason") == "assumed_success" and price_bcoin >= 1 and before_balance is not None and after_balance is not None:
+                    delta = float(before_balance) - float(after_balance)
+                    if delta <= 0:
+                        safe_print("❌ 未检测到余额变化，判定送礼失败")
+                        return {
+                            "success": False,
+                            "error": "no_balance_change",
+                            "balance_insufficient": False,
+                            "gift_id": gift_id,
+                            "room_id": room_id,
+                            "requested_quantity": quantity,
+                            "actual_quantity": 0,
+                            "partial_success": False
+                        }
                 # 只有非余额不足的情况下才考虑部分成功
                 verified = "message" in result and result.get("reason") != "assumed_success"
                 is_partial = successful_sends < quantity
@@ -468,7 +768,13 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 
         except Exception as e:
             safe_print(f"Gift sending error: {e}")
-            return {"success": False, "error": str(e), "gift_id": gift_id, "room_id": room_id}
+            return {
+                "success": False,
+                "error": str(e),
+                "gift_id": gift_id,
+                "room_id": room_id,
+                "outcome_uncertain": send_attempted
+            }
 
         # 注意：浏览器会在with语句结束时自动关闭
 

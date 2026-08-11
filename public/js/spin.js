@@ -11,7 +11,7 @@ const { username, csrfToken } = document.body.dataset;
         let countdownEndTime = null;
 
         const challengeListZh = [
-            '2加币买吃的', 'Quiz', 'Scratch', 'Slot', '10个深蹲',
+            '2积分买吃的', 'Quiz', 'Scratch', 'Slot', '10个深蹲',
             '热舞1分钟', '10个俯卧撑',
             '转盘次数+2',
             '反方向走3分钟', '负重前行', '3分钟不能说你我他', '20秒吹一瓶可乐',
@@ -20,7 +20,7 @@ const { username, csrfToken } = document.body.dataset;
         ];
 
         const challengeListEn = [
-            '2 Coins for Food', 'Quiz', 'Scratch', 'Slot', '10 Squats',
+            '2 Points for Food', 'Quiz', 'Scratch', 'Slot', '10 Squats',
             'Dance 1 Minute', '10 Push-ups',
             'Wheel Spins +2',
             'Walk Backwards 3 Minutes', 'Carry Weight', 'No “you/me/he” for 3 minutes', 'Chug a Cola in 20s',
@@ -29,7 +29,7 @@ const { username, csrfToken } = document.body.dataset;
         ];
 
         const prizeMap = {
-            '2加币买吃的': '2 Coins for Food',
+            '2积分买吃的': '2 Points for Food',
             'Quiz': 'Quiz',
             'Scratch': 'Scratch',
             'Slot': 'Slot',
@@ -172,7 +172,7 @@ const { username, csrfToken } = document.body.dataset;
                 const data = await response.json();
                 
                 if (!data.success) {
-                    resultDiv.textContent = "❌ " + translateServerMessage(data.message);
+                    resultDiv.textContent = translateServerMessage(data.message);
                     button.disabled = false;
                     return;
                 }
@@ -333,7 +333,7 @@ const { username, csrfToken } = document.body.dataset;
                         if (prizeText.includes(lang === 'zh' ? '背起走路' : 'Piggyback walk')) {
                             displayContent += `
                                 <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('两名男生，一人背起一人，走1步加0.2加币，上限4加币，若小于5步则扣4加币', 'Piggyback: +0.2 coins per step, max 4; if <5 steps then -4 coins')}
+                                    ${t('两名男生，一人背起一人，走1步加0.2积分，上限4积分，若小于5步则扣4积分', 'Piggyback: +0.2 points per step, max 4; if <5 steps then -4 points')}
                                 </div>
                             `;
                         }
@@ -353,7 +353,7 @@ const { username, csrfToken } = document.body.dataset;
                 requestAnimationFrame(animate);
                 
             } catch (error) {
-                resultDiv.textContent = t('❌ 网络错误，请重试', '❌ Network error, please retry');
+                resultDiv.textContent = t('网络错误，请重试', 'Network error, please retry');
                 button.disabled = false;
                 console.error('Error:', error);
             }

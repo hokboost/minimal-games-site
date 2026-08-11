@@ -357,43 +357,43 @@
         }
     </style>
 </head>
-<body data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign game-page page-scratch" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="header">
-            <h1>🎟️ <%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></h1>
+            <h1><%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></h1>
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
-                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
-                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
+                <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/profile"><%= lang === 'zh' ? '个人记录' : 'Activity' %></a>
             </div>
         </div>
 
         <div class="balance-tier-section">
             <div class="balance-info">
-                <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
+                <h3><%= lang === 'zh' ? '当前积分' : 'Current Points' %> <span id="current-balance"><%= balance || 0 %></span></h3>
             </div>
             <div class="tier-selection">
-                <h4>🎯 <%= lang === 'zh' ? '选择游戏档位' : 'Select Game Tier' %>:</h4>
+                <h4><%= lang === 'zh' ? '选择游戏档位' : 'Select game tier' %></h4>
                 <div class="tier-buttons">
                     <button class="tier-btn" data-cost="5" data-wins="5">
-                        🎟️ <%= lang === 'zh' ? '普通版' : 'Basic' %><br>
-                        <span class="tier-cost">5 <%= lang === 'zh' ? '电币' : 'coins' %></span><br>
+                        <%= lang === 'zh' ? '普通版' : 'Basic' %><br>
+                        <span class="tier-cost">5 <%= lang === 'zh' ? '积分' : 'points' %></span><br>
                         <span class="tier-detail">
                             <%= lang === 'zh' ? '5个中奖号码+5个我的号码' : '5 winning numbers + 5 my numbers' %>
                         </span>
                     </button>
                     <button class="tier-btn" data-cost="10" data-wins="5">
-                        🎆 <%= lang === 'zh' ? '进阶版' : 'Advanced' %><br>
-                        <span class="tier-cost">10 <%= lang === 'zh' ? '电币' : 'coins' %></span><br>
+                        <%= lang === 'zh' ? '进阶版' : 'Advanced' %><br>
+                        <span class="tier-cost">10 <%= lang === 'zh' ? '积分' : 'points' %></span><br>
                         <span class="tier-detail">
                             <%= lang === 'zh' ? '5个中奖号码+10个我的号码' : '5 winning numbers + 10 my numbers' %>
                         </span>
                     </button>
                     <button class="tier-btn" data-cost="100" data-wins="5">
-                        💰 <%= lang === 'zh' ? '豪华版' : 'Deluxe' %><br>
-                        <span class="tier-cost">100 <%= lang === 'zh' ? '电币' : 'coins' %></span><br>
+                        <%= lang === 'zh' ? '豪华版' : 'Deluxe' %><br>
+                        <span class="tier-cost">100 <%= lang === 'zh' ? '积分' : 'points' %></span><br>
                         <span class="tier-detail">
                             <%= lang === 'zh' ? '5个中奖号码+20个我的号码' : '5 winning numbers + 20 my numbers' %>
                         </span>
@@ -403,7 +403,7 @@
         </div>
 
         <div class="board" id="game-board" style="display: none;">
-            <h2>🎯 <%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></h2>
+            <h2><%= lang === 'zh' ? '刮开你的号码' : 'Reveal your numbers' %></h2>
             <div class="game-info">
                 <div id="current-tier-info"></div>
                 <div class="labels">
@@ -416,8 +416,8 @@
             </div>
 
             <div class="scratch-ui">
-                <button id="verify-btn">🎯 <%= lang === 'zh' ? '点击验证中奖' : 'Verify Win' %></button>
-                <button id="back-btn">🔙 <%= lang === 'zh' ? '返回选择' : 'Back' %></button>
+                <button id="verify-btn"><%= lang === 'zh' ? '验证结果' : 'Verify result' %></button>
+                <button id="back-btn">← <%= lang === 'zh' ? '重新选档' : 'Choose another tier' %></button>
                 <div id="game-result"></div>
             </div>
         </div>
@@ -434,9 +434,9 @@
             text-align: center;
         ">
             <% if (lang === 'zh') { %>
-                ⚠️ <strong>免责声明：</strong>本刮刮乐功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得。参与完全免费，符合中华人民共和国相关法律法规。使用本功能即表示您确认这不是博彩游戏。严禁未满18周岁用户使用，请理性娱乐。
+                <strong>免责声明：</strong>本刮刮乐功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得。参与完全免费，符合中华人民共和国相关法律法规。使用本功能即表示您确认这不是博彩游戏。严禁未满18周岁用户使用，请理性娱乐。
             <% } else { %>
-                ⚠️ <strong>Disclaimer:</strong> This scratch card feature is for entertainment only and does not involve any form of gambling, betting, or real money usage. No real money prizes are available. Participation is completely free and complies with relevant laws. By using this feature, you confirm this is not a gambling game. Strictly prohibited for users under 18 years old. Please enjoy responsibly.
+                <strong>Disclaimer:</strong> This scratch card feature is for entertainment only and does not involve any form of gambling, betting, or real money usage. No real money prizes are available. Participation is completely free and complies with relevant laws. By using this feature, you confirm this is not a gambling game. Strictly prohibited for users under 18 years old. Please enjoy responsibly.
             <% } %>
         </div>
     </div>

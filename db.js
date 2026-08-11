@@ -14,10 +14,13 @@ const dbConfig = {
   connectionTimeoutMillis: 5000, // 快速失败，避免堆积
 };
 
-// Render PostgreSQL 总是需要SSL
-dbConfig.ssl = {
-  rejectUnauthorized: false // Render 需要这个设置
-};
+const isLocalDatabase = ['localhost', '127.0.0.1', '::1'].includes(dbConfig.host);
+const sslDisabled = process.env.DB_SSL === 'false' || isLocalDatabase;
+if (!sslDisabled) {
+  dbConfig.ssl = {
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true'
+  };
+}
 
 console.log('数据库配置:', {
   user: dbConfig.user,
@@ -33,7 +36,6 @@ const pool = new Pool(dbConfig);
 // 连接监控和错误处理
 pool.on('error', (err) => {
   console.error('数据库连接池错误:', err);
-  process.exit(-1);
 });
 
 pool.on('connect', (client) => {

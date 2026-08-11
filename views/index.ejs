@@ -3,376 +3,95 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><%= lang === 'zh' ? '游戏中心' : 'Game Center' %></title>
+    <meta name="theme-color" content="#f3f1eb">
+    <title><%= lang === 'zh' ? 'Minimal Games 轻量游戏厅' : 'Minimal Games — Pocket Game Room' %></title>
     <link rel="stylesheet" href="/styles.css">
-    <style>
-    .header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 2rem;
-        padding-bottom: 1rem;
-        border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-    }
-    
-    .title {
-        margin: 0;
-        color: #fff;
-    }
-    
-    .user-info {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        color: #ccc;
-    }
-    
-    .user-menu {
-        display: flex;
-        gap: 0.5rem;
-    }
-    
-    .auth-menu {
-        display: flex;
-        gap: 0.5rem;
-    }
-    
-    .btn-profile, .btn-admin, .btn-logout, .btn-login, .btn-register {
-        padding: 0.5rem 1rem;
-        border-radius: 8px;
-        text-decoration: none;
-        font-size: 0.9rem;
-        font-weight: bold;
-        transition: all 0.3s ease;
-        border: none;
-        cursor: pointer;
-    }
-    
-    .btn-profile {
-        background: linear-gradient(135deg, #2196f3, #1976d2);
-        color: white;
-    }
-    
-    .btn-profile:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(33, 150, 243, 0.4);
-    }
-    
-    .btn-admin {
-        background: linear-gradient(135deg, #ff9800, #f57c00);
-        color: white;
-    }
-    
-    .btn-admin:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(255, 152, 0, 0.4);
-    }
-    
-    .btn-logout {
-        background: linear-gradient(135deg, #f44336, #d32f2f);
-        color: white;
-    }
-    
-    .btn-logout:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(244, 67, 54, 0.4);
-    }
-    
-    .btn-login {
-        background: linear-gradient(135deg, #4caf50, #45a049);
-        color: white;
-    }
-    
-    .btn-login:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
-    }
-    
-    .btn-register {
-        background: linear-gradient(135deg, #00c853, #00bfa5);
-        color: white;
-    }
-    
-    .btn-register:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(0, 200, 83, 0.4);
-    }
-    
-    @media (max-width: 768px) {
-        .header {
-            flex-direction: column;
-            gap: 1rem;
-        }
-        
-        .user-menu, .auth-menu {
-            flex-wrap: wrap;
-        }
-    }
-    
-    .games-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 2rem;
-        margin-top: 2rem;
-    }
-    
-    .game-card {
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 12px;
-        padding: 2rem;
-        text-align: center;
-        transition: all 0.3s;
-        cursor: pointer;
-        text-decoration: none;
-        color: inherit;
-        display: block;
-    }
-    
-    .game-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        background: rgba(255, 255, 255, 0.1);
-        border-color: #f0c040;
-    }
-    
-    .game-icon {
-        font-size: 4rem;
-        margin-bottom: 1rem;
-        display: block;
-    }
-    
-    .game-title {
-        color: #f0c040;
-        font-size: 1.5rem;
-        margin-bottom: 0.5rem;
-        font-weight: bold;
-    }
-    
-    .game-description {
-        color: #ccc;
-        font-size: 1rem;
-        line-height: 1.5;
-        margin-bottom: 1rem;
-    }
-    
-    .game-status {
-        margin-top: 1rem;
-        padding: 0.5rem 1rem;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 20px;
-        font-size: 0.9rem;
-        display: inline-block;
-    }
-    
-    .status-new {
-        color: #4ecdc4;
-        border: 1px solid #4ecdc4;
-    }
-    
-    .status-hot {
-        color: #ff6b6b;
-        border: 1px solid #ff6b6b;
-    }
-    
-    .status-classic {
-        color: #f0c040;
-        border: 1px solid #f0c040;
-    }
-    
-    .status-developing {
-        color: #9e9e9e;
-        border: 1px solid #9e9e9e;
-    }
-    
-    .game-card-disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        pointer-events: none;
-        filter: grayscale(0.5);
-    }
-    
-    .game-card-disabled:hover {
-        transform: none;
-        box-shadow: none;
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(255, 255, 255, 0.2);
-    }
-    
-    @media (max-width: 768px) {
-        .games-grid {
-            grid-template-columns: 1fr;
-            gap: 1.5rem;
-        }
-        
-        .game-icon {
-            font-size: 3rem;
-        }
-    }
-    </style>
 </head>
-<body data-authorized="<%= user && user.authorized ? 'true' : 'false' %>" data-username="<%= user ? user.username : '' %>">
+<body class="app-redesign page-home" data-authorized="<%= user && user.authorized ? 'true' : 'false' %>" data-username="<%= user ? user.username : '' %>">
     <%- include('partials/language-switcher') %>
 
-    <div class="container">
+    <div class="site-layout">
+        <%- include('partials/site-header', { active: 'home' }) %>
 
-        <div class="header">
-            <h1 class="title">🎮 Minimal Games <%= lang === 'zh' ? '游戏中心' : 'Game Center' %></h1>
-            <div class="user-info">
-                <% if (typeof req !== 'undefined' && req.session && req.session.user) { %>
-                    <span><%= lang === 'zh' ? '欢迎' : 'Welcome' %>，<%= req.session.user.username %>!</span>
-                    <div class="user-menu">
-                        <a href="/profile" class="btn-profile">👤 <%= lang === 'zh' ? '个人资料' : 'Profile' %></a>
-                        <% if (req.session.user.is_admin) { %>
-                            <a href="/admin" class="btn-admin">👑 <%= lang === 'zh' ? '管理后台' : 'Admin' %></a>
+        <main class="site-main">
+            <section class="hub-hero" aria-labelledby="hub-title">
+                <div class="hub-copy">
+                    <span class="eyebrow"><%= lang === 'zh' ? '轻量游戏合集' : 'A small collection of play' %></span>
+                    <h1 id="hub-title">Minimal Games</h1>
+                    <p><%= lang === 'zh' ? '不用下载，也不用复杂准备。选一个喜欢的玩法，现在就开一局。' : 'Nothing to install and nothing to prepare. Pick a game and start a quick round.' %></p>
+                    <div class="hero-actions">
+                        <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+                            <a class="hero-action-primary" href="#game-catalog"><%= lang === 'zh' ? '挑选游戏' : 'Browse games' %></a>
+                            <a class="hero-action-secondary" href="/spin"><%= lang === 'zh' ? '随机挑战' : 'Surprise me' %> <span aria-hidden="true">→</span></a>
+                        <% } else { %>
+                            <a class="hero-action-primary" href="/login"><%= lang === 'zh' ? '登录开始' : 'Sign in to play' %></a>
+                            <a class="hero-action-secondary" href="#game-catalog"><%= lang === 'zh' ? '先看看游戏' : 'Explore first' %></a>
                         <% } %>
-                        <a href="/logout" class="btn-logout">🚪 <%= lang === 'zh' ? '退出登录' : 'Logout' %></a>
                     </div>
-                <% } else { %>
-                    <div class="auth-menu">
-                        <a href="/login" class="btn-login">🔐 <%= t.auth.login %></a>
-                        <a href="/register" class="btn-register">🆕 <%= t.auth.register %></a>
+                    <div class="hero-notes" aria-label="<%= lang === 'zh' ? '游戏厅概况' : 'Game room overview' %>">
+                        <span><strong>10</strong> <%= lang === 'zh' ? '款玩法' : 'games' %></span>
+                        <span><strong>4</strong> <%= lang === 'zh' ? '种节奏' : 'ways to play' %></span>
+                        <span><%= lang === 'zh' ? '纯虚拟娱乐' : 'Virtual play only' %></span>
                     </div>
-                <% } %>
-            </div>
-        </div>
-        
-        <% if (typeof user !== 'undefined' && user && user.authorized) { %>
-            
-            
-            <div class="spins-reminder">
-                <h3>⚡ <%= lang === 'zh' ? '电币余额' : 'Coin Balance' %>：<%= balance !== null ? balance : 0 %> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
-                <p><%= lang === 'zh' ? '仅供娱乐，虚拟电币不可兑换真实货币' : 'For entertainment only, virtual coins cannot be exchanged for real money' %></p>
-            </div>
-
-            <div class="games-grid">
-                <a href="/games" class="game-card">
-                    <span class="game-icon">🧭</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '游戏专区' : 'Game Zone' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '集结更多玩法：祈愿、合石头、翻牌、决斗' : 'More modes: wish, stones, card flip, duel' %></p>
-                    <span class="game-status status-hot">✨ <%= lang === 'zh' ? '专区' : 'Zone' %></span>
-                </a>
-
-                <a href="/quiz" class="game-card">
-                    <span class="game-icon">🧠</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '知识问答' : 'Quiz Game' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '测试你的知识，答对越多奖励越丰厚' : 'Test your knowledge, more correct answers mean bigger rewards' %></p>
-                    <span class="game-status status-hot">🔥 <%= lang === 'zh' ? '热门' : 'Hot' %></span>
-                </a>
-
-                <a href="/slot" class="game-card">
-                    <span class="game-icon">🎰</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '幸运老虎机' : 'Slot Machine' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '经典老虎机游戏，三个相同图案即可获胜' : 'Classic slot game, match three symbols to win' %></p>
-                    <span class="game-status status-classic">⭐ <%= lang === 'zh' ? '经典' : 'Classic' %></span>
-                </a>
-
-                <a href="/scratch" class="game-card">
-                    <span class="game-icon">🎟️</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '刮开涂层，发现隐藏的奖励，简单又刺激' : 'Scratch to reveal hidden rewards, simple and exciting' %></p>
-                    <span class="game-status status-classic">⭐ <%= lang === 'zh' ? '经典' : 'Classic' %></span>
-                </a>
-
-                <a href="/dictation" class="game-card">
-                    <span class="game-icon">✍️</span>
-                    <h2 class="game-title"><%= lang === 'zh' ? '汉字听写' : 'Chinese Dictation' %></h2>
-                    <p class="game-description"><%= lang === 'zh' ? '听读音写汉字，提交后人工审核' : 'Listen and write Chinese characters, manual review' %></p>
-                    <span class="game-status status-classic">📚 <%= lang === 'zh' ? '学习' : 'Study' %></span>
-                </a>
-
-                
-                <a href="/gifts" class="game-card" style="background: linear-gradient(135deg, rgba(255, 152, 0, 0.2), rgba(255, 193, 7, 0.1));">
-                    <span class="game-icon">🎁</span>
-                    <h2 class="game-title"><%= t.nav.gifts %></h2>
-                    <p class="game-description">
-                        <%= lang === 'zh'
-                            ? '用电币兑换精美礼物，为主播送上心意'
-                            : 'Exchange coins for beautiful gifts, show your support to streamers'
-                        %>
-                    </p>
-                    <span class="game-status" style="background: linear-gradient(135deg, #ff9800, #ffc107); color: white;">
-                        ✨ <%= lang === 'zh' ? '核心功能' : 'Core Feature' %>
-                    </span>
-                </a>
-            </div>
-            
-            
-            <div style="
-                max-width: 800px;
-                margin: 3rem auto 0;
-                padding: 1.5rem;
-                background: rgba(255, 255, 255, 0.05);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 10px;
-                font-size: 0.9rem;
-                color: #ccc;
-                text-align: center;
-                line-height: 1.6;
-            ">
-                <div style="margin-bottom: 10px; font-weight: bold; color: #ff9800;">
-                    ⚠️ <%= lang === 'zh' ? '重要声明' : 'Important Notice' %>
                 </div>
-                <% if (lang === 'zh') { %>
-                    本平台所有游戏功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币交易。<br>
-                    平台内虚拟积分、余额等均为娱乐道具，无法兑换为真实货币或有价物品。<br>
-                    参与完全免费，无需任何付费，符合中华人民共和国相关法律法规。<br>
-                    <strong>严禁未满18周岁用户使用，请理性娱乐，适度游戏。</strong>
-                <% } else { %>
-                    All games on this platform are for entertainment purposes only and do not involve any form of gambling, betting, or real money transactions.<br>
-                    Virtual points and balances are entertainment items only and cannot be exchanged for real currency or valuable goods.<br>
-                    Participation is completely free with no payment required, in compliance with relevant laws and regulations.<br>
-                    <strong>Strictly prohibited for users under 18 years old. Please enjoy responsibly and game in moderation.</strong>
-                <% } %>
-            </div>
-        <% } else { %>
-            <div style="
-                text-align: center;
-                padding: 4rem 2rem;
-                margin: 2rem 0;
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-            ">
-                <% if (typeof user !== 'undefined' && user && !user.authorized) { %>
-                    <div style="font-size: 3.6rem; margin-bottom: 1.5rem;">🔒</div>
-                    <h2 style="color: #ff9800; margin-bottom: 1rem;">
-                        <%= lang === 'zh' ? '账户待授权' : 'Account Pending Authorization' %>
-                    </h2>
-                    <p style="color: #ccc; font-size: 1.1rem; line-height: 1.6;">
-                        <%= lang === 'zh'
-                            ? '你的账号需要管理员授权后才能进入游戏。请联系管理员或稍后再试。'
-                            : 'Your account needs admin approval before you can access the games. Please contact the admin or try again later.'
-                        %>
-                    </p>
-                    <div style="margin-top: 1.5rem;">
-                        <a href="/logout" class="btn-logout" style="display: inline-block;"><%= lang === 'zh' ? '退出登录' : 'Logout' %></a>
+            </section>
+
+            <% if (!(typeof user !== 'undefined' && user && user.authorized)) { %>
+                <section class="access-banner <%= user ? 'pending' : '' %>" aria-labelledby="access-title">
+                    <div>
+                        <h2 id="access-title"><%= user ? (lang === 'zh' ? '账号正在等待授权' : 'Account awaiting approval') : (lang === 'zh' ? '登录后即可开局' : 'Sign in to start playing') %></h2>
+                        <p><%= user ? (lang === 'zh' ? '管理员授权后，全部游戏和礼物功能会自动开放。' : 'All games and gift features unlock after admin approval.') : (lang === 'zh' ? '创建账号，记录成绩、保存奖励并使用虚拟积分。' : 'Create an account to save scores, rewards, and virtual points.') %></p>
                     </div>
-                <% } else { %>
-                    <div style="font-size: 3.6rem; margin-bottom: 1.5rem;">👋</div>
-                    <h2 style="color: #ff9800; margin-bottom: 1rem;">
-                        <%= lang === 'zh' ? '请先登录或注册' : 'Please Login or Register' %>
-                    </h2>
-                    <p style="color: #ccc; font-size: 1.1rem; line-height: 1.6;">
-                        <%= lang === 'zh'
-                            ? '登录后即可开始游戏并兑换礼物。'
-                            : 'Sign in to start playing games and redeem gifts.'
-                        %>
-                    </p>
-                    <div style="margin-top: 1.5rem; display: inline-flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center;">
-                        <a href="/login" class="btn-login">🔐 <%= t.auth.login %></a>
-                        <a href="/register" class="btn-register">🆕 <%= t.auth.register %></a>
+                    <div class="access-actions">
+                        <% if (user) { %>
+                            <a href="/logout" class="secondary"><%= lang === 'zh' ? '退出账号' : 'Log out' %></a>
+                        <% } else { %>
+                            <a href="/login" class="secondary"><%= t.auth.login %></a>
+                            <a href="/register"><%= t.auth.register %></a>
+                        <% } %>
                     </div>
-                <% } %>
-            </div>
-        <% } %>
+                </section>
+            <% } %>
+
+            <section class="catalog-section" aria-labelledby="catalog-title">
+                <div class="catalog-heading">
+                    <div>
+                        <span class="eyebrow"><%= lang === 'zh' ? '全部游戏' : 'All games' %></span>
+                        <h2 id="catalog-title"><%= lang === 'zh' ? '选一种今天的节奏' : 'Choose today’s pace' %></h2>
+                        <p><%= lang === 'zh' ? '想动脑、碰运气，还是来一次策略挑战？' : 'Think, test your luck, or take on a strategic challenge.' %></p>
+                    </div>
+                    <div class="catalog-filters" role="group" aria-label="<%= lang === 'zh' ? '筛选游戏类型' : 'Filter game category' %>">
+                        <button type="button" class="active" data-catalog-filter="all" aria-pressed="true"><%= lang === 'zh' ? '全部 10' : 'All 10' %></button>
+                        <button type="button" data-catalog-filter="brain" aria-pressed="false"><%= lang === 'zh' ? '益智' : 'Brain' %></button>
+                        <button type="button" data-catalog-filter="chance" aria-pressed="false"><%= lang === 'zh' ? '运气' : 'Chance' %></button>
+                        <button type="button" data-catalog-filter="strategy" aria-pressed="false"><%= lang === 'zh' ? '策略' : 'Strategy' %></button>
+                        <button type="button" data-catalog-filter="challenge" aria-pressed="false"><%= lang === 'zh' ? '挑战' : 'Challenge' %></button>
+                    </div>
+                </div>
+
+                <%- include('partials/game-catalog') %>
+            </section>
+
+            <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+                <section class="service-strip" aria-labelledby="service-title">
+                    <span class="service-art" aria-hidden="true"><span>GIFT</span></span>
+                    <div>
+                        <span class="eyebrow"><%= lang === 'zh' ? '游戏之外' : 'Beyond the games' %></span>
+                        <h2 id="service-title"><%= lang === 'zh' ? '把奖励带进直播间' : 'Bring your rewards to the stream' %></h2>
+                        <p><%= lang === 'zh' ? '在礼物商店兑换、查看发送进度，管理祈愿得到的奖品。' : 'Redeem gifts, track delivery, and manage everything won from wishes.' %></p>
+                    </div>
+                    <a href="/gifts"><%= lang === 'zh' ? '打开礼物商店' : 'Open gift shop' %><span aria-hidden="true">→</span></a>
+                </section>
+            <% } %>
+        </main>
+
+        <%- include('partials/app-footer') %>
     </div>
 
-<% if (typeof user !== 'undefined' && user && user.authorized) { %>
-<script src="/socket.io/socket.io.js"></script>
-<script src="/security-alerts.js"></script>
-<script src="/js/index.js"></script>
-<% } %>
-
+    <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+        <script src="/socket.io/socket.io.js"></script>
+        <script src="/security-alerts.js"></script>
+        <script src="/js/index.js"></script>
+    <% } %>
 </body>
 </html>

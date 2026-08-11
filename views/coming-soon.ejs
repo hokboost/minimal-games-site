@@ -46,12 +46,12 @@
         }
     </style>
 </head>
-<body>
+<body class="app-redesign page-coming-soon">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="status-card">
-            <h1>🔐 <%= lang === 'zh' ? '请先登录或注册' : 'Please Login or Register' %></h1>
+            <h1><%= lang === 'zh' ? '请先登录或注册' : 'Please Login or Register' %></h1>
             <p>
                 <%= lang === 'zh'
                     ? '登录后即可访问全部游戏功能与礼物系统。'

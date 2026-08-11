@@ -198,7 +198,7 @@
         toggleConfirm(false);
         try {
             clearDraft();
-            const response = await safeFetch('/api/dictation/start', {
+            const response = await window.idempotentFetch('/api/dictation/start', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1049,7 +1049,7 @@
         setStatus(t('提交中...', 'Submitting...'));
 
         try {
-            const response = await safeFetch('/api/dictation/submit', {
+            const response = await window.idempotentFetch('/api/dictation/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1166,7 +1166,7 @@
     }
 
     async function autoAdvanceFallback() {
-        const resp = await safeFetch('/api/dictation/start', {
+        const resp = await window.idempotentFetch('/api/dictation/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1184,7 +1184,7 @@
     }
 
     async function retryLevel() {
-        const resp = await safeFetch('/api/dictation/retry', {
+        const resp = await window.idempotentFetch('/api/dictation/retry', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

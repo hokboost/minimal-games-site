@@ -36,6 +36,16 @@ if (process.env.NODE_ENV === 'production') {
         console.error('最少需要32字节的强随机字符串');
         process.exit(1);
     }
+
+    if (!process.env.GIFT_TASKS_HMAC_SECRET || process.env.GIFT_TASKS_HMAC_SECRET.length < 32) {
+        console.error('生产环境安全错误: GIFT_TASKS_HMAC_SECRET 必须是至少32字节的随机字符串');
+        process.exit(1);
+    }
+
+    if (process.env.CSRF_TEST_MODE === 'true' || process.env.CSRF_AUTO_FILL === 'true') {
+        console.error('生产环境安全错误: 禁止启用 CSRF_TEST_MODE 或 CSRF_AUTO_FILL');
+        process.exit(1);
+    }
     
     console.log('✅ 生产环境安全检查通过');
 }
@@ -65,10 +75,14 @@ const fs = require('fs');
 const axios = require('axios');
 const { getSimpleGiftSender } = require('./bilibili-gift-sender-simple');
 const crypto = require('crypto');
+const developmentSessionSecret = crypto.randomBytes(32).toString('hex');
+const sessionSecret = process.env.SESSION_SECRET || developmentSessionSecret;
+const { parseCookies, decodeSignedSessionCookie } = require('./lib/session-auth');
+const { createIdempotencyMiddleware } = require('./lib/idempotency');
 
 let giftConfig = {};
 try {
-    const giftConfigData = fs.readFileSync('./gift-codes.json', 'utf8');
+    const giftConfigData = fs.readFileSync(path.join(__dirname, 'gift-codes.json'), 'utf8');
     giftConfig = JSON.parse(giftConfigData);
     console.log('✅ 礼物配置加载成功');
 } catch (error) {
@@ -138,22 +152,14 @@ io.use(async (socket, next) => {
             return next(new Error('No cookies provided'));
         }
 
-        // 解析session cookie
-        const cookies = {};
-        cookieHeader.split(';').forEach(cookie => {
-            const [name, value] = cookie.trim().split('=');
-            if (name && value) {
-                cookies[name] = decodeURIComponent(value);
-            }
-        });
-
-        const sessionId = cookies['minimal_games_sid'];
+        const cookies = parseCookies(cookieHeader);
+        const sessionId = decodeSignedSessionCookie(cookies.minimal_games_sid, sessionSecret);
         if (!sessionId) {
-            return next(new Error('No session cookie'));
+            return next(new Error('Invalid session cookie'));
         }
 
         // 从数据库获取session
-        const sessionQuery = 'SELECT sess FROM user_sessions WHERE sid = $1';
+        const sessionQuery = 'SELECT sess FROM user_sessions WHERE sid = $1 AND expire > NOW()';
         const result = await pool.query(sessionQuery, [sessionId]);
         
         if (result.rows.length === 0) {
@@ -161,15 +167,28 @@ io.use(async (socket, next) => {
         }
 
         const sessionData = result.rows[0].sess;
-        if (!sessionData.user || !sessionData.user.authorized) {
+        if (!sessionData.user?.username) {
             return next(new Error('User not authenticated'));
+        }
+
+        const currentUser = await pool.query(
+            'SELECT id, username, authorized, is_admin FROM users WHERE username = $1',
+            [sessionData.user.username]
+        );
+        const activeSession = await pool.query(
+            'SELECT is_active FROM active_sessions WHERE session_id = $1 AND username = $2',
+            [sessionId, sessionData.user.username]
+        );
+        const user = currentUser.rows[0];
+        if (!user?.authorized || activeSession.rows[0]?.is_active !== true) {
+            return next(new Error('Session is no longer authorized'));
         }
 
         // 将验证过的用户信息附加到socket
         socket.authenticatedUser = {
-            username: sessionData.user.username,
-            userId: sessionData.user.id,
-            isAdmin: sessionData.user.is_admin || false,
+            username: user.username,
+            userId: user.id,
+            isAdmin: user.is_admin === true,
             sessionId
         };
 
@@ -243,12 +262,34 @@ function notifySecurityEvent(username, event, excludeSessionId = null) {
     }
 }
 
+function disconnectUserSockets(username, sessionIds = null) {
+    const allowedSessionIds = sessionIds ? new Set(sessionIds) : null;
+    const socketIds = [...(userSockets.get(username) || [])];
+    for (const socketId of socketIds) {
+        const socket = io.sockets.sockets.get(socketId);
+        if (!socket) continue;
+        const sessionId = socket.authenticatedUser?.sessionId;
+        if (!allowedSessionIds || allowedSessionIds.has(sessionId)) {
+            socket.disconnect(true);
+        }
+    }
+}
+
 const PORT = process.env.PORT || 3000;
 
 // 数据库初始化函数
 async function initializeDatabase() {
     try {
         console.log('🔧 检查数据库结构...');
+
+        for (const migrationName of [
+            'create_idempotency_keys.sql',
+            'create_quiz_runtime_tables.sql',
+            'add_pk_report_id.sql'
+        ]) {
+            const migrationPath = path.join(__dirname, 'migrations', migrationName);
+            await pool.query(fs.readFileSync(migrationPath, 'utf8'));
+        }
         
         // 检查quantity字段是否存在
         const checkQuantity = await pool.query(`
@@ -260,7 +301,7 @@ async function initializeDatabase() {
         
         if (checkQuantity.rows.length === 0) {
             console.log('➕ 添加quantity字段到gift_exchanges表...');
-            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN quantity INTEGER DEFAULT 1`);
+            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
             // 更新现有记录
             await pool.query(`UPDATE gift_exchanges SET quantity = 1 WHERE quantity IS NULL`);
             console.log('✅ quantity字段添加完成');
@@ -277,7 +318,7 @@ async function initializeDatabase() {
 
         if (checkFailureReason.rows.length === 0) {
             console.log('➕ 添加failure_reason字段到gift_exchanges表...');
-            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN failure_reason TEXT`);
+            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS failure_reason TEXT`);
             console.log('✅ failure_reason字段添加完成');
         } else {
             console.log('✅ failure_reason字段已存在');
@@ -292,7 +333,7 @@ async function initializeDatabase() {
 
         if (checkUpdatedAt.rows.length === 0) {
             console.log('➕ 添加updated_at字段到gift_exchanges表...');
-            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`);
+            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`);
             await pool.query(`UPDATE gift_exchanges SET updated_at = created_at WHERE updated_at IS NULL`);
             console.log('✅ updated_at字段添加完成');
         } else {
@@ -308,7 +349,7 @@ async function initializeDatabase() {
 
         if (checkWishFailureReason.rows.length === 0) {
             console.log('➕ 添加last_failure_reason字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN last_failure_reason TEXT`);
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS last_failure_reason TEXT`);
             console.log('✅ last_failure_reason字段添加完成');
         } else {
             console.log('✅ last_failure_reason字段已存在');
@@ -323,7 +364,7 @@ async function initializeDatabase() {
 
         if (checkWishSourceType.rows.length === 0) {
             console.log('➕ 添加source_type字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN source_type TEXT`);
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS source_type TEXT`);
             console.log('✅ source_type字段添加完成');
         } else {
             console.log('✅ source_type字段已存在');
@@ -338,7 +379,7 @@ async function initializeDatabase() {
 
         if (checkWishBatchId.rows.length === 0) {
             console.log('➕ 添加source_batch_id字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN source_batch_id TEXT`);
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS source_batch_id TEXT`);
             console.log('✅ source_batch_id字段添加完成');
         } else {
             console.log('✅ source_batch_id字段已存在');
@@ -353,7 +394,7 @@ async function initializeDatabase() {
 
         if (checkWishBatchOrder.rows.length === 0) {
             console.log('➕ 添加batch_order字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN batch_order INTEGER`);
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS batch_order INTEGER`);
             console.log('✅ batch_order字段添加完成');
         } else {
             console.log('✅ batch_order字段已存在');
@@ -368,7 +409,7 @@ async function initializeDatabase() {
 
         if (checkWishBatchValue.rows.length === 0) {
             console.log('➕ 添加batch_value字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN batch_value INTEGER`);
+            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS batch_value INTEGER`);
             console.log('✅ batch_value字段添加完成');
         } else {
             console.log('✅ batch_value字段已存在');
@@ -397,7 +438,7 @@ async function initializeDatabase() {
         `);
         if (checkPkTicketCount.rows.length === 0) {
             console.log('➕ 添加ticket_count字段到pk_gift_logs表...');
-            await pool.query(`ALTER TABLE pk_gift_logs ADD COLUMN ticket_count INTEGER`);
+            await pool.query(`ALTER TABLE pk_gift_logs ADD COLUMN IF NOT EXISTS ticket_count INTEGER`);
             console.log('✅ ticket_count字段添加完成');
         } else {
             console.log('✅ ticket_count字段已存在');
@@ -427,9 +468,70 @@ async function initializeDatabase() {
                 updated_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
             )
         `);
-        
+        return true;
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);
+        return false;
+    }
+}
+
+async function runDatabaseMaintenance() {
+    let client;
+    let locked = false;
+    try {
+        client = await pool.connect();
+        const lockResult = await client.query(
+            "SELECT pg_try_advisory_lock(hashtext('minimal_games_maintenance')) AS locked"
+        );
+        locked = lockResult.rows[0]?.locked === true;
+        if (!locked) return;
+
+        await client.query(`
+            WITH expired AS (
+                SELECT id
+                FROM quiz_sessions
+                WHERE status = 'active' AND expires_at < NOW()
+                ORDER BY expires_at
+                LIMIT 1000
+            )
+            UPDATE quiz_sessions AS session
+            SET status = 'expired', settled_at = NOW()
+            FROM expired
+            WHERE session.id = expired.id
+        `);
+        await client.query(`
+            DELETE FROM quiz_sessions
+            WHERE id IN (
+                SELECT id
+                FROM quiz_sessions
+                WHERE status != 'active'
+                  AND created_at < NOW() - INTERVAL '30 days'
+                ORDER BY created_at
+                LIMIT 1000
+            )
+        `);
+        await client.query(`
+            DELETE FROM idempotency_keys
+            WHERE id IN (
+                SELECT id
+                FROM idempotency_keys
+                WHERE status = 'completed'
+                  AND updated_at < NOW() - INTERVAL '7 days'
+                ORDER BY updated_at
+                LIMIT 5000
+            )
+        `);
+    } catch (error) {
+        console.error('数据库维护失败:', error);
+    } finally {
+        if (client) {
+            if (locked) {
+                await client.query(
+                    "SELECT pg_advisory_unlock(hashtext('minimal_games_maintenance'))"
+                ).catch((error) => console.error('释放数据库维护锁失败:', error));
+            }
+            client.release();
+        }
     }
 }
 
@@ -467,13 +569,8 @@ app.use(helmet({
 
 // Session配置 - 使用PostgreSQL存储
 app.use(session({
-    store: new pgSession({
-        pool: pool,
-        tableName: 'user_sessions',
-        pruneSessionInterval: 60,
-        errorLog: console.error
-    }),
-    secret: process.env.SESSION_SECRET || 'your-secret-key-change-this-in-production',
+    store: sessionStore,
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     rolling: true,
@@ -488,8 +585,8 @@ app.use(session({
 
 // 基础中间件
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '2mb', strict: true }));
+app.use(express.urlencoded({ extended: true, limit: '256kb', parameterLimit: 100 }));
 app.use(mongoSanitize()); // 防止NoSQL注入
 
 // 国际化中间件
@@ -521,24 +618,33 @@ app.use(async (req, res, next) => {
 
 // 统一的CSRF token 生成（修复后：不再混用不同的token生成机制）
 function generateCSRFToken(req) {
-    // 统一使用csrf库，不再使用GameLogic.generateToken()
-    if (!req.session.id) {
-        // 确保session有ID
-        req.session.save(() => {});
+    if (!req.session.csrfSecret) {
+        req.session.csrfSecret = tokens.secretSync();
     }
-    const token = tokens.create(req.session.id || 'default');
+    const token = tokens.create(req.session.csrfSecret);
     req.session.csrfToken = token;
     return token;
 }
 
 // 统一的CSRF验证
 function verifyCSRFToken(req, providedToken) {
-    const sessionToken = req.session.csrfToken;
-    if (!sessionToken || !providedToken) {
+    const csrfSecret = req.session.csrfSecret;
+    if (!csrfSecret || !providedToken) {
         return false;
     }
-    return tokens.verify(req.session.id || 'default', providedToken);
+    return tokens.verify(csrfSecret, providedToken);
 }
+
+// Existing sessions created before per-session CSRF secrets were introduced are
+// upgraded on their next page load. Mutating requests never accept legacy tokens.
+app.use((req, res, next) => {
+    if ((req.method === 'GET' || req.method === 'HEAD')
+        && req.session?.initialized
+        && (!req.session.csrfSecret || !req.session.csrfToken)) {
+        generateCSRFToken(req);
+    }
+    next();
+});
 
 // 添加CSRF中间件
 const requireCSRF = (req, res, next) => {
@@ -552,46 +658,56 @@ const requireCSRF = (req, res, next) => {
 // 认证中间件
 const requireLogin = async (req, res, next) => {
     if (!req.session.user) {
-        const cookieHeader = req.headers.cookie || '';
-        const cookies = {};
-        cookieHeader.split(';').forEach((cookie) => {
-            const [name, value] = cookie.trim().split('=');
-            if (name && value) {
-                cookies[name] = decodeURIComponent(value);
-            }
-        });
-
-        const sessionId = cookies['minimal_games_sid'];
-        if (sessionId) {
-            try {
-                const result = await pool.query(
-                    `SELECT is_active, termination_reason
-                     FROM active_sessions
-                     WHERE session_id = $1
-                     ORDER BY terminated_at DESC NULLS LAST
-                     LIMIT 1`,
-                    [sessionId]
-                );
-
-                const sessionRow = result.rows[0];
-                if (sessionRow && sessionRow.is_active === false && sessionRow.termination_reason === 'new_device_login') {
-                    if (req.path.startsWith('/api/')) {
-                        return res.status(401).json({ success: false, message: '账号已在其他设备登录' });
-                    }
-                    return res.redirect('/login?kicked=true');
-                }
-            } catch (error) {
-                console.error('Session lookup error:', error);
-            }
-        }
-
-        // 检查是否是API请求
         if (req.path.startsWith('/api/')) {
             return res.status(401).json({ success: false, message: '请先登录' });
         }
         return res.redirect('/login');
     }
-    next();
+
+    try {
+        const username = req.session.user.username;
+        const result = await pool.query(`
+            SELECT u.id, u.username, u.authorized, u.is_admin,
+                   a.is_active, a.termination_reason
+            FROM users u
+            LEFT JOIN active_sessions a
+              ON a.username = u.username AND a.session_id = $2
+            WHERE u.username = $1
+        `, [username, req.sessionID]);
+        const current = result.rows[0];
+
+        if (!current || current.is_active !== true) {
+            const kicked = current?.termination_reason === 'new_device_login';
+            return req.session.destroy(() => {
+                res.clearCookie('minimal_games_sid');
+                if (req.path.startsWith('/api/')) {
+                    return res.status(401).json({
+                        success: false,
+                        message: kicked ? '账号已在其他设备登录' : '登录会话已失效'
+                    });
+                }
+                return res.redirect(kicked ? '/login?kicked=true' : '/login');
+            });
+        }
+
+        req.session.user = {
+            id: current.id,
+            username: current.username,
+            authorized: current.authorized === true,
+            is_admin: current.is_admin === true
+        };
+        await pool.query(`
+            UPDATE active_sessions
+            SET last_activity = NOW()
+            WHERE session_id = $1
+              AND is_active = true
+              AND last_activity < NOW() - INTERVAL '1 minute'
+        `, [req.sessionID]);
+        return next();
+    } catch (error) {
+        console.error('Session validation error:', error);
+        return res.status(503).json({ success: false, message: '会话验证暂不可用' });
+    }
 };
 
 const requireAuthorized = (req, res, next) => {
@@ -634,13 +750,13 @@ app.use((req, res, next) => {
 // 限流配置
 const loginLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
-    max: 200, // 放宽：便于大规模测试
+    max: 10,
     message: "❌ 尝试次数过多，请 10 分钟后再试。"
 });
 
 const registerLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
-    max: 15, // 放宽5倍：从3次改为15次
+    max: 5,
     message: "⚠️ 注册太频繁，请稍后再试。",
     standardHeaders: true,
     legacyHeaders: false,
@@ -660,10 +776,6 @@ function generateUsername() {
     const num = crypto.randomInt(0, 10000);
     return `${adj}${noun}${num}`;
 }
-
-// 存储用户答题会话数据 (简单内存存储)
-const userSessions = new Map();
-const quizSessions = new Map();
 
 // 飘屏系统
 class DanmakuSystem {
@@ -733,61 +845,17 @@ function broadcastDanmaku(username, type, isWin) {
 // 创建题目ID索引，提升查找性能
 const questionMap = new Map(questions.map(q => [q.id, q]));
 
-// 定时清理过期的答题会话数据
-setInterval(() => {
-    const now = Date.now();
-    const maxAge = 5 * 60 * 1000; // 5分钟过期
-    
-    for (const [username, sessions] of userSessions.entries()) {
-        if (sessions && sessions.tokensBySession) {
-            for (const [sessionId, tokens] of Object.entries(sessions.tokensBySession)) {
-                for (const [token, data] of Object.entries(tokens)) {
-                    if (data && now - data.timestamp > maxAge) {
-                        delete tokens[token];
-                    }
-                }
-                if (Object.keys(tokens).length === 0) {
-                    delete sessions.tokensBySession[sessionId];
-                }
-            }
-            if (Object.keys(sessions.tokensBySession).length === 0) {
-                userSessions.delete(username);
-            }
-        } else if (sessions && sessions.tokens) {
-            for (const [token, data] of Object.entries(sessions.tokens)) {
-                if (data && now - data.timestamp > maxAge) {
-                    delete sessions.tokens[token];
-                }
-            }
-            if (Object.keys(sessions.tokens).length === 0) {
-                userSessions.delete(username);
-            }
-        } else if (typeof sessions === 'object' && sessions !== null) {
-            // 兼容旧结构
-            for (const [token, data] of Object.entries(sessions)) {
-                if (data && now - data.timestamp > maxAge) {
-                    delete sessions[token];
-                }
-            }
-            if (Object.keys(sessions).length === 0) {
-                userSessions.delete(username);
-            }
-        }
-    }
-
-    for (const [sessionId, session] of quizSessions.entries()) {
-        if (!session || !session.expiresAt || now > session.expiresAt) {
-            quizSessions.delete(sessionId);
-        }
-    }
-    
-    console.log(`Session cleanup: ${userSessions.size} active users, ${quizSessions.size} active quiz sessions`);
-}, 60000); // 每分钟清理一次
-
 // ====================
 // 认证路由
 // ====================
 const uiText = (res, zh, en) => (res.locals.lang === 'zh' ? zh : en);
+const usernamePattern = /^[\p{L}\p{N}_-]{3,32}$/u;
+const isStrongPassword = (value) => typeof value === 'string'
+    && value.length >= 12
+    && value.length <= 128
+    && Buffer.byteLength(value, 'utf8') <= 72
+    && /\p{L}/u.test(value)
+    && /\p{N}/u.test(value);
 
 // 登录页面
 app.get('/login', (req, res) => {
@@ -797,7 +865,8 @@ app.get('/login', (req, res) => {
     res.render('login', {
         title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
         csrfToken: generateCSRFToken(req),
-        error: req.query.error
+        error: req.query.error,
+        req
     });
 });
 
@@ -898,24 +967,24 @@ app.post('/register', registerLimiter, async (req, res) => {
     const { username, password, _csrf } = req.body;
     
     // CSRF 验证
-    if (_csrf !== req.session.csrfToken) {
+    if (!verifyCSRFToken(req, _csrf)) {
         return res.status(403).send(uiText(res, '⚠️ CSRF token 校验失败', '⚠️ CSRF token validation failed'));
     }
 
     // 输入验证
-    if (!username || !password) {
+    if (!usernamePattern.test(String(username || '')) || !password) {
         return res.render('register', {
             title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
-            error: uiText(res, '用户名或密码不能为空！', 'Username and password cannot be empty!'),
+            error: uiText(res, '用户名须为3-32位中文、字母、数字、下划线或连字符', 'Username must be 3-32 letters, numbers, underscores, or hyphens.'),
             csrfToken: generateCSRFToken(req)
         });
     }
 
     // 密码强度验证
-    if (password.length < 6) {
+    if (!isStrongPassword(password)) {
         return res.render('register', {
             title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
-            error: uiText(res, '密码长度至少需要6个字符', 'Password must be at least 6 characters'),
+            error: uiText(res, '密码须为12-128位，并同时包含字母和数字', 'Password must be 12-128 characters and include letters and numbers.'),
             csrfToken: generateCSRFToken(req)
         });
     }
@@ -947,24 +1016,13 @@ app.post('/register', registerLimiter, async (req, res) => {
     }
 });
 
-// 管理员登录限流豁免中间件
-const adminLoginLimiterExempt = (req, res, next) => {
-    const u = req.body?.username;
-    const bypassUsers = new Set(['hokboost', '尧顺宇', '测试']);
-    if (u && bypassUsers.has(u)) {
-        console.log(`登录限流豁免 - 用户: ${u}`);
-        return next();
-    }
-    return loginLimiter(req, res, next);
-};
-
 // 登录处理 - 集成IP风控和单设备登录
-app.post('/login', adminLoginLimiterExempt, async (req, res) => {
+app.post('/login', loginLimiter, async (req, res) => {
     const { username, password, _csrf } = req.body;
     const clientIP = req.clientIP;
     const userAgent = req.userAgent;
     
-    if (_csrf !== req.session.csrfToken) {
+    if (!verifyCSRFToken(req, _csrf)) {
         return res.status(403).send(uiText(res, '⚠️ CSRF token 校验失败', '⚠️ CSRF token validation failed'));
     }
 
@@ -1016,7 +1074,7 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
         const now = new Date();
         
         // 4. 账户锁定检查
-        if (!user.is_admin && user.locked_until && new Date(user.locked_until) > now) {
+        if (user.locked_until && new Date(user.locked_until) > now) {
             const lockMinutes = Math.ceil((new Date(user.locked_until) - now) / 60000);
             await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_locked');
             return res.status(423).render('login', {
@@ -1030,74 +1088,50 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password_hash);
         
         if (!isMatch) {
-            // 失败登录处理
-            if (!user.is_admin) {
-                const failures = (user.login_failures || 0) + 1;
-                let lockUntil = null;
-                
-                if (failures >= 3) {
-                    const lockMinutes = failures - 2;
-                    lockUntil = new Date(now.getTime() + lockMinutes * 60000);
-                }
-                
-                await pool.query(
-                    'UPDATE users SET login_failures = $1, last_failure_time = $2, locked_until = $3 WHERE username = $4',
-                    [failures, now, lockUntil, username]
-                );
-                
-                await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
-                
-                const errorMsg = lockUntil ? 
-                    uiText(res, `密码错误！账户已被锁定 ${failures-2} 分钟`, `Wrong password. Account locked for ${failures - 2} minutes.`) : 
-                    uiText(res, `密码错误！连续错误3次将被锁定 (当前${failures}次)`, `Wrong password. 3 consecutive failures will lock the account (current ${failures}).`);
-                    
-                return res.status(401).render('login', {
-                    title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
-                    error: errorMsg,
-                    csrfToken: generateCSRFToken(req)
-                });
-            } else {
-                await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
-                return res.status(401).render('login', {
-                    title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
-                    error: uiText(res, '用户名或密码错误！', 'Invalid username or password!'),
-                    csrfToken: generateCSRFToken(req)
-                });
-            }
+            const failureResult = await pool.query(`
+                UPDATE users
+                SET login_failures = COALESCE(login_failures, 0) + 1,
+                    last_failure_time = NOW(),
+                    locked_until = CASE
+                        WHEN COALESCE(login_failures, 0) + 1 >= 3 THEN
+                            NOW() + make_interval(mins => LEAST(
+                                30,
+                                POWER(2, LEAST(COALESCE(login_failures, 0) - 2, 5))::integer
+                            ))
+                        ELSE NULL
+                    END
+                WHERE username = $1
+                RETURNING login_failures, locked_until
+            `, [username]);
+            const failureState = failureResult.rows[0];
+            await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
+
+            const errorMsg = failureState?.locked_until
+                ? uiText(res, '用户名或密码错误，账户已被临时锁定', 'Invalid credentials. Account temporarily locked.')
+                : uiText(res, '用户名或密码错误！', 'Invalid username or password!');
+
+            return res.status(401).render('login', {
+                title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                error: errorMsg,
+                csrfToken: generateCSRFToken(req)
+            });
         }
 
         // 6. 登录成功处理
-        if (!user.is_admin) {
-            await pool.query(
-                'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
-                [username]
-            );
-        }
+        await pool.query(
+            'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
+            [username]
+        );
         
-        // 7. 设置session在session.regenerate之前
-        req.session.user = {
-            id: user.id,
-            username: user.username,
-            authorized: user.authorized,
-            is_admin: user.is_admin
-        };
-        req.session.username = user.username;
-
-        // 8. 重新生成session ID以提高安全性
+        // 7. 重新生成session ID以提高安全性
         req.session.regenerate(async function (err) {
             if (err) {
                 console.error("Session regenerate error:", err);
                 return res.status(500).send("Session error");
             }
 
-            // 重新设置session数据（regenerate会清空所有数据）
-            req.session.user = {
-                id: user.id,
-                username: user.username,
-                authorized: user.authorized,
-                is_admin: user.is_admin
-            };
-            req.session.username = user.username;
+            try {
+            // regenerate会清空旧会话，最终用户信息由加锁后的数据库记录提供。
             req.session.initialized = true;
             req.session.createdAt = Date.now();
             generateCSRFToken(req); // 统一使用csrf库
@@ -1108,13 +1142,31 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
             }
 
             // 10. 创建单设备会话管理（使用新的session ID，恢复实时通知）
-            const sessionSuccess = await SessionManager.createSingleDeviceSession(
-                username, req.sessionID, clientIP, userAgent, notifySecurityEvent
+            const sessionResult = await SessionManager.createSingleDeviceSession(
+                username,
+                req.sessionID,
+                clientIP,
+                userAgent,
+                notifySecurityEvent,
+                user.password_hash
             );
 
-            if (!sessionSuccess) {
+            if (!sessionResult.success) {
                 console.error('创建单设备会话失败');
+                return req.session.destroy(() => {
+                    res.clearCookie('minimal_games_sid');
+                    const credentialsChanged = sessionResult.reason === 'credentials_changed';
+                    res.status(credentialsChanged ? 401 : 503).send(credentialsChanged
+                        ? uiText(res, '密码已发生变化，请重新登录', 'Password changed. Please sign in again.')
+                        : uiText(res, '登录会话创建失败，请重试', 'Failed to create login session. Please retry.'));
+                });
             }
+            disconnectUserSockets(username, sessionResult.terminatedSessionIds);
+            req.session.user = sessionResult.user;
+            req.session.username = sessionResult.user.username;
+            await new Promise((resolve, reject) => {
+                req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
+            });
 
             // 11. 记录登录日志和活动
             await Promise.all([
@@ -1140,6 +1192,17 @@ app.post('/login', adminLoginLimiterExempt, async (req, res) => {
             
             console.log(`✅ 用户 ${username} 登录成功，IP: ${clientIP}, 风险分: ${riskData.score}`);
             res.redirect('/');
+            } catch (callbackError) {
+                console.error('登录会话初始化失败:', callbackError);
+                await SessionManager.terminateSession(req.sessionID, 'login_initialization_failed')
+                    .catch(() => {});
+                return req.session.destroy(() => {
+                    res.clearCookie('minimal_games_sid');
+                    if (!res.headersSent) {
+                        res.status(503).send(uiText(res, '登录初始化失败，请重试', 'Login initialization failed. Please retry.'));
+                    }
+                });
+            }
         });
 
     } catch (err) {
@@ -1170,8 +1233,10 @@ app.get('/logout', async (req, res) => {
 });
 
 // 修改密码API
-app.post('/api/change-password', requireLogin, async (req, res) => {
+app.post('/api/change-password', requireLogin, requireCSRF, async (req, res) => {
+    let client;
     try {
+        client = await pool.connect();
         const { currentPassword, newPassword, confirmPassword } = req.body;
         const username = req.session.user.username;
 
@@ -1184,32 +1249,61 @@ app.post('/api/change-password', requireLogin, async (req, res) => {
             return res.status(400).json({ success: false, message: '新密码和确认密码不匹配' });
         }
 
-        if (newPassword.length < 6) {
-            return res.status(400).json({ success: false, message: '新密码至少需要6个字符' });
+        if (!isStrongPassword(newPassword)) {
+            return res.status(400).json({ success: false, message: '新密码须为12-128位，并同时包含字母和数字' });
         }
 
         // 验证当前密码
-        const userResult = await pool.query(
-            'SELECT password_hash FROM users WHERE username = $1',
+        await client.query('BEGIN');
+        const userResult = await client.query(
+            'SELECT password_hash FROM users WHERE username = $1 FOR UPDATE',
             [username]
         );
+        if (userResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: '用户不存在' });
+        }
 
         const isValidPassword = await bcrypt.compare(currentPassword, userResult.rows[0].password_hash);
         if (!isValidPassword) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: '当前密码错误' });
         }
 
         // 更新密码
-        const newPasswordHash = await bcrypt.hash(newPassword, 10);
-        await pool.query(
+        const newPasswordHash = await bcrypt.hash(newPassword, 12);
+        await client.query(
             'UPDATE users SET password_hash = $1 WHERE username = $2',
             [newPasswordHash, username]
         );
+        const otherSessions = await client.query(
+            `SELECT session_id
+             FROM active_sessions
+             WHERE username = $1 AND session_id != $2 AND is_active = true
+             FOR UPDATE`,
+            [username, req.sessionID]
+        );
+        const otherSessionIds = otherSessions.rows.map((row) => row.session_id);
+        await client.query(
+            `UPDATE active_sessions
+             SET is_active = false, terminated_at = NOW(), termination_reason = 'password_changed'
+             WHERE username = $1 AND session_id != $2 AND is_active = true`,
+            [username, req.sessionID]
+        );
+        if (otherSessionIds.length > 0) {
+            await client.query('DELETE FROM user_sessions WHERE sid = ANY($1::text[])', [otherSessionIds]);
+        }
+        await client.query('COMMIT');
+
+        disconnectUserSockets(username, otherSessionIds);
 
         res.json({ success: true, message: '密码修改成功！' });
     } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('修改密码失败:', error);
         res.status(500).json({ success: false, message: '修改密码失败，请稍后重试' });
+    } finally {
+        client?.release();
     }
 });
 
@@ -1409,7 +1503,7 @@ function createFlipBoard() {
 async function getFlipState(username, client = pool, { forUpdate = false } = {}) {
     const executor = client.query ? client.query.bind(client) : client;
     const lockClause = forUpdate ? ' FOR UPDATE' : '';
-    const result = await executor(
+    let result = await executor(
         `SELECT board, flipped, good_count, bad_count, ended FROM flip_states WHERE username = $1${lockClause}`,
         [username]
     );
@@ -1419,16 +1513,14 @@ async function getFlipState(username, client = pool, { forUpdate = false } = {})
         const flipped = Array(board.length).fill(false);
         await executor(
             `INSERT INTO flip_states (username, board, flipped, good_count, bad_count, ended, created_at, updated_at)
-             VALUES ($1, $2, $3, 0, 0, FALSE, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+             VALUES ($1, $2, $3, 0, 0, FALSE, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))
+             ON CONFLICT (username) DO NOTHING`,
             [username, JSON.stringify(board), JSON.stringify(flipped)]
         );
-        return {
-            board,
-            flipped,
-            good_count: 0,
-            bad_count: 0,
-            ended: false
-        };
+        result = await executor(
+            `SELECT board, flipped, good_count, bad_count, ended FROM flip_states WHERE username = $1${lockClause}`,
+            [username]
+        );
     }
 
     const row = result.rows[0];
@@ -1507,27 +1599,23 @@ async function logFlipAction({
     ended = false
 }, client = pool) {
     const executor = client.query ? client.query.bind(client) : client;
-    try {
-        await executor(
-            `INSERT INTO flip_logs (
-                username, action_type, cost, reward, card_index, card_type,
-                good_count, bad_count, ended, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-            [
-                username,
-                actionType,
-                cost,
-                reward,
-                cardIndex,
-                cardType,
-                goodCount,
-                badCount,
-                ended
-            ]
-        );
-    } catch (error) {
-        console.error('Flip log error:', error);
-    }
+    await executor(
+        `INSERT INTO flip_logs (
+            username, action_type, cost, reward, card_index, card_type,
+            good_count, bad_count, ended, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+        [
+            username,
+            actionType,
+            cost,
+            reward,
+            cardIndex,
+            cardType,
+            goodCount,
+            badCount,
+            ended
+        ]
+    );
 }
 
 function randomStoneColor() {
@@ -1555,7 +1643,7 @@ function getMaxSameCount(slots) {
 async function getStoneState(username, client = pool, { forUpdate = false } = {}) {
     const executor = client.query ? client.query.bind(client) : client;
     const lockClause = forUpdate ? ' FOR UPDATE' : '';
-    const result = await executor(
+    let result = await executor(
         `SELECT slots FROM stone_states WHERE username = $1${lockClause}`,
         [username]
     );
@@ -1564,10 +1652,14 @@ async function getStoneState(username, client = pool, { forUpdate = false } = {}
         const slots = normalizeStoneSlots([]);
         await executor(
             `INSERT INTO stone_states (username, slots, created_at, updated_at)
-             VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+             VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))
+             ON CONFLICT (username) DO NOTHING`,
             [username, JSON.stringify(slots)]
         );
-        return slots;
+        result = await executor(
+            `SELECT slots FROM stone_states WHERE username = $1${lockClause}`,
+            [username]
+        );
     }
 
     return normalizeStoneSlots(result.rows[0].slots);
@@ -1593,24 +1685,20 @@ async function logStoneAction({
     afterSlots
 }, client = pool) {
     const executor = client.query ? client.query.bind(client) : client;
-    try {
-        await executor(
-            `INSERT INTO stone_logs (
-                username, action_type, cost, reward, slot_index, before_slots, after_slots, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-            [
-                username,
-                actionType,
-                cost,
-                reward,
-                slotIndex,
-                JSON.stringify(beforeSlots || []),
-                JSON.stringify(afterSlots || [])
-            ]
-        );
-    } catch (error) {
-        console.error('Stone log error:', error);
-    }
+    await executor(
+        `INSERT INTO stone_logs (
+            username, action_type, cost, reward, slot_index, before_slots, after_slots, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+        [
+            username,
+            actionType,
+            cost,
+            reward,
+            slotIndex,
+            JSON.stringify(beforeSlots || []),
+            JSON.stringify(afterSlots || [])
+        ]
+    );
 }
 
 // ====================
@@ -1618,9 +1706,14 @@ async function logStoneAction({
 // ====================
 
 async function enqueueWishInventorySend({ inventoryId, username, isAuto = false }) {
-    const client = await pool.connect();
+    let client;
     try {
+        client = await pool.connect();
         await client.query('BEGIN');
+        await client.query(
+            "SELECT pg_advisory_xact_lock(hashtext($1 || ':gift_exchange'))",
+            [username]
+        );
 
         const inventoryResult = await client.query(`
             SELECT id, username, gift_type, gift_name, bilibili_gift_id, status, expires_at
@@ -1646,21 +1739,34 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false 
         );
 
         const bilibiliRoomId = userResult.rows.length > 0 ? userResult.rows[0].bilibili_room_id : null;
-            if (!bilibiliRoomId) {
-                if (isAuto) {
-                    await client.query(`
-                        UPDATE wish_inventory
-                        SET status = 'stored',
-                            expires_at = 'infinity'::timestamptz,
-                            updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-                        WHERE id = $1
-                    `, [inventoryId]);
-                    await client.query('COMMIT');
+        if (!bilibiliRoomId) {
+            if (isAuto) {
+                await client.query(`
+                    UPDATE wish_inventory
+                    SET status = 'stored',
+                        expires_at = 'infinity'::timestamptz,
+                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                    WHERE id = $1
+                `, [inventoryId]);
+                await client.query('COMMIT');
                 return { success: false, message: '未绑定房间号，暂不送出' };
             }
 
             await client.query('ROLLBACK');
             return { success: false, message: '请先绑定B站房间号再送出礼物' };
+        }
+
+        const activeDelivery = await client.query(`
+            SELECT id
+            FROM gift_exchanges
+            WHERE username = $1
+              AND status = 'funds_locked'
+              AND delivery_status IN ('pending', 'processing', 'uncertain')
+            LIMIT 1
+        `, [username]);
+        if (activeDelivery.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return { success: false, message: '已有礼物正在发送或等待结果确认' };
         }
 
         const exchangeResult = await client.query(`
@@ -1689,11 +1795,11 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false 
         await client.query('COMMIT');
         return { success: true, exchangeId: exchangeResult.rows[0].id };
     } catch (error) {
-        await client.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('背包礼物入队失败:', error);
         return { success: false, message: '送出失败，请稍后重试' };
     } finally {
-        client.release();
+        client?.release();
     }
 }
 
@@ -1703,16 +1809,16 @@ async function autoSendExpiredWishRewards() {
         return;
     }
     isWishAutoSendRunning = true;
-
-    // 跨实例互斥，避免重复发送
-    const lockResult = await pool.query("SELECT pg_try_advisory_lock(hashtext('wish_auto_send')) AS locked");
-    if (!lockResult.rows[0].locked) {
-        isWishAutoSendRunning = false;
-        return;
-    }
+    let lockClient = null;
+    let lockAcquired = false;
 
     try {
-        const expiredItems = await pool.query(`
+        lockClient = await pool.connect();
+        const lockResult = await lockClient.query("SELECT pg_try_advisory_lock(hashtext('wish_auto_send')) AS locked");
+        lockAcquired = lockResult.rows[0].locked === true;
+        if (!lockAcquired) return;
+
+        const expiredItems = await lockClient.query(`
             SELECT wi.id, wi.username, u.bilibili_room_id
             FROM wish_inventory wi
             JOIN users u ON u.username = wi.username
@@ -1724,7 +1830,7 @@ async function autoSendExpiredWishRewards() {
 
         for (const row of expiredItems.rows) {
             if (!row.bilibili_room_id) {
-                await pool.query(`
+                await lockClient.query(`
                     UPDATE wish_inventory
                     SET expires_at = 'infinity'::timestamptz,
                         updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
@@ -1742,10 +1848,15 @@ async function autoSendExpiredWishRewards() {
     } catch (error) {
         console.error('自动发送祈愿礼物失败:', error);
     } finally {
-        try {
-            await pool.query("SELECT pg_advisory_unlock(hashtext('wish_auto_send'))");
-        } catch (e) {
-            console.error('释放 wish_auto_send 锁失败:', e);
+        if (lockClient) {
+            if (lockAcquired) {
+                try {
+                    await lockClient.query("SELECT pg_advisory_unlock(hashtext('wish_auto_send'))");
+                } catch (e) {
+                    console.error('释放 wish_auto_send 锁失败:', e);
+                }
+            }
+            lockClient.release();
         }
         isWishAutoSendRunning = false;
     }
@@ -1766,20 +1877,21 @@ async function autoSendWishInventoryOnBind(username) {
     }
 }
 
-setInterval(autoSendExpiredWishRewards, 60 * 1000);
+const wishAutoSendInterval = setInterval(autoSendExpiredWishRewards, 60 * 1000);
+wishAutoSendInterval.unref?.();
 
 // 健康检查
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        games: ['quiz', 'slot', 'scratch', 'spin', 'wish', 'blindbox', 'stone', 'flip', 'duel'],
+        games: ['quiz', 'slot', 'scratch', 'dictation', 'spin', 'wish', 'blindbox', 'stone', 'flip', 'duel'],
         questions: questions.length
     });
 });
 
 // 🛡️ 安全修复：API密钥验证中间件 - 只允许header传key，禁止query参数
-function requireApiKey(req, res, next) {
+async function requireApiKey(req, res, next) {
     const apiKey = req.headers['x-api-key']; // 仅从header获取，不再支持query参数
     const validApiKey = process.env.WINDOWS_API_KEY || 'INVALID_DEFAULT_KEY';
     const ipWhitelist = process.env.GIFT_TASKS_IP_WHITELIST || '';
@@ -1797,7 +1909,10 @@ function requireApiKey(req, res, next) {
         });
     }
     
-    if (!apiKey || !validApiKey || apiKey !== validApiKey) {
+    const apiKeyBuffer = Buffer.from(String(apiKey || ''), 'utf8');
+    const validApiKeyBuffer = Buffer.from(String(validApiKey || ''), 'utf8');
+    if (!apiKey || !validApiKey || apiKeyBuffer.length !== validApiKeyBuffer.length
+        || !crypto.timingSafeEqual(apiKeyBuffer, validApiKeyBuffer)) {
         return res.status(401).json({ 
             success: false, 
             message: '无效的API密钥' 
@@ -1849,7 +1964,8 @@ function requireApiKey(req, res, next) {
         });
     }
 
-    if (nonceHeader.length < 8) {
+    if (typeof nonceHeader !== 'string' || nonceHeader.length < 8 || nonceHeader.length > 200
+        || !/^[A-Za-z0-9._:-]+$/.test(nonceHeader)) {
         return res.status(401).json({
             success: false,
             message: '无效随机串'
@@ -1861,7 +1977,16 @@ function requireApiKey(req, res, next) {
     }
 
     const nonceCache = requireApiKey.nonceCache;
-    if (nonceCache.size > MAX_NONCE_CACHE_SIZE) {
+    if (!requireApiKey.lastMemoryNonceCleanupAt
+        || now - requireApiKey.lastMemoryNonceCleanupAt > 60 * 1000) {
+        requireApiKey.lastMemoryNonceCleanupAt = now;
+        for (const [key, time] of nonceCache.entries()) {
+            if (now - time > 10 * 60 * 1000) {
+                nonceCache.delete(key);
+            }
+        }
+    }
+    if (nonceCache.size >= MAX_NONCE_CACHE_SIZE) {
         return res.status(429).json({
             success: false,
             message: '请求过于频繁'
@@ -1872,13 +1997,6 @@ function requireApiKey(req, res, next) {
             success: false,
             message: '重复请求'
         });
-    }
-
-    nonceCache.set(nonceHeader, timestampMs);
-    for (const [key, time] of nonceCache.entries()) {
-        if (now - time > 10 * 60 * 1000) {
-            nonceCache.delete(key);
-        }
     }
 
     const canonicalBody = stableStringifyBody(req.body);
@@ -1896,8 +2014,29 @@ function requireApiKey(req, res, next) {
             message: '签名不匹配'
         });
     }
-    
-    next();
+
+    try {
+        const nonceResult = await pool.query(`
+            INSERT INTO api_request_nonces (
+                nonce, request_method, request_path, request_timestamp, created_at
+            ) VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), NOW())
+            ON CONFLICT (nonce) DO NOTHING
+            RETURNING nonce
+        `, [nonceHeader, req.method, req.path, timestampMs]);
+        if (nonceResult.rows.length === 0) {
+            return res.status(401).json({ success: false, message: '重复请求' });
+        }
+        nonceCache.set(nonceHeader, timestampMs);
+        if (!requireApiKey.lastNonceCleanupAt || now - requireApiKey.lastNonceCleanupAt > 60 * 60 * 1000) {
+            requireApiKey.lastNonceCleanupAt = now;
+            pool.query("DELETE FROM api_request_nonces WHERE created_at < NOW() - INTERVAL '1 day'")
+                .catch((error) => console.error('API nonce cleanup failed:', error));
+        }
+        return next();
+    } catch (error) {
+        console.error('API nonce persistence failed:', error);
+        return res.status(503).json({ success: false, message: '请求验证服务暂不可用' });
+    }
 }
 
 function stableStringifyBody(body) {
@@ -1929,6 +2068,79 @@ function stableStringify(value) {
 // 路由注册
 // ====================
 
+const idempotentWritePaths = [
+    '/api/change-password',
+    '/api/quiz/start',
+    '/api/quiz/next',
+    '/api/quiz/submit',
+    '/api/dictation/start',
+    '/api/dictation/retry',
+    '/api/dictation/submit',
+    '/api/slot/play',
+    '/api/scratch/play',
+    '/api/stone/add',
+    '/api/stone/fill',
+    '/api/stone/replace',
+    '/api/stone/redeem',
+    '/api/flip/start',
+    '/api/flip/flip',
+    '/api/flip/cashout',
+    '/api/blindbox/open',
+    '/api/duel/play',
+    '/api/wish/play',
+    '/api/wish-batch',
+    '/api/wish/backpack/send',
+    '/api/gifts/exchange',
+    '/api/pk/start',
+    '/api/pk/stop',
+    '/api/admin/add-electric-coin',
+    '/api/admin/authorize-user',
+    '/api/admin/unauthorize-user',
+    '/api/admin/reset-password',
+    '/api/admin/update-balance',
+    '/api/admin/dictation/mark',
+    '/api/admin/delete-account',
+    '/api/admin/unlock-account',
+    '/api/admin/clear-failures',
+    '/api/admin/change-self-password',
+    '/api/bilibili/room',
+    '/api/bilibili/cookies/refresh'
+];
+async function validateExistingIdempotentRequest(req) {
+    const providedToken = req.body?.csrfToken || req.headers['x-csrf-token'];
+    if (!verifyCSRFToken(req, providedToken)) {
+        return { status: 403, message: 'CSRF token验证失败' };
+    }
+
+    const username = req.session?.user?.username;
+    const sessionResult = await pool.query(`
+        SELECT u.authorized, u.is_admin, a.is_active
+        FROM users u
+        LEFT JOIN active_sessions a
+          ON a.username = u.username AND a.session_id = $2
+        WHERE u.username = $1
+    `, [username, req.sessionID]);
+    const current = sessionResult.rows[0];
+    if (!current || current.is_active !== true) {
+        return { status: 401, message: '登录会话已失效' };
+    }
+    if (current.authorized !== true) {
+        return { status: 403, message: '未授权访问' };
+    }
+    const requiresAdmin = req.path.startsWith('/api/admin/')
+        || req.path.startsWith('/api/bilibili/');
+    if (requiresAdmin && current.is_admin !== true) {
+        return { status: 403, message: '无权访问管理员后台' };
+    }
+    return null;
+}
+
+app.use(createIdempotencyMiddleware({
+    pool,
+    paths: idempotentWritePaths,
+    validateExistingRequest: validateExistingIdempotentRequest
+}));
+
 registerAdminRoutes(app, {
     pool,
     bcrypt,
@@ -1943,6 +2155,7 @@ registerAdminRoutes(app, {
     IPManager,
     SessionManager,
     notifySecurityEvent,
+    disconnectUserSockets,
     path
 });
 
@@ -1981,8 +2194,6 @@ registerGameRoutes(app, {
     requireLogin,
     requireAuthorized,
     security,
-    userSessions,
-    quizSessions,
     questionMap,
     randomStoneColor,
     normalizeStoneSlots,
@@ -2005,60 +2216,73 @@ registerGameRoutes(app, {
 
 // 404 处理（必须在所有API路由之后）
 app.use('*', (req, res) => {
+    if (req.originalUrl.startsWith('/api/')) {
+        return res.status(404).json({ success: false, message: '接口不存在' });
+    }
     res.redirect('/');
 });
 
 // 错误处理
 app.use((err, req, res, next) => {
     console.error('Server error:', err);
-    res.status(500).redirect('/');
+    if (res.headersSent) return next(err);
+    if (req.originalUrl.startsWith('/api/')) {
+        return res.status(500).json({ success: false, message: '服务器错误' });
+    }
+    return res.status(500).send('服务器错误');
 });
 
-server.listen(PORT, async () => {
-    console.log(`🎮 游戏服务器运行在端口 ${PORT}`);
-    console.log(`📚 题库包含 ${questions.length} 道题目`);
-    console.log(`🌐 访问 http://localhost:${PORT} 开始游戏`);
-    console.log(`🚀 WebSocket飘屏系统已启动`);
-    console.log(`🎁 B站送礼功能已启用`);
-    
-    // 启动后进行数据库初始化
-    await initializeDatabase();
+let databaseMaintenanceInterval = null;
+
+async function startServer() {
+    const databaseReady = await initializeDatabase();
+    if (!databaseReady) {
+        throw new Error('数据库初始化失败，拒绝启动服务');
+    }
+    await runDatabaseMaintenance();
+    databaseMaintenanceInterval = setInterval(runDatabaseMaintenance, 6 * 60 * 60 * 1000);
+    databaseMaintenanceInterval.unref?.();
+    server.listen(PORT, () => {
+        console.log(`🎮 游戏服务器运行在端口 ${PORT}`);
+        console.log(`📚 题库包含 ${questions.length} 道题目`);
+        console.log(`🌐 访问 http://localhost:${PORT} 开始游戏`);
+        console.log(`🚀 WebSocket飘屏系统已启动`);
+        console.log(`🎁 B站送礼功能已启用`);
+    });
+}
+
+startServer().catch((error) => {
+    console.error('服务启动失败:', error);
+    process.exitCode = 1;
+    pool.end().catch(() => {});
 });
 
-// 优雅关闭处理
-process.on('SIGINT', async () => {
-    console.log('\n🔄 正在优雅关闭服务器...');
-    
+let shutdownStarted = false;
+async function shutdown(signal) {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    console.log(`收到${signal}信号，正在关闭服务...`);
+    if (databaseMaintenanceInterval) clearInterval(databaseMaintenanceInterval);
+
     try {
-        // Windows监听服务独立运行，无需清理
-        
-        // 关闭数据库连接池
-        if (pool) {
-            await pool.end();
-            console.log('✅ 数据库连接已关闭');
-        }
-        
-        console.log('✅ 服务器已优雅关闭');
+        io.close();
+        await new Promise((resolve) => {
+            if (!server.listening) return resolve();
+            const timeout = setTimeout(resolve, 10000);
+            timeout.unref?.();
+            server.close(() => {
+                clearTimeout(timeout);
+                resolve();
+            });
+        });
+        await pool.end();
+        console.log('服务器已安全关闭');
         process.exit(0);
     } catch (error) {
-        console.error('❌ 关闭服务器时发生错误:', error);
+        console.error('关闭服务器时发生错误:', error);
         process.exit(1);
     }
-});
+}
 
-process.on('SIGTERM', async () => {
-    console.log('🔄 收到SIGTERM信号，正在关闭...');
-    
-    try {
-        // Windows监听服务独立运行，无需清理
-        
-        if (pool) {
-            await pool.end();
-        }
-        
-        process.exit(0);
-    } catch (error) {
-        console.error('❌ 关闭时发生错误:', error);
-        process.exit(1);
-    }
-});
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

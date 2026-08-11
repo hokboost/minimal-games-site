@@ -1,16 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
-
-// Use the verified connection string directly
-const connectionString = 'postgres://quiz_db_i6kg_user:bc6GYvT7jjfbtyEyOnZzfU04lvfdLO4S@dpg-d16r57fdiees73dgmkj0-a.oregon-postgres.render.com/quiz_db_i6kg';
-
-const pool = new Pool({
-    connectionString: connectionString,
-    ssl: {
-        rejectUnauthorized: false
-    }
-});
+const pool = require('../db');
 
 async function runMigration() {
     console.log('Starting migration script...');
@@ -21,7 +11,8 @@ async function runMigration() {
 
         if (!fs.existsSync(sqlPath)) {
             console.error('ERROR: SQL file not found!');
-            process.exit(1);
+            process.exitCode = 1;
+            return;
         }
 
         const sql = fs.readFileSync(sqlPath, 'utf8');
@@ -37,8 +28,9 @@ async function runMigration() {
         } finally {
             client.release();
         }
-    } catch (err) {
-        console.error('Migration failed:', err);
+    } catch (error) {
+        console.error('Migration failed:', error);
+        process.exitCode = 1;
     } finally {
         await pool.end();
     }

@@ -47,7 +47,7 @@
             const maxSame = state.maxSame || 0;
             const reward = state.reward || 0;
 
-            document.getElementById('rewardAmount').textContent = isFull ? `${reward} ${t('电币', 'coins')}` : '--';
+            document.getElementById('rewardAmount').textContent = isFull ? `${reward} ${t('积分', 'points')}` : '--';
             document.getElementById('sameCount').textContent = t(`同色 ${maxSame}`, `Same Color ${maxSame}`);
             const redeemBtn = document.getElementById('redeemBtn');
             redeemBtn.disabled = !isFull;
@@ -58,11 +58,11 @@
             addOneBtn.classList.toggle('ready', !addOneBtn.disabled);
 
             const fillBtn = document.getElementById('fillBtn');
-            fillBtn.disabled = state.slots.some(slot => slot);
+            fillBtn.disabled = isFull;
             fillBtn.classList.toggle('ready', !fillBtn.disabled);
 
             const replaceCost = state.replaceCost;
-            document.getElementById('replaceCost').textContent = replaceCost ? `${replaceCost} ${t('电币', 'coins')}` : t('不可更换', 'Not Available');
+            document.getElementById('replaceCost').textContent = replaceCost ? `${replaceCost} ${t('积分', 'points')}` : t('不可更换', 'Not Available');
 
             if (!state.canReplace) {
                 selectedSlot = null;
@@ -84,7 +84,7 @@
         }
 
         async function postAction(url, body = {}) {
-            const response = await fetch(url, {
+            const response = await window.idempotentFetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -99,6 +99,16 @@
             }
             updateBalance(result.newBalance);
             await loadState(result.replacedSlot ?? null);
+            if (Number.isInteger(result.nextReplaceIndex) && currentState?.canReplace) {
+                selectedSlot = result.nextReplaceIndex;
+                document.querySelectorAll('.stone-slot').forEach((item) => item.classList.remove('selected'));
+                const nextSlot = document.querySelector(`.stone-slot[data-index="${selectedSlot}"]`);
+                nextSlot?.classList.add('selected');
+                document.getElementById('selectedSlot').textContent = selectedSlot + 1;
+                const replaceBtn = document.getElementById('replaceBtn');
+                replaceBtn.disabled = false;
+                replaceBtn.classList.add('ready');
+            }
             return result;
         }
 
@@ -122,8 +132,8 @@
             const result = await postAction('/api/stone/redeem');
             if (result && result.reward !== undefined) {
                 alert(t(
-                    `兑换成功！获得 ${result.reward} 电币`,
-                    `Redeem success! Earned ${result.reward} coins`
+                    `兑换成功！获得 ${result.reward} 积分`,
+                    `Redeem success! Earned ${result.reward} points`
                 ));
             }
         });

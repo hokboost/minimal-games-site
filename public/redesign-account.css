@@ -1,0 +1,2088 @@
+:root {
+    --account-ink: #1c2522;
+    --account-ink-soft: #303a36;
+    --account-canvas: #f4f1ea;
+    --account-surface: #fffefa;
+    --account-surface-soft: #ebece6;
+    --account-line: #d9dcd5;
+    --account-muted: #68726e;
+    --account-coral: #e85d4c;
+    --account-coral-soft: #fbe8e3;
+    --account-teal: #087f73;
+    --account-teal-dark: #06675f;
+    --account-teal-soft: #dfefeb;
+    --account-gold: #b77a08;
+    --account-gold-soft: #f8edcf;
+    --account-blue: #2d66a5;
+    --account-blue-soft: #e5edf7;
+    --account-success: #217a55;
+    --account-danger: #bf453e;
+    --account-danger-soft: #f9e8e5;
+    --account-shadow: 0 18px 46px rgba(28, 37, 34, 0.1);
+    --account-shadow-small: 0 6px 20px rgba(28, 37, 34, 0.07);
+}
+
+/* Account surfaces share one product language without leaking into game pages. */
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    background: var(--account-canvas);
+    color: var(--account-ink);
+    font-family: Aptos, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    letter-spacing: 0;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) *,
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) *::before,
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) *::after {
+    box-sizing: border-box;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) :is(h1, h2, h3, h4, p) {
+    letter-spacing: 0;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) :is(a, button, input, select, textarea):focus-visible {
+    outline: 3px solid rgba(45, 102, 165, 0.38);
+    outline-offset: 3px;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) button {
+    border-radius: 6px;
+    font: inherit;
+    letter-spacing: 0;
+    transition: background-color 150ms ease, border-color 150ms ease,
+        color 150ms ease, box-shadow 150ms ease;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) button:hover:not(:disabled) {
+    transform: none;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) .language-switcher {
+    position: fixed;
+    z-index: 80;
+    top: 18px;
+    right: 22px;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) .language-switcher .lang-btn {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 11px;
+    border: 1px solid var(--account-line);
+    border-radius: 6px;
+    background: var(--account-surface);
+    color: var(--account-ink);
+    box-shadow: var(--account-shadow-small);
+    font-size: 0.82rem;
+    font-weight: 720;
+    text-decoration: none;
+}
+
+body.app-redesign:is(
+    .page-login,
+    .page-register,
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records,
+    .page-coming-soon
+) .language-switcher .lang-btn:hover {
+    border-color: var(--account-teal);
+    background: var(--account-teal-soft);
+    color: var(--account-teal-dark);
+    transform: none;
+}
+
+/* Authentication */
+body.app-redesign:is(.page-login, .page-register) {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(330px, 40vw) minmax(0, 1fr);
+    align-items: center;
+    padding: 46px;
+    overflow: hidden;
+}
+
+body.app-redesign:is(.page-login, .page-register)::before {
+    position: fixed;
+    z-index: 0;
+    inset: 0 auto 0 0;
+    width: 40vw;
+    min-width: 330px;
+    border-right: 8px solid var(--account-coral);
+    background: var(--account-ink);
+    content: "";
+}
+
+body.app-redesign:is(.page-login, .page-register)::after {
+    position: fixed;
+    z-index: 1;
+    top: 50%;
+    left: clamp(42px, 7vw, 112px);
+    max-width: 260px;
+    color: var(--account-surface);
+    content: "MINIMAL\A GAMES";
+    font-size: 4rem;
+    font-weight: 820;
+    line-height: 0.93;
+    letter-spacing: 0;
+    white-space: pre;
+    transform: translateY(-50%);
+}
+
+body.app-redesign:is(.page-login, .page-register) > .container {
+    position: relative;
+    z-index: 2;
+    grid-column: 2;
+    justify-self: center;
+    width: min(100%, 470px);
+    max-width: 470px;
+    margin: 0;
+    padding: 44px 48px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--account-ink);
+    box-shadow: none;
+}
+
+body.app-redesign:is(.page-login, .page-register) > .container h1 {
+    margin: 0 0 30px;
+    color: var(--account-ink);
+    font-size: 2rem;
+    font-weight: 780;
+    line-height: 1.2;
+    text-align: left;
+}
+
+body.app-redesign:is(.page-login, .page-register) .auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+body.app-redesign:is(.page-login, .page-register) .form-group {
+    margin: 0;
+}
+
+body.app-redesign:is(.page-login, .page-register) .form-group input {
+    width: 100%;
+    min-height: 50px;
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--account-line);
+    border-radius: 6px;
+    background: var(--account-surface);
+    color: var(--account-ink);
+    box-shadow: 0 1px 0 rgba(28, 37, 34, 0.03);
+    font-size: 1rem;
+}
+
+body.app-redesign:is(.page-login, .page-register) .form-group input::placeholder {
+    color: #7d8682;
+}
+
+body.app-redesign:is(.page-login, .page-register) .form-group input:focus {
+    border-color: var(--account-teal);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(8, 127, 115, 0.13);
+}
+
+body.app-redesign:is(.page-login, .page-register) .input-hint {
+    margin: 7px 2px 0;
+    color: var(--account-muted);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+body.app-redesign:is(.page-login, .page-register) .btn-primary {
+    width: 100%;
+    min-height: 50px;
+    padding: 12px 17px;
+    border: 1px solid var(--account-ink);
+    border-radius: 6px;
+    background: var(--account-ink);
+    background-image: none;
+    color: var(--account-surface);
+    box-shadow: none;
+    font-size: 0.98rem;
+    font-weight: 740;
+}
+
+body.app-redesign:is(.page-login, .page-register) .btn-primary:hover:not(:disabled) {
+    border-color: var(--account-teal);
+    background: var(--account-teal);
+    box-shadow: none;
+}
+
+body.app-redesign:is(.page-login, .page-register) :is(
+    .error-message,
+    .success-message,
+    .warning-message
+) {
+    margin-top: 16px;
+    padding: 11px 13px;
+    border: 0;
+    border-left: 4px solid currentColor;
+    border-radius: 0 6px 6px 0;
+    text-align: left;
+    font-size: 0.88rem;
+}
+
+body.app-redesign:is(.page-login, .page-register) .error-message {
+    background: var(--account-danger-soft);
+    color: var(--account-danger);
+}
+
+body.app-redesign:is(.page-login, .page-register) .success-message {
+    background: var(--account-teal-soft);
+    color: var(--account-success);
+}
+
+body.app-redesign:is(.page-login, .page-register) .warning-message {
+    background: var(--account-gold-soft);
+    color: #80600f;
+}
+
+body.app-redesign:is(.page-login, .page-register) .auth-links {
+    margin-top: 24px;
+    color: var(--account-muted);
+    line-height: 2;
+    text-align: left;
+}
+
+body.app-redesign:is(.page-login, .page-register) .auth-links a {
+    color: var(--account-teal-dark);
+    font-weight: 680;
+    text-decoration: none;
+    box-shadow: inset 0 -1px 0 rgba(8, 127, 115, 0.35);
+}
+
+body.app-redesign:is(.page-login, .page-register) .auth-links a:hover {
+    color: var(--account-ink);
+    box-shadow: inset 0 -1px 0 var(--account-ink);
+}
+
+/* Shared page frame */
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) {
+    padding: 70px 24px 56px;
+}
+
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) > .container {
+    width: min(100%, 1180px);
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--account-ink);
+    box-shadow: none;
+}
+
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) :is(.profile-header, .header, .admin-header) {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin: 0 0 30px;
+    padding: 0 142px 20px 0;
+    border: 0;
+    border-bottom: 1px solid var(--account-line);
+    background: transparent;
+}
+
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) :is(.profile-header, .header, .admin-header) h1 {
+    max-width: 760px;
+    margin: 0;
+    color: var(--account-ink);
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1.08;
+    text-align: left;
+}
+
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) .nav-links {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+}
+
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) .nav-links span {
+    margin-right: 8px;
+    color: var(--account-muted);
+    font-size: 0.88rem;
+}
+
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) .nav-links a {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--account-ink-soft);
+    font-size: 0.87rem;
+    font-weight: 680;
+    text-decoration: none;
+}
+
+body.app-redesign:is(
+    .page-profile,
+    .page-gifts,
+    .page-admin,
+    .page-admin-user-records
+) .nav-links a:hover {
+    border-color: var(--account-line);
+    background: var(--account-surface);
+    color: var(--account-teal-dark);
+    transform: none;
+}
+
+/* Profile dashboard */
+body.app-redesign.page-profile > .container {
+    max-width: 1120px;
+}
+
+body.app-redesign.page-profile .profile-section {
+    margin: 0;
+    padding: 32px 0 36px;
+    border: 0;
+    border-bottom: 1px solid var(--account-line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+body.app-redesign.page-profile .profile-section:first-of-type {
+    padding-top: 4px;
+}
+
+body.app-redesign.page-profile .profile-section:last-of-type {
+    border-bottom: 0;
+}
+
+body.app-redesign.page-profile .profile-section > h2 {
+    margin: 0 0 17px;
+    padding: 0;
+    border: 0;
+    color: var(--account-ink);
+    font-size: 1.04rem;
+    font-weight: 760;
+    line-height: 1.35;
+}
+
+body.app-redesign.page-profile .info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 8px;
+    background: var(--account-ink);
+    box-shadow: var(--account-shadow-small);
+}
+
+body.app-redesign.page-profile .info-item {
+    display: grid;
+    min-height: 104px;
+    align-content: center;
+    justify-items: start;
+    gap: 7px;
+    padding: 20px 24px;
+    border: 0;
+    border-right: 1px solid rgba(255, 254, 250, 0.16);
+    border-radius: 0;
+    background: transparent;
+}
+
+body.app-redesign.page-profile .info-item:last-child {
+    border-right: 0;
+}
+
+body.app-redesign.page-profile .info-item label {
+    color: #adb5b1;
+    font-size: 0.75rem;
+    font-weight: 650;
+}
+
+body.app-redesign.page-profile .info-item span {
+    color: var(--account-surface);
+    font-size: 1rem;
+    font-weight: 750;
+}
+
+body.app-redesign.page-profile .info-item .status.authorized {
+    color: #75d5b1;
+}
+
+body.app-redesign.page-profile .info-item .status.pending {
+    color: #efd184;
+}
+
+body.app-redesign.page-profile .info-item .balance-count {
+    color: #f0c768 !important;
+    font-size: 1.12rem;
+}
+
+body.app-redesign.page-profile .game-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+body.app-redesign.page-profile .stat-card {
+    display: flex;
+    min-width: 0;
+    min-height: 206px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 13px;
+    padding: 18px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--account-surface);
+    box-shadow: var(--account-shadow-small);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+body.app-redesign.page-profile .stat-card:hover {
+    border-color: var(--account-line);
+    background: var(--account-surface);
+    box-shadow: 0 10px 28px rgba(28, 37, 34, 0.1);
+    transform: none;
+}
+
+body.app-redesign.page-profile .stat-icon {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    margin: 0;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: var(--account-teal-soft);
+    font-size: 1.35rem;
+}
+
+body.app-redesign.page-profile .stat-card:nth-child(4n + 2) .stat-icon {
+    background: var(--account-coral-soft);
+}
+
+body.app-redesign.page-profile .stat-card:nth-child(4n + 3) .stat-icon {
+    background: var(--account-gold-soft);
+}
+
+body.app-redesign.page-profile .stat-card:nth-child(4n) .stat-icon {
+    background: var(--account-blue-soft);
+}
+
+body.app-redesign.page-profile .stat-content {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    flex-direction: column;
+}
+
+body.app-redesign.page-profile .stat-content h3 {
+    margin: 0 0 10px;
+    color: var(--account-ink);
+    font-size: 0.96rem;
+    font-weight: 750;
+    line-height: 1.3;
+    text-align: left;
+}
+
+body.app-redesign.page-profile .stat-numbers {
+    display: grid;
+    gap: 3px;
+    margin: 0 0 16px;
+}
+
+body.app-redesign.page-profile .stat-main {
+    color: var(--account-ink-soft);
+    font-size: 0.82rem;
+}
+
+body.app-redesign.page-profile .stat-sub {
+    color: var(--account-muted);
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
+body.app-redesign.page-profile :is(.view-records-btn, .btn-primary) {
+    min-height: 38px;
+    margin-top: auto;
+    padding: 7px 11px;
+    border: 1px solid var(--account-line);
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    color: var(--account-teal-dark);
+    box-shadow: none;
+    font-size: 0.8rem;
+    font-weight: 720;
+}
+
+body.app-redesign.page-profile :is(.view-records-btn, .btn-primary):hover:not(:disabled) {
+    border-color: var(--account-teal);
+    background: var(--account-teal-soft);
+    color: var(--account-teal-dark);
+    box-shadow: none;
+}
+
+body.app-redesign.page-profile .backpack-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin: -48px 0 15px;
+}
+
+body.app-redesign.page-profile .backpack-toolbar .view-records-btn {
+    width: auto;
+    min-width: 104px;
+    margin: 0;
+}
+
+body.app-redesign.page-profile #backpackContent {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+body.app-redesign.page-profile .loading {
+    padding: 26px 0;
+    color: var(--account-muted);
+}
+
+body.app-redesign.page-profile .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+body.app-redesign.page-profile .setting-btn {
+    min-height: 54px;
+    padding: 11px 16px;
+    border: 1px solid var(--account-line);
+    border-radius: 6px;
+    background: var(--account-surface);
+    background-image: none;
+    color: var(--account-ink);
+    box-shadow: none;
+    font-size: 0.9rem;
+    font-weight: 720;
+    text-align: left;
+}
+
+body.app-redesign.page-profile .setting-btn:hover:not(:disabled) {
+    border-color: var(--account-teal);
+    background: var(--account-teal-soft);
+    color: var(--account-teal-dark);
+    box-shadow: none;
+}
+
+body.app-redesign.page-profile .modal {
+    padding: 20px;
+    background: rgba(28, 37, 34, 0.72);
+    backdrop-filter: none;
+    overflow-y: auto;
+}
+
+body.app-redesign.page-profile .modal-content,
+body.app-redesign.page-profile .records-modal .modal-content {
+    width: min(100%, 520px);
+    max-width: 520px;
+    max-height: min(84vh, 760px);
+    margin: 6vh auto;
+    overflow: hidden;
+    border: 0;
+    border-radius: 8px;
+    background: var(--account-surface);
+    background-image: none;
+    color: var(--account-ink);
+    box-shadow: 0 24px 64px rgba(16, 22, 20, 0.26);
+}
+
+body.app-redesign.page-profile #gameRecordsModal .modal-content {
+    width: min(100%, 850px);
+    max-width: 850px;
+}
+
+body.app-redesign.page-profile .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 17px 20px;
+    border: 0;
+    border-bottom: 1px solid var(--account-line);
+    border-radius: 0;
+    background: var(--account-surface);
+    background-image: none;
+    color: var(--account-ink);
+}
+
+body.app-redesign.page-profile .modal-header h3 {
+    margin: 0;
+    color: var(--account-ink);
+    font-size: 1rem;
+}
+
+body.app-redesign.page-profile .close {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    color: var(--account-muted);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+body.app-redesign.page-profile .close:hover {
+    color: var(--account-danger);
+}
+
+body.app-redesign.page-profile .modal-body {
+    max-height: calc(84vh - 71px);
+    padding: 20px;
+    overflow: auto;
+}
+
+body.app-redesign.page-profile .form-group {
+    margin-bottom: 16px;
+}
+
+body.app-redesign.page-profile .form-group label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--account-ink);
+    font-size: 0.84rem;
+    font-weight: 680;
+}
+
+body.app-redesign.page-profile .form-group input {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 12px;
+    border: 1px solid var(--account-line);
+    border-radius: 6px;
+    background: var(--account-surface);
+    color: var(--account-ink);
+}
+
+body.app-redesign.page-profile .form-group input:focus {
+    border-color: var(--account-teal);
+    box-shadow: 0 0 0 3px rgba(8, 127, 115, 0.13);
+}
+
+body.app-redesign.page-profile .form-group small {
+    color: var(--account-muted);
+}
+
+body.app-redesign.page-profile .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+body.app-redesign.page-profile .form-actions :is(.btn-primary, .btn-secondary) {
+    min-height: 42px;
+    margin: 0;
+    padding: 9px 15px;
+}
+
+body.app-redesign.page-profile .form-actions .btn-primary {
+    border-color: var(--account-teal);
+    background: var(--account-teal);
+    color: var(--account-surface);
+}
+
+body.app-redesign.page-profile .btn-secondary {
+    border: 1px solid var(--account-line);
+    background: transparent;
+    color: var(--account-ink);
+}
+
+body.app-redesign.page-profile .records-table {
+    width: 100%;
+    min-width: 620px;
+    border: 0;
+    border-collapse: collapse;
+    border-radius: 0;
+    background: var(--account-surface);
+}
+
+body.app-redesign.page-profile .records-table :is(th, td) {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--account-line);
+    color: var(--account-ink);
+    font-size: 0.8rem;
+    text-align: left;
+    white-space: nowrap;
+}
+
+body.app-redesign.page-profile .records-table th {
+    background: var(--account-surface-soft);
+    color: var(--account-ink-soft);
+    font-weight: 740;
+}
+
+body.app-redesign.page-profile .records-table tbody tr:hover {
+    background: var(--account-teal-soft);
+}
+
+body.app-redesign.page-profile .pagination {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 5px;
+    margin-top: 16px;
+}
+
+body.app-redesign.page-profile .pagination button {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 6px 9px;
+    border: 1px solid var(--account-line);
+    background: transparent;
+    color: var(--account-ink);
+}
+
+body.app-redesign.page-profile .pagination button:hover,
+body.app-redesign.page-profile .pagination button.active {
+    border-color: var(--account-teal);
+    background: var(--account-teal);
+    color: var(--account-surface);
+}
+
+body.app-redesign.page-profile .pagination-ellipsis {
+    color: var(--account-muted);
+}
+
+body.app-redesign.page-profile .toast {
+    top: auto;
+    right: 20px;
+    bottom: 20px;
+    max-width: min(410px, calc(100vw - 40px));
+    padding: 12px 15px;
+    border: 0;
+    border-left: 4px solid var(--account-blue);
+    border-radius: 0 6px 6px 0;
+    background: var(--account-surface);
+    background-image: none;
+    color: var(--account-ink);
+    box-shadow: var(--account-shadow);
+}
+
+body.app-redesign.page-profile .toast.success {
+    border-left-color: var(--account-success);
+    background: var(--account-surface);
+}
+
+body.app-redesign.page-profile .toast.error {
+    border-left-color: var(--account-danger);
+    background: var(--account-surface);
+}
+
+/* Gift catalog */
+body.app-redesign.page-gifts > .container {
+    max-width: 1120px;
+}
+
+body.app-redesign.page-gifts .header .balance-display {
+    flex: 0 0 auto;
+    padding: 9px 13px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--account-gold-soft);
+    background-image: none;
+    color: #72520d;
+    box-shadow: none;
+    font-size: 0.9rem;
+    font-weight: 760;
+}
+
+body.app-redesign.page-gifts .pk-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin: 0 0 12px;
+    padding: 17px 19px;
+    border: 0;
+    border-left: 5px solid var(--account-blue);
+    border-radius: 0 8px 8px 0;
+    background: var(--account-blue-soft);
+    box-shadow: none;
+}
+
+body.app-redesign.page-gifts .pk-panel h3 {
+    margin: 0;
+    color: var(--account-ink);
+    font-size: 0.95rem;
+    font-weight: 750;
+}
+
+body.app-redesign.page-gifts .pk-panel p {
+    margin: 3px 0 0;
+    color: var(--account-muted);
+    font-size: 0.82rem;
+}
+
+body.app-redesign.page-gifts .pk-status {
+    margin-top: 4px;
+    color: var(--account-blue);
+    font-size: 0.8rem;
+}
+
+body.app-redesign.page-gifts .pk-toggle-btn {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 1px solid var(--account-blue);
+    border-radius: 6px;
+    background: var(--account-blue);
+    background-image: none;
+    color: var(--account-surface);
+    box-shadow: none;
+    font-size: 0.84rem;
+    font-weight: 720;
+}
+
+body.app-redesign.page-gifts .pk-toggle-btn.stop {
+    border-color: var(--account-danger);
+    background: var(--account-danger);
+    background-image: none;
+}
+
+body.app-redesign.page-gifts .pk-toggle-btn:hover:not(:disabled) {
+    border-color: var(--account-ink);
+    background: var(--account-ink);
+}
+
+body.app-redesign.page-gifts > .container > .nav-links {
+    justify-content: flex-start;
+    margin: 0 0 22px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--account-line);
+}
+
+body.app-redesign.page-gifts .gifts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0 0 38px;
+}
+
+body.app-redesign.page-gifts .gift-card {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 420px;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 22px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--account-surface);
+    background-image: none;
+    box-shadow: var(--account-shadow-small);
+    text-align: left;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+body.app-redesign.page-gifts .gift-card::before {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 4px;
+    background: var(--account-coral);
+    content: "";
+}
+
+body.app-redesign.page-gifts .gift-card:nth-child(2)::before {
+    background: var(--account-teal);
+}
+
+body.app-redesign.page-gifts .gift-card:nth-child(3)::before {
+    background: var(--account-gold);
+}
+
+body.app-redesign.page-gifts .gift-card:hover {
+    border-color: var(--account-line);
+    box-shadow: 0 12px 32px rgba(28, 37, 34, 0.1);
+    transform: none;
+}
+
+body.app-redesign.page-gifts .gift-icon {
+    display: grid;
+    width: 54px;
+    height: 54px;
+    margin: 3px 0 18px;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: var(--account-coral-soft);
+    font-size: 1.8rem;
+}
+
+body.app-redesign.page-gifts .gift-card:nth-child(2) .gift-icon {
+    background: var(--account-teal-soft);
+}
+
+body.app-redesign.page-gifts .gift-card:nth-child(3) .gift-icon {
+    background: var(--account-gold-soft);
+}
+
+body.app-redesign.page-gifts .gift-name {
+    margin: 0 0 6px;
+    color: var(--account-ink);
+    font-size: 1.08rem;
+    font-weight: 770;
+}
+
+body.app-redesign.page-gifts .gift-description {
+    min-height: 48px;
+    margin: 0 0 18px;
+    color: var(--account-muted);
+    font-size: 0.83rem;
+    line-height: 1.5;
+}
+
+body.app-redesign.page-gifts .gift-price {
+    margin: 0 0 17px;
+    color: var(--account-gold);
+    font-size: 1.18rem;
+    font-weight: 780;
+}
+
+body.app-redesign.page-gifts .quantity-selector {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 76px;
+    gap: 8px 10px;
+    align-items: center;
+    margin: auto 0 14px;
+    color: var(--account-ink);
+    text-align: left;
+}
+
+body.app-redesign.page-gifts .quantity-selector label {
+    color: var(--account-muted);
+    font-size: 0.78rem;
+    font-weight: 680;
+}
+
+body.app-redesign.page-gifts .quantity-selector input {
+    width: 76px !important;
+    min-height: 40px;
+    margin: 0 !important;
+    padding: 7px 8px !important;
+    border: 1px solid var(--account-line) !important;
+    border-radius: 6px !important;
+    background: var(--account-surface) !important;
+    color: var(--account-ink) !important;
+    text-align: center;
+}
+
+body.app-redesign.page-gifts .quantity-selector input:focus {
+    border-color: var(--account-teal) !important;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(8, 127, 115, 0.13) !important;
+}
+
+body.app-redesign.page-gifts .quantity-selector > span {
+    grid-column: 1 / -1;
+    color: var(--account-ink-soft);
+    font-size: 0.82rem;
+}
+
+body.app-redesign.page-gifts .gift-button {
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 14px;
+    border: 1px solid var(--account-teal);
+    border-radius: 6px;
+    background: var(--account-teal);
+    background-image: none;
+    color: var(--account-surface);
+    box-shadow: none;
+    font-size: 0.88rem;
+    font-weight: 730;
+}
+
+body.app-redesign.page-gifts .gift-button:hover:not(:disabled) {
+    border-color: var(--account-ink);
+    background: var(--account-ink);
+    box-shadow: none;
+}
+
+body.app-redesign.page-gifts .gift-button:disabled {
+    border-color: var(--account-line);
+    background: var(--account-surface-soft);
+    color: var(--account-muted);
+}
+
+body.app-redesign.page-gifts .exchange-history {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+body.app-redesign.page-gifts .history-title {
+    margin: 0 0 12px;
+    color: var(--account-ink);
+    font-size: 1.02rem;
+    font-weight: 760;
+}
+
+body.app-redesign.page-gifts #exchangeHistory {
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--account-surface);
+    box-shadow: var(--account-shadow-small);
+}
+
+body.app-redesign.page-gifts .history-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 0;
+    padding: 14px 16px;
+    border: 0;
+    border-bottom: 1px solid var(--account-line);
+    border-radius: 0;
+    background: transparent;
+}
+
+body.app-redesign.page-gifts .history-item:last-child {
+    border-bottom: 0;
+}
+
+body.app-redesign.page-gifts .history-gift {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    color: var(--account-ink-soft);
+    font-size: 0.86rem;
+}
+
+body.app-redesign.page-gifts .history-gift > span:nth-child(3) {
+    color: var(--account-gold) !important;
+}
+
+body.app-redesign.page-gifts .history-gift > span[style*="#2196f3"] {
+    color: var(--account-blue) !important;
+}
+
+body.app-redesign.page-gifts .history-gift > span[style*="#4caf50"] {
+    color: var(--account-success) !important;
+}
+
+body.app-redesign.page-gifts .history-gift > span[style*="#f44336"],
+body.app-redesign.page-gifts .history-gift > span[style*="#ff5722"] {
+    color: var(--account-danger) !important;
+}
+
+body.app-redesign.page-gifts .history-gift > span[style*="#9e9e9e"] {
+    color: var(--account-muted) !important;
+}
+
+body.app-redesign.page-gifts .history-time,
+body.app-redesign.page-gifts .loading {
+    color: var(--account-muted);
+    font-size: 0.8rem;
+}
+
+body.app-redesign.page-gifts .loading {
+    padding: 28px 16px;
+    text-align: center;
+}
+
+body.app-redesign.page-gifts > div[style*="position: fixed"][style*="z-index: 1001"] {
+    top: auto !important;
+    right: 20px !important;
+    bottom: 20px !important;
+    max-width: min(400px, calc(100vw - 40px)) !important;
+    padding: 12px 15px !important;
+    border: 0 !important;
+    border-left: 4px solid var(--account-blue) !important;
+    border-radius: 0 6px 6px 0 !important;
+    background: var(--account-surface) !important;
+    background-image: none !important;
+    color: var(--account-ink) !important;
+    box-shadow: var(--account-shadow) !important;
+}
+
+/* Admin workspace */
+body.app-redesign.page-admin > .container,
+body.app-redesign.page-admin-user-records > .container {
+    max-width: 1380px;
+}
+
+body.app-redesign.page-admin .admin-content {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 18px;
+    min-width: 0;
+    overflow: visible;
+}
+
+body.app-redesign.page-admin :is(.cookie-management, .room-management) {
+    min-width: 0;
+    margin: 0 !important;
+    padding: 20px !important;
+    border: 0 !important;
+    border-top: 4px solid var(--account-gold) !important;
+    border-radius: 8px !important;
+    background: var(--account-surface) !important;
+    background-image: none !important;
+    color: var(--account-ink) !important;
+    box-shadow: var(--account-shadow-small);
+}
+
+body.app-redesign.page-admin .room-management {
+    border-top-color: var(--account-teal) !important;
+}
+
+body.app-redesign.page-admin :is(.cookie-management, .room-management) :is(h2, h3, label) {
+    color: var(--account-ink) !important;
+}
+
+body.app-redesign.page-admin :is(.cookie-management, .room-management) h2 {
+    margin: 0 0 14px !important;
+    font-size: 1.05rem;
+    font-weight: 760;
+}
+
+body.app-redesign.page-admin .cookie-management > div:first-of-type {
+    gap: 8px !important;
+}
+
+body.app-redesign.page-admin .room-management > div:not(:last-child) {
+    padding: 13px !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: var(--account-surface-soft) !important;
+}
+
+body.app-redesign.page-admin .room-management > div > div[style*="grid-template-columns"] {
+    gap: 10px !important;
+}
+
+body.app-redesign.page-admin :is(#bindUsername, #bindRoomId, #unbindUsername) {
+    width: 100% !important;
+    min-height: 42px !important;
+    padding: 9px 11px !important;
+    border: 1px solid var(--account-line) !important;
+    border-radius: 6px !important;
+    background: var(--account-surface) !important;
+    color: var(--account-ink) !important;
+    font-size: 0.9rem !important;
+}
+
+body.app-redesign.page-admin :is(#bindUsername, #bindRoomId, #unbindUsername)::placeholder {
+    color: #7d8682 !important;
+}
+
+body.app-redesign.page-admin :is(#bindUsername, #bindRoomId, #unbindUsername):focus {
+    border-color: var(--account-teal) !important;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(8, 127, 115, 0.13) !important;
+}
+
+body.app-redesign.page-admin :is(
+    #check-cookie-status,
+    #refresh-cookies,
+    #bind-room,
+    #unbind-room,
+    #load-room-bindings
+) {
+    min-height: 40px !important;
+    padding: 8px 12px !important;
+    border: 1px solid transparent !important;
+    border-radius: 6px !important;
+    background-image: none !important;
+    color: var(--account-surface) !important;
+    box-shadow: none !important;
+    font-size: 0.82rem !important;
+    font-weight: 720 !important;
+}
+
+body.app-redesign.page-admin :is(#check-cookie-status, #load-room-bindings) {
+    border-color: var(--account-blue) !important;
+    background: var(--account-blue) !important;
+}
+
+body.app-redesign.page-admin #refresh-cookies {
+    border-color: var(--account-gold) !important;
+    background: var(--account-gold) !important;
+}
+
+body.app-redesign.page-admin #bind-room {
+    border-color: var(--account-teal) !important;
+    background: var(--account-teal) !important;
+}
+
+body.app-redesign.page-admin #unbind-room {
+    border-color: var(--account-danger) !important;
+    background: var(--account-danger) !important;
+}
+
+body.app-redesign.page-admin :is(
+    #check-cookie-status,
+    #refresh-cookies,
+    #bind-room,
+    #unbind-room,
+    #load-room-bindings
+):hover:not(:disabled) {
+    border-color: var(--account-ink) !important;
+    background: var(--account-ink) !important;
+}
+
+body.app-redesign.page-admin #cookieStatus {
+    min-height: 40px !important;
+    padding: 9px 11px !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: var(--account-surface-soft) !important;
+    color: var(--account-muted) !important;
+}
+
+body.app-redesign.page-admin #cookieDetails {
+    color: var(--account-muted) !important;
+}
+
+body.app-redesign.page-admin #currentBindings {
+    min-height: 84px !important;
+    padding: 10px !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: var(--account-canvas) !important;
+    color: var(--account-ink) !important;
+}
+
+body.app-redesign.page-admin #currentBindings * {
+    color: var(--account-ink) !important;
+}
+
+body.app-redesign.page-admin #currentBindings > div[style*="display: flex"] {
+    padding: 9px 10px !important;
+    border: 0 !important;
+    border-left: 3px solid var(--account-teal) !important;
+    border-radius: 0 6px 6px 0 !important;
+    background: var(--account-surface) !important;
+}
+
+body.app-redesign.page-admin :is(.users-table, .recent-records, .dictation-records, .dictation-latest) {
+    grid-column: 1 / -1;
+    min-width: 0;
+}
+
+body.app-redesign.page-admin .users-table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 6px 0 0;
+    overflow-x: auto;
+    border: 0;
+    border-radius: 8px;
+    border-collapse: collapse;
+    background: var(--account-surface);
+    color: var(--account-ink);
+    box-shadow: var(--account-shadow-small);
+    overscroll-behavior-inline: contain;
+}
+
+body.app-redesign.page-admin .users-table :is(thead, tbody) {
+    display: table;
+    width: 100%;
+    min-width: 1040px;
+    table-layout: fixed;
+}
+
+body.app-redesign.page-admin .users-table :is(th, td):nth-child(1) {
+    width: 13%;
+}
+
+body.app-redesign.page-admin .users-table :is(th, td):nth-child(2) {
+    width: 15%;
+}
+
+body.app-redesign.page-admin .users-table :is(th, td):nth-child(3) {
+    width: 22%;
+}
+
+body.app-redesign.page-admin .users-table :is(th, td):nth-child(4) {
+    width: 17%;
+}
+
+body.app-redesign.page-admin .users-table :is(th, td):nth-child(5) {
+    width: 15%;
+}
+
+body.app-redesign.page-admin .users-table :is(th, td):nth-child(6) {
+    width: 18%;
+}
+
+body.app-redesign.page-admin .records-table-wrap {
+    width: 100%;
+    max-width: 100%;
+    padding: 0;
+    overflow-x: auto;
+    border: 0;
+    border-radius: 8px;
+    background: var(--account-surface);
+    box-shadow: var(--account-shadow-small);
+    overscroll-behavior-inline: contain;
+}
+
+body.app-redesign.page-admin .records-table {
+    width: 100%;
+    min-width: 1080px;
+    border: 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+    border-radius: 0;
+    background: var(--account-surface);
+    background-image: none;
+    color: var(--account-ink);
+}
+
+body.app-redesign.page-admin :is(.users-table, .records-table) th,
+body.app-redesign.page-admin-user-records table th {
+    padding: 10px 9px;
+    border: 0;
+    border-bottom: 1px solid var(--account-line);
+    background: var(--account-surface-soft);
+    background-image: none;
+    color: var(--account-ink-soft);
+    font-size: 0.76rem;
+    font-weight: 750;
+    text-align: left;
+}
+
+body.app-redesign.page-admin :is(.users-table, .records-table) td,
+body.app-redesign.page-admin-user-records table td {
+    padding: 10px 9px;
+    border: 0;
+    border-bottom: 1px solid var(--account-line);
+    color: var(--account-ink-soft);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    vertical-align: top;
+}
+
+body.app-redesign.page-admin :is(.users-table, .records-table) tbody tr:hover,
+body.app-redesign.page-admin-user-records table tbody tr:hover {
+    background: var(--account-teal-soft);
+}
+
+body.app-redesign.page-admin td[colspan][style] {
+    color: var(--account-muted) !important;
+}
+
+body.app-redesign.page-admin img[alt="dictation"] {
+    border: 1px solid var(--account-line) !important;
+    border-radius: 6px !important;
+    background: var(--account-canvas) !important;
+}
+
+body.app-redesign.page-admin :is(.recent-records, .dictation-records, .dictation-latest) {
+    margin-top: 12px;
+}
+
+body.app-redesign.page-admin :is(.recent-records, .dictation-records, .dictation-latest) h2 {
+    margin: 0 0 10px;
+    color: var(--account-ink);
+    font-size: 1.04rem;
+    font-weight: 760;
+}
+
+body.app-redesign.page-admin .dictation-review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+body.app-redesign.page-admin .users-table button,
+body.app-redesign.page-admin .dictation-review-actions button {
+    min-height: 30px;
+    margin: 1px;
+    padding: 4px 7px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background-image: none;
+    box-shadow: none;
+    color: var(--account-surface);
+    font-size: 0.71rem;
+    font-weight: 710;
+}
+
+body.app-redesign.page-admin :is(.btn-add, .btn-authorize, .btn-approve) {
+    border-color: var(--account-success);
+    background: var(--account-success);
+}
+
+body.app-redesign.page-admin :is(.btn-self, .btn-clear, .edit-balance-btn) {
+    border-color: var(--account-blue);
+    background: var(--account-blue);
+}
+
+body.app-redesign.page-admin :is(.btn-unauthorize, .btn-warn, .btn-unlock) {
+    border-color: var(--account-gold);
+    background: var(--account-gold);
+}
+
+body.app-redesign.page-admin :is(.btn-reset, .btn-delete, .btn-reject) {
+    border-color: var(--account-danger);
+    background: var(--account-danger);
+}
+
+body.app-redesign.page-admin .users-table button:hover:not(:disabled),
+body.app-redesign.page-admin .dictation-review-actions button:hover:not(:disabled) {
+    border-color: var(--account-ink);
+    background: var(--account-ink);
+    color: var(--account-surface);
+}
+
+body.app-redesign.page-admin .balance {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 6px;
+}
+
+body.app-redesign.page-admin .balance-display {
+    min-width: 68px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    background-image: none;
+    color: var(--account-gold);
+    font-size: 0.8rem;
+    font-weight: 730;
+    white-space: nowrap;
+}
+
+body.app-redesign.page-admin .edit-balance-btn {
+    min-width: 52px;
+    white-space: nowrap;
+}
+
+body.app-redesign.page-admin .user-link {
+    color: var(--account-teal-dark);
+    font-weight: 720;
+    text-decoration: none;
+    box-shadow: inset 0 -1px 0 rgba(8, 127, 115, 0.3);
+}
+
+body.app-redesign.page-admin :is(.status-admin, .status-normal) {
+    color: var(--account-success);
+}
+
+body.app-redesign.page-admin .status-locked {
+    color: var(--account-danger);
+}
+
+body.app-redesign.page-admin .status-warning {
+    color: #86620d;
+}
+
+body.app-redesign.page-admin .self-indicator {
+    color: var(--account-blue);
+}
+
+body.app-redesign.page-admin > div[style*="position: fixed"][style*="z-index: 1001"] {
+    top: auto !important;
+    right: 20px !important;
+    bottom: 20px !important;
+    max-width: min(400px, calc(100vw - 40px)) !important;
+    padding: 12px 15px !important;
+    border: 0 !important;
+    border-left: 4px solid var(--account-blue) !important;
+    border-radius: 0 6px 6px 0 !important;
+    background: var(--account-surface) !important;
+    background-image: none !important;
+    color: var(--account-ink) !important;
+    box-shadow: var(--account-shadow) !important;
+}
+
+/* Per-user records use a compact two-column audit layout. */
+body.app-redesign.page-admin-user-records > .container {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+body.app-redesign.page-admin-user-records .admin-header {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+
+body.app-redesign.page-admin-user-records .records-section {
+    min-width: 0;
+    margin: 0;
+    overflow-x: auto;
+    border: 0;
+    border-radius: 8px;
+    background: var(--account-surface);
+    box-shadow: var(--account-shadow-small);
+    overscroll-behavior-inline: contain;
+}
+
+body.app-redesign.page-admin-user-records .records-section h2 {
+    position: sticky;
+    z-index: 2;
+    left: 0;
+    margin: 0;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--account-line);
+    background: var(--account-surface);
+    color: var(--account-ink);
+    font-size: 0.92rem;
+    font-weight: 760;
+}
+
+body.app-redesign.page-admin-user-records .records-section table {
+    width: 100%;
+    min-width: 560px;
+    border: 0;
+    border-collapse: collapse;
+    border-radius: 0;
+    background: var(--account-surface);
+    background-image: none;
+    color: var(--account-ink);
+}
+
+body.app-redesign.page-admin-user-records .records-section :is(th, td) {
+    white-space: nowrap;
+}
+
+/* Authorization gate */
+body.app-redesign.page-coming-soon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 68px 24px 40px;
+    background: var(--account-ink);
+}
+
+body.app-redesign.page-coming-soon::before {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 8px;
+    background: var(--account-coral);
+    content: "";
+}
+
+body.app-redesign.page-coming-soon > .container {
+    width: min(100%, 650px);
+    max-width: 650px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+}
+
+body.app-redesign.page-coming-soon .status-card {
+    padding: 42px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--account-surface);
+    color: var(--account-ink);
+    box-shadow: 0 24px 64px rgba(8, 12, 11, 0.32);
+    text-align: left;
+}
+
+body.app-redesign.page-coming-soon .status-card h1 {
+    margin: 0 0 12px;
+    color: var(--account-ink);
+    font-size: 2rem;
+    font-weight: 790;
+    line-height: 1.2;
+}
+
+body.app-redesign.page-coming-soon .status-card p {
+    max-width: 490px;
+    margin: 0 0 28px;
+    color: var(--account-muted);
+}
+
+body.app-redesign.page-coming-soon .action-btn {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    margin: 4px 6px 4px 0;
+    padding: 9px 18px;
+    border: 1px solid var(--account-coral);
+    border-radius: 6px;
+    background: var(--account-coral);
+    background-image: none;
+    color: var(--account-surface);
+    font-weight: 720;
+    text-decoration: none;
+}
+
+body.app-redesign.page-coming-soon .action-btn.secondary {
+    border-color: var(--account-teal);
+    background: var(--account-teal);
+    background-image: none;
+}
+
+body.app-redesign.page-coming-soon .action-btn:hover {
+    border-color: var(--account-ink);
+    background: var(--account-ink);
+}
+
+@media (max-width: 1120px) {
+    body.app-redesign.page-profile .game-stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    body.app-redesign.page-profile .stat-card {
+        min-height: 188px;
+    }
+
+    body.app-redesign.page-admin .admin-content {
+        grid-template-columns: 1fr;
+    }
+
+    body.app-redesign.page-admin :is(.cookie-management, .room-management) {
+        grid-column: 1;
+    }
+}
+
+@media (max-width: 880px) {
+    body.app-redesign:is(.page-login, .page-register) {
+        grid-template-columns: minmax(250px, 34vw) minmax(0, 1fr);
+        padding: 28px;
+    }
+
+    body.app-redesign:is(.page-login, .page-register)::before {
+        width: 34vw;
+        min-width: 250px;
+    }
+
+    body.app-redesign:is(.page-login, .page-register)::after {
+        left: 38px;
+        font-size: 2.7rem;
+    }
+
+    body.app-redesign:is(.page-login, .page-register) > .container {
+        padding: 38px 30px;
+    }
+
+    body.app-redesign.page-gifts .gifts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body.app-redesign.page-gifts .gift-card {
+        min-height: 0;
+    }
+
+    body.app-redesign.page-gifts .gift-description {
+        min-height: 0;
+    }
+
+    body.app-redesign.page-admin .room-management > div > div[style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    body.app-redesign.page-admin :is(#bind-room, #unbind-room) {
+        width: 100% !important;
+    }
+}
+
+@media (max-width: 720px) {
+    body.app-redesign:is(.page-login, .page-register) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 70px 20px 36px;
+        overflow: auto;
+        background: var(--account-surface);
+    }
+
+    body.app-redesign:is(.page-login, .page-register)::before {
+        inset: 0 0 auto;
+        width: 100%;
+        min-width: 0;
+        height: 8px;
+        border: 0;
+        background: var(--account-coral);
+    }
+
+    body.app-redesign:is(.page-login, .page-register)::after {
+        display: none;
+    }
+
+    body.app-redesign:is(.page-login, .page-register) > .container {
+        width: min(100%, 470px);
+        padding: 30px 0;
+    }
+
+    body.app-redesign:is(
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records
+    ) {
+        padding: 64px 14px 34px;
+    }
+
+    body.app-redesign:is(
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records
+    ) :is(.profile-header, .header, .admin-header) {
+        align-items: flex-start;
+        padding: 0 0 16px;
+        flex-direction: column;
+    }
+
+    body.app-redesign:is(
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records
+    ) .nav-links {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    body.app-redesign:is(
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records
+    ) .nav-links span {
+        width: 100%;
+        margin: 0 0 4px;
+    }
+
+    body.app-redesign:is(
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records
+    ) .nav-links a {
+        flex: 1 1 auto;
+    }
+
+    body.app-redesign.page-profile .info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body.app-redesign.page-profile .info-item {
+        min-height: 86px;
+        border-right: 0;
+        border-bottom: 1px solid rgba(255, 254, 250, 0.16);
+    }
+
+    body.app-redesign.page-profile .info-item:last-child {
+        border-bottom: 0;
+    }
+
+    body.app-redesign.page-profile .settings-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body.app-redesign.page-profile .modal {
+        padding: 12px;
+    }
+
+    body.app-redesign.page-profile .modal-content,
+    body.app-redesign.page-profile .records-modal .modal-content {
+        max-height: 92vh;
+        margin: 2vh auto;
+    }
+
+    body.app-redesign.page-profile .modal-body {
+        max-height: calc(92vh - 70px);
+        padding: 16px;
+    }
+
+    body.app-redesign.page-gifts .pk-panel {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    body.app-redesign.page-gifts .pk-toggle-btn {
+        width: 100%;
+    }
+
+    body.app-redesign.page-gifts .history-item {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    body.app-redesign.page-admin :is(.cookie-management, .room-management) {
+        padding: 15px !important;
+    }
+
+    body.app-redesign.page-admin > .admin-toast {
+        top: 58px !important;
+        right: 14px !important;
+        bottom: auto !important;
+        left: 14px !important;
+        max-width: none !important;
+    }
+
+    body.app-redesign.page-admin-user-records > .container {
+        grid-template-columns: 1fr;
+    }
+
+    body.app-redesign.page-coming-soon {
+        padding: 68px 18px 34px;
+    }
+}
+
+@media (max-width: 460px) {
+    body.app-redesign:is(
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records
+    ) :is(.profile-header, .header, .admin-header) h1 {
+        overflow-wrap: anywhere;
+        font-size: 1.55rem;
+    }
+
+    body.app-redesign.page-profile .game-stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body.app-redesign.page-profile .stat-card {
+        min-height: 184px;
+    }
+
+    body.app-redesign.page-profile .backpack-toolbar {
+        justify-content: stretch;
+        margin: 0 0 12px;
+    }
+
+    body.app-redesign.page-profile .backpack-toolbar .view-records-btn {
+        width: 100%;
+    }
+
+    body.app-redesign.page-profile .form-actions {
+        align-items: stretch;
+        flex-direction: column-reverse;
+    }
+
+    body.app-redesign.page-profile .form-actions button {
+        width: 100%;
+    }
+
+    body.app-redesign.page-gifts .gift-card {
+        padding: 19px;
+    }
+
+    body.app-redesign.page-gifts .quantity-selector {
+        grid-template-columns: minmax(0, 1fr) 76px;
+    }
+
+    body.app-redesign.page-admin .cookie-management > div:first-of-type {
+        align-items: stretch !important;
+        flex-direction: column !important;
+    }
+
+    body.app-redesign.page-admin :is(#check-cookie-status, #refresh-cookies, #load-room-bindings) {
+        width: 100% !important;
+    }
+
+    body.app-redesign.page-coming-soon .status-card {
+        padding: 30px 20px;
+    }
+
+    body.app-redesign.page-coming-soon .action-btn {
+        width: 100%;
+        margin: 4px 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.app-redesign:is(
+        .page-login,
+        .page-register,
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records,
+        .page-coming-soon
+    ) *,
+    body.app-redesign:is(
+        .page-login,
+        .page-register,
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records,
+        .page-coming-soon
+    ) *::before,
+    body.app-redesign:is(
+        .page-login,
+        .page-register,
+        .page-profile,
+        .page-gifts,
+        .page-admin,
+        .page-admin-user-records,
+        .page-coming-soon
+    ) *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

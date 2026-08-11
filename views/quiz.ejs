@@ -6,25 +6,24 @@
     <title><%= lang === 'zh' ? '知识问答' : 'Quiz' %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign game-page page-quiz" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="header">
-            <h1>🧐 <%= lang === 'zh' ? '在线答题' : 'Online Quiz' %></h1>
+            <h1><%= lang === 'zh' ? '知识问答' : 'Quiz Sprint' %></h1>
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
-                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
-                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
+                <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/profile"><%= lang === 'zh' ? '个人记录' : 'Activity' %></a>
             </div>
         </div>
 
         <div id="user-section" class="game-section">
             <div class="balance-info">
-                <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
+                <h3><%= lang === 'zh' ? '当前积分' : 'Current Points' %> <span id="current-balance"><%= balance || 0 %></span></h3>
                 <p class="cost-info">
-                    💰 <%= lang === 'zh' ? '游戏费用' : 'Game Cost' %>: 10 <%= lang === 'zh' ? '电币' : 'coins' %> |
-                    🏆 <%= lang === 'zh' ? '获胜奖励' : 'Win Reward' %>: <%= lang === 'zh' ? '得分 × 2 电币' : 'Score × 2 coins' %>
+                    <%= lang === 'zh' ? '入场 10 积分 · 每答对一题返 2 积分' : 'Entry 10 points · Earn 2 points per correct answer' %>
                 </p>
             </div>
             <p class="game-desc">
@@ -34,7 +33,7 @@
                 %>
             </p>
             <button id="start-quiz-btn">
-                🎮 <%= lang === 'zh' ? '开始答题 (消耗10电币)' : 'Start Quiz (Cost 10 coins)' %>
+                <%= lang === 'zh' ? '开始答题' : 'Start quiz' %>
             </button>
         </div>
 
@@ -60,17 +59,17 @@
                 text-align: center;
                 display: none;
             ">
-                <h3 style="color: #00c853; margin-bottom: 1rem;">📊 <%= lang === 'zh' ? '本局结果' : 'Current Game Result' %></h3>
+                <h3 style="color: #00c853; margin-bottom: 1rem;"><%= lang === 'zh' ? '本局结果' : 'Current Game Result' %></h3>
                 <div id="current-score" style="font-size: 1.3rem; color: #ffeb3b; margin-bottom: 0.5rem;"></div>
                 <div id="current-reward" style="font-size: 1.1rem; color: #00c853;"></div>
             </div>
 
-            <h2>🏆 <%= lang === 'zh' ? '今日排行榜' : 'Today\'s Leaderboard' %></h2>
             <div class="refresh-controls">
-                <button class="refresh-btn" id="refresh-leaderboard-btn">🔄 <%= lang === 'zh' ? '刷新排行榜' : 'Refresh Leaderboard' %></button>
-                <small style="display: block; margin-top: 5px;">
-                    <%= lang === 'zh' ? '排行榜显示每个用户最高分' : 'Leaderboard shows highest score per user' %>
-                </small>
+                <div>
+                    <h2><%= lang === 'zh' ? '今日排行榜' : 'Today\'s Leaderboard' %></h2>
+                    <small><%= lang === 'zh' ? '显示每位用户的今日最高分' : 'Each player’s highest score today' %></small>
+                </div>
+                <button class="refresh-btn" id="refresh-leaderboard-btn"><%= lang === 'zh' ? '刷新排行榜' : 'Refresh leaderboard' %></button>
             </div>
             <table class="leaderboard-table">
                 <thead>
@@ -100,9 +99,9 @@
             text-align: center;
         ">
             <% if (lang === 'zh') { %>
-                ⚠️ <strong>免责声明：</strong>本问答游戏仅供娱乐学习，积分为虚拟奖励，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。请理性游戏，严禁未满18周岁用户使用。
+                <strong>免责声明：</strong>本问答游戏仅供娱乐学习，积分为虚拟奖励，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。请理性游戏，严禁未满18周岁用户使用。
             <% } else { %>
-                ⚠️ <strong>Disclaimer:</strong> This quiz game is for entertainment and learning only. Points are virtual rewards that cannot be exchanged for real money or valuable goods. Participation is completely free and complies with relevant laws. Please play responsibly. Strictly prohibited for users under 18 years old.
+                <strong>Disclaimer:</strong> This quiz game is for entertainment and learning only. Points are virtual rewards that cannot be exchanged for real money or valuable goods. Participation is completely free and complies with relevant laws. Please play responsibly. Strictly prohibited for users under 18 years old.
             <% } %>
         </div>
     </div>
@@ -366,9 +365,6 @@
         background: rgba(255, 255, 255, 0.1);
     }
 
-    .leaderboard-table tr:nth-child(1) td:first-child::before { content: "🥇 "; }
-    .leaderboard-table tr:nth-child(2) td:first-child::before { content: "🥈 "; }
-    .leaderboard-table tr:nth-child(3) td:first-child::before { content: "🥉 "; }
 
     @media (max-width: 768px) {
         .container {

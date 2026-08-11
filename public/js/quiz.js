@@ -2,6 +2,7 @@
     const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
     const t = (zh, en) => (lang === 'zh' ? zh : en);
     const translateServerMessage = window.translateServerMessage || ((message) => message);
+    const escapeHTML = window.escapeHTML || ((value) => String(value ?? ''));
 
     const { username } = document.body.dataset;
     let csrf = document.body.dataset.csrfToken || '';
@@ -9,6 +10,8 @@
     let currentAnswers = [];
     let questionIndex = 0;
     let timer;
+    let submitInFlight = false;
+    let questionLocked = false;
     let startTime;
     const totalQuestions = 15;
     const totalTime = 30;
@@ -54,14 +57,14 @@
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
         if (currentBalance < 10) {
             alert(t(
-                '⚡ 电币不足！需要10电币才能开始答题。仅供娱乐，虚拟电币不可兑换真实货币。',
-                '⚡ Insufficient coins! You need 10 coins to start. For entertainment only, virtual coins cannot be exchanged for real money.'
+                '积分不足！需要10积分才能开始答题。仅供娱乐，虚拟积分不可兑换真实货币。',
+                'Insufficient points! You need 10 points to start. For entertainment only, virtual points cannot be exchanged for real money.'
             ));
             return;
         }
 
         try {
-            const response = await safeFetch('/api/quiz/start', {
+            const response = await window.idempotentFetch('/api/quiz/start', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -91,6 +94,8 @@
         currentAnswers = [];
         questionIndex = 0;
         timeLeft = totalTime;
+        submitInFlight = false;
+        questionLocked = false;
         startTime = new Date();
 
         showWarmupMessage();
@@ -119,7 +124,7 @@
         }
 
         try {
-            const response = await safeFetch('/api/quiz/next', {
+            const response = await window.idempotentFetch('/api/quiz/next', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -158,6 +163,7 @@
     }
 
     function displayQuestion(question, token) {
+        questionLocked = false;
         document.getElementById('question').textContent = question.question;
 
         const optionsDiv = document.getElementById('options');
@@ -173,10 +179,17 @@
     }
 
     function selectOption(answerIndex, token, optionElement) {
+        if (questionLocked || submitInFlight) {
+            return;
+        }
+        questionLocked = true;
+
         const options = document.querySelectorAll('.option');
         options.forEach((opt) => {
             opt.classList.add('locked');
             opt.style.pointerEvents = 'none';
+            opt.setAttribute('aria-disabled', 'true');
+            opt.tabIndex = -1;
         });
 
         optionElement.classList.add('selected');
@@ -192,6 +205,7 @@
     }
 
     function startTotalTimer() {
+        stopTotalTimer();
         document.getElementById('timer').textContent = t(
             `剩余时间: ${timeLeft}s`,
             `Time left: ${timeLeft}s`
@@ -211,9 +225,29 @@
         }, 1000);
     }
 
+    function stopTotalTimer() {
+        if (timer) {
+            clearInterval(timer);
+            timer = null;
+        }
+    }
+
     async function submitQuiz() {
+        if (submitInFlight) {
+            return;
+        }
+        submitInFlight = true;
+        stopTotalTimer();
+        questionLocked = true;
+        document.querySelectorAll('.option').forEach((option) => {
+            option.classList.add('locked');
+            option.style.pointerEvents = 'none';
+            option.setAttribute('aria-disabled', 'true');
+            option.tabIndex = -1;
+        });
+
         try {
-            const response = await safeFetch('/api/quiz/submit', {
+            const response = await window.idempotentFetch('/api/quiz/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -229,15 +263,49 @@
             if (data.success) {
                 showResult(data.score, data.total, data.reward, data.newBalance);
             } else {
-            alert(t('提交失败: ', 'Submit failed: ') + translateServerMessage(data.message));
-            if (data.message && data.message.includes('请先开始')) {
-                await startQuiz();
-            }
+                const message = translateServerMessage(data.message) || t('提交失败', 'Submission failed');
+                if (data.message && data.message.includes('请先开始')) {
+                    alert(t('提交失败: ', 'Submit failed: ') + message);
+                    await startQuiz();
+                } else {
+                    showSubmissionRecovery(message, false);
+                }
             }
         } catch (error) {
             console.error('Error:', error);
-            alert(t('提交失败，请稍后重试', 'Submit failed, please try again'));
+            showSubmissionRecovery(t('网络异常，请检查连接后重试。', 'Network error. Check your connection and try again.'), true);
+        } finally {
+            submitInFlight = false;
         }
+    }
+
+    function showSubmissionRecovery(message, canRetry) {
+        resultDiv.className = 'result-section show submission-error';
+        resultDiv.replaceChildren();
+
+        const title = document.createElement('h2');
+        title.textContent = t('成绩提交未完成', 'Score not submitted');
+        const detail = document.createElement('p');
+        detail.textContent = message;
+        resultDiv.append(title, detail);
+
+        if (canRetry) {
+            const retryButton = document.createElement('button');
+            retryButton.type = 'button';
+            retryButton.textContent = t('重新提交', 'Retry submission');
+            retryButton.addEventListener('click', () => {
+                resultDiv.replaceChildren();
+                submitQuiz();
+            }, { once: true });
+            resultDiv.append(retryButton);
+            return;
+        }
+
+        const profileLink = document.createElement('a');
+        profileLink.href = '/profile';
+        profileLink.className = 'submission-records-link';
+        profileLink.textContent = t('查看个人记录', 'View personal records');
+        resultDiv.append(profileLink);
     }
 
     function showResult(score, total, reward, newBalance) {
@@ -256,15 +324,15 @@
         const timeTaken = Math.round((endTime - startTime) / 1000);
 
         let resultHTML = `
-            <h2>🎉 ${t('答题完成！', 'Quiz Complete!')}</h2>
+            <h2>${t('答题完成！', 'Quiz Complete!')}</h2>
             <div style="font-size: 2rem; margin: 1rem 0; color: #00c853;">
                 ${score}/${total} ${t('分', 'pts')} (${percentage}%)
             </div>
             <div style="font-size: 1.5rem; margin: 1rem 0; color: #ffeb3b;">
-                ⚡ ${t('获得奖励', 'Reward')}: ${reward || 0} ${t('电币', 'coins')}
+                ${t('获得奖励', 'Reward')}: ${reward || 0} ${t('积分', 'points')}
             </div>
             <div style="font-size: 1.2rem; margin: 1rem 0; color: #ffeb3b;">
-                💰 ${t('当前余额', 'Balance')}: ${newBalance || 0} ${t('电币', 'coins')}
+                ${t('当前余额', 'Balance')}: ${newBalance || 0} ${t('积分', 'points')}
             </div>
             <p>${t('用时', 'Time')}: ${timeTaken} ${t('秒', 's')}</p>
         `;
@@ -274,34 +342,34 @@
         }
 
         if (percentage >= 80) {
-            resultHTML += `<p style="color: #4caf50;">🌟 ${t('优秀！知识渊博！', 'Excellent! Great knowledge!')}</p>`;
+            resultHTML += `<p style="color: #4caf50;">${t('优秀！知识渊博！', 'Excellent! Great knowledge!')}</p>`;
         } else if (percentage >= 60) {
-            resultHTML += `<p style="color: #ff9800;">👍 ${t('不错！继续努力！', 'Nice! Keep going!')}</p>`;
+            resultHTML += `<p style="color: #ff9800;">${t('不错！继续努力！', 'Nice! Keep going!')}</p>`;
         } else {
-            resultHTML += `<p style="color: #f44336;">💪 ${t('加油！多学习多练习！', 'Keep it up! Practice more!')}</p>`;
+            resultHTML += `<p style="color: #f44336;">${t('加油！多学习多练习！', 'Keep it up! Practice more!')}</p>`;
         }
 
         resultHTML += `
             <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap;">
                 <button class="result-action-btn" data-action="restart" style="
-                    background: linear-gradient(45deg, #00c853, #00bfa5);
+                    background: #087f73;
                     color: white;
                     border: none;
                     padding: 12px 24px;
                     font-size: 16px;
                     border-radius: 25px;
                     cursor: pointer;
-                ">🔄 ${t('再来一次 (消耗10电币)', 'Play Again (Cost 10 coins)')}</button>
+                ">${t('再来一次 (消耗10积分)', 'Play Again (Cost 10 points)')}</button>
 
                 <button class="result-action-btn" data-action="home" style="
-                    background: linear-gradient(45deg, #2196f3, #1976d2);
+                    background: #326fad;
                     color: white;
                     border: none;
                     padding: 12px 24px;
                     font-size: 16px;
                     border-radius: 25px;
                     cursor: pointer;
-                ">🏠 ${t('返回首页', 'Back to Home')}</button>
+                ">${t('返回首页', 'Back to Home')}</button>
             </div>
         `;
 
@@ -323,8 +391,8 @@
                 `Score: ${score}/${total} pts (${percentage}%)`
             );
             document.getElementById('current-reward').textContent = t(
-                `获得电币：${reward} 电币`,
-                `Coins Earned: ${reward} coins`
+                `获得积分：${reward} 积分`,
+                `Points Earned: ${reward} points`
             );
 
             document.getElementById('leaderboard').style.display = 'block';
@@ -356,8 +424,8 @@
                     const row = document.createElement('tr');
                     row.innerHTML = `
                         <td>${index + 1}</td>
-                        <td>${record.username}</td>
-                        <td>${record.score}</td>
+                        <td>${escapeHTML(record.username)}</td>
+                        <td>${escapeHTML(record.score)}</td>
                         <td>${new Date(record.submitted_at).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
                             timeZone: 'Asia/Shanghai',
                             year: 'numeric',

@@ -195,21 +195,21 @@
         }
     </style>
 </head>
-<body data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign game-page page-duel" data-csrf-token="<%= csrfToken %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="header">
-            <h1>⚔️ <%= lang === 'zh' ? '决斗挑战' : 'Duel Challenge' %></h1>
+            <h1><%= lang === 'zh' ? '决斗挑战' : 'Duel Challenge' %></h1>
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
-                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
-                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
+                <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/profile"><%= lang === 'zh' ? '个人记录' : 'Activity' %></a>
             </div>
         </div>
 
         <div class="balance-section">
-            <h3>⚡ <%= lang === 'zh' ? '当前电币' : 'Current Coins' %>: <span id="current-balance"><%= balance || 0 %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
+            <h3><%= lang === 'zh' ? '当前积分' : 'Current Points' %> <span id="current-balance"><%= balance || 0 %></span></h3>
         </div>
 
         <div class="duel-panel">
@@ -227,7 +227,7 @@
                 </div>
                 <div class="summary-box">
                     <%= lang === 'zh' ? '功力' : 'Power' %>：<strong id="powerValue">20%</strong><br>
-                    <%= lang === 'zh' ? '消耗电币' : 'Cost' %>：<strong id="costValue">1040</strong>
+                    <%= lang === 'zh' ? '消耗积分' : 'Cost' %>：<strong id="costValue">1040</strong>
                 </div>
                 <div class="action-row">
                     <button class="action-btn" id="duelBtn">

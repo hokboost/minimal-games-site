@@ -276,18 +276,19 @@
         }
     </style>
 </head>
-<body data-csrf-token="<%= csrfToken %>" data-blindbox-rates="<%= encodeURIComponent(JSON.stringify(blindboxConfigs || {})) %>">
+<body class="app-redesign game-page page-blindbox" data-csrf-token="<%= csrfToken %>" data-blindbox-rates="<%= encodeURIComponent(JSON.stringify(blindboxConfigs || {})) %>">
+    <%- include('partials/language-switcher') %>
     <div class="container">
         <div class="header">
-            <h1>🎁 <%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></h1>
+            <h1><%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Boxes' %></h1>
             <div class="nav-links">
-                <a href="/games">🧭 <%= lang === 'zh' ? '游戏专区' : 'Game Zone' %></a>
-                <a href="/profile">👤 <%= lang === 'zh' ? '个人资料' : 'Profile' %></a>
+                <a href="/games">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/profile"><%= lang === 'zh' ? '个人记录' : 'Activity' %></a>
             </div>
         </div>
 
         <div class="balance-box">
-            <h3><%= lang === 'zh' ? '当前电币余额' : 'Current Balance' %>: <span id="current-balance"><%= balance %></span> <%= lang === 'zh' ? '电币' : 'coins' %></h3>
+            <h3><%= lang === 'zh' ? '当前积分余额' : 'Current Balance' %>: <span id="current-balance"><%= balance %></span> <%= lang === 'zh' ? '积分' : 'points' %></h3>
             <p><%= lang === 'zh' ? '盲盒奖励会立刻按价值从高到低送出' : 'Rewards are sent immediately from highest value to lowest' %></p>
         </div>
 
@@ -295,7 +296,7 @@
             <% tiers.forEach((tier, index) => { %>
                 <div class="tier-card <%= index === 0 ? 'active' : '' %>" data-tier="<%= tier.key %>" data-cost="<%= tier.cost %>" data-name-zh="<%= tier.nameZh %>" data-name-en="<%= tier.nameEn %>">
                     <div class="tier-title"><%= lang === 'zh' ? tier.nameZh : tier.nameEn %></div>
-                    <div class="tier-cost"><%= tier.cost %> <%= lang === 'zh' ? '电币/次' : 'coins per box' %></div>
+                    <div class="tier-cost"><%= tier.cost %> <%= lang === 'zh' ? '积分/次' : 'points per box' %></div>
                 </div>
             <% }) %>
         </div>

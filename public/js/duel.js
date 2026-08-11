@@ -37,7 +37,7 @@
         rewards.forEach((reward) => {
             const item = document.createElement('div');
             item.className = 'reward-item' + (reward.key === activeReward.key ? ' active' : '');
-            item.innerHTML = `<span>${reward.name}</span><strong>${reward.reward} ${t('电币', 'coins')}</strong>`;
+            item.innerHTML = `<span>${reward.name}</span><strong>${reward.reward} ${t('积分', 'points')}</strong>`;
             item.addEventListener('click', () => {
                 activeReward = reward;
                 renderRewards();
@@ -85,7 +85,7 @@
         const cost = calculateCost(power);
         const currentBalance = parseBalance(balanceEl.textContent);
         if (currentBalance !== null && currentBalance < cost) {
-            resultBox.textContent = t('电币不足，无法挑战', 'Insufficient coins');
+            resultBox.textContent = t('积分不足，无法挑战', 'Insufficient points');
             duelBtn.disabled = false;
             return;
         }
@@ -93,7 +93,7 @@
             balanceEl.textContent = currentBalance - cost;
         }
         try {
-            const response = await fetch('/api/duel/play', {
+            const response = await window.idempotentFetch('/api/duel/play', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -133,11 +133,11 @@
             }
             if (result.duelSuccess) {
                 resultBox.textContent = t(
-                    `🎉 挑战成功！获得 ${activeReward.reward} 电币`,
-                    `🎉 Success! Earned ${activeReward.reward} coins`
+                    `挑战成功！获得 ${activeReward.reward} 积分`,
+                    `Success! Earned ${activeReward.reward} points`
                 );
             } else {
-                resultBox.textContent = t('😢 挑战失败，再接再厉', '😢 Challenge failed, try again');
+                resultBox.textContent = t('挑战失败，再接再厉', 'Challenge failed, try again');
             }
         } catch (error) {
             console.error('Duel error:', error);

@@ -6,16 +6,16 @@
     <title><%= title %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign page-admin" data-csrf-token="<%= csrfToken %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="admin-header">
-            <h1>👑 <%= lang === 'zh' ? '管理后台' : 'Admin Panel' %></h1>
+            <h1><%= lang === 'zh' ? '管理后台' : 'Admin panel' %></h1>
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '欢迎，' : 'Welcome, ' %><%= user.username %></span>
-                <a href="/">🏠 <%= lang === 'zh' ? '首页' : 'Home' %></a>
-                <a href="/logout">🚪 <%= lang === 'zh' ? '退出登录' : 'Logout' %></a>
+                <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/logout"><%= lang === 'zh' ? '退出登录' : 'Log out' %></a>
             </div>
         </div>
 
@@ -25,7 +25,7 @@
                 background: linear-gradient(135deg, rgba(255, 152, 0, 0.1), rgba(255, 193, 7, 0.05));
                 border: 2px solid #ff9800; border-radius: 15px; padding: 1.5rem; margin-bottom: 2rem;
             ">
-                <h2 style="color: #ff9800; margin-bottom: 1rem;">🍪 <%= lang === 'zh' ? 'B站Cookie管理' : 'Bilibili Cookie Management' %></h2>
+                <h2 style="color: #ff9800; margin-bottom: 1rem;"><%= lang === 'zh' ? 'B站 Cookie 管理' : 'Bilibili cookie management' %></h2>
                 <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
                     <div id="cookieStatus" style="
                         padding: 0.8rem 1.2rem; border-radius: 8px; font-weight: bold;
@@ -36,13 +36,13 @@
                         padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #2196f3, #1976d2);
                         color: white; border: none; border-radius: 8px; font-weight: bold;
                         cursor: pointer; transition: all 0.3s ease;
-                    ">🔍 <%= lang === 'zh' ? '检查状态' : 'Check Status' %></button>
+                    "><%= lang === 'zh' ? '检查状态' : 'Check Status' %></button>
                     
                     <button id="refresh-cookies" style="
                         padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #ff9800, #f57c00);
                         color: white; border: none; border-radius: 8px; font-weight: bold;
                         cursor: pointer; transition: all 0.3s ease;
-                    ">🔄 <%= lang === 'zh' ? '刷新Cookie' : 'Refresh Cookie' %></button>
+                    "><%= lang === 'zh' ? '刷新 Cookie' : 'Refresh Cookie' %></button>
                 </div>
                 <div id="cookieDetails" style="margin-top: 1rem; font-size: 0.9rem; color: #ccc;"></div>
             </div>
@@ -52,13 +52,13 @@
                 background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(129, 199, 132, 0.05));
                 border: 2px solid #4caf50; border-radius: 15px; padding: 1.5rem; margin-bottom: 2rem;
             ">
-                <h2 style="color: #4caf50; margin-bottom: 1rem;">📺 <%= lang === 'zh' ? '直播间绑定管理' : 'Live Room Binding Management' %></h2>
+                <h2 style="color: #4caf50; margin-bottom: 1rem;"><%= lang === 'zh' ? '直播间绑定' : 'Live room bindings' %></h2>
                 
                 
                 <div style="
                     background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
                 ">
-                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;">➕ <%= lang === 'zh' ? '绑定新房间' : 'Bind New Room' %></h3>
+                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;"><%= lang === 'zh' ? '绑定新房间' : 'Bind New Room' %></h3>
                     <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 1rem; align-items: end;">
                         <div>
                             <label style="display: block; margin-bottom: 0.3rem; color: #4caf50; font-size: 0.9rem;"><%= lang === 'zh' ? '用户名:' : 'Username:' %></label>
@@ -84,7 +84,7 @@
                             padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #4caf50, #45a049);
                             color: white; border: none; border-radius: 8px; font-weight: bold;
                             cursor: pointer; transition: all 0.3s ease; white-space: nowrap;
-                        ">🔗 <%= lang === 'zh' ? '绑定房间' : 'Bind Room' %></button>
+                        "><%= lang === 'zh' ? '绑定房间' : 'Bind Room' %></button>
                     </div>
                 </div>
 
@@ -92,7 +92,7 @@
                 <div style="
                     background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
                 ">
-                    <h3 style="color: #f44336; margin-bottom: 0.8rem; font-size: 1.1rem;">➖ <%= lang === 'zh' ? '解除绑定' : 'Unbind' %></h3>
+                    <h3 style="color: #f44336; margin-bottom: 0.8rem; font-size: 1.1rem;"><%= lang === 'zh' ? '解除绑定' : 'Unbind' %></h3>
                     <div style="display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: end;">
                         <div>
                             <label style="display: block; margin-bottom: 0.3rem; color: #f44336; font-size: 0.9rem;"><%= lang === 'zh' ? '用户名:' : 'Username:' %></label>
@@ -108,13 +108,13 @@
                             padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #f44336, #d32f2f);
                             color: white; border: none; border-radius: 8px; font-weight: bold;
                             cursor: pointer; transition: all 0.3s ease; white-space: nowrap;
-                        ">🔓 <%= lang === 'zh' ? '解除绑定' : 'Unbind' %></button>
+                        "><%= lang === 'zh' ? '解除绑定' : 'Unbind' %></button>
                     </div>
                 </div>
 
                 
                 <div>
-                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;">📋 <%= lang === 'zh' ? '当前绑定列表' : 'Current Bindings' %></h3>
+                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;"><%= lang === 'zh' ? '当前绑定' : 'Current bindings' %></h3>
                     <div id="currentBindings" style="
                         background: rgba(0, 0, 0, 0.3); border-radius: 8px; padding: 1rem;
                         min-height: 100px; color: #ccc;
@@ -128,7 +128,7 @@
                         background: linear-gradient(135deg, #2196f3, #1976d2);
                         color: white; border: none; border-radius: 6px; font-weight: bold;
                         cursor: pointer; transition: all 0.3s ease;
-                    ">🔄 <%= lang === 'zh' ? '刷新列表' : 'Refresh List' %></button>
+                    "><%= lang === 'zh' ? '刷新列表' : 'Refresh List' %></button>
                 </div>
             </div>
 
@@ -136,7 +136,7 @@
                 <thead>
                     <tr>
                         <th><%= lang === 'zh' ? '用户名' : 'Username' %></th>
-                        <th><%= lang === 'zh' ? '电币余额' : 'Coin Balance' %></th>
+                        <th><%= lang === 'zh' ? '积分余额' : 'Point Balance' %></th>
                         <th><%= lang === 'zh' ? '操作' : 'Actions' %></th>
                         <th><%= lang === 'zh' ? '密码管理' : 'Password' %></th>
                         <th><%= lang === 'zh' ? '账号管理' : 'Account' %></th>
@@ -152,51 +152,51 @@
                                 </a>
                             </td>
                             <td class="balance">
-                                <span class="balance-display">⚡<%= user.balance || 0 %> 电币</span>
+                                <span class="balance-display"><%= user.balance || 0 %> 积分</span>
                                 <button class="edit-balance-btn" data-action="edit-balance" data-username="<%= user.username %>" data-balance="<%= user.balance || 0 %>">
-                                    ✏️ <%= lang === 'zh' ? '修改' : 'Edit' %>
+                                    <%= lang === 'zh' ? '修改' : 'Edit' %>
                                 </button>
                             </td>
                             <td>
-                                <button class="btn-add" data-action="add-coin" data-username="<%= user.username %>">⚡ <%= lang === 'zh' ? '加电币' : 'Add Coins' %></button>
+                                <button class="btn-add" data-action="add-point" data-username="<%= user.username %>"><%= lang === 'zh' ? '加积分' : 'Add points' %></button>
                                 <% if (user.authorized) { %>
-                                    <button class="btn-unauthorize" data-action="unauthorize" data-username="<%= user.username %>">❌ <%= lang === 'zh' ? '取消授权' : 'Revoke' %></button>
+                                    <button class="btn-unauthorize" data-action="unauthorize" data-username="<%= user.username %>"><%= lang === 'zh' ? '取消授权' : 'Revoke' %></button>
                                 <% } else { %>
-                                    <button class="btn-authorize" data-action="authorize" data-username="<%= user.username %>">✅ <%= lang === 'zh' ? '授权' : 'Authorize' %></button>
+                                    <button class="btn-authorize" data-action="authorize" data-username="<%= user.username %>"><%= lang === 'zh' ? '授权' : 'Authorize' %></button>
                                 <% } %>
                             </td>
                             <td>
                                 <% if (user.username === userLoggedIn) { %>
-                                    <button class="btn-self" id="change-self-password">🔑 <%= lang === 'zh' ? '修改密码' : 'Change Password' %></button>
+                                    <button class="btn-self" id="change-self-password"><%= lang === 'zh' ? '修改密码' : 'Change password' %></button>
                                 <% } else { %>
-                                    <button class="btn-reset" data-action="reset-password" data-username="<%= user.username %>">🔑 <%= lang === 'zh' ? '重置密码' : 'Reset Password' %></button>
+                                    <button class="btn-reset" data-action="reset-password" data-username="<%= user.username %>"><%= lang === 'zh' ? '重置密码' : 'Reset password' %></button>
                                 <% } %>
                             </td>
                             <td>
                                 <% if (user.username === userLoggedIn) { %>
-                                    <span class="self-indicator">👤 <%= lang === 'zh' ? '自己' : 'You' %></span>
+                                    <span class="self-indicator"><%= lang === 'zh' ? '自己' : 'You' %></span>
                                 <% } else { %>
-                                    <button class="btn-delete" data-action="delete-account" data-username="<%= user.username %>">🗑️ <%= lang === 'zh' ? '注销账号' : 'Delete Account' %></button>
+                                    <button class="btn-delete" data-action="delete-account" data-username="<%= user.username %>"><%= lang === 'zh' ? '注销账号' : 'Delete account' %></button>
                                 <% } %>
                             </td>
                             <td>
                                 <% if (user.is_admin) { %>
-                                    <span class="status-admin">👑 <%= lang === 'zh' ? '管理员' : 'Admin' %></span>
+                                    <span class="status-admin"><%= lang === 'zh' ? '管理员' : 'Admin' %></span>
                                 <% } else if (user.is_locked) { %>
                                     <div class="status-locked">
-                                        🔒 <%= lang === 'zh' ? '已锁定' : 'Locked' %><br>
+                                        <%= lang === 'zh' ? '已锁定' : 'Locked' %><br>
                                         <small><%= lang === 'zh' ? '剩余' : 'Remaining' %> <%= user.lock_minutes %> <%= lang === 'zh' ? '分钟' : 'min' %></small><br>
                                         <small><%= lang === 'zh' ? '失败次数' : 'Failures' %>: <%= user.login_failures %></small><br>
                                         <button class="btn-unlock" data-action="unlock" data-username="<%= user.username %>"><%= lang === 'zh' ? '解锁' : 'Unlock' %></button>
                                     </div>
                                 <% } else if (user.login_failures > 0) { %>
                                     <div class="status-warning">
-                                        ⚠️ <%= lang === 'zh' ? '警告' : 'Warning' %><br>
+                                        <%= lang === 'zh' ? '警告' : 'Warning' %><br>
                                         <small><%= lang === 'zh' ? '失败次数' : 'Failures' %>: <%= user.login_failures %></small><br>
                                         <button class="btn-clear" data-action="clear-failures" data-username="<%= user.username %>"><%= lang === 'zh' ? '清除' : 'Clear' %></button>
                                     </div>
                                 <% } else { %>
-                                    <span class="status-normal">✅ <%= lang === 'zh' ? '正常' : 'Normal' %></span>
+                                    <span class="status-normal"><%= lang === 'zh' ? '正常' : 'Normal' %></span>
                                 <% } %>
                             </td>
                         </tr>
@@ -205,7 +205,7 @@
             </table>
 
             <div class="recent-records">
-                <h2>🧾 <%= lang === 'zh' ? '最近游戏记录' : 'Recent Game Records' %></h2>
+                <h2><%= lang === 'zh' ? '最近游戏记录' : 'Recent game records' %></h2>
                 <div class="records-table-wrap">
                     <table class="records-table">
                         <thead>
@@ -241,7 +241,7 @@
             </div>
 
             <div class="dictation-records">
-                <h2>✍️ <%= lang === 'zh' ? '听写提交记录' : 'Dictation Submissions' %></h2>
+                <h2><%= lang === 'zh' ? '听写提交记录' : 'Dictation submissions' %></h2>
                 <div class="records-table-wrap">
                     <table class="records-table">
                         <thead>
@@ -311,7 +311,7 @@
             </div>
 
             <div class="dictation-latest">
-                <h2>🧾 <%= lang === 'zh' ? '听写套题最近结果' : 'Dictation Latest Results' %></h2>
+                <h2><%= lang === 'zh' ? '听写套题最近结果' : 'Latest dictation results' %></h2>
                 <div class="records-table-wrap">
                     <table class="records-table">
                         <thead>

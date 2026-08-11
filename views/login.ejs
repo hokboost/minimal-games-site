@@ -6,11 +6,11 @@
     <title><%= title %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body class="app-redesign page-login">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
-        <h1>🔐 <%= t.auth.login %> Minimal Games</h1>
+        <h1><%= t.auth.login %> Minimal Games</h1>
         <form method="POST" action="/login" class="auth-form">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
 
@@ -31,13 +31,13 @@
 
         <% if (typeof req !== 'undefined' && req.query && req.query.registered === 'true') { %>
             <div class="success-message">
-                <%= lang === 'zh' ? '✅ 注册成功！请登录您的账户。' : '✅ Registration successful! Please login to your account.' %>
+                <%= lang === 'zh' ? '注册成功，请登录您的账户。' : 'Registration successful. Please log in to your account.' %>
             </div>
         <% } %>
 
         <% if (typeof req !== 'undefined' && req.query && req.query.kicked === 'true') { %>
             <div class="warning-message">
-                <%= lang === 'zh' ? '⚠️ 您的账号已在其他设备登录，请重新登录。' : '⚠️ Your account has been logged in on another device. Please login again.' %>
+                <%= lang === 'zh' ? '您的账号已在其他设备登录，请重新登录。' : 'Your account was used on another device. Please log in again.' %>
             </div>
         <% } %>
 

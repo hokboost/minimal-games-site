@@ -47,7 +47,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 username,
                 balance,
                 csrfToken: req.session.csrfToken,
-                canWishTest: username === 'hokboost'
+                canWishTest: req.session.user.is_admin === true
             });
         }).catch((dbError) => {
             console.error('Database query error:', dbError);
@@ -55,7 +55,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 username,
                 balance,
                 csrfToken: req.session.csrfToken,
-                canWishTest: username === 'hokboost'
+                canWishTest: req.session.user.is_admin === true
             });
         });
     });
@@ -83,10 +83,9 @@ module.exports = function registerWishRoutes(app, deps) {
 
         const maxAttempts = 2;
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-            const client = await pool.connect();
-            // 事务内仅保留扣款 + 进度 + 背包，其他日志记录提交后再写，缩短锁时间
-            const postCommitInserts = [];
+            let client;
             try {
+                client = await pool.connect();
                 await client.query('BEGIN');
                 const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':wish\')) AS locked', [username]);
                 if (!lock.rows[0].locked) {
@@ -94,32 +93,28 @@ module.exports = function registerWishRoutes(app, deps) {
                     return res.status(429).json({ success: false, message: '祈愿过于频繁，请稍后重试' });
                 }
 
-                // 锁定祈愿进度
-                let progressResult = await client.query(
-                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+                await client.query(`
+                    INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                    VALUES ($1, $2, 0, 0, 0, 0)
+                    ON CONFLICT (username, gift_type) DO NOTHING
+                `, [username, giftType]);
+                const progressResult = await client.query(
+                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
                     [username, giftType]
                 );
 
-                if (progressResult.rows.length === 0) {
-                    await client.query(`
-                        INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
-                        VALUES ($1, $2, 0, 0, 0, 0)
-                    `, [username, giftType]);
-
-                    progressResult = await client.query(
-                        'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
-                        [username, giftType]
-                    );
-                }
-
                 const progress = progressResult.rows[0];
+                const totalWishes = Number(progress.total_wishes) || 0;
+                const consecutiveFails = Number(progress.consecutive_fails) || 0;
+                const totalSpent = Number(progress.total_spent) || 0;
+                const totalRewardsValue = Number(progress.total_rewards_value) || 0;
 
                 // 扣除祈愿费用（同一事务）
                 const betResult = await BalanceLogger.updateBalance({
                     username: username,
                     amount: -wishCost,
                     operationType: 'wish_bet',
-                    description: `幸运祈愿：${wishCost} 电币`,
+                    description: `幸运祈愿：${wishCost} 积分`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
                     client,
@@ -136,11 +131,11 @@ module.exports = function registerWishRoutes(app, deps) {
                     return res.status(400).json({ success: false, message: betResult.message });
                 }
 
-                const balanceBefore = betResult.balance + wishCost;
+                const balanceBefore = betResult.balanceBefore;
                 let balanceAfter = betResult.balance;
 
                 // 判断是否成功
-                const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
+                const isGuaranteed = Number.isFinite(guaranteeThreshold) && consecutiveFails >= guaranteeThreshold;
                 const randomSuccess = randomFloat() < successRate;
                 const success = isGuaranteed || randomSuccess;
 
@@ -172,10 +167,10 @@ module.exports = function registerWishRoutes(app, deps) {
                 }
 
                 // 更新祈愿进度
-                const newTotalWishes = progress.total_wishes + 1;
-                const newConsecutiveFails = success ? 0 : progress.consecutive_fails + 1;
-                const newTotalSpent = progress.total_spent + wishCost;
-                const newTotalRewardsValue = progress.total_rewards_value + (success ? rewardValue : 0);
+                const newTotalWishes = totalWishes + 1;
+                const newConsecutiveFails = success ? 0 : consecutiveFails + 1;
+                const newTotalSpent = totalSpent + wishCost;
+                const newTotalRewardsValue = totalRewardsValue + (success ? rewardValue : 0);
 
                 await client.query(`
                     UPDATE wish_progress 
@@ -193,71 +188,51 @@ module.exports = function registerWishRoutes(app, deps) {
                     giftType
                     ]);
 
-                // 事务后异步写 wish_results / wish_sessions，避免占用锁时间
-                postCommitInserts.push(async () => {
-                    try {
-                        const crypto = require('crypto');
-                        const proof = crypto.createHash('sha256')
-                            .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                            .digest('hex');
-
-                        await pool.query(`
-                            INSERT INTO wish_results (
-                                username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
-                                wishes_count, is_guaranteed, game_details, created_at
-                            ) 
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
-                        `, [
-                            username,
-                            giftType,
-                            wishCost,
-                            success,
-                            reward,
-                            success ? rewardValue : null,
-                            balanceBefore,
-                            balanceAfter,
-                            newTotalWishes,
-                            isGuaranteed,
-                            JSON.stringify({
-                                success_rate: successRate,
-                                is_guaranteed: isGuaranteed,
-                                consecutive_fails_before: progress.consecutive_fails,
-                                proof: proof,
-                                timestamp: new Date().toISOString()
-                            })
-                        ]);
-                    } catch (dbError) {
-                        console.error('祈愿记录存储失败:', dbError);
-                    }
-                });
-
-                postCommitInserts.push(async () => {
-                    try {
-                        await pool.query(`
-                            INSERT INTO wish_sessions (
-                                username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
-                            )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
-                        `, [
-                            username,
-                            giftType,
-                            rewardName,
-                            1,
-                            wishCost,
-                            success ? 1 : 0,
-                            success ? rewardValue : 0
-                        ]);
-                    } catch (dbError) {
-                        console.error('祈愿会话记录失败:', dbError);
-                    }
-                });
+                const crypto = require('crypto');
+                const proof = crypto.createHash('sha256')
+                    .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                    .digest('hex');
+                await client.query(`
+                    INSERT INTO wish_results (
+                        username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
+                        wishes_count, is_guaranteed, game_details, created_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                `, [
+                    username,
+                    giftType,
+                    wishCost,
+                    success,
+                    reward,
+                    success ? rewardValue : null,
+                    balanceBefore,
+                    balanceAfter,
+                    newTotalWishes,
+                    isGuaranteed,
+                    JSON.stringify({
+                        success_rate: successRate,
+                        is_guaranteed: isGuaranteed,
+                        consecutive_fails_before: consecutiveFails,
+                        proof,
+                        timestamp: new Date().toISOString()
+                    })
+                ]);
+                await client.query(`
+                    INSERT INTO wish_sessions (
+                        username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                `, [
+                    username,
+                    giftType,
+                    rewardName,
+                    1,
+                    wishCost,
+                    success ? 1 : 0,
+                    success ? rewardValue : 0
+                ]);
 
                 await client.query('COMMIT');
-
-                // 提交后写日志，不阻塞事务
-                for (const task of postCommitInserts) {
-                    task().catch((err) => console.error('祈愿提交后记录失败:', err));
-                }
 
                 return res.json({
                     success: true,
@@ -282,7 +257,9 @@ module.exports = function registerWishRoutes(app, deps) {
                     giftName: rewardName
                 });
             } catch (error) {
-                try { await client.query('ROLLBACK'); } catch (e) { console.error('Wish play rollback failed:', e); }
+                if (client) await client.query('ROLLBACK').catch((rollbackError) => {
+                    console.error('Wish play rollback failed:', rollbackError);
+                });
                 const isLockError = lockErrorCodes.has(error.code);
                 if (isLockError && attempt < maxAttempts) {
                     await sleep(150);
@@ -291,7 +268,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 console.error('Wish play error:', error);
                 return res.status(500).json({ success: false, message: '祈愿失败，请稍后重试' });
             } finally {
-                client.release();
+                client?.release();
             }
         }
     });
@@ -300,8 +277,8 @@ module.exports = function registerWishRoutes(app, deps) {
     app.get('/api/wish/history', requireLogin, requireAuthorized, async (req, res) => {
         try {
             const username = req.session.user.username;
-            const page = parseInt(req.query.page) || 1;
-            const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
             const offset = (page - 1) * limit;
 
             const result = await pool.query(`
@@ -354,6 +331,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 await pool.query(`
                     INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
                     VALUES ($1, $2, 0, 0, 0, 0)
+                    ON CONFLICT (username, gift_type) DO NOTHING
                 `, [username, giftType]);
 
                 result = await pool.query(
@@ -400,6 +378,7 @@ module.exports = function registerWishRoutes(app, deps) {
                        wi.gift_name,
                        wi.status,
                        wi.gift_exchange_id,
+                       ge.delivery_status,
                        wi.last_failure_reason,
                        CASE
                            WHEN u.bilibili_room_id IS NULL THEN NULL
@@ -414,6 +393,7 @@ module.exports = function registerWishRoutes(app, deps) {
                        to_char(wi.created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at
                 FROM wish_inventory wi
                 JOIN users u ON u.username = wi.username
+                LEFT JOIN gift_exchanges ge ON ge.id = wi.gift_exchange_id
                 WHERE wi.username = $1
                 ORDER BY wi.created_at DESC
                 LIMIT 100
@@ -440,7 +420,7 @@ module.exports = function registerWishRoutes(app, deps) {
             const username = req.session.user.username;
             const inventoryId = Number(req.body.inventoryId);
 
-            if (!Number.isFinite(inventoryId)) {
+            if (!Number.isSafeInteger(inventoryId) || inventoryId < 1) {
                 return res.status(400).json({ success: false, message: '参数无效' });
             }
 
@@ -453,32 +433,6 @@ module.exports = function registerWishRoutes(app, deps) {
         } catch (error) {
             console.error('背包送出失败:', error);
             res.status(500).json({ success: false, message: '送出失败' });
-        }
-    });
-
-    // Wish API 路由
-    app.post('/api/wish',
-        basicRateLimit,
-        csrfProtection,
-        (req, res) => {
-        try {
-            const { currentCount = 0, username } = req.body;
-            const result = GameLogic.wish.makeWish(currentCount);
-
-            // 触发飘屏广播
-            if (username) {
-                broadcastDanmaku(username, 'wish', result.isWin);
-            }
-
-            res.json({
-                success: true,
-                isWin: result.isWin,
-                guaranteed: result.guaranteed,
-                globalRate: result.globalRate
-            });
-        } catch (error) {
-            console.error('Wish error:', error);
-            res.status(500).json({ success: false, message: '祈愿系统故障' });
         }
     });
 
@@ -514,8 +468,6 @@ module.exports = function registerWishRoutes(app, deps) {
             try {
                 client = await pool.connect();
                 await client.query('BEGIN');
-                // 事务内只保留扣款 + 进度 + 背包，记录类写在提交后
-                const postCommitInserts = [];
                 const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':wish\')) AS locked', [username]);
                 if (!lock.rows[0].locked) {
                     await client.query('ROLLBACK');
@@ -528,7 +480,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     username,
                     amount: -totalCost,
                     operationType: 'wish_bet_batch',
-                    description: `十连祈愿扣费：${totalCost} 电币`,
+                    description: `十连祈愿扣费：${totalCost} 积分`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
                     client,
@@ -538,28 +490,34 @@ module.exports = function registerWishRoutes(app, deps) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: totalBetResult.message });
                 }
-                const startingBalance = totalBetResult.balance + totalCost;
+                const startingBalance = totalBetResult.balanceBefore;
                 const finalBalance = totalBetResult.balance;
 
-                // 获取用户当前祈愿进度（加锁）
-                let progressResult = await client.query(
-                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+                await client.query(`
+                    INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
+                    VALUES ($1, $2, 0, 0, 0, 0)
+                    ON CONFLICT (username, gift_type) DO NOTHING
+                `, [username, giftType]);
+                const progressResult = await client.query(
+                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
                     [username, giftType]
                 );
 
-                if (progressResult.rows.length === 0) {
-                    await client.query(`
-                        INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
-                        VALUES ($1, $2, 0, 0, 0, 0)
-                    `, [username, giftType]);
-
-                    progressResult = await client.query(
-                        'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
-                        [username, giftType]
-                    );
-                }
-
-                let progress = progressResult.rows[0];
+                let progress = {
+                    ...progressResult.rows[0],
+                    total_wishes: Number(progressResult.rows[0].total_wishes) || 0,
+                    consecutive_fails: Number(progressResult.rows[0].consecutive_fails) || 0,
+                    total_spent: Number(progressResult.rows[0].total_spent) || 0,
+                    total_rewards_value: Number(progressResult.rows[0].total_rewards_value) || 0
+                };
+                const roomResult = await client.query(
+                    'SELECT bilibili_room_id FROM users WHERE username = $1',
+                    [username]
+                );
+                const roomId = roomResult.rows[0]?.bilibili_room_id || null;
+                const expiresAt = roomId
+                    ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
+                    : "'infinity'::timestamptz";
                 let successCount = 0;
                 for (let i = 0; i < batchCount; i++) {
                     const balanceBefore = startingBalance - (wishCost * i);
@@ -573,33 +531,18 @@ module.exports = function registerWishRoutes(app, deps) {
                     let reward = null;
                     if (success) {
                         reward = rewardName;
-
-                        // 写入背包奖励
-                        try {
-                            const roomResult = await client.query(
-                                'SELECT bilibili_room_id FROM users WHERE username = $1',
-                                [username]
-                            );
-                            const roomId = roomResult.rows[0]?.bilibili_room_id || null;
-                            const expiresAt = roomId
-                                ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
-                                : "'infinity'::timestamptz";
-
-                            await client.query(`
-                                INSERT INTO wish_inventory (
-                                    username, gift_type, gift_name, bilibili_gift_id, status, expires_at,
-                                    created_at, updated_at
-                                )
-                                VALUES (
-                                    $1, $2, $3, $4, 'stored',
-                                    ${expiresAt},
-                                    (NOW() AT TIME ZONE 'Asia/Shanghai'),
-                                    (NOW() AT TIME ZONE 'Asia/Shanghai')
-                                )
-                            `, [username, giftType, rewardName, config.bilibiliGiftId]);
-                        } catch (dbError) {
-                            console.error('祈愿背包记录存储失败:', dbError);
-                        }
+                        await client.query(`
+                            INSERT INTO wish_inventory (
+                                username, gift_type, gift_name, bilibili_gift_id, status, expires_at,
+                                created_at, updated_at
+                            )
+                            VALUES (
+                                $1, $2, $3, $4, 'stored',
+                                ${expiresAt},
+                                (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                                (NOW() AT TIME ZONE 'Asia/Shanghai')
+                            )
+                        `, [username, giftType, rewardName, config.bilibiliGiftId]);
                     }
 
                     // 更新祈愿进度
@@ -631,43 +574,35 @@ module.exports = function registerWishRoutes(app, deps) {
                         successCount += 1;
                     }
 
-                    // 提交后再写 wish_results，避免事务内多次 insert
-                    postCommitInserts.push(async () => {
-                        try {
-                            const crypto = require('crypto');
-                            const proof = crypto.createHash('sha256')
-                                .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                                .digest('hex');
-
-                            await pool.query(`
-                                INSERT INTO wish_results (
-                                    username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
-                                    wishes_count, is_guaranteed, game_details, created_at
-                                ) 
-                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
-                            `, [
-                                username,
-                                giftType,
-                                wishCost,
-                                success,
-                                reward,
-                                success ? rewardValue : null,
-                                balanceBefore,
-                                balanceAfterThis,
-                                newTotalWishes,
-                                isGuaranteed,
-                                JSON.stringify({
-                                    success_rate: successRate,
-                                    is_guaranteed: isGuaranteed,
-                                    consecutive_fails_before: progress.consecutive_fails,
-                                    proof: proof,
-                                    timestamp: new Date().toISOString()
-                                })
-                            ]);
-                        } catch (dbError) {
-                            console.error('祈愿记录存储失败:', dbError);
-                        }
-                    });
+                    const crypto = require('crypto');
+                    const proof = crypto.createHash('sha256')
+                        .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                        .digest('hex');
+                    await client.query(`
+                        INSERT INTO wish_results (
+                            username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
+                            wishes_count, is_guaranteed, game_details, created_at
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                    `, [
+                        username,
+                        giftType,
+                        wishCost,
+                        success,
+                        reward,
+                        success ? rewardValue : null,
+                        balanceBefore,
+                        balanceAfterThis,
+                        newTotalWishes,
+                        isGuaranteed,
+                        JSON.stringify({
+                            success_rate: successRate,
+                            is_guaranteed: isGuaranteed,
+                            consecutive_fails_before: progress.consecutive_fails,
+                            proof,
+                            timestamp: new Date().toISOString()
+                        })
+                    ]);
 
                     progress = {
                         ...progress,
@@ -679,34 +614,22 @@ module.exports = function registerWishRoutes(app, deps) {
                     };
                 }
 
-                // 提交后写会话记录
-                postCommitInserts.push(async () => {
-                    try {
-                        await pool.query(`
-                            INSERT INTO wish_sessions (
-                                username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
-                            )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
-                        `, [
-                            username,
-                            giftType,
-                            rewardName,
-                            batchCount,
-                            wishCost * batchCount,
-                            successCount,
-                            successCount * rewardValue
-                        ]);
-                    } catch (dbError) {
-                        console.error('祈愿会话记录失败:', dbError);
-                    }
-                });
+                await client.query(`
+                    INSERT INTO wish_sessions (
+                        username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                `, [
+                    username,
+                    giftType,
+                    rewardName,
+                    batchCount,
+                    wishCost * batchCount,
+                    successCount,
+                    successCount * rewardValue
+                ]);
 
                 await client.query('COMMIT');
-
-                // 提交后执行记录任务，不阻塞事务
-                for (const task of postCommitInserts) {
-                    task().catch((err) => console.error('祈愿提交后记录失败:', err));
-                }
 
                 return res.json({
                     success: true,
@@ -759,7 +682,7 @@ module.exports = function registerWishRoutes(app, deps) {
         async (req, res) => {
         try {
             const username = req.session.user.username;
-            if (username !== 'hokboost') {
+            if (req.session.user.is_admin !== true) {
                 return res.status(403).json({ success: false, message: '无权限' });
             }
 
@@ -770,7 +693,7 @@ module.exports = function registerWishRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
             }
 
-            if (!Number.isFinite(count) || count < 1 || count > 100000) {
+            if (!Number.isInteger(count) || count < 1 || count > 100000) {
                 return res.status(400).json({ success: false, message: '次数无效' });
             }
 

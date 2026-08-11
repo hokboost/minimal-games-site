@@ -12,9 +12,15 @@
         .notification { margin: 10px 0; padding: 10px; background: #e3f2fd; }
         .alert { margin: 10px 0; padding: 10px; background: #fff3e0; }
     </style>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/redesign.css">
 </head>
-<body>
-    <h1>WebSocket通知测试页面</h1>
+<body class="app-redesign page-test-websocket">
+    <div class="container">
+    <div class="header">
+        <h1>WebSocket 通知测试</h1>
+        <div class="nav-links"><a href="/admin">← 返回管理后台</a></div>
+    </div>
     
     <div class="test-section">
         <h3>连接状态</h3>
@@ -45,8 +51,10 @@
         <h3>通知显示区</h3>
         <div id="notification-area"></div>
     </div>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/ui-shell.js" defer></script>
     <script>
         let socket = null;
         let currentUser = '';

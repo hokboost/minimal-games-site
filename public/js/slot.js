@@ -12,7 +12,7 @@
         }
         let formatted = outcomeMap[outcome] || outcome;
         formatted = formatted.replace('中奖', 'Win');
-        formatted = formatted.replace('电币', 'coins');
+        formatted = formatted.replace('积分', 'points');
         return formatted;
     };
 
@@ -49,8 +49,8 @@
 
                 if (isWin && payout > 0) {
                     result.textContent = t(
-                        `🎉 恭喜中奖！获得 ${payout} 电币`,
-                        `🎉 You won! Earned ${payout} coins`
+                        `恭喜中奖！获得 ${payout} 积分`,
+                        `You won! Earned ${payout} points`
                     );
                     result.className = 'result-text big';
                     r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1.4)';
@@ -58,10 +58,10 @@
                         r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1)';
                     }, 500);
                 } else if (isClose) {
-                    result.textContent = t('😭 差一点点就中了！继续努力', '😭 So close! Try again');
+                    result.textContent = t('差一点点就中了！继续努力', 'So close! Try again');
                     result.className = 'result-text narrow';
                 } else {
-                    result.textContent = t('😅 三个数字不同，未中奖', '😅 No match this time');
+                    result.textContent = t('三个数字不同，未中奖', 'No match this time');
                     result.className = 'result-text narrow';
                 }
 
@@ -75,24 +75,24 @@
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
 
         if (!betAmount || betAmount < 1 || betAmount > 1000) {
-            alert(t('请输入有效的投注金额 (1-1000电币)', 'Enter a valid bet amount (1-1000 coins)'));
+            alert(t('请输入有效的投注金额 (1-1000积分)', 'Enter a valid bet amount (1-1000 points)'));
             return;
         }
 
         if (currentBalance < betAmount) {
             alert(t(
-                `⚡ 电币不足！当前余额: ${currentBalance} 电币，需要: ${betAmount} 电币。仅供娱乐，虚拟电币不可兑换真实货币。`,
-                `⚡ Insufficient coins! Balance: ${currentBalance}, needed: ${betAmount}. For entertainment only, virtual coins cannot be exchanged for real money.`
+                `积分不足！当前余额: ${currentBalance} 积分，需要: ${betAmount} 积分。仅供娱乐，虚拟积分不可兑换真实货币。`,
+                `Insufficient points! Balance: ${currentBalance}, needed: ${betAmount}. For entertainment only, virtual points cannot be exchanged for real money.`
             ));
             return;
         }
 
         btn.disabled = true;
-        result.textContent = t('🎰 游戏中...', '🎰 Spinning...');
+        result.textContent = t('游戏中...', 'Spinning...');
         result.className = 'result-text';
 
         try {
-            const response = await fetch('/api/slot/play', {
+            const response = await window.idempotentFetch('/api/slot/play', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -107,7 +107,7 @@
             const data = await response.json();
             if (!data.success) {
                 const serverMessage = translateServerMessage(data.message);
-                result.textContent = t(`❌ 游戏失败：${serverMessage}`, `❌ Game failed: ${serverMessage}`);
+                result.textContent = t(`游戏失败：${serverMessage}`, `Game failed: ${serverMessage}`);
                 return;
             }
 
@@ -122,29 +122,29 @@
                 let resultMessage;
                 if (outcome === '不亏不赚') {
                     resultMessage = t(
-                        `🎯 ${outcome}！投注: ${betAmount} 电币，返还: ${payout} 电币`,
-                        `🎯 ${formatOutcome(outcome)}! Bet: ${betAmount} coins, returned: ${payout} coins`
+                        `${outcome}！投注: ${betAmount} 积分，返还: ${payout} 积分`,
+                        `${formatOutcome(outcome)}! Bet: ${betAmount} points, returned: ${payout} points`
                     );
                 } else if (outcome === '归零') {
                     resultMessage = t(
-                        `💸 ${outcome}！投注: ${betAmount} 电币，损失全部投注`,
-                        `💸 ${formatOutcome(outcome)}! Bet: ${betAmount} coins, lost the full stake`
+                        `${outcome}！投注: ${betAmount} 积分，损失全部投注`,
+                        `${formatOutcome(outcome)}! Bet: ${betAmount} points, lost the full stake`
                     );
                 } else {
                     resultMessage = t(
-                        `🎉 ${outcome}！投注: ${betAmount} 电币，获得: ${payout} 电币`,
-                        `🎉 ${formatOutcome(outcome)}! Bet: ${betAmount} coins, earned: ${payout} coins`
+                        `${outcome}！投注: ${betAmount} 积分，获得: ${payout} 积分`,
+                        `${formatOutcome(outcome)}! Bet: ${betAmount} points, earned: ${payout} points`
                     );
                 }
                 result.textContent = t(
-                    `${resultMessage} | 余额: ${finalBalance} 电币`,
-                    `${resultMessage} | Balance: ${finalBalance} coins`
+                    `${resultMessage} | 余额: ${finalBalance} 积分`,
+                    `${resultMessage} | Balance: ${finalBalance} points`
                 );
                 document.getElementById('current-balance').textContent = finalBalance;
             });
         } catch (error) {
             console.error('Slot play error:', error);
-            result.textContent = t('⚠️ 网络错误，请稍后重试', '⚠️ Network error, please try again');
+            result.textContent = t('网络错误，请稍后重试', 'Network error, please try again');
         } finally {
             btn.disabled = false;
         }

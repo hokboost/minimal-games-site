@@ -1,0 +1,46 @@
+<header class="site-header">
+    <a class="site-brand" href="/" aria-label="Minimal Games">
+        <span class="brand-mark" aria-hidden="true">
+            <i></i><i></i><i></i><i></i>
+        </span>
+        <span class="brand-copy">
+            <strong>Minimal Games</strong>
+            <small><%= lang === 'zh' ? '随时玩一局' : 'Play a little' %></small>
+        </span>
+    </a>
+
+    <nav class="site-nav" aria-label="<%= lang === 'zh' ? '主导航' : 'Main navigation' %>">
+        <a href="/" class="<%= active === 'home' ? 'active' : '' %>"><%= lang === 'zh' ? '游戏' : 'Games' %></a>
+        <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+            <a href="/gifts"><%= lang === 'zh' ? '礼物' : 'Gifts' %></a>
+            <a href="/profile"><%= lang === 'zh' ? '记录' : 'Activity' %></a>
+        <% } %>
+    </nav>
+
+    <div class="site-actions">
+        <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+            <a class="balance-chip" href="/profile" aria-label="<%= lang === 'zh' ? '查看积分余额' : 'View point balance' %>">
+                <span class="balance-icon" aria-hidden="true">ϟ</span>
+                <span><strong><%= balance !== null && typeof balance !== 'undefined' ? balance : 0 %></strong> <%= lang === 'zh' ? '积分' : 'points' %></span>
+            </a>
+            <% if (user.is_admin) { %>
+                <a class="text-link" href="/admin"><%= lang === 'zh' ? '管理' : 'Admin' %></a>
+            <% } %>
+            <a class="user-link" href="/profile" title="<%= user.username %>">
+                <span class="user-avatar" aria-hidden="true"><%= String(user.username || '?').charAt(0).toUpperCase() %></span>
+                <span class="user-name"><%= user.username %></span>
+            </a>
+            <a class="text-link logout-link" href="/logout"><%= lang === 'zh' ? '退出' : 'Log out' %></a>
+        <% } else if (typeof user !== 'undefined' && user) { %>
+            <span class="pending-chip"><%= lang === 'zh' ? '等待授权' : 'Pending' %></span>
+            <span class="user-link">
+                <span class="user-avatar" aria-hidden="true"><%= String(user.username || '?').charAt(0).toUpperCase() %></span>
+                <span class="user-name"><%= user.username %></span>
+            </span>
+            <a class="text-link logout-link" href="/logout"><%= lang === 'zh' ? '退出' : 'Log out' %></a>
+        <% } else { %>
+            <a class="text-link" href="/login"><%= t.auth.login %></a>
+            <a class="button-link" href="/register"><%= t.auth.register %></a>
+        <% } %>
+    </div>
+</header>

@@ -10,16 +10,53 @@ module.exports = function registerGiftRoutes(app, deps) {
         generateCSRFToken,
         enqueueWishInventorySend
     } = deps;
-    const crypto = require('crypto');
+    const redeemableGiftTypes = new Set(['heartbox', 'fanlight', 'tiedu_one']);
+
+    async function enqueueNextStoredBlindbox(username, completedExchangeId) {
+        if (!enqueueWishInventorySend || !username) return;
+
+        const completedItem = await pool.query(`
+            SELECT source_batch_id
+            FROM wish_inventory
+            WHERE gift_exchange_id = $1 AND username = $2 AND source_type = 'blindbox'
+            LIMIT 1
+        `, [completedExchangeId, username]);
+        const preferredBatchId = completedItem.rows[0]?.source_batch_id || null;
+        const nextItem = await pool.query(`
+            SELECT id
+            FROM wish_inventory
+            WHERE username = $1
+              AND source_type = 'blindbox'
+              AND status = 'stored'
+            ORDER BY
+              CASE WHEN source_batch_id = $2 THEN 0 ELSE 1 END,
+              created_at ASC,
+              batch_order ASC
+            LIMIT 1
+        `, [username, preferredBatchId]);
+        if (!nextItem.rows[0]) return;
+
+        const enqueueResult = await enqueueWishInventorySend({
+            inventoryId: nextItem.rows[0].id,
+            username
+        });
+        if (!enqueueResult.success && enqueueResult.message === '送出失败，请稍后重试') {
+            throw new Error(enqueueResult.message);
+        }
+    }
 
     // 自动处理卡住的礼物任务，超时退款
     const monitorStuckGiftTasks = () => {
         const INTERVAL_MS = 10 * 60 * 1000; // 10分钟扫描一次
-        const TIMEOUT_SQL = `created_at < (NOW() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '30 minutes'`;
-        setInterval(async () => {
+        const TIMEOUT_SQL = `(
+            (delivery_status = 'pending' AND created_at < NOW() - INTERVAL '30 minutes')
+            OR
+            (delivery_status = 'processing' AND processed_at < NOW() - INTERVAL '30 minutes')
+        )`;
+        const interval = setInterval(async () => {
             try {
                 const stuckTasks = await pool.query(`
-                    SELECT id, username, cost
+                    SELECT id, username, cost, delivery_status
                     FROM gift_exchanges
                     WHERE status = 'funds_locked'
                       AND delivery_status IN ('pending', 'processing')
@@ -32,18 +69,44 @@ module.exports = function registerGiftRoutes(app, deps) {
                     const client = await pool.connect();
                     try {
                         await client.query('BEGIN');
+                        const lockedResult = await client.query(`
+                            SELECT username, cost, delivery_status
+                            FROM gift_exchanges
+                            WHERE id = $1
+                              AND status = 'funds_locked'
+                              AND delivery_status IN ('pending', 'processing')
+                            FOR UPDATE
+                        `, [task.id]);
+                        if (lockedResult.rows.length === 0) {
+                            await client.query('ROLLBACK');
+                            continue;
+                        }
+                        const lockedTask = lockedResult.rows[0];
+                        if (lockedTask.delivery_status === 'processing') {
+                            await client.query(
+                                `UPDATE gift_exchanges
+                                 SET delivery_status = 'uncertain',
+                                     failure_reason = '发送服务已领取任务，但超时未确认结果',
+                                     updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                                 WHERE id = $1 AND status = 'funds_locked'`,
+                                [task.id]
+                            );
+                            await client.query('COMMIT');
+                            console.error(`礼物任务结果待人工确认，未自动退款或重发: id=${task.id}`);
+                            continue;
+                        }
                         const refund = await BalanceLogger.updateBalance({
-                            username: task.username,
-                            amount: task.cost,
+                            username: lockedTask.username,
+                            amount: Number(lockedTask.cost),
                             operationType: 'gift_timeout_refund',
-                            description: `礼物任务超时自动退款: ${task.cost} 电币`,
+                            description: `礼物任务超时自动退款: ${lockedTask.cost} 积分`,
                             requireSufficientBalance: false,
                             client,
                             managedTransaction: true
                         });
                         if (!refund.success) {
                             await client.query('ROLLBACK');
-                            console.error(`自动退款失败，任务ID=${task.id}, 用户=${task.username}`);
+                            console.error(`自动退款失败，任务ID=${task.id}, 用户=${lockedTask.username}`);
                             continue;
                         }
                         await client.query(
@@ -52,6 +115,15 @@ module.exports = function registerGiftRoutes(app, deps) {
                              WHERE id = $1`,
                             [task.id]
                         );
+                        await client.query(`
+                            UPDATE wish_inventory
+                            SET status = 'stored',
+                                gift_exchange_id = NULL,
+                                last_failure_reason = '发送任务在领取前超时',
+                                expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
+                                updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                            WHERE gift_exchange_id = $1
+                        `, [task.id]);
                         await client.query('COMMIT');
                         console.log(`✅ 自动处理卡住礼物任务，已退款并标记失败: id=${task.id}`);
                     } catch (err) {
@@ -65,23 +137,8 @@ module.exports = function registerGiftRoutes(app, deps) {
                 console.error('扫描卡住礼物任务失败:', err);
             }
         }, INTERVAL_MS);
+        interval.unref?.();
     };
-
-    function verifyGiftTaskHMAC(taskId, timestamp, signature) {
-        const secret = process.env.GIFT_TASKS_HMAC_SECRET;
-        const enforce = process.env.GIFT_TASKS_HMAC_ENFORCE === 'true';
-        if (!secret || !timestamp || !signature) {
-            return enforce ? { valid: false, error: '签名缺失' } : { valid: true };
-        }
-        const payload = `${taskId}:${timestamp}`;
-        const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-        if (signature !== expected) return { valid: false, error: '签名无效' };
-        const age = Date.now() - Number(timestamp);
-        if (!Number.isFinite(age) || age < 0 || age > 300000) {
-            return { valid: false, error: '请求已过期' };
-        }
-        return { valid: true };
-    }
 
     // 礼物兑换页面
     app.get('/gifts', requireLogin, requireAuthorized, async (req, res) => {
@@ -128,72 +185,134 @@ module.exports = function registerGiftRoutes(app, deps) {
     });
 
     app.post('/api/pk/start', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        let client;
         try {
+            client = await pool.connect();
             const username = req.session.user.username;
-            const roomResult = await pool.query(
+            await client.query('BEGIN');
+            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`pk:${username}`]);
+            const roomResult = await client.query(
                 'SELECT bilibili_room_id FROM users WHERE username = $1',
                 [username]
             );
             const roomId = roomResult.rows[0]?.bilibili_room_id;
             if (!roomId) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '请先绑定B站房间号' });
             }
-            const pendingResult = await pool.query(
-                "SELECT COUNT(*) AS count FROM pk_tasks WHERE username = $1 AND status IN ('pending','processing') AND action = 'start'",
+            const pendingResult = await client.query(
+                `SELECT id, action, status
+                 FROM pk_tasks
+                 WHERE username = $1 AND status IN ('pending', 'processing')
+                 ORDER BY created_at
+                 FOR UPDATE`,
                 [username]
             );
-            if (Number(pendingResult.rows[0]?.count || 0) > 0) {
+            if (pendingResult.rows.some((task) => task.action === 'start')) {
+                await client.query('ROLLBACK');
                 return res.json({ success: true, queued: true, message: '已在队列中' });
             }
-            await pool.query(
+            await client.query(
+                `UPDATE pk_tasks
+                 SET status = 'superseded', processed_at = NOW(), error = '由较新的启动请求替代'
+                 WHERE username = $1 AND status = 'pending'`,
+                [username]
+            );
+            await client.query(
                 `INSERT INTO pk_tasks (username, room_id, action, status)
                  VALUES ($1, $2, 'start', 'pending')`,
                 [username, String(roomId)]
             );
+            await client.query('COMMIT');
             return res.json({ success: true, queued: true });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('PK start error:', error);
             return res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
-    app.post('/api/pk/stop', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, (req, res) => {
+    app.post('/api/pk/stop', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
+        let client;
         try {
+            client = await pool.connect();
             const username = req.session.user.username;
-            pool.query(
-                "SELECT COUNT(*) AS count FROM pk_tasks WHERE username = $1 AND status IN ('pending','processing') AND action = 'stop'",
+            await client.query('BEGIN');
+            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`pk:${username}`]);
+            const pendingResult = await client.query(
+                `SELECT id, action, status
+                 FROM pk_tasks
+                 WHERE username = $1 AND status IN ('pending', 'processing')
+                 ORDER BY created_at
+                 FOR UPDATE`,
                 [username]
-            ).then((pendingResult) => {
-                if (Number(pendingResult.rows[0]?.count || 0) > 0) {
-                    return res.json({ success: true, queued: true, message: '已在队列中' });
-                }
-                return pool.query(
-                    `INSERT INTO pk_tasks (username, action, status)
-                     VALUES ($1, 'stop', 'pending')`,
-                    [username]
-                ).then(() => res.json({ success: true, queued: true }));
-            }).catch((error) => {
-                console.error('PK stop error:', error);
-                res.status(500).json({ success: false, message: '服务器错误' });
-            });
+            );
+            if (pendingResult.rows.some((task) => task.action === 'stop')) {
+                await client.query('ROLLBACK');
+                return res.json({ success: true, queued: true, message: '已在队列中' });
+            }
+            await client.query(
+                `UPDATE pk_tasks
+                 SET status = 'superseded', processed_at = NOW(), error = '由较新的停止请求替代'
+                 WHERE username = $1 AND status = 'pending'`,
+                [username]
+            );
+            await client.query(
+                `INSERT INTO pk_tasks (username, action, status)
+                 VALUES ($1, 'stop', 'pending')`,
+                [username]
+            );
+            await client.query('COMMIT');
+            return res.json({ success: true, queued: true });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('PK stop error:', error);
             return res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
     app.get('/api/pk-tasks', requireApiKey, async (req, res) => {
         try {
-            const result = await pool.query(`
+            await pool.query(`
                 UPDATE pk_tasks
-                SET status = 'processing', processed_at = NOW()
-                WHERE id IN (
-                    SELECT id FROM pk_tasks
-                    WHERE status = 'pending'
-                    ORDER BY created_at ASC
+                SET status = 'failed',
+                    error = '任务领取后超过10分钟未确认结果',
+                    processed_at = NOW()
+                WHERE status = 'processing'
+                  AND processed_at < NOW() - INTERVAL '10 minutes'
+            `);
+            const result = await pool.query(`
+                WITH claimed AS (
+                    SELECT task.id
+                    FROM pk_tasks task
+                    WHERE task.status = 'pending'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM pk_tasks active
+                          WHERE active.username = task.username
+                            AND active.status = 'processing'
+                      )
+                      AND task.id = (
+                          SELECT first_task.id
+                          FROM pk_tasks first_task
+                          WHERE first_task.username = task.username
+                            AND first_task.status = 'pending'
+                          ORDER BY first_task.created_at ASC, first_task.id ASC
+                          LIMIT 1
+                      )
+                    ORDER BY task.created_at ASC, task.id ASC
+                    FOR UPDATE SKIP LOCKED
                     LIMIT 10
                 )
-                RETURNING id, username, room_id, action, created_at
+                UPDATE pk_tasks AS task
+                SET status = 'processing', processed_at = NOW()
+                FROM claimed
+                WHERE task.id = claimed.id
+                RETURNING task.id, task.username, task.room_id, task.action, task.created_at
             `);
             res.json({ success: true, tasks: result.rows });
         } catch (error) {
@@ -204,14 +323,24 @@ module.exports = function registerGiftRoutes(app, deps) {
 
     app.post('/api/pk-tasks/:id/complete', requireApiKey, async (req, res) => {
         try {
-            const taskId = parseInt(req.params.id, 10);
+            const taskId = Number(req.params.id);
+            if (!Number.isSafeInteger(taskId) || taskId < 1) {
+                return res.status(400).json({ success: false, message: '任务ID无效' });
+            }
             const result = await pool.query(`
                 UPDATE pk_tasks
                 SET status = 'completed', processed_at = NOW()
-                WHERE id = $1
+                WHERE id = $1 AND status = 'processing'
                 RETURNING id
             `, [taskId]);
             if (result.rows.length === 0) {
+                const existing = await pool.query('SELECT status FROM pk_tasks WHERE id = $1', [taskId]);
+                if (existing.rows[0]?.status === 'completed') {
+                    return res.json({ success: true, message: '任务已完成' });
+                }
+                if (existing.rows.length > 0) {
+                    return res.status(409).json({ success: false, message: '任务状态不允许完成' });
+                }
                 return res.status(404).json({ success: false, message: '任务不存在' });
             }
             return res.json({ success: true });
@@ -223,15 +352,25 @@ module.exports = function registerGiftRoutes(app, deps) {
 
     app.post('/api/pk-tasks/:id/fail', requireApiKey, async (req, res) => {
         try {
-            const taskId = parseInt(req.params.id, 10);
-            const errorMessage = req.body?.error || '执行失败';
+            const taskId = Number(req.params.id);
+            if (!Number.isSafeInteger(taskId) || taskId < 1) {
+                return res.status(400).json({ success: false, message: '任务ID无效' });
+            }
+            const errorMessage = String(req.body?.error || '执行失败').slice(0, 1000);
             const result = await pool.query(`
                 UPDATE pk_tasks
                 SET status = 'failed', error = $2, processed_at = NOW()
-                WHERE id = $1
+                WHERE id = $1 AND status = 'processing'
                 RETURNING id
             `, [taskId, errorMessage]);
             if (result.rows.length === 0) {
+                const existing = await pool.query('SELECT status FROM pk_tasks WHERE id = $1', [taskId]);
+                if (existing.rows[0]?.status === 'failed') {
+                    return res.json({ success: true, message: '任务已标记失败' });
+                }
+                if (existing.rows.length > 0) {
+                    return res.status(409).json({ success: false, message: '任务状态不允许失败处理' });
+                }
                 return res.status(404).json({ success: false, message: '任务不存在' });
             }
             return res.json({ success: true });
@@ -244,7 +383,10 @@ module.exports = function registerGiftRoutes(app, deps) {
     app.post('/api/pk/runner/update', requireApiKey, async (req, res) => {
         try {
             const { username, running, roomId, pid } = req.body || {};
-            if (!username || typeof running !== 'boolean') {
+            const normalizedUsername = typeof username === 'string' ? username.trim() : '';
+            const normalizedPid = pid === null || pid === undefined ? null : Number(pid);
+            if (!/^[\p{L}\p{N}_-]{3,32}$/u.test(normalizedUsername) || typeof running !== 'boolean'
+                || (normalizedPid !== null && (!Number.isSafeInteger(normalizedPid) || normalizedPid < 1 || normalizedPid > 2147483647))) {
                 return res.status(400).json({ success: false, message: '参数不完整' });
             }
             await pool.query(`
@@ -253,10 +395,10 @@ module.exports = function registerGiftRoutes(app, deps) {
                 ON CONFLICT (username)
                 DO UPDATE SET room_id = EXCLUDED.room_id, running = EXCLUDED.running, pid = EXCLUDED.pid, updated_at = EXCLUDED.updated_at
             `, [
-                username,
-                roomId ? String(roomId) : null,
+                normalizedUsername,
+                roomId ? String(roomId).slice(0, 50) : null,
                 running,
-                Number.isFinite(Number(pid)) ? Number(pid) : null
+                normalizedPid
             ]);
             res.json({ success: true });
         } catch (error) {
@@ -267,59 +409,111 @@ module.exports = function registerGiftRoutes(app, deps) {
 
     app.post('/api/pk/report', requireApiKey, async (req, res) => {
         try {
-            const { username, roomId, giftIds, script, success, reason, ticketCount } = req.body || {};
-            if (!username || !Array.isArray(giftIds)) {
+            const { reportId, username, roomId, giftIds, script, success, reason, ticketCount } = req.body || {};
+            const normalizedGiftItems = Array.isArray(giftIds) ? giftIds.map((item) => {
+                if (item && typeof item === 'object' && !Array.isArray(item)) {
+                    const id = String(item.id ?? item.gift_id ?? item.giftId ?? '');
+                    const count = Number(item.count ?? 1);
+                    return { id, count };
+                }
+                return { id: String(item), count: 1 };
+            }) : [];
+            if (typeof username !== 'string' || !/^[\p{L}\p{N}_-]{3,32}$/u.test(username)
+                || typeof reportId !== 'string' || !/^[A-Za-z0-9._:-]{16,128}$/.test(reportId)
+                || typeof success !== 'boolean'
+                || !Array.isArray(giftIds) || giftIds.length < 1 || giftIds.length > 1000
+                || normalizedGiftItems.some(({ id, count }) => (
+                    !/^[A-Za-z0-9_-]{1,50}$/.test(id)
+                    || !Number.isSafeInteger(count) || count < 1 || count > 1000000
+                ))
+                || normalizedGiftItems.reduce((sum, item) => sum + item.count, 0) > 1000000) {
                 return res.status(400).json({ success: false, message: '参数不完整' });
             }
             const parseTicketCount = (value) => {
                 const num = Number(value);
-                if (!Number.isFinite(num) || num <= 0) {
+                if (!Number.isSafeInteger(num) || num <= 0 || num > 100000000) {
                     return null;
                 }
-                return Math.round(num);
+                return num;
             };
             const computeTicketCountFromGifts = () => {
                 const poolConfig = giftConfig?.礼物池配置 || {};
                 let total = 0;
-                giftIds.forEach((gid) => {
-                    const entry = poolConfig[String(gid)];
+                let allKnown = true;
+                normalizedGiftItems.forEach(({ id, count }) => {
+                    const entry = poolConfig[id];
                     if (!entry) {
+                        allKnown = false;
                         return;
                     }
                     const price = Array.isArray(entry) ? Number(entry[1]) : Number(entry?.value);
-                    if (!Number.isFinite(price)) {
+                    if (!Number.isFinite(price) || price < 0) {
+                        allKnown = false;
                         return;
                     }
-                    total += Math.round(price * 10);
+                    total += price * 10 * count;
                 });
-                return total > 0 ? total : null;
+                const roundedTotal = Math.round(total);
+                return allKnown && Number.isSafeInteger(roundedTotal)
+                    && roundedTotal > 0 && roundedTotal <= 100000000
+                    ? roundedTotal
+                    : null;
             };
-            const resolvedTicketCount = parseTicketCount(ticketCount) ?? computeTicketCountFromGifts();
-            await pool.query(`
-                INSERT INTO pk_gift_logs (username, room_id, gift_ids, ticket_count, script_name, success, reason)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-            `, [
-                username,
-                roomId ? String(roomId) : null,
-                JSON.stringify(giftIds),
-                Number.isFinite(resolvedTicketCount) ? resolvedTicketCount : null,
-                script ? String(script) : null,
-                typeof success === 'boolean' ? success : null,
-                reason ? String(reason) : null
-            ]);
-            if (success === true && Number.isFinite(resolvedTicketCount) && resolvedTicketCount > 0) {
-                try {
-                    await BalanceLogger.updateBalance({
+            const reportedTicketCount = parseTicketCount(ticketCount);
+            const computedTicketCount = computeTicketCountFromGifts();
+            if (success && computedTicketCount === null) {
+                return res.status(400).json({ success: false, message: '礼物明细无法计算或超过上限' });
+            }
+            if (reportedTicketCount && computedTicketCount && reportedTicketCount !== computedTicketCount) {
+                return res.status(400).json({ success: false, message: '上票积分与礼物明细不匹配' });
+            }
+            const resolvedTicketCount = computedTicketCount ?? reportedTicketCount;
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                const insertResult = await client.query(`
+                    INSERT INTO pk_gift_logs (
+                        report_id, username, room_id, gift_ids, ticket_count, script_name, success, reason
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (report_id) DO NOTHING
+                    RETURNING id
+                `, [
+                    reportId,
+                    username,
+                    roomId ? String(roomId).slice(0, 50) : null,
+                    JSON.stringify(giftIds),
+                    Number.isFinite(resolvedTicketCount) ? resolvedTicketCount : null,
+                    script ? String(script).slice(0, 50) : null,
+                    typeof success === 'boolean' ? success : null,
+                    reason ? String(reason).slice(0, 1000) : null
+                ]);
+                if (insertResult.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    return res.json({ success: true, replayed: true });
+                }
+                if (success === true && Number.isFinite(resolvedTicketCount) && resolvedTicketCount > 0) {
+                    const chargeResult = await BalanceLogger.updateBalance({
                         username,
                         amount: -resolvedTicketCount,
                         operationType: 'pk_ticket',
-                        description: `PK自动上票扣费：${resolvedTicketCount} 电币`,
+                        description: `PK自动上票扣费：${resolvedTicketCount} 积分`,
                         ipAddress: req.ip,
-                        userAgent: req.get('User-Agent')
+                        userAgent: req.get('User-Agent'),
+                        requireSufficientBalance: false,
+                        client,
+                        managedTransaction: true
                     });
-                } catch (balanceError) {
-                    console.error('PK ticket balance deduct error:', balanceError);
+                    if (!chargeResult.success) {
+                        throw new Error(chargeResult.message || 'PK上票扣费失败');
+                    }
                 }
+                await client.query('COMMIT');
+            } catch (transactionError) {
+                await client.query('ROLLBACK').catch(() => {});
+                throw transactionError;
+            } finally {
+                client.release();
             }
             return res.json({ success: true });
         } catch (error) {
@@ -330,21 +524,11 @@ module.exports = function registerGiftRoutes(app, deps) {
 
     // 礼物兑换
     app.post('/api/gifts/exchange', requireLogin, requireAuthorized, security.basicRateLimit, security.csrfProtection, async (req, res) => {
-        console.log('🚀 [DEBUG] 礼物兑换API开始执行');
-        console.log('🚀 [DEBUG] 请求体:', JSON.stringify(req.body, null, 2));
-        console.log('🚀 [DEBUG] 用户session:', req.session?.user);
-
-        // ✅ FIX: 提前声明，避免外层catch作用域拿不到
         let username = 'unknown';
-        // ✅ FIX: 事务内拿到的值需要在事务外继续用
         let currentBalance;
         let bilibiliRoomId;
         let existingExchange = null;
-        // 如果未传入，则后端自动生成，避免NULL导致无法去重
-        const crypto = require('crypto');
-        const idempotencyKey = req.body?.idempotencyKey
-            || req.body?.idempotency_key
-            || `auto-${Date.now()}-${crypto.randomBytes(16).toString('hex')}`;
+        const idempotencyKey = req.idempotencyKey;
 
         try {
             const { giftType, cost, quantity = 1 } = req.body;
@@ -352,22 +536,17 @@ module.exports = function registerGiftRoutes(app, deps) {
             const clientIP = req.clientIP;
             const userAgent = req.userAgent;
 
-            console.log(`🔍 [DEBUG] 解析后参数: giftType=${giftType}, cost=${cost}, quantity=${quantity}, username=${username}`);
-            console.log(`🔍 [DEBUG] 客户端信息: IP=${clientIP}, UA=${userAgent}`);
-
             // ✅ FIX: 统一把 cost / quantity 转成数字，避免 "150" !== 150
             const costNum = Number(cost);
             const quantityNum = Number(quantity);
 
             // 验证输入参数
             if (!giftType || !Number.isFinite(costNum) || !Number.isInteger(costNum) || !Number.isFinite(quantityNum) || !Number.isInteger(quantityNum) || quantityNum < 1) {
-                console.log('❌ [DEBUG] 参数验证失败:', { giftType, cost, quantity });
                 return res.status(400).json({
                     success: false,
                     message: '参数不完整或数量无效'
                 });
             }
-            console.log('✅ [DEBUG] 参数验证通过');
 
             // 验证数量上限
             if (quantityNum > 100) { // ✅ FIX
@@ -378,27 +557,23 @@ module.exports = function registerGiftRoutes(app, deps) {
             }
 
             // 从配置文件获取可用的礼物类型
-            console.log('🔍 [DEBUG] giftConfig状态:', { hasConfig: !!giftConfig, hasMapping: !!giftConfig.礼物映射 });
-
             const availableGifts = {};
             if (giftConfig.礼物映射) {
-                console.log('✅ [DEBUG] 使用配置文件中的礼物映射');
                 for (const [key, config] of Object.entries(giftConfig.礼物映射)) {
+                    if (!redeemableGiftTypes.has(key)) {
+                        continue;
+                    }
                     availableGifts[key] = {
                         name: config.名称,
                         cost: config.电币成本,
                         bilibili_id: config.bilibili_id
                     };
-                    console.log(`🔍 [DEBUG] 加载礼物: ${key} = ${JSON.stringify(availableGifts[key])}`);
                 }
             } else {
-                console.log('⚠️ [DEBUG] 配置文件无效，使用备用配置');
                 // 备用配置
                 availableGifts.heartbox = { name: '心动盲盒', cost: 150, bilibili_id: '32251' };
                 availableGifts.fanlight = { name: '粉丝团灯牌', cost: 1, bilibili_id: '31164' };
             }
-
-            console.log('🔍 [DEBUG] 最终可用礼物:', availableGifts);
 
             // 验证礼物类型
             if (!availableGifts[giftType]) {
@@ -413,16 +588,14 @@ module.exports = function registerGiftRoutes(app, deps) {
             if (costNum !== expectedTotalCost) { // ✅ FIX
                 return res.status(400).json({
                     success: false,
-                    message: `价格不匹配，期望价格: ${expectedTotalCost} 电币`
+                    message: `价格不匹配，期望价格: ${expectedTotalCost} 积分`
                 });
             }
 
             // 🛡️ 真正的预扣机制：在事务中原子地检查余额、锁住资金并创建任务
-            console.log('🔍 [DEBUG] 开始数据库事务操作');
             const client = await pool.connect();
             let insertResult;
             try {
-                console.log('🔍 [DEBUG] 开始事务');
                 await client.query('BEGIN');
 
                 // 加锁：同一用户礼物兑换互斥，避免并发重复扣款
@@ -436,13 +609,10 @@ module.exports = function registerGiftRoutes(app, deps) {
                 }
 
                 // 1. 锁定用户行并检查余额
-                console.log(`🔍 [DEBUG] 查询用户 ${username} 的余额和房间号`);
                 const lockResult = await client.query(
                     'SELECT balance, bilibili_room_id FROM users WHERE username = $1 FOR UPDATE',
                     [username]
                 );
-                console.log('🔍 [DEBUG] 数据库查询结果:', lockResult.rows);
-
                 if (lockResult.rows.length === 0) {
                     throw new Error('用户不存在');
                 }
@@ -451,17 +621,13 @@ module.exports = function registerGiftRoutes(app, deps) {
                 currentBalance = Number(lockResult.rows[0].balance);
                 bilibiliRoomId = lockResult.rows[0].bilibili_room_id;
 
-                console.log(`🔍 [DEBUG] 用户信息: 余额=${currentBalance}, 房间号=${bilibiliRoomId}`);
-
                 if (!bilibiliRoomId) {
                     throw new Error('请先绑定B站房间号再兑换礼物');
                 }
 
                 if (currentBalance < costNum) { // ✅ FIX
-                    console.log(`❌ [DEBUG] 余额不足: 当前=${currentBalance}, 需要=${costNum}`); // ✅ FIX
-                    throw new Error(`余额不足！当前余额: ${currentBalance} 电币，需要: ${costNum} 电币`); // ✅ FIX
+                    throw new Error(`余额不足！当前余额: ${currentBalance} 积分，需要: ${costNum} 积分`); // ✅ FIX
                 }
-                console.log('✅ [DEBUG] 余额检查通过');
 
                 // 2.1 幂等检查（如果表支持 idempotency_key）
                 // 2.1 幂等检查
@@ -491,21 +657,15 @@ module.exports = function registerGiftRoutes(app, deps) {
                 }
 
                 // 2. 检查是否有pending的任务（防止重复兑换）
-                console.log('🔍 [DEBUG] 检查是否有pending任务');
                 const pendingResult = await client.query(
                     'SELECT COUNT(*) as count FROM gift_exchanges WHERE username = $1 AND delivery_status IN ($2, $3)',
                     [username, 'pending', 'processing']
                 );
-                console.log('🔍 [DEBUG] pending任务查询结果:', pendingResult.rows);
-
                 if (parseInt(pendingResult.rows[0].count) > 0) {
-                    console.log('❌ [DEBUG] 检测到pending任务，阻止兑换');
                     throw new Error('您有礼物正在发送中，请等待完成后再兑换');
                 }
-                console.log('✅ [DEBUG] 无pending任务，可以继续');
 
                 // 3. 立即锁住资金（从余额中扣除，但标记为frozen）
-                console.log(`🔍 [DEBUG] 扣除资金: ${costNum} 电币`); // ✅ FIX
                 const deductResult = await BalanceLogger.updateBalance({
                     username,
                     amount: -costNum,
@@ -519,12 +679,9 @@ module.exports = function registerGiftRoutes(app, deps) {
                 if (!deductResult.success) {
                     throw new Error(deductResult.message || '扣费失败');
                 }
-                console.log('✅ [DEBUG] 资金扣除完成');
 
                 // 4. 创建任务记录，标记资金已锁定
-                console.log('🔍 [DEBUG] 创建礼物兑换任务记录');
                 const insertParams = [username, giftType, availableGifts[giftType].name, costNum, quantityNum, bilibiliRoomId, 'pending', idempotencyKey];
-                console.log('🔍 [DEBUG] INSERT参数:', insertParams);
 
                 insertResult = await client.query(`
                     INSERT INTO gift_exchanges (
@@ -533,32 +690,32 @@ module.exports = function registerGiftRoutes(app, deps) {
                     ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7, $8)
                     RETURNING id
                 `, insertParams);
-                console.log('✅ [DEBUG] 任务记录创建成功:', insertResult.rows);
-
-                console.log('🔍 [DEBUG] 提交事务');
                 await client.query('COMMIT');
-                console.log('✅ [DEBUG] 事务提交成功');
 
-                console.log(`🔒 用户 ${username} 资金已锁定: ${costNum} 电币，剩余余额: ${currentBalance - costNum} 电币`); // ✅ FIX
+                console.log(`🔒 用户 ${username} 资金已锁定: ${costNum} 积分，剩余余额: ${currentBalance - costNum} 积分`); // ✅ FIX
 
             } catch (error) {
-                console.log('💥 [DEBUG] 事务中发生错误:', error.message);
-                console.log('💥 [DEBUG] 错误堆栈:', error.stack);
-                await client.query('ROLLBACK');
-                console.log('🔍 [DEBUG] 事务已回滚');
+                await client.query('ROLLBACK').catch(() => {});
                 console.error('兑换事务失败:', error.message);
-                return res.status(400).json({
+                const publicMessages = [
+                    '用户不存在',
+                    '请先绑定B站房间号再兑换礼物',
+                    '您有礼物正在发送中，请等待完成后再兑换'
+                ];
+                const isPublicError = publicMessages.includes(error.message)
+                    || error.message.startsWith('余额不足')
+                    || error.message === '余额不足';
+                return res.status(isPublicError ? 400 : 500).json({
                     success: false,
-                    message: error.message
+                    message: isPublicError ? error.message : '兑换失败，请稍后重试'
                 });
             } finally {
-                console.log('🔍 [DEBUG] 释放数据库连接');
                 client.release();
             }
 
             const exchangeId = insertResult.rows[0].id;
 
-            console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name} x${quantityNum}，花费 ${costNum} 电币`); // ✅ FIX
+            console.log(`✅ 用户 ${username} 成功兑换 ${availableGifts[giftType].name} x${quantityNum}，花费 ${costNum} 积分`); // ✅ FIX
 
             // 礼物将由Windows监听服务处理，无需立即发送
             let deliveryMessage = '';
@@ -590,7 +747,7 @@ module.exports = function registerGiftRoutes(app, deps) {
             });
             res.status(500).json({
                 success: false,
-                message: `服务器错误: ${error.message}`
+                message: '服务器错误'
             });
         }
     });
@@ -599,15 +756,15 @@ module.exports = function registerGiftRoutes(app, deps) {
     app.get('/api/gifts/history', requireLogin, requireAuthorized, async (req, res) => {
         try {
             const username = req.session.user.username;
-            const page = parseInt(req.query.page) || 1;
-            const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
             const offset = (page - 1) * limit;
 
             // 尝试查询包含quantity字段，如果失败则使用不包含quantity的查询
             let result;
             try {
                 result = await pool.query(`
-                    SELECT gift_type, gift_name, cost, quantity, status, failure_reason,
+                    SELECT id, gift_type, gift_name, cost, quantity, status, failure_reason,
                            to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at,
                            delivery_status
                     FROM gift_exchanges 
@@ -619,7 +776,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                 if (error.code === '42703') { // column does not exist
                     console.log('⚠️ quantity字段不存在，历史记录使用备用查询');
                     result = await pool.query(`
-                        SELECT gift_type, gift_name, cost, status,
+                        SELECT id, gift_type, gift_name, cost, status,
                                to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as created_at,
                                delivery_status
                         FROM gift_exchanges 
@@ -671,38 +828,44 @@ module.exports = function registerGiftRoutes(app, deps) {
             let result;
             try {
                 result = await pool.query(`
-                    UPDATE gift_exchanges 
-                    SET delivery_status = 'processing', processed_at = NOW()
-                    WHERE id IN (
-                        SELECT id FROM gift_exchanges 
+                    WITH claimed AS (
+                        SELECT id
+                        FROM gift_exchanges
                         WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
-                        ORDER BY created_at ASC 
+                        ORDER BY created_at ASC
+                        FOR UPDATE SKIP LOCKED
                         LIMIT 10
                     )
-                    RETURNING id, gift_type, bilibili_room_id, username, gift_name, quantity, created_at
+                    UPDATE gift_exchanges AS exchange
+                    SET delivery_status = 'processing', processed_at = NOW()
+                    FROM claimed
+                    WHERE exchange.id = claimed.id
+                    RETURNING exchange.id, exchange.gift_type, exchange.bilibili_room_id,
+                              exchange.username, exchange.gift_name, exchange.quantity, exchange.created_at
                 `);
             } catch (error) {
                 if (error.code === '42703') { // column does not exist
                     console.log('⚠️ quantity字段不存在，使用备用查询');
                     result = await pool.query(`
-                        UPDATE gift_exchanges 
-                        SET delivery_status = 'processing', processed_at = NOW()
-                        WHERE id IN (
-                            SELECT id FROM gift_exchanges 
+                        WITH claimed AS (
+                            SELECT id
+                            FROM gift_exchanges
                             WHERE delivery_status = 'pending' AND bilibili_room_id IS NOT NULL
-                            ORDER BY created_at ASC 
+                            ORDER BY created_at ASC
+                            FOR UPDATE SKIP LOCKED
                             LIMIT 10
                         )
-                        RETURNING id, gift_type, bilibili_room_id, username, gift_name, created_at
+                        UPDATE gift_exchanges AS exchange
+                        SET delivery_status = 'processing', processed_at = NOW()
+                        FROM claimed
+                        WHERE exchange.id = claimed.id
+                        RETURNING exchange.id, exchange.gift_type, exchange.bilibili_room_id,
+                                  exchange.username, exchange.gift_name, exchange.created_at
                     `);
                 } else {
                     throw error;
                 }
             }
-
-            // 加载礼物配置
-            const fs = require('fs');
-            const giftConfig = JSON.parse(fs.readFileSync('./gift-codes.json', 'utf8'));
 
             res.json({
                 success: true,
@@ -729,13 +892,16 @@ module.exports = function registerGiftRoutes(app, deps) {
     // 标记任务开始处理
     app.post('/api/gift-tasks/:id/start', requireApiKey, async (req, res) => {
         try {
-            const taskId = parseInt(req.params.id);
+            const taskId = Number(req.params.id);
+            if (!Number.isSafeInteger(taskId) || taskId < 1) {
+                return res.status(400).json({ success: false, message: '任务ID无效' });
+            }
 
             const result = await pool.query(`
                 UPDATE gift_exchanges 
                 SET delivery_status = 'processing',
                     processed_at = NOW()
-                WHERE id = $1 AND delivery_status = 'pending'
+                WHERE id = $1 AND delivery_status IN ('pending', 'processing')
                 RETURNING username, gift_name
             `, [taskId]);
 
@@ -747,180 +913,152 @@ module.exports = function registerGiftRoutes(app, deps) {
             }
         } catch (error) {
             console.error('标记任务开始失败:', error);
-            res.status(500).json({ success: false, message: '服务器错误', error: error.message });
+            res.status(500).json({ success: false, message: '服务器错误' });
         }
     });
 
     // 标记任务完成
     app.post('/api/gift-tasks/:id/complete', requireApiKey, async (req, res) => {
+        let client;
         try {
-            const taskId = parseInt(req.params.id);
-            const { timestamp, signature } = req.body || {};
-            const verification = verifyGiftTaskHMAC(taskId, timestamp, signature);
-            if (!verification.valid) {
-                const enforce = process.env.GIFT_TASKS_HMAC_ENFORCE === 'true';
-                // 仅当明确启用强制并且传入了签名却校验失败时才阻断；缺失签名时放行，避免任务卡住
-                if (enforce && timestamp && signature) {
-                    return res.status(401).json({ success: false, message: verification.error || '签名校验失败' });
-                }
+            client = await pool.connect();
+            const taskId = Number.parseInt(req.params.id, 10);
+            if (!Number.isInteger(taskId) || taskId < 1) {
+                return res.status(400).json({ success: false, message: '任务ID无效' });
             }
-
-            // 🛡️ 预扣机制：获取任务信息并执行部分成功的扣费
-            // ✅ 兼容 Windows(Python) snake_case 与 JS camelCase
-            const actualQuantityVal = (req.body.actualQuantity ?? req.body.actual_quantity);
-            const requestedQuantityVal = (req.body.requestedQuantity ?? req.body.requested_quantity);
-            const partialSuccessVal = (req.body.partialSuccess ?? req.body.partial_success);
-            const actualQuantity = Number.isFinite(Number(actualQuantityVal)) ? parseInt(actualQuantityVal, 10) : null;
-            const requestedQuantity = Number.isFinite(Number(requestedQuantityVal)) ? parseInt(requestedQuantityVal, 10) : null;
-            const partialSuccess = !!partialSuccessVal;
-            const clampQuantity = (val, fallback) => {
-                if (!Number.isFinite(val) || val < 0) return fallback;
-                return val;
-            };
-
-            const taskResult = await pool.query(`
-                SELECT username, gift_name, cost, status, quantity
-                FROM gift_exchanges 
+            await client.query('BEGIN');
+            const taskResult = await client.query(`
+                SELECT username, gift_name, cost, status, quantity, delivery_status
+                FROM gift_exchanges
                 WHERE id = $1
+                FOR UPDATE
             `, [taskId]);
 
             if (taskResult.rows.length === 0) {
+                await client.query('ROLLBACK');
                 return res.status(404).json({ success: false, message: '任务不存在' });
             }
 
-            const { username, gift_name, cost, status, quantity } = taskResult.rows[0];
-            const effectiveRequested = clampQuantity(requestedQuantity, quantity);
-            const effectiveActual = clampQuantity(actualQuantity, quantity);
+            const { username, gift_name, cost, status, quantity, delivery_status } = taskResult.rows[0];
+            if (status === 'completed') {
+                await client.query('ROLLBACK');
+                await enqueueNextStoredBlindbox(username, taskId);
+                return res.json({ success: true, message: '任务已完成' });
+            }
+            if (status !== 'funds_locked') {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '任务状态不允许完成' });
+            }
+            if (!['processing', 'uncertain'].includes(delivery_status)) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '任务尚未被发送服务领取' });
+            }
+            const quantityNum = Number(quantity);
+            const costNum = Number(cost);
+            if (!Number.isInteger(quantityNum) || quantityNum < 1 || !Number.isFinite(costNum) || costNum < 0) {
+                throw new Error('任务金额或数量无效');
+            }
+            const partialSuccess = (req.body.partialSuccess ?? req.body.partial_success) === true;
+            const rawActual = Number(req.body.actualQuantity ?? req.body.actual_quantity);
+            const rawRequested = Number(req.body.requestedQuantity ?? req.body.requested_quantity);
+            const hasActualQuantity = req.body.actualQuantity !== undefined || req.body.actual_quantity !== undefined;
+            const hasRequestedQuantity = req.body.requestedQuantity !== undefined || req.body.requested_quantity !== undefined;
+            if (hasRequestedQuantity && (!Number.isInteger(rawRequested) || rawRequested !== quantityNum)) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: '请求数量与任务不匹配' });
+            }
+            if (partialSuccess && (!Number.isInteger(rawActual) || rawActual < 1 || rawActual >= quantityNum)) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: '部分成功数量无效' });
+            }
+            if (!partialSuccess && hasActualQuantity && (!Number.isInteger(rawActual) || rawActual !== quantityNum)) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: '成功数量与任务不匹配' });
+            }
+            const actualQuantity = partialSuccess ? rawActual : quantityNum;
+            const actualCost = Math.round((costNum / quantityNum) * actualQuantity);
+            const refundAmount = Math.max(0, costNum - actualCost);
 
-            // 🔒 资金已锁定状态的任务，成功时确认扣费（已经扣除了，标记为完成即可）
-            if (status === 'funds_locked') {
-                // 🛡️ 计算实际应扣费用和退款（基于实际发送数量）
-                const unitCost = cost / quantity; // 单个礼物的成本
-                const actualCost = Math.round(unitCost * (effectiveActual || effectiveRequested));
-                const refundAmount = Math.max(0, cost - actualCost); // 需要退还的金额
-
-                if (partialSuccess && refundAmount > 0) {
-                    console.log(`⚠️ 任务 ${taskId} 部分成功: 原计划 ${quantity} 个，实际成功 ${effectiveActual} 个`);
-                    console.log(`💰 资金处理: 锁定 ${cost} 电池，实际消费 ${actualCost} 电池，退还 ${refundAmount} 电池`);
-
-                    // 退还多余的资金
-                    await BalanceLogger.updateBalance({
-                        username,
-                        amount: refundAmount,
-                        operationType: 'gift_delivery_refund',
-                        description: `礼物部分成功退款 ${refundAmount} 电币`,
-                        requireSufficientBalance: false
-                    });
-                }
-
-                // 记录最终的扣费日志
-                const balanceResult = await BalanceLogger.updateBalance({
-                    username: username,
-                    amount: 0, // 资金已经在兑换时锁定了，这里只是记录
-                    operationType: partialSuccess ? 'gift_delivery_partial' : 'gift_delivery_success',
-                    description: `礼物发送${partialSuccess ? '部分' : ''}成功确认: ${gift_name} ${effectiveActual || quantity}/${quantity}${refundAmount > 0 ? `，退还 ${refundAmount} 电池` : ''}`,
-                    gameData: {
-                        taskId,
-                        gift_name,
-                        lockedAmount: cost,
-                        actualCost: actualCost,
-                        refundAmount: refundAmount,
-                        requestedQuantity: effectiveRequested,
-                        actualQuantity: effectiveActual || quantity,
-                        partialSuccess: partialSuccess || false
-                    },
-                    requireSufficientBalance: false // 不检查余额，因为只是记录
+            if (refundAmount > 0) {
+                const refund = await BalanceLogger.updateBalance({
+                    username,
+                    amount: refundAmount,
+                    operationType: 'gift_delivery_refund',
+                    description: `礼物部分成功退款 ${refundAmount} 积分`,
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
-
-            console.log(`💰 任务 ${taskId} 资金确认: 锁定 ${cost} 电池，消费 ${actualCost} 电池，退还 ${refundAmount} 电池`);
+                if (!refund.success) throw new Error(refund.message || '退款失败');
             }
 
+            const confirmation = await BalanceLogger.updateBalance({
+                username,
+                amount: 0,
+                operationType: partialSuccess ? 'gift_delivery_partial' : 'gift_delivery_success',
+                description: `礼物发送${partialSuccess ? '部分' : ''}成功确认: ${gift_name} ${actualQuantity}/${quantityNum}`,
+                gameData: {
+                    taskId,
+                    gift_name,
+                    lockedAmount: costNum,
+                    actualCost,
+                    refundAmount,
+                    actualQuantity,
+                    partialSuccess
+                },
+                requireSufficientBalance: false,
+                client,
+                managedTransaction: true
+            });
+            if (!confirmation.success) throw new Error(confirmation.message || '确认日志写入失败');
+
             const finalDeliveryStatus = partialSuccess ? 'partial_success' : 'success';
-            // 标记任务完成
-            const result = await pool.query(`
-                UPDATE gift_exchanges 
+            await client.query(`
+                UPDATE gift_exchanges
                 SET delivery_status = $2,
                     status = 'completed',
                     processed_at = NOW()
-                WHERE id = $1
-                RETURNING username, gift_name
+                WHERE id = $1 AND status = 'funds_locked'
             `, [taskId, finalDeliveryStatus]);
 
-            if (result.rows.length > 0) {
-                try {
-                    await pool.query(`
-                        UPDATE wish_inventory
-                        SET status = 'sent',
-                            sent_at = (NOW() AT TIME ZONE 'Asia/Shanghai'),
-                            last_failure_reason = NULL,
-                            updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-                        WHERE gift_exchange_id = $1
-                    `, [taskId]);
-
-                    if (enqueueWishInventorySend) {
-                        const batchInfo = await pool.query(`
-                            SELECT id, username, source_type, source_batch_id, batch_order
-                            FROM wish_inventory
-                            WHERE gift_exchange_id = $1
-                            LIMIT 1
-                        `, [taskId]);
-
-                        const batchRow = batchInfo.rows[0];
-                        if (batchRow?.source_type === 'blindbox' && batchRow.source_batch_id) {
-                            const nextItem = await pool.query(`
-                                SELECT id
-                                FROM wish_inventory
-                                WHERE username = $1
-                                  AND source_type = 'blindbox'
-                                  AND source_batch_id = $2
-                                  AND status = 'stored'
-                                ORDER BY batch_order ASC
-                                LIMIT 1
-                            `, [batchRow.username, batchRow.source_batch_id]);
-
-                            if (nextItem.rows.length > 0) {
-                                enqueueWishInventorySend({
-                                    inventoryId: nextItem.rows[0].id,
-                                    username: batchRow.username
-                                }).catch((err) => {
-                                    console.error('Blindbox enqueue next failed:', err);
-                                });
-                            }
-                        }
-                    }
-                } catch (dbError) {
-                    console.error('更新背包发送状态失败:', dbError);
-                }
-
-                console.log(`✅ Windows服务完成任务 ${taskId}: ${result.rows[0].username} 的 ${result.rows[0].gift_name}`);
-                res.json({ success: true, message: '任务完成' });
-            } else {
-                res.status(404).json({ success: false, message: '任务不存在' });
-            }
-
+            await client.query(`
+                UPDATE wish_inventory
+                SET status = 'sent',
+                    sent_at = (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                    last_failure_reason = NULL,
+                    updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                WHERE gift_exchange_id = $1
+            `, [taskId]);
+            await client.query('COMMIT');
+            await enqueueNextStoredBlindbox(username, taskId);
+            return res.json({ success: true, message: '任务完成' });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('标记任务完成失败:', error);
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: '服务器错误'
             });
+        } finally {
+            client?.release();
         }
     });
 
-    // 重置卡住的任务（超过5分钟的processing任务重置为pending）
+    // 已领取任务的外部副作用可能已经发生，不能自动重发或退款。
     app.post('/api/gift-tasks/reset-stuck', requireApiKey, async (req, res) => {
         try {
             const result = await pool.query(`
                 UPDATE gift_exchanges 
-                SET delivery_status = 'pending',
-                    processed_at = NULL
+                SET delivery_status = 'uncertain',
+                    failure_reason = '发送服务已领取任务，但超时未确认结果',
+                    updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
                 WHERE delivery_status = 'processing' 
                 AND processed_at < NOW() - INTERVAL '5 minutes'
                 RETURNING id, username, gift_name
             `);
 
             const resetCount = result.rows.length;
-            console.log(`🔄 重置了 ${resetCount} 个卡住的任务`);
+            console.log(`标记了 ${resetCount} 个结果待确认的任务`);
 
             result.rows.forEach(row => {
                 console.log(`  - 任务 ${row.id}: ${row.username} 的 ${row.gift_name}`);
@@ -928,128 +1066,169 @@ module.exports = function registerGiftRoutes(app, deps) {
 
             res.json({
                 success: true,
-                message: `重置了 ${resetCount} 个卡住的任务`,
+                message: `标记了 ${resetCount} 个结果待确认的任务`,
                 resetTasks: result.rows
             });
         } catch (error) {
             console.error('重置卡住任务失败:', error);
-            res.status(500).json({ success: false, message: '服务器错误', error: error.message });
+            res.status(500).json({ success: false, message: '服务器错误' });
+        }
+    });
+
+    app.post('/api/gift-tasks/:id/uncertain', requireApiKey, async (req, res) => {
+        try {
+            const taskId = Number(req.params.id);
+            if (!Number.isSafeInteger(taskId) || taskId < 1) {
+                return res.status(400).json({ success: false, message: '任务ID无效' });
+            }
+            const reason = String(req.body?.reason || '发送结果无法确认').trim().slice(0, 1000) || '发送结果无法确认';
+            const result = await pool.query(`
+                UPDATE gift_exchanges
+                SET delivery_status = 'uncertain',
+                    failure_reason = $2,
+                    updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                WHERE id = $1
+                  AND status = 'funds_locked'
+                  AND delivery_status = 'processing'
+                RETURNING id
+            `, [taskId, reason]);
+            if (result.rows.length > 0) {
+                return res.json({ success: true, message: '任务已标记为结果待确认' });
+            }
+            const existing = await pool.query(
+                'SELECT status, delivery_status FROM gift_exchanges WHERE id = $1',
+                [taskId]
+            );
+            if (existing.rows.length === 0) {
+                return res.status(404).json({ success: false, message: '任务不存在' });
+            }
+            if (existing.rows[0].delivery_status === 'uncertain'
+                || ['completed', 'failed'].includes(existing.rows[0].status)) {
+                return res.json({ success: true, message: '任务已有最终或待确认状态' });
+            }
+            return res.status(409).json({ success: false, message: '任务状态不允许标记待确认' });
+        } catch (error) {
+            console.error('标记礼物任务待确认失败:', error);
+            return res.status(500).json({ success: false, message: '服务器错误' });
         }
     });
 
     // 标记任务失败
     app.post('/api/gift-tasks/:id/fail', requireApiKey, async (req, res) => {
+        let client;
         try {
-            const taskId = parseInt(req.params.id);
-            const errorMessage = req.body.error || '礼物发送失败';
+            client = await pool.connect();
+            const taskId = Number.parseInt(req.params.id, 10);
+            if (!Number.isInteger(taskId) || taskId < 1) {
+                return res.status(400).json({ success: false, message: '任务ID无效' });
+            }
+            const errorMessage = String(req.body.error || '礼物发送失败').trim().slice(0, 1000) || '礼物发送失败';
 
-            // ✅ 兼容 Windows(Python) snake_case 与 JS camelCase
-            const actualQuantityVal = (req.body.actualQuantity ?? req.body.actual_quantity);
-            const partialSuccessVal = (req.body.partialSuccess ?? req.body.partial_success);
-            const actualQuantity = Number.isFinite(Number(actualQuantityVal)) ? parseInt(actualQuantityVal, 10) : null;
-            const partialSuccess = !!partialSuccessVal;
-
-            // 🛡️ 预扣机制：任务失败时必须退还锁定的资金
-            const taskResult = await pool.query(`
-                SELECT username, gift_name, cost, status, quantity
-                FROM gift_exchanges 
+            await client.query('BEGIN');
+            const taskResult = await client.query(`
+                SELECT username, gift_name, cost, status, quantity, delivery_status
+                FROM gift_exchanges
                 WHERE id = $1
+                FOR UPDATE
             `, [taskId]);
 
             if (taskResult.rows.length === 0) {
+                await client.query('ROLLBACK');
                 return res.status(404).json({ success: false, message: '任务不存在' });
             }
 
-            const { username, gift_name, cost, status, quantity } = taskResult.rows[0];
+            const { username, gift_name, cost, status, quantity, delivery_status } = taskResult.rows[0];
+            if (status === 'failed') {
+                await client.query('ROLLBACK');
+                return res.json({ success: true, message: '任务已标记失败' });
+            }
+            if (status !== 'funds_locked') {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '任务状态不允许失败处理' });
+            }
+            if (!['processing', 'uncertain'].includes(delivery_status)) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '任务尚未被发送服务领取' });
+            }
+            if (delivery_status === 'uncertain' && req.body.confirmedFailure !== true) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({
+                    success: false,
+                    message: '结果待确认任务必须明确确认发送失败后才能退款'
+                });
+            }
 
-            // 🔒 如果资金已锁定，需要退还给用户
-            if (status === 'funds_locked') {
-                // ✅ 计算实际应退款金额
-                let refundAmount = cost; // 默认全退（保持你原有行为）
-                let descExtra = '';
+            const quantityNum = Number(quantity);
+            const costNum = Number(cost);
+            if (!Number.isInteger(quantityNum) || quantityNum < 1 || !Number.isFinite(costNum) || costNum < 0) {
+                throw new Error('任务金额或数量无效');
+            }
+            const partialSuccess = (req.body.partialSuccess ?? req.body.partial_success) === true;
+            if (partialSuccess) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: '部分成功必须通过完成接口确认' });
+            }
+            const actualQuantity = 0;
+            const actualCost = Math.round((costNum / quantityNum) * actualQuantity);
+            const refundAmount = Math.max(0, costNum - actualCost);
 
-                if (partialSuccess && actualQuantity !== null && actualQuantity > 0 && quantity > 0) {
-                    const unitCost = cost / quantity;              // 单价
-                    const actualCost = Math.round(unitCost * actualQuantity);
-                    refundAmount = Math.max(0, cost - actualCost); // 只退未送出的差额
-                    descExtra = `（部分成功：${actualQuantity}/${quantity}，退还差额 ${refundAmount} 电币）`;
-                }
-
-                console.log(`🔄 任务 ${taskId} 失败，正在退还锁定资金 ${refundAmount} 电币给用户 ${username}`);
-
-                // 使用 BalanceLogger 安全地退还资金并记录日志
+            if (refundAmount > 0) {
                 const refundResult = await BalanceLogger.updateBalance({
-                    username: username,
+                    username,
                     amount: refundAmount,
                     operationType: 'gift_delivery_failed_refund',
-                    description: `礼物发送失败退款: ${gift_name} ${quantity}个，退还 ${refundAmount} 电币 - 原因: ${errorMessage}${descExtra}`,
+                    description: `礼物发送失败退款: ${gift_name} ${quantityNum}个，退还 ${refundAmount} 积分 - 原因: ${errorMessage}`,
                     gameData: {
                         taskId,
                         gift_name,
-                        originalCost: cost,
-                        refundAmount: refundAmount,
-                        errorMessage: errorMessage,
-                        quantity: quantity,
-                        actualQuantity: actualQuantity,
-                        partialSuccess: partialSuccess
+                        originalCost: costNum,
+                        actualCost,
+                        refundAmount,
+                        errorMessage,
+                        quantity: quantityNum,
+                        actualQuantity,
+                        partialSuccess
                     },
-                    requireSufficientBalance: false
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
 
                 if (!refundResult.success) {
-                    console.error(`❌ 退款失败: ${refundResult.message}`);
-                    return res.status(500).json({
-                        success: false,
-                        message: `任务失败且退款失败: ${refundResult.message}`
-                    });
+                    throw new Error(refundResult.message || '退款失败');
                 }
-
-                console.log(`✅ 成功退还 ${refundAmount} 电币给 ${username}，新余额: ${refundResult.balance}`);
             }
 
-            // 标记任务为失败
-            const result = await pool.query(`
-                UPDATE gift_exchanges 
+            await client.query(`
+                UPDATE gift_exchanges
                 SET delivery_status = 'failed',
                     status = 'failed',
                     failure_reason = $2,
                     processed_at = NOW()
-                WHERE id = $1
-                RETURNING username, gift_name, cost
+                WHERE id = $1 AND status = 'funds_locked'
             `, [taskId, errorMessage]);
 
-            if (result.rows.length > 0) {
-                try {
-                    await pool.query(`
-                        UPDATE wish_inventory
-                        SET status = 'stored',
-                            gift_exchange_id = NULL,
-                            last_failure_reason = $2,
-                            expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
-                            updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-                        WHERE gift_exchange_id = $1
-                    `, [taskId, errorMessage]);
-                } catch (dbError) {
-                    console.error('更新背包失败回退失败:', dbError);
-                }
-
-                console.log(`❌ 任务 ${taskId} 标记为失败: ${username} 的 ${gift_name} - ${errorMessage}`);
-                if (status === 'funds_locked') {
-                    console.log('💰 资金处理: 已按规则退还（可能为差额退款）');
-                } else {
-                    console.log(`💰 资金处理: 无需退款（状态: ${status}）`);
-                }
-                res.json({ success: true, message: '任务标记为失败，资金已安全退还' });
-            } else {
-                res.status(404).json({ success: false, message: '任务不存在' });
-            }
+            await client.query(`
+                UPDATE wish_inventory
+                SET status = 'stored',
+                    gift_exchange_id = NULL,
+                    last_failure_reason = $2,
+                    expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
+                    updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                WHERE gift_exchange_id = $1
+            `, [taskId, errorMessage]);
+            await client.query('COMMIT');
+            return res.json({ success: true, message: '任务标记为失败，资金已安全退还' });
 
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('标记任务失败:', error);
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: '服务器错误'
             });
+        } finally {
+            client?.release();
         }
     });
 

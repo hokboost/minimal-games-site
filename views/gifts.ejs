@@ -265,20 +265,20 @@
     }
     </style>
 </head>
-<body data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign page-gifts" data-csrf-token="<%= csrfToken %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="header">
-            <h1>🎁 <%= lang === 'zh' ? '礼物兑换商店' : 'Gift Exchange Shop' %></h1>
+            <h1><%= lang === 'zh' ? '礼物商店' : 'Gift shop' %></h1>
             <div class="balance-display">
-                💰 <%= lang === 'zh' ? '电币余额' : 'Coin Balance' %>: <span id="currentBalance"><%= balance || 0 %></span>
+                <%= lang === 'zh' ? '积分余额' : 'Point balance' %> <span id="currentBalance"><%= balance || 0 %></span>
             </div>
         </div>
 
         <div class="pk-panel">
             <div>
-                <h3>⚔️ <%= lang === 'zh' ? '自动打PK' : 'Auto PK' %></h3>
+                <h3><%= lang === 'zh' ? '自动打 PK' : 'Auto PK' %></h3>
                 <p><%= lang === 'zh' ? '使用当前绑定房间号启动偷塔脚本' : 'Start the PK script for your bound room ID' %></p>
                 <div class="pk-status" id="pkStatusText"><%= lang === 'zh' ? '状态：未运行' : 'Status: Stopped' %></div>
             </div>
@@ -286,17 +286,17 @@
         </div>
 
         <div class="nav-links">
-            <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
-            <a href="/profile">👤 <%= lang === 'zh' ? '个人资料' : 'Profile' %></a>
+            <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+            <a href="/profile"><%= lang === 'zh' ? '个人记录' : 'Activity' %></a>
             <% if (typeof user !== 'undefined' && user && user.is_admin) { %>
-                <a href="/admin">⚙️ <%= lang === 'zh' ? '管理后台' : 'Admin' %></a>
+                <a href="/admin"><%= lang === 'zh' ? '管理后台' : 'Admin' %></a>
             <% } %>
         </div>
 
         <div class="gifts-grid">
             
             <div class="gift-card">
-                <span class="gift-icon">💝</span>
+                <span class="gift-icon">BOX</span>
                 <div class="gift-name"><%= lang === 'zh' ? '心动盲盒' : 'Mystery Gift Box' %></div>
                 <div class="gift-description">
                     <% if (lang === 'zh') { %>
@@ -307,11 +307,11 @@
                         Perfect for your favorite streamer
                     <% } %>
                 </div>
-                <div class="gift-price">150 <%= lang === 'zh' ? '电币/个' : 'coins/each' %></div>
+                <div class="gift-price">150 <%= lang === 'zh' ? '积分/个' : 'points/each' %></div>
                 <div class="quantity-selector">
                     <label><%= lang === 'zh' ? '数量' : 'Quantity' %>:</label>
                     <input type="number" id="heartbox-quantity" min="1" max="100" value="1" style="width: 80px; padding: 5px; margin: 0 10px; border-radius: 4px; border: 1px solid #ccc;">
-                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="heartbox-total">150</span> <%= lang === 'zh' ? '电币' : 'coins' %></span>
+                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="heartbox-total">150</span> <%= lang === 'zh' ? '积分' : 'points' %></span>
                 </div>
                 <button class="gift-button" data-gift="heartbox" data-cost="150">
                     <%= lang === 'zh' ? '立即兑换' : 'Exchange Now' %>
@@ -320,7 +320,7 @@
 
             
             <div class="gift-card">
-                <span class="gift-icon">🏮</span>
+                <span class="gift-icon">FAN</span>
                 <div class="gift-name"><%= lang === 'zh' ? '粉丝团灯牌' : 'Fan Light Badge' %></div>
                 <div class="gift-description">
                     <% if (lang === 'zh') { %>
@@ -331,11 +331,11 @@
                         A symbol of true fans
                     <% } %>
                 </div>
-                <div class="gift-price">1 <%= lang === 'zh' ? '电币/个' : 'coin/each' %></div>
+                <div class="gift-price">1 <%= lang === 'zh' ? '积分/个' : 'point/each' %></div>
                 <div class="quantity-selector">
                     <label><%= lang === 'zh' ? '数量' : 'Quantity' %>:</label>
                     <input type="number" id="fanlight-quantity" min="1" max="100" value="1" style="width: 80px; padding: 5px; margin: 0 10px; border-radius: 4px; border: 1px solid #ccc;">
-                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="fanlight-total">1</span> <%= lang === 'zh' ? '电币' : 'coins' %></span>
+                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="fanlight-total">1</span> <%= lang === 'zh' ? '积分' : 'points' %></span>
                 </div>
                 <button class="gift-button" data-gift="fanlight" data-cost="1">
                     <%= lang === 'zh' ? '立即兑换' : 'Exchange Now' %>
@@ -343,7 +343,7 @@
             </div>
 
             <div class="gift-card">
-                <span class="gift-icon">🛳️</span>
+                <span class="gift-icon">ADM</span>
                 <div class="gift-name"><%= lang === 'zh' ? '提督一号' : 'Admiral One' %></div>
                 <div class="gift-description">
                     <% if (lang === 'zh') { %>
@@ -354,11 +354,11 @@
                         Boost the room atmosphere
                     <% } %>
                 </div>
-                <div class="gift-price">19980 <%= lang === 'zh' ? '电币/个' : 'coins/each' %></div>
+                <div class="gift-price">19980 <%= lang === 'zh' ? '积分/个' : 'points/each' %></div>
                 <div class="quantity-selector">
                     <label><%= lang === 'zh' ? '数量' : 'Quantity' %>:</label>
                     <input type="number" id="tiedu_one-quantity" min="1" max="100" value="1" style="width: 80px; padding: 5px; margin: 0 10px; border-radius: 4px; border: 1px solid #ccc;">
-                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="tiedu_one-total">19980</span> <%= lang === 'zh' ? '电币' : 'coins' %></span>
+                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="tiedu_one-total">19980</span> <%= lang === 'zh' ? '积分' : 'points' %></span>
                 </div>
                 <button class="gift-button" data-gift="tiedu_one" data-cost="19980">
                     <%= lang === 'zh' ? '立即兑换' : 'Exchange Now' %>
@@ -367,7 +367,7 @@
         </div>
 
         <div class="exchange-history">
-            <div class="history-title">📜 <%= lang === 'zh' ? '兑换记录' : 'Exchange History' %></div>
+            <div class="history-title"><%= lang === 'zh' ? '兑换记录' : 'Exchange history' %></div>
             <div id="exchangeHistory">
                 <div class="loading"><%= lang === 'zh' ? '正在加载兑换记录...' : 'Loading exchange history...' %></div>
             </div>

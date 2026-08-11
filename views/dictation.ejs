@@ -6,16 +6,16 @@
     <title><%= lang === 'zh' ? '汉字听写' : 'Chinese Dictation' %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign game-page page-dictation" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
         <div class="header">
-            <h1>✍️ <%= lang === 'zh' ? '汉字听写' : 'Chinese Dictation' %></h1>
+            <h1><%= lang === 'zh' ? '汉字听写' : 'Chinese Dictation' %></h1>
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '用户' : 'User' %>：<%= username %></span>
-                <a href="/">🏠 <%= lang === 'zh' ? '返回首页' : 'Home' %></a>
-                <a href="/profile">👤 <%= lang === 'zh' ? '个人中心' : 'Profile' %></a>
+                <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/profile"><%= lang === 'zh' ? '个人记录' : 'Activity' %></a>
             </div>
         </div>
 
@@ -26,12 +26,12 @@
             </div>
 
             <div class="dictation-controls">
-                <button id="start-btn" class="primary-btn">▶️ <%= lang === 'zh' ? '开始听写' : 'Start' %></button>
+                <button id="start-btn" class="primary-btn"><%= lang === 'zh' ? '开始听写' : 'Start dictation' %></button>
             </div>
 
             <div class="dictation-audio">
                 <span class="dictation-audio-label"><%= lang === 'zh' ? '题目播报' : 'Prompt' %></span>
-                <button id="play-btn" class="speaker-btn" disabled title="<%= lang === 'zh' ? '播放词语与解释' : 'Play word and meaning' %>">🔊</button>
+                <button id="play-btn" class="speaker-btn" disabled title="<%= lang === 'zh' ? '播放词语与解释' : 'Play word and meaning' %>" aria-label="<%= lang === 'zh' ? '播放词语与解释' : 'Play word and meaning' %>">▶</button>
             </div>
 
             <div class="input-section">
@@ -51,7 +51,7 @@
             </div>
 
             <div class="submit-controls">
-                <button id="submit-btn" class="primary-btn" disabled>✅ <%= lang === 'zh' ? '确认提交' : 'Submit' %></button>
+                <button id="submit-btn" class="primary-btn" disabled><%= lang === 'zh' ? '确认提交' : 'Submit' %></button>
             </div>
 
             <div id="dictation-status" class="dictation-status"></div>

@@ -1,6 +1,7 @@
 (() => {
     const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
     const t = (zh, en) => (lang === 'zh' ? zh : en);
+    const escapeHTML = window.escapeHTML || ((value) => String(value ?? ''));
 
     const { authorized, username } = document.body.dataset;
     if (authorized !== 'true') {
@@ -33,11 +34,11 @@
         notificationDiv.innerHTML = `
             <div class="notification-content">
                 <div class="notification-header">
-                    <strong>${notification.title || t('系统通知', 'System Notification')}</strong>
+                    <strong>${escapeHTML(notification.title || t('系统通知', 'System Notification'))}</strong>
                     <span class="notification-close">&times;</span>
                 </div>
                 <div class="notification-body">
-                    ${notification.message}
+                    ${escapeHTML(notification.message)}
                 </div>
             </div>
         `;
@@ -72,31 +73,31 @@
         alertDiv.className = 'security-alert';
 
         let alertStyle = '';
-        let alertIcon = '';
+        let alertLabel = '';
 
         switch (event.level) {
             case 'warning':
                 alertStyle = 'background: #fff3cd; border-color: #ffeaa7; color: #856404;';
-                alertIcon = '⚠️';
+                alertLabel = t('警告', 'Warning');
                 break;
             case 'danger':
                 alertStyle = 'background: #f8d7da; border-color: #f5c6cb; color: #721c24;';
-                alertIcon = '🚨';
+                alertLabel = t('严重警告', 'Critical');
                 break;
             default:
                 alertStyle = 'background: #d4edda; border-color: #c3e6cb; color: #155724;';
-                alertIcon = 'ℹ️';
+                alertLabel = t('提示', 'Notice');
         }
 
         alertDiv.innerHTML = `
             <div class="alert-content">
                 <div class="alert-header">
-                    ${alertIcon} <strong>${event.title}</strong>
+                    <span class="alert-level">${alertLabel}</span> <strong>${escapeHTML(event.title)}</strong>
                     <span class="alert-close">&times;</span>
                 </div>
                 <div class="alert-body">
-                    ${event.message}
-                    ${event.details ? `<div class="alert-details">${t('设备数量', 'Devices')}: ${event.details.kickedDevices}</div>` : ''}
+                    ${escapeHTML(event.message)}
+                    ${event.details ? `<div class="alert-details">${t('设备数量', 'Devices')}: ${escapeHTML(event.details.kickedDevices)}</div>` : ''}
                 </div>
             </div>
         `;

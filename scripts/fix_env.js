@@ -1,17 +1,38 @@
+'use strict';
+
 const fs = require('fs');
+const crypto = require('crypto');
 
-const envContent = `ADMIN_IP_WHITELIST=142.122.111.63
-ADMIN_PASSWORD=your-admin-password
-ADMIN_SIGN_SECRET=725b9a3501674b5998ec0101fe317e07d67143d6911a0d4c55a3b58e772deab7
-DB_HOST=dpg-d16r57fdiees73dgmkj0-a.oregon-postgres.render.com
-DB_NAME=quiz_db_i6kg
-DB_PASS=bc6GYvT7jjfbtyEyOnZzfU04lvfdLO4S
-DB_PORT=5432
-DB_USER=quiz_db_i6kg_user
-GIFT_TASKS_HMAC_SECRET=932be5abbb5e542af914e5f4ce779d14fd98a09638f8d7cb37f55024e5a944c3
-NODE_ENV=production
-SESSION_SECRET=your-super-secret-key
-WINDOWS_API_KEY=bilibili-gift-service-secret-key-2024-secure`;
+if (fs.existsSync('.env')) {
+    console.error('Refusing to overwrite the existing .env file. Rotate secrets in your deployment provider instead.');
+    process.exit(1);
+}
 
-fs.writeFileSync('.env', envContent, 'utf8');
-console.log('.env file written successfully (clean UTF-8).');
+const required = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASS'];
+const missing = required.filter((name) => !process.env[name]);
+if (missing.length > 0) {
+    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+}
+
+const randomSecret = () => crypto.randomBytes(32).toString('hex');
+const envContent = [
+    'NODE_ENV=production',
+    `DB_HOST=${process.env.DB_HOST}`,
+    `DB_NAME=${process.env.DB_NAME}`,
+    `DB_USER=${process.env.DB_USER}`,
+    `DB_PASS=${process.env.DB_PASS}`,
+    `DB_PORT=${process.env.DB_PORT || '5432'}`,
+    `SESSION_SECRET=${randomSecret()}`,
+    `WINDOWS_API_KEY=${randomSecret()}`,
+    `GIFT_TASKS_HMAC_SECRET=${randomSecret()}`,
+    `ADMIN_SIGN_SECRET=${randomSecret()}`,
+    'ADMIN_SIGN_ENFORCE=true',
+    'GIFT_TASKS_HMAC_ENFORCE=true',
+    `ADMIN_IP_WHITELIST=${process.env.ADMIN_IP_WHITELIST || ''}`,
+    `GIFT_TASKS_IP_WHITELIST=${process.env.GIFT_TASKS_IP_WHITELIST || ''}`,
+    ''
+].join('\n');
+
+fs.writeFileSync('.env', envContent, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+console.log('.env created with fresh random application secrets.');

@@ -4,13 +4,14 @@ class IPManager {
     constructor() {
         this.riskCache = new Map(); // IP风险缓存
         this.locationCache = new Map(); // IP地理位置缓存
+        this.activityWriteCache = new Map();
         this.cleanupInterval = 60 * 60 * 1000; // 1小时清理一次缓存
         this.startCleanup();
     }
 
     // 启动定期清理缓存
     startCleanup() {
-        setInterval(() => {
+        const interval = setInterval(async () => {
             const now = Date.now();
             for (const [ip, data] of this.riskCache) {
                 if (now - data.timestamp > this.cleanupInterval) {
@@ -22,35 +23,65 @@ class IPManager {
                     this.locationCache.delete(ip);
                 }
             }
+            for (const [key, timestamp] of this.activityWriteCache) {
+                if (now - timestamp > 5 * 60 * 1000) {
+                    this.activityWriteCache.delete(key);
+                }
+            }
+            try {
+                await pool.query(`
+                    DELETE FROM ip_activities
+                    WHERE id IN (
+                        SELECT id
+                        FROM ip_activities
+                        WHERE created_at < NOW() - INTERVAL '31 days'
+                        ORDER BY created_at
+                        LIMIT 5000
+                    )
+                `);
+            } catch (error) {
+                console.error('清理过期IP活动失败:', error);
+            }
         }, this.cleanupInterval);
+        interval.unref?.();
+    }
+
+    riskCacheKey(ip, username = null) {
+        return `${ip}\u0000${username || ''}`;
+    }
+
+    clearRiskCacheForIP(ip) {
+        const prefix = `${ip}\u0000`;
+        for (const key of this.riskCache.keys()) {
+            if (key.startsWith(prefix)) this.riskCache.delete(key);
+        }
     }
 
     // 记录IP活动
     async recordIPActivity(ip, username, userAgent, action = 'access') {
+        const activityKey = `${ip}\u0000${username || ''}\u0000${action}`;
+        const now = Date.now();
+        if (action === 'request') {
+            const lastWrite = this.activityWriteCache.get(activityKey) || 0;
+            if (now - lastWrite < 60 * 1000) return;
+            this.activityWriteCache.set(activityKey, now);
+        }
         try {
             await pool.query(`
                 INSERT INTO ip_activities (ip_address, username, user_agent, action, created_at)
                 VALUES ($1, $2, $3, $4, NOW())
             `, [ip, username, userAgent, action]);
         } catch (error) {
+            if (action === 'request') this.activityWriteCache.delete(activityKey);
             console.error('记录IP活动失败:', error);
         }
     }
 
     // 获取IP风险评分
     async getIPRiskScore(ip, username = null) {
-        // 管理员hokboost永远安全 - 特殊保护
-        if (username === 'hokboost') {
-            return { 
-                score: 0, 
-                reasons: ['管理员账号 - 永久白名单保护'], 
-                level: 'SAFE' 
-            };
-        }
-
-        // 先检查缓存
-        if (this.riskCache.has(ip)) {
-            const cached = this.riskCache.get(ip);
+        const cacheKey = this.riskCacheKey(ip, username);
+        if (this.riskCache.has(cacheKey)) {
+            const cached = this.riskCache.get(cacheKey);
             if (Date.now() - cached.timestamp < 10 * 60 * 1000 && cached.result) { // 10分钟缓存
                 return cached.result;
             }
@@ -69,7 +100,7 @@ class IPManager {
                 riskScore = 100; // 最高风险
                 reasons.push(`黑名单IP: ${blacklistCheck.rows[0].reason}`);
                 const result = { score: riskScore, reasons, level: 'CRITICAL' };
-                this.cacheRiskScore(ip, result);
+                this.cacheRiskScore(ip, username, result);
                 return result;
             }
 
@@ -82,7 +113,7 @@ class IPManager {
                 riskScore = 0; // 无风险
                 reasons.push('可信IP白名单');
                 const result = { score: riskScore, reasons, level: 'SAFE' };
-                this.cacheRiskScore(ip, result);
+                this.cacheRiskScore(ip, username, result);
                 return result;
             }
 
@@ -149,7 +180,7 @@ class IPManager {
             else level = 'SAFE';
 
             const result = { score: riskScore, reasons, level };
-            this.cacheRiskScore(ip, result);
+            this.cacheRiskScore(ip, username, result);
             return result;
 
         } catch (error) {
@@ -219,8 +250,8 @@ class IPManager {
     }
 
     // 缓存风险评分
-    cacheRiskScore(ip, result) {
-        this.riskCache.set(ip, {
+    cacheRiskScore(ip, username, result) {
+        this.riskCache.set(this.riskCacheKey(ip, username), {
             result,
             timestamp: Date.now()
         });
@@ -237,7 +268,7 @@ class IPManager {
             `, [ip, reason, adminUser]);
             
             // 清除缓存
-            this.riskCache.delete(ip);
+            this.clearRiskCacheForIP(ip);
             return true;
         } catch (error) {
             console.error('添加IP黑名单失败:', error);
@@ -256,7 +287,7 @@ class IPManager {
             `, [ip, reason, adminUser]);
             
             // 清除缓存
-            this.riskCache.delete(ip);
+            this.clearRiskCacheForIP(ip);
             return true;
         } catch (error) {
             console.error('添加IP白名单失败:', error);
@@ -271,7 +302,7 @@ class IPManager {
                 'UPDATE ip_blacklist SET is_active = false WHERE ip_address = $1',
                 [ip]
             );
-            this.riskCache.delete(ip);
+            this.clearRiskCacheForIP(ip);
             return true;
         } catch (error) {
             console.error('移除IP黑名单失败:', error);

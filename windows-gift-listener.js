@@ -18,12 +18,13 @@ class WindowsGiftListener {
     constructor() {
         // 配置服务器URL（根据实际部署地址修改）
         this.serverUrl = process.env.SERVER_URL || 'https://minimal-games-site.onrender.com';  // 或者你的实际Render URL
-        this.apiKey = process.env.WINDOWS_API_KEY || 'bilibili-gift-service-secret-key-2024-secure'; // API密钥
+        this.apiKey = process.env.WINDOWS_API_KEY || '';
         this.hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || ''; // 签名密钥
         this.pollInterval = 2000; // 2秒轮询一次
-        this.isProcessing = false;
-        this.pythonScript = 'C:/Users/user/minimal-games-site/bilibili_gift_sender.py';
-        this.pythonPath = 'python'; // 直接用python命令
+        this.isPollingGifts = false;
+        this.isPollingPk = false;
+        this.pythonScript = process.env.GIFT_SENDER_SCRIPT || 'C:/Users/user/minimal-games-site/bilibili_gift_sender.py';
+        this.pythonPath = process.env.GIFT_SENDER_PYTHON || 'python';
         this.threeServerUrl = 'http://127.0.0.1:9876';
         this.threeServerRoomId = null;
         this.threeServerLastCheck = 0;
@@ -43,6 +44,9 @@ class WindowsGiftListener {
     async start() {
         if (!this.hmacSecret) {
             throw new Error('缺少GIFT_TASKS_HMAC_SECRET环境变量，无法进行签名请求');
+        }
+        if (!this.apiKey || this.apiKey.length < 32) {
+            throw new Error('缺少有效的WINDOWS_API_KEY环境变量');
         }
         console.log('🚀 Windows B站礼物发送监听服务已启动');
         console.log(`📡 监听服务器: ${this.serverUrl}`);
@@ -68,6 +72,8 @@ class WindowsGiftListener {
     }
 
     async pollForPkTasks() {
+        if (this.isPollingPk) return;
+        this.isPollingPk = true;
         try {
             const path = '/api/pk-tasks';
             const headers = this.buildSignedHeaders('GET', path, null);
@@ -88,6 +94,8 @@ class WindowsGiftListener {
             if (error.response?.status === 401) {
                 console.error('❌ PK任务鉴权失败，请检查密钥/签名设置');
             }
+        } finally {
+            this.isPollingPk = false;
         }
     }
 
@@ -95,23 +103,34 @@ class WindowsGiftListener {
         try {
             if (task.action === 'start') {
                 await this.startPkProcess(task.username, task.room_id);
-                await this.markPkTaskComplete(task.id);
             } else if (task.action === 'stop') {
                 await this.stopPkProcess(task.username);
-                await this.markPkTaskComplete(task.id);
             } else {
                 await this.markPkTaskFailed(task.id, '未知动作');
+                return;
             }
         } catch (error) {
             console.error(`❌ PK任务处理失败 (${task.id}):`, error.message);
             await this.markPkTaskFailed(task.id, error.message || '执行失败');
+            return;
+        }
+
+        const confirmed = await this.markPkTaskComplete(task.id);
+        if (!confirmed) {
+            console.error(`❌ PK任务 ${task.id} 已执行，但服务器未确认结果；不会错误标记为执行失败`);
         }
     }
 
     async startPkProcess(username, roomId) {
         if (this.pkProcesses.has(username)) {
-            await this.updatePkRunnerState(username, true, roomId, this.pkProcesses.get(username)?.pid);
-            return;
+            const existing = this.pkProcesses.get(username);
+            if (String(existing?.roomId || '') === String(roomId || '')) {
+                if (!await this.updatePkRunnerState(username, true, roomId, existing?.pid || null)) {
+                    throw new Error('PK进程正在运行，但运行状态上报失败');
+                }
+                return;
+            }
+            await this.stopPkProcess(username);
         }
         const pkConfigPath = await this.ensureRoomConfig(roomId);
         const pkThreeServerUrl = await this.ensurePkThreeServer(username, roomId);
@@ -132,79 +151,111 @@ class WindowsGiftListener {
             windowTitle
         });
 
-        await this.updatePkRunnerState(username, true, roomId, pid || null);
+        if (!await this.updatePkRunnerState(username, true, roomId, pid || null)) {
+            throw new Error('PK进程已启动，但运行状态上报失败');
+        }
     }
 
     async stopPkProcess(username) {
         const entry = this.pkProcesses.get(username);
         if (!entry) {
-            await this.updatePkRunnerState(username, false, null, null);
+            if (!await this.updatePkRunnerState(username, false, null, null)) {
+                throw new Error('PK进程未运行，但停止状态上报失败');
+            }
             this.stopPkThreeServer(username);
             return;
         }
-        try {
-            if (entry.windowTitle) {
-                await this.closeWindowByTitle(entry.windowTitle);
-            }
-        } catch (error) {
-            console.error(`[PK:${username}] stop error:`, error.message);
+        if (entry.windowTitle) {
+            await this.closeWindowByTitle(entry.windowTitle);
         }
         this.pkProcesses.delete(username);
         this.stopPkThreeServer(username);
-        await this.updatePkRunnerState(username, false, null, null);
-    }
-
-    async updatePkRunnerState(username, running, roomId, pid) {
-        try {
-            const path = '/api/pk/runner/update';
-            const payload = {
-                username,
-                running: !!running,
-                roomId: roomId ? String(roomId) : null,
-                pid: pid || null
-            };
-            const headers = this.buildSignedHeaders('POST', path, payload);
-            await axios.post(`${this.serverUrl}${path}`, payload, {
-                timeout: 5000,
-                headers: {
-                    ...headers,
-                    'Content-Type': 'application/json'
-                }
-            });
-        } catch (error) {
-            console.error('PK runner update error:', error.message);
+        if (!await this.updatePkRunnerState(username, false, null, null)) {
+            throw new Error('PK进程已停止，但运行状态上报失败');
         }
     }
 
-    async markPkTaskComplete(taskId) {
-        const path = `/api/pk-tasks/${taskId}/complete`;
-        const payload = {};
-        const headers = this.buildSignedHeaders('POST', path, payload);
-        await axios.post(`${this.serverUrl}${path}`, payload, {
-            timeout: 5000,
-            headers: {
-                ...headers,
-                'Content-Type': 'application/json'
+    async updatePkRunnerState(username, running, roomId, pid) {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+            try {
+                const path = '/api/pk/runner/update';
+                const payload = {
+                    username,
+                    running: !!running,
+                    roomId: roomId ? String(roomId) : null,
+                    pid: pid || null
+                };
+                const headers = this.buildSignedHeaders('POST', path, payload);
+                const response = await axios.post(`${this.serverUrl}${path}`, payload, {
+                    timeout: 5000,
+                    headers: {
+                        ...headers,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                return response.status === 200 && response.data.success;
+            } catch (error) {
+                console.error(`PK runner update error (${attempt}/4):`, error.message);
+                if (attempt < 4) {
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+                }
             }
-        });
+        }
+        return false;
+    }
+
+    async markPkTaskComplete(taskId) {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+            try {
+                const path = `/api/pk-tasks/${taskId}/complete`;
+                const payload = {};
+                const headers = this.buildSignedHeaders('POST', path, payload);
+                const response = await axios.post(`${this.serverUrl}${path}`, payload, {
+                    timeout: 5000,
+                    headers: {
+                        ...headers,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                return response.status === 200 && response.data.success;
+            } catch (error) {
+                console.error(`PK任务完成回执失败 (${taskId}, ${attempt}/4):`, error.message);
+                if (attempt < 4) {
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+                }
+            }
+        }
+        return false;
     }
 
     async markPkTaskFailed(taskId, errorMessage) {
-        const path = `/api/pk-tasks/${taskId}/fail`;
-        const payload = { error: errorMessage };
-        const headers = this.buildSignedHeaders('POST', path, payload);
-        await axios.post(`${this.serverUrl}${path}`, payload, {
-            timeout: 5000,
-            headers: {
-                ...headers,
-                'Content-Type': 'application/json'
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+            try {
+                const path = `/api/pk-tasks/${taskId}/fail`;
+                const payload = { error: errorMessage };
+                const headers = this.buildSignedHeaders('POST', path, payload);
+                const response = await axios.post(`${this.serverUrl}${path}`, payload, {
+                    timeout: 5000,
+                    headers: {
+                        ...headers,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                return response.status === 200 && response.data.success;
+            } catch (error) {
+                console.error(`PK任务失败回执失败 (${taskId}, ${attempt}/4):`, error.message);
+                if (attempt < 4) {
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+                }
             }
-        });
+        }
+        return false;
     }
 
     // 轮询服务器获取任务
     async pollForTasks() {
-        // 移除isProcessing限制，允许查询新任务（但不重复处理相同任务）
+        if (this.isPollingGifts) return;
+        this.isPollingGifts = true;
 
         try {
             console.log(`🔄 轮询任务... ${new Date().toLocaleTimeString()}`);
@@ -246,6 +297,8 @@ class WindowsGiftListener {
                     data: error.response?.data
                 });
             }
+        } finally {
+            this.isPollingGifts = false;
         }
     }
 
@@ -273,7 +326,8 @@ class WindowsGiftListener {
                     if (markResult) {
                         console.log(`✅ 任务 ${task.id} 已提交到threeserver: ${task.giftName} x${quantity}`);
                     } else {
-                        console.log(`❌ 任务 ${task.id} 处理成功但标记失败，将在下次轮询重试`);
+                        await this.markTaskUncertain(task.id, 'threeserver已发送，但完成回执未确认');
+                        console.log(`❌ 任务 ${task.id} 已发送但完成回执未确认`);
                     }
                     return;
                 }
@@ -306,9 +360,15 @@ class WindowsGiftListener {
                         console.log(`✅ 任务 ${task.id} 完成: ${task.giftName} ${result.actual_quantity}/${result.requested_quantity} 已发送到房间 ${task.roomId}`);
                     }
                 } else {
-                    console.log(`❌ 任务 ${task.id} 处理成功但标记失败，将在下次轮询重试`);
+                    await this.markTaskUncertain(task.id, 'Python发送已完成，但完成回执未确认');
+                    console.log(`❌ 任务 ${task.id} 已发送但完成回执未确认`);
                 }
             } else {
+                if (result.outcome_uncertain) {
+                    await this.markTaskUncertain(task.id, result.error || 'Python发送结果无法确认');
+                    console.log(`⚠️ 任务 ${task.id} 发送结果待确认: ${result.error || '未知原因'}`);
+                    return;
+                }
                 if (result.balance_insufficient) {
                     console.log(`🚫 任务 ${task.id} 失败: 余额不足！请充值后再试。`);
                     console.log(`⚠️  建议暂停送礼服务直到充值完成`);
@@ -575,6 +635,28 @@ class WindowsGiftListener {
 
             let output = '';
             let errorOutput = '';
+            let settled = false;
+            const finish = (result) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                resolve(result);
+            };
+            const timeout = setTimeout(() => {
+                try {
+                    pythonProcess.kill('SIGTERM');
+                } catch (error) {
+                    console.error(`终止超时Python进程失败: ${error.message}`);
+                }
+                finish({
+                    success: false,
+                    giftId,
+                    roomId,
+                    outcome_uncertain: true,
+                    error: 'Python送礼进程超时，结果无法确认'
+                });
+            }, 3 * 60 * 1000);
+            timeout.unref?.();
 
             pythonProcess.stdout.on('data', (data) => {
                 output += data.toString();
@@ -603,7 +685,7 @@ class WindowsGiftListener {
                             try {
                                 const result = JSON.parse(trimmed);
                                 console.log(`📋 解析Python结果成功: success=${result.success}, error=${result.error || 'N/A'}`);
-                                resolve(result);
+                                finish(result);
                                 return;
                             } catch (jsonError) {
                                 console.log(`⚠️ JSON解析失败: "${trimmed}" - ${jsonError.message}`);
@@ -617,26 +699,28 @@ class WindowsGiftListener {
                     console.log(`stdout: "${output}"`);
                     console.log(`stderr: "${errorOutput}"`);
                     
-                    resolve({
+                    finish({
                         success: false,
                         giftId: giftId,
                         roomId: roomId,
+                        outcome_uncertain: true,
                         error: `Python脚本未返回有效JSON结果 (exit code: ${code})`
                     });
                     
                 } catch (parseError) {
                     console.error(`💥 解析过程异常: ${parseError.message}`);
-                    resolve({
+                    finish({
                         success: false,
                         giftId: giftId,
                         roomId: roomId,
+                        outcome_uncertain: true,
                         error: `Python脚本输出解析失败: ${parseError.message}`
                     });
                 }
             });
 
             pythonProcess.on('error', (error) => {
-                resolve({
+                finish({
                     success: false,
                     giftId: giftId,
                     roomId: roomId,
@@ -702,7 +786,8 @@ class WindowsGiftListener {
 
     // 标记任务完成
     async markTaskComplete(taskId, resultData = {}) {
-        try {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+            try {
             const path = `/api/gift-tasks/${taskId}/complete`;
             // ✅ 修复：清理 undefined 值，确保签名计算和 HTTP body 一致
             const payload = cleanPayload({
@@ -719,15 +804,20 @@ class WindowsGiftListener {
                 }
             });
             return response.status === 200 && response.data.success;
-        } catch (error) {
-            console.error(`❌ 标记任务完成失败 (${taskId}):`, error.message);
-            return false;
+            } catch (error) {
+                console.error(`❌ 标记任务完成失败 (${taskId}, ${attempt}/4):`, error.message);
+                if (attempt < 4) {
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+                }
+            }
         }
+        return false;
     }
 
     // 标记任务失败
     async markTaskFailed(taskId, errorMessage, result = {}) {
-        try {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+            try {
             const path = `/api/gift-tasks/${taskId}/fail`;
             // ✅ 修复：清理 undefined 值，确保签名计算和 HTTP body 一致
             const payload = cleanPayload({
@@ -745,11 +835,39 @@ class WindowsGiftListener {
                 }
             });
             return response.status === 200 && response.data.success;
-        } catch (error) {
-            console.error(`❌ 标记任务失败失败 (${taskId}):`, error.message);
-            return false;
+            } catch (error) {
+                console.error(`❌ 标记任务失败失败 (${taskId}, ${attempt}/4):`, error.message);
+                if (attempt < 4) {
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+                }
+            }
         }
-    }      
+        return false;
+    }
+
+    async markTaskUncertain(taskId, reason) {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+            try {
+                const path = `/api/gift-tasks/${taskId}/uncertain`;
+                const payload = { reason: String(reason || '发送结果无法确认').slice(0, 1000) };
+                const headers = this.buildSignedHeaders('POST', path, payload);
+                const response = await axios.post(`${this.serverUrl}${path}`, payload, {
+                    timeout: 5000,
+                    headers: {
+                        ...headers,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                return response.status === 200 && response.data.success;
+            } catch (error) {
+                console.error(`标记任务待确认失败 (${taskId}, ${attempt}/4):`, error.message);
+                if (attempt < 4) {
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+                }
+            }
+        }
+        return false;
+    }
 
     buildSignedHeaders(method, path, body) {
         const timestamp = Date.now().toString();

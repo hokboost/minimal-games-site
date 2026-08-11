@@ -49,9 +49,9 @@
     function updateState(data) {
         state = data;
         renderBoard(data.board, data.ended);
-        nextCostEl.textContent = data.nextCost ? `${data.nextCost} ${t('电币', 'coins')}` : '--';
+        nextCostEl.textContent = data.nextCost ? `${data.nextCost} ${t('积分', 'points')}` : '--';
         goodCountEl.textContent = data.goodCount || 0;
-        cashoutRewardEl.textContent = `${data.cashoutReward || 0} ${t('电币', 'coins')}`;
+        cashoutRewardEl.textContent = `${data.cashoutReward || 0} ${t('积分', 'points')}`;
         cashoutBtn.disabled = data.ended || data.goodCount === 0;
     }
 
@@ -64,7 +64,7 @@
     }
 
     async function flipCard(index) {
-        const response = await fetch('/api/flip/flip', {
+        const response = await window.idempotentFetch('/api/flip/flip', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -81,12 +81,12 @@
         await loadState();
 
         if (result.reward > 0) {
-            alert(t(`本轮结束！获得 ${result.reward} 电币`, `Round ended! Earned ${result.reward} coins`));
+            alert(t(`本轮结束！获得 ${result.reward} 积分`, `Round ended! Earned ${result.reward} points`));
         }
     }
 
     startBtn.addEventListener('click', async () => {
-        const response = await fetch('/api/flip/start', {
+        const response = await window.idempotentFetch('/api/flip/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -103,15 +103,15 @@
         }
         if (result.previousReward > 0) {
             alert(t(
-                `上一轮自动结算：获得 ${result.previousReward} 电币`,
-                `Previous round auto-settled: earned ${result.previousReward} coins`
+                `上一轮自动结算：获得 ${result.previousReward} 积分`,
+                `Previous round auto-settled: earned ${result.previousReward} points`
             ));
         }
         await loadState();
     });
 
     cashoutBtn.addEventListener('click', async () => {
-        const response = await fetch('/api/flip/cashout', {
+        const response = await window.idempotentFetch('/api/flip/cashout', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -125,7 +125,7 @@
         }
         updateBalance(result.newBalance);
         await loadState();
-        alert(t(`退出成功，获得 ${result.reward} 电币`, `Cash out success, earned ${result.reward} coins`));
+        alert(t(`退出成功，获得 ${result.reward} 积分`, `Cash out success, earned ${result.reward} points`));
     });
 
     loadState();

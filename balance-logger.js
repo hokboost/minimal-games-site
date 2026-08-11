@@ -74,24 +74,37 @@ class BalanceLogger {
         client: externalClient = null,
         managedTransaction = false
     }) {
-        const client = externalClient || await pool.connect();
+        const numericAmount = Number(amount);
+        if (!username || !Number.isSafeInteger(numericAmount)) {
+            return { success: false, message: '余额变动参数无效' };
+        }
+        if (typeof operationType !== 'string' || !operationType.trim()) {
+            return { success: false, message: '余额操作类型无效' };
+        }
+        if (externalClient && !managedTransaction) {
+            return { success: false, message: '外部数据库连接必须声明事务管理模式' };
+        }
+
+        let client = externalClient;
         const maxAttempts = 3;
         const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/stmt timeout, deadlock, serialization
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-        const useSavepoint = Boolean(managedTransaction);
+        const ownsTransaction = !externalClient;
+        const useSavepoint = Boolean(externalClient && managedTransaction);
 
         try {
+            if (!client) client = await pool.connect();
             for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
                 const savepointName = useSavepoint ? `balance_update_${attempt}` : null;
+                if (ownsTransaction) {
+                    await client.query('BEGIN');
+                }
                 if (useSavepoint) {
-                    // 独立的保存点，避免单次语句失败把整个外层事务打脏
                     await client.query(`SAVEPOINT ${savepointName}`);
                 }
                 try {
-                    // 不再显式开启事务或设置锁/超时，缩短占用时间
-                    // 单语句更新，避免显式行锁等待
                     let updateResult;
-                    if (requireSufficientBalance && amount < 0) {
+                    if (requireSufficientBalance && numericAmount < 0) {
                         updateResult = await client.query(
                             `
                             UPDATE users
@@ -99,7 +112,7 @@ class BalanceLogger {
                             WHERE username = $1 AND balance >= $3
                             RETURNING balance
                             `,
-                            [username, amount, Math.abs(amount)]
+                            [username, numericAmount, Math.abs(numericAmount)]
                         );
                     } else {
                         updateResult = await client.query(
@@ -109,16 +122,21 @@ class BalanceLogger {
                             WHERE username = $1
                             RETURNING balance
                             `,
-                            [username, amount]
+                            [username, numericAmount]
                         );
                     }
 
                     if (updateResult.rows.length === 0) {
+                        if (useSavepoint) {
+                            await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+                            await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+                        }
+                        if (ownsTransaction) await client.query('ROLLBACK');
                         return { success: false, message: '余额不足' };
                     }
 
                     const balanceAfter = parseFloat(updateResult.rows[0].balance);
-                    const balanceBefore = balanceAfter - amount;
+                    const balanceBefore = balanceAfter - numericAmount;
 
                     // 记录日志
                     await client.query(`
@@ -129,7 +147,7 @@ class BalanceLogger {
                     `, [
                         username,
                         operationType,
-                        amount,
+                        numericAmount,
                         balanceBefore,
                         balanceAfter,
                         description,
@@ -141,6 +159,7 @@ class BalanceLogger {
                     if (useSavepoint) {
                         await client.query(`RELEASE SAVEPOINT ${savepointName}`);
                     }
+                    if (ownsTransaction) await client.query('COMMIT');
                     return {
                         success: true,
                         balance: balanceAfter,
@@ -149,7 +168,6 @@ class BalanceLogger {
 
                 } catch (error) {
                     if (useSavepoint) {
-                        // 回滚到保存点，清理掉本次失败让事务可继续使用
                         try {
                             await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
                             await client.query(`RELEASE SAVEPOINT ${savepointName}`);
@@ -157,9 +175,11 @@ class BalanceLogger {
                             console.error('回滚余额更新保存点失败:', rollbackError);
                         }
                     }
+                    if (ownsTransaction) {
+                        await client.query('ROLLBACK').catch(() => {});
+                    }
                     const isLockTimeout = lockErrorCodes.has(error.code);
                     if (isLockTimeout && attempt < maxAttempts) {
-                        // 轻量重试，缓解偶发锁等待
                         await sleep(150);
                         continue;
                     }
@@ -171,10 +191,14 @@ class BalanceLogger {
                 }
             }
             return { success: false, message: '系统错误' };
-        } finally {
-            if (!externalClient) {
-                client.release();
+        } catch (error) {
+            if (ownsTransaction && client) {
+                await client.query('ROLLBACK').catch(() => {});
             }
+            console.error('余额更新初始化失败:', error);
+            return { success: false, message: '系统繁忙，请稍后重试' };
+        } finally {
+            if (ownsTransaction) client?.release();
         }
     }
 

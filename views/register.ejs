@@ -6,11 +6,11 @@
     <title><%= title %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body class="app-redesign page-register">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
-        <h1>🆕 <%= t.auth.register %> Minimal Games</h1>
+        <h1><%= t.auth.register %> Minimal Games</h1>
 
         <form id="register-form" action="/register" method="POST" class="auth-form">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -26,11 +26,11 @@
             </div>
 
             <div class="form-group">
-                <input type="password" name="password" placeholder="<%= t.auth.password %>" required minlength="6" maxlength="128" />
+                <input type="password" name="password" placeholder="<%= t.auth.password %>" required minlength="12" maxlength="128" autocomplete="new-password" />
                 <div class="input-hint">
                     <%= lang === 'zh'
-                        ? '密码要求: 6-128个字符，不能使用常见弱密码（如123456）'
-                        : 'Password: 6-128 characters, avoid common weak passwords (e.g., 123456)'
+                        ? '密码要求: 12-128个字符，同时包含字母和数字'
+                        : 'Password: 12-128 characters with letters and numbers'
                     %>
                 </div>
             </div>

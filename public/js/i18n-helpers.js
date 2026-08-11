@@ -6,11 +6,11 @@
         '请先登录': 'Please log in first',
         '未授权访问': 'Unauthorized access',
         '无权访问管理员后台': 'No permission to access admin panel',
-        '❌ 尝试次数过多，请 10 分钟后再试。': '❌ Too many attempts. Please try again in 10 minutes.',
-        '⚠️ 注册太频繁，请稍后再试。': '⚠️ Too many registrations. Please try again later.',
+        '尝试次数过多，请 10 分钟后再试。': 'Too many attempts. Please try again in 10 minutes.',
+        '注册太频繁，请稍后再试。': 'Too many registrations. Please try again later.',
         '请填写所有字段': 'Please fill in all fields',
         '新密码和确认密码不匹配': 'New password and confirmation do not match',
-        '新密码至少需要6个字符': 'New password must be at least 6 characters',
+        '新密码须为12-128位，并同时包含字母和数字': 'Password must be 12-128 characters with letters and numbers',
         '当前密码错误': 'Current password is incorrect',
         '密码修改成功！': 'Password updated successfully!',
         '修改密码失败，请稍后重试': 'Password update failed, please try again',
@@ -34,11 +34,57 @@
     };
 
     const translateServerMessage = (message) => {
-        if (!message || lang === 'zh') {
-            return message;
+        const cleanMessage = typeof message === 'string'
+            ? message.replace(/^(?:\u274c|\u26a0\ufe0f?)\s*/u, '')
+            : message;
+        if (!cleanMessage || lang === 'zh') {
+            return cleanMessage;
         }
-        return messageMap[message] || message;
+        return messageMap[cleanMessage] || cleanMessage;
     };
 
     window.translateServerMessage = translateServerMessage;
+    window.escapeHTML = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;'
+    }[char]));
+
+    const pendingIdempotencyKeys = new Map();
+    const newIdempotencyKey = () => {
+        if (globalThis.crypto?.randomUUID) {
+            return globalThis.crypto.randomUUID();
+        }
+        const bytes = new Uint8Array(16);
+        globalThis.crypto.getRandomValues(bytes);
+        return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    };
+
+    window.idempotentFetch = async (url, options = {}) => {
+        const method = String(options.method || 'GET').toUpperCase();
+        const signature = `${method}:${url}:${String(options.body || '')}`;
+        const existing = pendingIdempotencyKeys.get(signature);
+        const key = existing?.key || newIdempotencyKey();
+        pendingIdempotencyKeys.set(signature, { key, createdAt: Date.now() });
+
+        const headers = new Headers(options.headers || {});
+        headers.set('Idempotency-Key', key);
+        try {
+            const response = await fetch(url, { ...options, headers });
+            const idempotencyStatus = response.headers.get('Idempotency-Status');
+            if (response.status !== 409 || idempotencyStatus !== 'pending') {
+                pendingIdempotencyKeys.delete(signature);
+            }
+            return response;
+        } catch (error) {
+            for (const [entrySignature, entry] of pendingIdempotencyKeys.entries()) {
+                if (Date.now() - entry.createdAt > 5 * 60 * 1000) {
+                    pendingIdempotencyKeys.delete(entrySignature);
+                }
+            }
+            throw error;
+        }
+    };
 })();

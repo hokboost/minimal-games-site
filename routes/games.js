@@ -9,8 +9,6 @@ module.exports = function registerGameRoutes(app, deps) {
         requireLogin,
         requireAuthorized,
         security,
-        userSessions,
-        quizSessions,
         questionMap,
         randomStoneColor,
         normalizeStoneSlots,
@@ -285,7 +283,7 @@ module.exports = function registerGameRoutes(app, deps) {
 
         const username = req.session.user.username;
 
-        // 获取用户电币余额
+        // 获取用户积分余额
         let balance = 0;
         try {
             const result = await pool.query(
@@ -304,9 +302,11 @@ module.exports = function registerGameRoutes(app, deps) {
         });
     });
 
-    // Quiz 开始游戏 API - 扣除电币 + 创建付费会话
-    app.post('/api/quiz/start', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+    // Quiz 开始游戏 API - 扣除积分 + 创建付费会话
+    app.post('/api/quiz/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
+        let client;
         try {
+            client = await pool.connect();
             const { username } = req.body;
 
             // 验证用户名
@@ -314,47 +314,50 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
-            // 每次开始新会话时，清理旧的 quiz 会话
-            const prevSessionId = req.session.quizSessionId;
-            if (prevSessionId) {
-                quizSessions.delete(prevSessionId);
-            }
-
-            // 使用余额日志系统扣除电币
+            await client.query('BEGIN');
+            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`quiz:${username}`]);
             const balanceResult = await BalanceLogger.updateBalance({
-                username: username,
+                username,
                 amount: -10,
                 operationType: 'quiz_start',
                 description: '开始答题游戏',
                 ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
-            // 创建新的 quiz 会话（绑定付费、未结算、过期时间）
             const sessionId = GameLogic.generateToken(16);
-            const now = Date.now();
-            quizSessions.set(sessionId, {
-                username,
-                paid: true,
-                settled: false,
-                createdAt: now,
-                expiresAt: now + 20 * 60 * 1000 // 有效期放宽到20分钟，减少误判
-            });
+            await client.query(`
+                UPDATE quiz_sessions
+                SET status = 'replaced', settled_at = NOW()
+                WHERE username = $1 AND status = 'active'
+            `, [username]);
+            await client.query(`
+                INSERT INTO quiz_sessions (id, username, status, created_at, expires_at)
+                VALUES ($1, $2, 'active', NOW(), NOW() + INTERVAL '20 minutes')
+            `, [sessionId, username]);
+            await client.query('COMMIT');
+
             req.session.quizSessionId = sessionId;
 
             res.json({
                 success: true,
-                message: '游戏开始，已扣除10电币',
+                message: '游戏开始，已扣除10积分',
                 newBalance: balanceResult.balance,
                 quizSessionId: sessionId
             });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Quiz start error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
@@ -585,61 +588,77 @@ module.exports = function registerGameRoutes(app, deps) {
         requireAuthorized,
         basicRateLimit,
         csrfProtection,
-        (req, res) => {
+        async (req, res) => {
+        let client;
         try {
-            const { username: requestUsername, seen = [], questionIndex = 0 } = req.body;
+            client = await pool.connect();
+            const { username: requestUsername } = req.body;
             const username = req.session.user.username;
             if (requestUsername && requestUsername !== username) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
-            // 验证付费会话
-            const quizSessionId = req.session.quizSessionId;
-            const sessionData = quizSessionId ? quizSessions.get(quizSessionId) : null;
-            if (!sessionData || sessionData.username !== username) {
+            let quizSessionId = req.session.quizSessionId;
+            if (!quizSessionId) {
+                const activeSession = await client.query(`
+                    SELECT id
+                    FROM quiz_sessions
+                    WHERE username = $1
+                      AND status = 'active'
+                      AND expires_at > NOW()
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, [username]);
+                quizSessionId = activeSession.rows[0]?.id || null;
+                if (quizSessionId) req.session.quizSessionId = quizSessionId;
+            }
+            if (!quizSessionId) {
                 return res.status(403).json({ success: false, message: '未找到有效答题会话，请先开始游戏' });
             }
-            const now = Date.now();
-            if (!sessionData.paid || sessionData.settled || now > sessionData.expiresAt) {
+
+            await client.query('BEGIN');
+            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`quiz-next:${quizSessionId}`]);
+            const sessionResult = await client.query(`
+                SELECT status, expires_at
+                FROM quiz_sessions
+                WHERE id = $1 AND username = $2
+                FOR UPDATE
+            `, [quizSessionId, username]);
+            const sessionData = sessionResult.rows[0];
+            if (!sessionData) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({ success: false, message: '未找到有效答题会话，请先开始游戏' });
+            }
+            if (sessionData.status !== 'active' || new Date(sessionData.expires_at) <= new Date()) {
+                await client.query('ROLLBACK');
                 return res.status(403).json({ success: false, message: '答题会话无效或已过期，请重新开始' });
             }
 
-            const question = GameLogic.quiz.getRandomQuestion(questions, seen, questionIndex);
+            const issuedTokens = await client.query(
+                'SELECT question_id FROM quiz_question_tokens WHERE session_id = $1 ORDER BY created_at',
+                [quizSessionId]
+            );
+            if (issuedTokens.rows.length >= 15) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: '题目数量已达上限，请提交答案' });
+            }
+
+            const serverSeen = issuedTokens.rows
+                .map((row) => Number(row.question_id))
+                .filter(Number.isInteger);
+            const question = GameLogic.quiz.getRandomQuestion(questions, serverSeen, issuedTokens.rows.length);
             if (!question) {
+                await client.query('ROLLBACK');
                 return res.json({ success: false, message: '没有更多题目了' });
             }
 
             const token = GameLogic.generateToken(16);
             const signature = GameLogic.generateToken(16);
-
-            // 存储问题信息，绑定到当前付费会话，按 session 分桶
-            if (!userSessions.has(username)) {
-                userSessions.set(username, { tokensBySession: {} });
-            }
-            const userStore = userSessions.get(username);
-            if (!userStore.tokensBySession) {
-                userStore.tokensBySession = {};
-            }
-            // 只清理其他会话的残留，当前会话保留已有题目的token
-            Object.keys(userStore.tokensBySession).forEach((sid) => {
-                if (sid !== quizSessionId) {
-                    delete userStore.tokensBySession[sid];
-                }
-            });
-            if (!userStore.tokensBySession[quizSessionId]) {
-                userStore.tokensBySession[quizSessionId] = {};
-            }
-            // 限制单次会话题目数量，防止无限刷题（最多15题）
-            const currentCount = Object.keys(userStore.tokensBySession[quizSessionId]).length;
-            if (currentCount >= 15) {
-                return res.status(400).json({ success: false, message: '题目数量已达上限，请提交答案' });
-            }
-            userStore.tokensBySession[quizSessionId][token] = {
-                questionId: question.id,
-                timestamp: Date.now(),
-                sessionId: quizSessionId
-            };
-            userSessions.set(username, userStore);
+            await client.query(`
+                INSERT INTO quiz_question_tokens (token, session_id, question_id, created_at)
+                VALUES ($1, $2, $3, NOW())
+            `, [token, quizSessionId, question.id]);
+            await client.query('COMMIT');
 
             res.json({
                 success: true,
@@ -652,8 +671,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 signature
             });
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Quiz next error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
@@ -663,169 +685,187 @@ module.exports = function registerGameRoutes(app, deps) {
         basicRateLimit,
         csrfProtection,
         async (req, res) => {
+        let client;
         try {
+            client = await pool.connect();
             const { username, answers = [] } = req.body;
 
-            // 验证用户名与登录用户一致
             if (username !== req.session.user.username) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
+            if (!Array.isArray(answers) || answers.length < 1 || answers.length > 15) {
+                return res.status(400).json({ success: false, message: '答案数量无效' });
+            }
 
-            // 验证付费会话
-            const quizSessionId = req.session.quizSessionId;
-            const sessionData = quizSessionId ? quizSessions.get(quizSessionId) : null;
-            const now = Date.now();
-            if (!sessionData || sessionData.username !== username) {
-                return res.status(403).json({ success: false, message: '未找到有效答题会话，请先开始游戏' });
-            }
-            if (!sessionData.paid || sessionData.settled) {
-                return res.status(403).json({ success: false, message: '答题会话无效或已结算' });
-            }
-            if (now > sessionData.expiresAt) {
-                quizSessions.delete(quizSessionId);
-                return res.status(403).json({ success: false, message: '答题会话已过期，请重新开始' });
-            }
-            if (sessionData.processing) {
-                return res.status(429).json({ success: false, message: '答题提交处理中，请勿重复提交' });
-            }
-            sessionData.processing = true;
-            quizSessions.set(quizSessionId, sessionData);
-
-            let correctCount = 0;
-            let validAnswers = 0;
-            const userStore = userSessions.get(username);
-            const userTokens = userStore?.tokensBySession?.[quizSessionId] || {};
-            const usedTokens = new Set();
-
+            const normalizedAnswers = [];
+            const submittedTokens = new Set();
             for (const answer of answers) {
-                const tokenData = userTokens[answer.token];
-                // token不存在直接跳过
-                if (!tokenData) {
-                    continue;
+                const token = typeof answer?.token === 'string' ? answer.token : '';
+                const answerIndex = Number(answer?.answerIndex);
+                if (!token || !Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 20) {
+                    return res.status(400).json({ success: false, message: '答案格式无效' });
                 }
-                // 防重放：同一次提交内重复token
-                if (usedTokens.has(answer.token)) {
+                if (submittedTokens.has(token)) {
                     return res.status(400).json({ success: false, message: 'Token重复使用，疑似作弊' });
                 }
-                const tokenAge = Date.now() - (tokenData.timestamp || 0);
-                if (tokenAge > 60_000) {
-                    continue; // 过期token直接忽略
-                }
-                if (tokenData && tokenData.sessionId === quizSessionId) {
-                    const question = questionMap.get(tokenData.questionId);
-                    if (question && GameLogic.quiz.validateAnswer(question, answer.answerIndex)) {
-                        correctCount++;
-                    }
-                    validAnswers++;
-                    usedTokens.add(answer.token);
-                }
+                submittedTokens.add(token);
+                normalizedAnswers.push({ token, answerIndex });
             }
 
-            // 消费已使用的token，避免后续重放
-            usedTokens.forEach((token) => {
-                delete userTokens[token];
-            });
+            let quizSessionId = req.session.quizSessionId;
+            if (!quizSessionId) {
+                const activeSession = await client.query(`
+                    SELECT id
+                    FROM quiz_sessions
+                    WHERE username = $1
+                      AND status = 'active'
+                      AND expires_at > NOW()
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, [username]);
+                quizSessionId = activeSession.rows[0]?.id || null;
+                if (quizSessionId) req.session.quizSessionId = quizSessionId;
+            }
+            if (!quizSessionId) {
+                return res.status(403).json({ success: false, message: '未找到有效答题会话，请先开始游戏' });
+            }
 
-            if (validAnswers === 0) {
+            await client.query('BEGIN');
+            const sessionResult = await client.query(`
+                SELECT status, expires_at
+                FROM quiz_sessions
+                WHERE id = $1 AND username = $2
+                FOR UPDATE
+            `, [quizSessionId, username]);
+            const sessionData = sessionResult.rows[0];
+            if (!sessionData) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({ success: false, message: '未找到有效答题会话，请先开始游戏' });
+            }
+            if (sessionData.status !== 'active') {
+                await client.query('ROLLBACK');
+                return res.status(403).json({ success: false, message: '答题会话无效或已结算' });
+            }
+            if (new Date(sessionData.expires_at) <= new Date()) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({ success: false, message: '答题会话已过期，请重新开始' });
+            }
+
+            const tokenResult = await client.query(`
+                SELECT token, question_id
+                FROM quiz_question_tokens
+                WHERE session_id = $1
+                  AND token = ANY($2::text[])
+                  AND consumed_at IS NULL
+                FOR UPDATE
+            `, [quizSessionId, Array.from(submittedTokens)]);
+            if (tokenResult.rows.length !== normalizedAnswers.length) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({
                     success: false,
-                    message: '未找到有效题目令牌，请重新获取题目后再提交'
+                    message: '存在无效或已使用的题目令牌'
                 });
             }
 
-            // 防止重复提交：标记已结算
-            sessionData.settled = true;
-            sessionData.processing = false;
-            quizSessions.set(quizSessionId, sessionData);
-
-            // 存储到数据库 - 完全对齐kingboost格式
-            try {
-                const crypto = require('crypto');
-                const proof = crypto.createHash('sha256')
-                    .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                    .digest('hex');
-
-                // 存储主记录到submissions表
-                const submissionResult = await pool.query(
-                    'INSERT INTO submissions (username, score, submitted_at, proof) VALUES ($1, $2, NOW(), $3) RETURNING id',
-                    [username, correctCount, proof]
-                );
-
-                const submissionId = submissionResult.rows[0].id;
-
-                // 存储详细答题记录到submission_details表
-                for (let i = 0; i < answers.length; i++) {
-                    const answer = answers[i];
-                    const tokenData = userTokens[answer.token];
-                    if (tokenData && tokenData.sessionId === quizSessionId) {
-                        const question = questionMap.get(tokenData.questionId);
-                        if (question) {
-                            const userAnswer = question.options[answer.answerIndex];
-                            const correctAnswer = question.options[question.correct];
-                            const isCorrect = answer.answerIndex === question.correct;
-
-                            await pool.query(
-                                'INSERT INTO submission_details (submission_id, question_id, user_answer, is_correct, correct_answer) VALUES ($1, $2, $3, $4, $5)',
-                                [submissionId, question.id, userAnswer, isCorrect, correctAnswer]
-                            );
-                        }
-                    }
+            const tokensByValue = new Map(tokenResult.rows.map((row) => [row.token, row]));
+            let correctCount = 0;
+            const answerDetails = [];
+            for (const answer of normalizedAnswers) {
+                const tokenData = tokensByValue.get(answer.token);
+                const question = questionMap.get(Number(tokenData.question_id));
+                if (!question || answer.answerIndex >= question.options.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ success: false, message: '题目或答案无效' });
                 }
-            } catch (dbError) {
-                console.error('数据库存储失败:', dbError);
+                const isCorrect = GameLogic.quiz.validateAnswer(question, answer.answerIndex);
+                if (isCorrect) correctCount += 1;
+                answerDetails.push({ question, answerIndex: answer.answerIndex, isCorrect });
             }
 
-            // 清理用户会话
-            if (userSessions.has(username)) {
-                userSessions.delete(username);
+            const crypto = require('crypto');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                .digest('hex');
+            const submissionResult = await client.query(
+                'INSERT INTO submissions (username, score, submitted_at, proof) VALUES ($1, $2, NOW(), $3) RETURNING id',
+                [username, correctCount, proof]
+            );
+            const submissionId = submissionResult.rows[0].id;
+
+            for (const detail of answerDetails) {
+                await client.query(
+                    `INSERT INTO submission_details (
+                        submission_id, question_id, user_answer, is_correct, correct_answer
+                    ) VALUES ($1, $2, $3, $4, $5)`,
+                    [
+                        submissionId,
+                        detail.question.id,
+                        detail.question.options[detail.answerIndex],
+                        detail.isCorrect,
+                        detail.question.options[detail.question.correct]
+                    ]
+                );
             }
 
-            // 发放电币奖励 (得分 × 2)
             const reward = correctCount * 2;
-            let newBalance = 0;
+            let newBalance;
 
             if (reward > 0) {
                 const balanceResult = await BalanceLogger.updateBalance({
-                    username: username,
+                    username,
                     amount: reward,
                     operationType: 'quiz_reward',
-                    description: `答题奖励：${correctCount}题正确 × 2电币`,
+                    description: `答题奖励：${correctCount}题正确 × 2积分`,
                     gameData: {
                         score: correctCount,
-                        total: answers.length,
-                        reward: reward
+                        total: normalizedAnswers.length,
+                        reward
                     },
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
-                    requireSufficientBalance: false
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
                 });
 
-                if (balanceResult.success) {
-                    newBalance = balanceResult.balance;
-                } else {
-                    console.error('电币奖励发放失败:', balanceResult.message);
+                if (!balanceResult.success) {
+                    await client.query('ROLLBACK');
+                    return res.status(503).json({ success: false, message: balanceResult.message || '奖励入账失败' });
                 }
+                newBalance = balanceResult.balance;
+            } else {
+                const balanceResult = await client.query(
+                    'SELECT balance FROM users WHERE username = $1',
+                    [username]
+                );
+                newBalance = Number(balanceResult.rows[0]?.balance || 0);
             }
+
+            await client.query(
+                'UPDATE quiz_question_tokens SET consumed_at = NOW() WHERE session_id = $1 AND token = ANY($2::text[])',
+                [quizSessionId, Array.from(submittedTokens)]
+            );
+            await client.query(
+                "UPDATE quiz_sessions SET status = 'settled', settled_at = NOW() WHERE id = $1",
+                [quizSessionId]
+            );
+            await client.query('COMMIT');
+            req.session.quizSessionId = null;
 
             res.json({
                 success: true,
                 score: correctCount,
-                total: answers.length,
-                reward: reward,
-                newBalance: newBalance,
-                proof: GameLogic.generateToken(8)
+                total: normalizedAnswers.length,
+                reward,
+                newBalance,
+                proof
             });
         } catch (error) {
-            const quizSessionId = req.session.quizSessionId;
-            if (quizSessionId && quizSessions.has(quizSessionId)) {
-                const sd = quizSessions.get(quizSessionId);
-                if (sd) {
-                    sd.processing = false;
-                    quizSessions.set(quizSessionId, sd);
-                }
-            }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Quiz submit error:', error);
             res.status(500).json({ success: false, message: '提交失败' });
+        } finally {
+            client?.release();
         }
     });
 
@@ -833,18 +873,20 @@ module.exports = function registerGameRoutes(app, deps) {
     app.get('/api/quiz/leaderboard', requireLogin, requireAuthorized, async (req, res) => {
         try {
             // 修改为只显示每个账号的最高分
-            const result = await pool.query(
-                `SELECT username, MAX(score) as score, 
-                        (SELECT submitted_at FROM submissions s2 
-                         WHERE s2.username = s1.username AND s2.score = MAX(s1.score) 
-                         ORDER BY submitted_at DESC LIMIT 1) as submitted_at
-                 FROM submissions s1
-                 WHERE DATE(submitted_at) = CURRENT_DATE
-                   AND s1.username NOT IN (SELECT username FROM users WHERE is_admin = TRUE)
-                 GROUP BY username
-                 ORDER BY score DESC, submitted_at ASC 
-                 LIMIT 20`
-            );
+            const result = await pool.query(`
+                SELECT username, score, submitted_at
+                FROM (
+                    SELECT DISTINCT ON (s.username)
+                           s.username, s.score, s.submitted_at
+                    FROM submissions s
+                    JOIN users u ON u.username = s.username
+                    WHERE DATE(s.submitted_at) = CURRENT_DATE
+                      AND u.is_admin = FALSE
+                    ORDER BY s.username, s.score DESC, s.submitted_at ASC
+                ) ranked
+                ORDER BY score DESC, submitted_at ASC
+                LIMIT 20
+            `);
 
             res.json({
                 success: true,
@@ -860,8 +902,8 @@ module.exports = function registerGameRoutes(app, deps) {
     app.get('/api/balance/logs', requireLogin, requireAuthorized, async (req, res) => {
         try {
             const username = req.session.user.username;
-            const page = parseInt(req.query.page) || 1;
-            const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
             const offset = (page - 1) * limit;
 
             const logs = await BalanceLogger.getUserBalanceLogs(username, limit, offset);
@@ -914,6 +956,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 let level = 1;
                 let setId = null;
                 let sessionId = null;
+                let consumeAttempt = false;
+                await client.query(
+                    `INSERT INTO dictation_progress (username, level)
+                     VALUES ($1, 1)
+                     ON CONFLICT (username) DO NOTHING`,
+                    [username]
+                );
                 const progressResult = await client.query(
                     'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1 FOR UPDATE',
                     [username]
@@ -922,12 +971,6 @@ module.exports = function registerGameRoutes(app, deps) {
                     level = Number(progressResult.rows[0].level || 1);
                     setId = progressResult.rows[0].set_id !== null ? Number(progressResult.rows[0].set_id) : null;
                     sessionId = progressResult.rows[0].session_id || null;
-                } else {
-                    await client.query(
-                        'INSERT INTO dictation_progress (username, level) VALUES ($1, 1)',
-                        [username]
-                    );
-                    level = 1;
                 }
 
                 if (level > 1 && !Number.isFinite(setId)) {
@@ -984,39 +1027,31 @@ module.exports = function registerGameRoutes(app, deps) {
                         return res.status(500).json({ success: false, message: '题库未配置' });
                     }
                     const orderedSetIds = setIds.slice().sort((a, b) => a - b);
-                    try {
-                        const inProgress = await client.query(
-                            `SELECT id, set_id
-                             FROM dictation_sessions
-                             WHERE username = $1 AND result = 'in_progress'
-                             ORDER BY started_at DESC
-                             LIMIT 1
-                             FOR UPDATE`,
-                            [username]
-                        );
-                        if (inProgress.rows.length) {
-                            setId = Number(inProgress.rows[0].set_id);
-                            sessionId = inProgress.rows[0].id;
-                        }
-                    } catch (progressError) {
-                        console.error('Dictation in-progress lookup error:', progressError);
+                    const inProgress = await client.query(
+                        `SELECT id, set_id
+                         FROM dictation_sessions
+                         WHERE username = $1 AND result = 'in_progress'
+                         ORDER BY started_at DESC
+                         LIMIT 1
+                         FOR UPDATE`,
+                        [username]
+                    );
+                    if (inProgress.rows.length) {
+                        setId = Number(inProgress.rows[0].set_id);
+                        sessionId = inProgress.rows[0].id;
                     }
                     if (!Number.isFinite(setId)) {
                         let lastCompletedId = null;
-                        try {
-                            const completed = await client.query(
-                                `SELECT set_id
-                                 FROM dictation_sessions
-                                 WHERE username = $1 AND result IN ('passed', 'failed')
-                                 ORDER BY ended_at DESC NULLS LAST, started_at DESC
-                                 LIMIT 1`,
-                                [username]
-                            );
-                            if (completed.rows.length) {
-                                lastCompletedId = Number(completed.rows[0].set_id);
-                            }
-                        } catch (completedError) {
-                            console.error('Dictation completed lookup error:', completedError);
+                        const completed = await client.query(
+                            `SELECT set_id
+                             FROM dictation_sessions
+                             WHERE username = $1 AND result IN ('passed', 'failed')
+                             ORDER BY ended_at DESC NULLS LAST, started_at DESC
+                             LIMIT 1`,
+                            [username]
+                        );
+                        if (completed.rows.length) {
+                            lastCompletedId = Number(completed.rows[0].set_id);
                         }
                         if (Number.isFinite(lastCompletedId)) {
                             const index = orderedSetIds.indexOf(lastCompletedId);
@@ -1032,6 +1067,7 @@ module.exports = function registerGameRoutes(app, deps) {
                             [username, setId, 'in_progress']
                         );
                         sessionId = sessionResult.rows[0].id;
+                        consumeAttempt = level === 1;
                     }
                 }
 
@@ -1040,7 +1076,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     [level, setId, sessionId, username]
                 );
 
-                if (level === 1) {
+                if (consumeAttempt) {
                     const attemptsResult = await client.query(
                         'SELECT attempts FROM dictation_allowances WHERE username = $1 FOR UPDATE',
                         [username]
@@ -1206,6 +1242,7 @@ module.exports = function registerGameRoutes(app, deps) {
         userActionRateLimit,
         csrfProtection,
         async (req, res) => {
+        let imageDiskPath = null;
         try {
             const sanitizeText = (value, maxLen) => {
                 if (typeof value !== 'string') {
@@ -1233,53 +1270,33 @@ module.exports = function registerGameRoutes(app, deps) {
             let level = 1;
             let setId = null;
             let sessionId = null;
-            let correctWord = word || '';
-            try {
-                const progressResult = await pool.query(
-                    'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1',
-                    [username]
-                );
-                if (progressResult.rows.length) {
-                    level = Number(progressResult.rows[0].level || 1);
-                    setId = progressResult.rows[0].set_id !== null ? Number(progressResult.rows[0].set_id) : null;
-                    sessionId = progressResult.rows[0].session_id || null;
-                }
-            } catch (progressError) {
-                console.error('Dictation progress fetch error:', progressError);
+            let correctWord = '';
+            const progressResult = await pool.query(
+                'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1',
+                [username]
+            );
+            if (progressResult.rows.length) {
+                level = Number(progressResult.rows[0].level || 1);
+                setId = progressResult.rows[0].set_id !== null ? Number(progressResult.rows[0].set_id) : null;
+                sessionId = progressResult.rows[0].session_id || null;
             }
 
             const fs = require('fs');
             const path = require('path');
-            const bodySetId = Number(req.body?.setId);
-            const bodyLevel = Number(req.body?.level);
-            if (Number.isFinite(bodySetId)) {
-                setId = bodySetId;
+            const wordsPath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
+            const raw = await fs.promises.readFile(wordsPath, 'utf8');
+            const data = JSON.parse(raw);
+            const matched = data.find((item) => String(item.id) === String(wordId));
+            if (!matched || typeof matched.word !== 'string') {
+                return res.status(400).json({ success: false, message: '题目不存在' });
             }
-            if (Number.isFinite(bodyLevel)) {
-                level = bodyLevel;
+            const matchedSetId = Number(matched.set_id);
+            const setWords = data.filter((item) => Number(item.set_id) === matchedSetId);
+            const matchedLevel = setWords.findIndex((item) => String(item.id) === String(wordId)) + 1;
+            if (!sessionId || matchedSetId !== setId || matchedLevel !== level) {
+                return res.status(409).json({ success: false, message: '题目与当前听写进度不匹配' });
             }
-            try {
-                const wordsPath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
-                const raw = await fs.promises.readFile(wordsPath, 'utf8');
-                const data = JSON.parse(raw);
-                const matched = data.find((item) => String(item.id) === String(wordId));
-                const matchedSetId = matched && Number.isFinite(Number(matched.set_id)) ? Number(matched.set_id) : null;
-                if (matched && typeof matched.word === 'string') {
-                    correctWord = matched.word.trim();
-                }
-                if (setId === null && matchedSetId !== null) {
-                    setId = matchedSetId;
-                }
-                if (setId !== null) {
-                    const setWords = data.filter((item) => Number(item.set_id) === Number(setId));
-                    const index = setWords.findIndex((item) => String(item.id) === String(wordId));
-                    if (index >= 0) {
-                        level = index + 1;
-                    }
-                }
-            } catch (wordError) {
-                console.error('Dictation word lookup error:', wordError);
-            }
+            correctWord = matched.word.trim();
             const normalizeAnswer = (value) => String(value || '').replace(/\s+/g, '');
             const normalizedInput = normalizeAnswer(userInput);
             const normalizedWord = normalizeAnswer(correctWord);
@@ -1288,17 +1305,65 @@ module.exports = function registerGameRoutes(app, deps) {
             const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'dictation');
             let imagePath = null;
             if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/png;base64,')) {
+                const base64Data = imageData.slice('data:image/png;base64,'.length);
+                if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64Data)) {
+                    return res.status(400).json({ success: false, message: '图片数据无效' });
+                }
+                const imageBuffer = Buffer.from(base64Data, 'base64');
+                const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+                if (imageBuffer.length === 0 || imageBuffer.length > 1.5 * 1024 * 1024 ||
+                    imageBuffer.length < pngSignature.length ||
+                    !imageBuffer.subarray(0, pngSignature.length).equals(pngSignature)) {
+                    return res.status(400).json({ success: false, message: '仅支持不超过 1.5MB 的 PNG 图片' });
+                }
                 await fs.promises.mkdir(uploadDir, { recursive: true });
-                const filename = `${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
+                const filename = `${Date.now()}_${randomBytes(12).toString('hex')}.png`;
                 const filePath = path.join(uploadDir, filename);
-                const base64Data = imageData.replace(/^data:image\/png;base64,/, '');
-                await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'));
+                await fs.promises.writeFile(filePath, imageBuffer, { flag: 'wx', mode: 0o600 });
+                imageDiskPath = filePath;
                 imagePath = `/uploads/dictation/${filename}`;
             }
 
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
+                const lockedProgress = await client.query(
+                    'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1 FOR UPDATE',
+                    [username]
+                );
+                const currentProgress = lockedProgress.rows[0];
+                if (!currentProgress
+                    || Number(currentProgress.level) !== level
+                    || Number(currentProgress.set_id) !== setId
+                    || String(currentProgress.session_id) !== String(sessionId)) {
+                    await client.query('ROLLBACK');
+                    if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
+                    return res.status(409).json({ success: false, message: '听写进度已变化，请刷新后重试' });
+                }
+                const activeSession = await client.query(`
+                    SELECT id
+                    FROM dictation_sessions
+                    WHERE id = $1 AND username = $2 AND set_id = $3 AND result = 'in_progress'
+                    FOR UPDATE
+                `, [sessionId, username, setId]);
+                if (activeSession.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
+                    return res.status(409).json({ success: false, message: '听写会话已结束' });
+                }
+                const previousSubmission = await client.query(`
+                    SELECT status
+                    FROM dictation_submissions
+                    WHERE username = $1 AND session_id = $2 AND level = $3
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                `, [username, sessionId, level]);
+                if (previousSubmission.rows.length > 0 && previousSubmission.rows[0].status !== 'rewrite') {
+                    await client.query('ROLLBACK');
+                    if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
+                    return res.status(409).json({ success: false, message: '本关答案已提交' });
+                }
                 await client.query(
                     `INSERT INTO dictation_submissions
                         (user_id, username, word_id, word, pronunciation, definition, user_input, status, level, set_id, session_id, image_path, ip_address, user_agent)
@@ -1308,8 +1373,8 @@ module.exports = function registerGameRoutes(app, deps) {
                         username,
                         wordId,
                         correctWord || null,
-                        pronunciation || null,
-                        definition || null,
+                        typeof matched.pronunciation === 'string' ? matched.pronunciation.slice(0, 120) : null,
+                        typeof matched.definition === 'string' ? matched.definition.slice(0, 400) : null,
                         userInput,
                         status,
                         Number.isFinite(level) ? level : 1,
@@ -1360,6 +1425,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 await client.query('COMMIT');
             } catch (txError) {
                 await client.query('ROLLBACK').catch(() => {});
+                if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
                 throw txError;
             } finally {
                 client.release();
@@ -1367,6 +1433,10 @@ module.exports = function registerGameRoutes(app, deps) {
 
             res.json({ success: true, message: isCorrect ? '自动审核通过' : '自动审核未通过', status });
         } catch (error) {
+            if (imageDiskPath) {
+                const fs = require('fs');
+                await fs.promises.unlink(imageDiskPath).catch(() => {});
+            }
             console.error('Dictation submit error:', error);
             res.status(500).json({ success: false, message: '提交失败' });
         }
@@ -1374,10 +1444,10 @@ module.exports = function registerGameRoutes(app, deps) {
 
 
     app.post('/api/slot/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const { username, betAmount } = req.body;
             const betValue = Number(betAmount);
 
@@ -1388,14 +1458,14 @@ module.exports = function registerGameRoutes(app, deps) {
 
             if (!Number.isFinite(betValue) || !Number.isInteger(betValue) || betValue < 1 || betValue > 1000) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ success: false, message: '投注金额必须在1-1000电币之间' });
+                return res.status(400).json({ success: false, message: '投注金额必须在1-1000积分之间' });
             }
 
             const betResult = await BalanceLogger.updateBalance({
                 username: username,
                 amount: -betValue,
                 operationType: 'slot_bet',
-                description: `老虎机投注：${betValue} 电币`,
+                description: `老虎机投注：${betValue} 积分`,
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent'),
                 client,
@@ -1439,7 +1509,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username: username,
                     amount: payout,
                     operationType: 'slot_win',
-                    description: `老虎机中奖：${outcome.type}，获得 ${payout} 电币`,
+                    description: `老虎机中奖：${outcome.type}，获得 ${payout} 积分`,
                     gameData: {
                         bet_amount: betAmount,
                         outcome: outcome.type,
@@ -1453,51 +1523,42 @@ module.exports = function registerGameRoutes(app, deps) {
                     managedTransaction: true
                 });
 
-                if (winResult.success) {
-                    finalBalance = winResult.balance;
+                if (!winResult.success) {
+                    await client.query('ROLLBACK');
+                    return res.status(503).json({ success: false, message: winResult.message || '奖励入账失败' });
                 }
+                finalBalance = winResult.balance;
             }
 
-            // 提交后记录 slot 结果，减少事务内 I/O
-            postCommitTasks.push(async () => {
-                try {
-                    const crypto = require('crypto');
-                    const proof = crypto.createHash('sha256')
-                        .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                        .digest('hex');
-
-                    await pool.query(`
-                        INSERT INTO slot_results (
-                            username, result, won, proof, created_at,
-                            bet_amount, payout_amount, balance_before, balance_after, multiplier, game_details
-                        ) 
-                        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10)
-                    `, [
-                        username,
-                        JSON.stringify(slotResults),
-                        outcome.type,
-                        proof,
-                        betValue,
-                        payout,
-                        currentBalance + betAmount,
-                        finalBalance,
-                        outcome.multiplier,
-                        JSON.stringify({
-                            outcome: outcome.type,
-                            amounts: slotResults,
-                            won: payout > 0,
-                            timestamp: new Date().toISOString()
-                        })
-                    ]);
-                } catch (dbError) {
-                    console.error('Slot游戏记录存储失败:', dbError);
-                }
-            });
+            const crypto = require('crypto');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                .digest('hex');
+            await client.query(`
+                INSERT INTO slot_results (
+                    username, result, won, proof, created_at,
+                    bet_amount, payout_amount, balance_before, balance_after, multiplier, game_details
+                )
+                VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10)
+            `, [
+                username,
+                JSON.stringify(slotResults),
+                outcome.type,
+                proof,
+                betValue,
+                payout,
+                betResult.balanceBefore,
+                finalBalance,
+                outcome.multiplier,
+                JSON.stringify({
+                    outcome: outcome.type,
+                    amounts: slotResults,
+                    won: payout > 0,
+                    timestamp: new Date().toISOString()
+                })
+            ]);
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Slot post-commit log failed:', err));
-            }
 
             res.json({
                 success: true,
@@ -1510,20 +1571,22 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
         } catch (error) {
-            await client.query('ROLLBACK').catch(() => {});
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Slot play error:', error);
             res.status(500).json({ success: false, message: '游戏失败，请稍后重试' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
     // Scratch 刮刮乐游戏API
     // Scratch 刮刮乐游戏API
-    app.post('/api/scratch/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+    app.post('/api/scratch/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const { username, tier, winCount } = req.body;
+            const { username } = req.body;
+            const tier = Number(req.body.tier);
 
             if (username !== req.session.user.username) {
                 await client.query('ROLLBACK');
@@ -1546,7 +1609,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 username: username,
                 amount: -tier,
                 operationType: 'scratch_bet',
-                description: `刮刮乐投注：${tier} 电币 (${selectedTier.winCount}中奖+${selectedTier.userCount}我的)`,
+                description: `刮刮乐投注：${tier} 积分 (${selectedTier.winCount}中奖+${selectedTier.userCount}我的)`,
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent'),
                 client,
@@ -1560,19 +1623,19 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const currentBalance = betResult.balance;
 
-            const random = randomInt(0, 10000) / 100; // 0-100的随机数
+            const random = randomInt(0, 10000);
             let payout = 0;
             let outcomeType = '';
 
-            if (random <= 50) {
+            if (random < 5000) {
                 payout = tier;
-                outcomeType = `中奖 ${tier} 电币`;
-            } else if (random <= 70) {
+                outcomeType = `中奖 ${tier} 积分`;
+            } else if (random < 7000) {
                 payout = tier * 2;
-                outcomeType = `大奖 ${payout} 电币`;
-            } else if (random <= 71) {
+                outcomeType = `大奖 ${payout} 积分`;
+            } else if (random < 7100) {
                 payout = tier * 4;
-                outcomeType = `超级大奖 ${payout} 电币`;
+                outcomeType = `超级大奖 ${payout} 积分`;
             } else {
                 payout = 0;
                 outcomeType = '未中奖';
@@ -1584,7 +1647,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username: username,
                     amount: payout,
                     operationType: 'scratch_win',
-                    description: `刮刮乐中奖：${outcomeType}，获得 ${payout} 电币`,
+                    description: `刮刮乐中奖：${outcomeType}，获得 ${payout} 积分`,
                     gameData: {
                         tier: tier,
                         outcome: outcomeType,
@@ -1598,15 +1661,18 @@ module.exports = function registerGameRoutes(app, deps) {
                     managedTransaction: true
                 });
 
-                if (winResult.success) {
-                    finalBalance = winResult.balance;
+                if (!winResult.success) {
+                    await client.query('ROLLBACK');
+                    return res.status(503).json({ success: false, message: winResult.message || '奖励入账失败' });
                 }
+                finalBalance = winResult.balance;
             }
 
             // 生成刮刮乐显示内容 - 修复为正确的号码配置
             const winningNumbers = [];
-            for (let i = 0; i < selectedTier.winCount; i++) {
-                winningNumbers.push(randomInt(1, 101));
+            while (winningNumbers.length < selectedTier.winCount) {
+                const candidate = randomInt(1, 101);
+                if (!winningNumbers.includes(candidate)) winningNumbers.push(candidate);
             }
 
             // 生成我的号码区域 - 修复中奖金额显示逻辑
@@ -1615,9 +1681,9 @@ module.exports = function registerGameRoutes(app, deps) {
 
             // 定义奖励金额梯度
             const rewardAmounts = {
-                5: [5, 10, 15, 20, 25, 30, 50],     // 5电币档位奖励
-                10: [10, 20, 30, 40, 50, 80, 100],  // 10电币档位奖励
-                100: [100, 200, 300, 500, 800, 1000, 1500] // 100电币档位奖励
+                5: [5, 10, 15, 20, 25, 30, 50],     // 5积分档位奖励
+                10: [10, 20, 30, 40, 50, 80, 100],  // 10积分档位奖励
+                100: [100, 200, 300, 500, 800, 1000, 1500] // 100积分档位奖励
             };
 
             const tierRewards = rewardAmounts[tier] || [tier, tier * 2, tier * 3, tier * 4, tier * 5, tier * 8, tier * 10];
@@ -1629,11 +1695,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 // 如果应该中奖且还没有匹配号码
                 if (payout > 0 && matchedCount === 0) {
                     num = winningNumbers[randomInt(0, winningNumbers.length)];
-                    prize = `${payout} 电币`; // 使用实际中奖金额
+                    prize = `${payout} 积分`; // 使用实际中奖金额
                     matchedCount++;
                 } else {
-                    num = randomInt(1, 101);
-                    prize = `${tierRewards[randomInt(0, tierRewards.length)]} 电币`;
+                    do {
+                        num = randomInt(1, 101);
+                    } while (winningNumbers.includes(num));
+                    prize = `${tierRewards[randomInt(0, tierRewards.length)]} 积分`;
                 }
 
                 userSlots.push({
@@ -1647,27 +1715,21 @@ module.exports = function registerGameRoutes(app, deps) {
             if (payout > 0 && matchedCount === 0) {
                 userSlots[0] = {
                     number: winningNumbers[0],
-                    prize: `${payout} 电币`,
+                    prize: `${payout} 积分`,
                     isWinning: true
                 };
             }
 
-            // 保存游戏记录
-            try {
-                const crypto = require('crypto');
-                const proof = crypto.createHash('sha256')
-                    .update(`${username}-scratch-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                    .digest('hex');
-
-                await pool.query(
-                    `INSERT INTO scratch_results (
-                        username, reward, matches_count, tier_cost, winning_numbers, slots, proof, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-                    [username, payout, matchedCount, tier, JSON.stringify(winningNumbers), JSON.stringify(userSlots), proof]
-                );
-            } catch (dbError) {
-                console.error('Scratch游戏记录存储失败:', dbError);
-            }
+            const crypto = require('crypto');
+            const proof = crypto.createHash('sha256')
+                .update(`${username}-scratch-${Date.now()}-${randomBytes(8).toString('hex')}`)
+                .digest('hex');
+            await client.query(
+                `INSERT INTO scratch_results (
+                    username, reward, matches_count, tier_cost, winning_numbers, slots, proof, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                [username, payout, matchedCount, tier, JSON.stringify(winningNumbers), JSON.stringify(userSlots), proof]
+            );
 
             await client.query('COMMIT');
 
@@ -1685,11 +1747,11 @@ module.exports = function registerGameRoutes(app, deps) {
             });
 
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Scratch play error:', error);
             res.status(500).json({ success: false, message: '游戏失败，请稍后重试' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
@@ -1719,10 +1781,10 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     app.post('/api/stone/add', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1756,39 +1818,34 @@ module.exports = function registerGameRoutes(app, deps) {
 
             slots[emptyIndex] = randomStoneColor();
             await saveStoneState(username, slots, client);
-            postCommitTasks.push(async () => {
-                await logStoneAction({
-                    username,
-                    actionType: 'add',
-                    cost: 30,
-                    beforeSlots,
-                    afterSlots: slots
-                });
-            });
+            await logStoneAction({
+                username,
+                actionType: 'add',
+                cost: 30,
+                beforeSlots,
+                afterSlots: slots
+            }, client);
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Stone add post-commit log failed:', err));
-            }
             res.json({
                 success: true,
                 slots,
                 newBalance: balanceResult.balance
             });
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone add error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
     app.post('/api/stone/fill', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1824,39 +1881,34 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const newSlots = slots.map((slot) => slot || randomStoneColor());
             await saveStoneState(username, newSlots, client);
-            postCommitTasks.push(async () => {
-                await logStoneAction({
-                    username,
-                    actionType: 'fill',
-                    cost,
-                    beforeSlots,
-                    afterSlots: newSlots
-                });
-            });
+            await logStoneAction({
+                username,
+                actionType: 'fill',
+                cost,
+                beforeSlots,
+                afterSlots: newSlots
+            }, client);
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Stone fill post-commit log failed:', err));
-            }
             res.json({
                 success: true,
                 slots: newSlots,
                 newBalance: balanceResult.balance
             });
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone fill error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
     app.post('/api/stone/replace', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1902,41 +1954,55 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const newSlots = slots.slice();
             newSlots[index] = randomStoneColor();
+            const colorCounts = newSlots.reduce((counts, color) => {
+                counts[color] = (counts[color] || 0) + 1;
+                return counts;
+            }, {});
+            const highestCount = Math.max(...Object.values(colorCounts));
+            const dominantColors = Object.keys(colorCounts)
+                .filter((color) => colorCounts[color] === highestCount);
+            let nextReplaceIndex = index;
+            if (dominantColors.length === 1 && dominantColors[0] === newSlots[index]) {
+                for (let offset = 1; offset < newSlots.length; offset += 1) {
+                    const candidate = (index + offset) % newSlots.length;
+                    if (newSlots[candidate] !== dominantColors[0]) {
+                        nextReplaceIndex = candidate;
+                        break;
+                    }
+                }
+            }
             await saveStoneState(username, newSlots, client);
-            postCommitTasks.push(async () => {
-                await logStoneAction({
-                    username,
-                    actionType: 'replace',
-                    cost: replaceCost,
-                    slotIndex: index,
-                    beforeSlots,
-                    afterSlots: newSlots
-                });
-            });
+            await logStoneAction({
+                username,
+                actionType: 'replace',
+                cost: replaceCost,
+                slotIndex: index,
+                beforeSlots,
+                afterSlots: newSlots
+            }, client);
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Stone replace post-commit log failed:', err));
-            }
             res.json({
                 success: true,
                 slots: newSlots,
-                newBalance: balanceResult.balance
+                newBalance: balanceResult.balance,
+                replacedSlot: index,
+                nextReplaceIndex
             });
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone replace error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
     app.post('/api/stone/redeem', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -1956,15 +2022,6 @@ module.exports = function registerGameRoutes(app, deps) {
             const newSlots = normalizeStoneSlots([]);
 
             await saveStoneState(username, newSlots, client);
-            postCommitTasks.push(async () => {
-                await logStoneAction({
-                    username,
-                    actionType: 'redeem',
-                    reward,
-                    beforeSlots,
-                    afterSlots: newSlots
-                });
-            });
 
             let newBalance = null;
             if (reward > 0) {
@@ -1972,7 +2029,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username,
                     amount: reward,
                     operationType: 'stone_reward',
-                    description: `合石头兑换奖励 ${reward} 电币`,
+                    description: `合石头兑换奖励 ${reward} 积分`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
@@ -1994,10 +2051,15 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance = balanceResult.rows.length > 0 ? balanceResult.rows[0].balance : 0;
             }
 
+            await logStoneAction({
+                username,
+                actionType: 'redeem',
+                reward,
+                beforeSlots,
+                afterSlots: newSlots
+            }, client);
+
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Stone redeem post-commit log failed:', err));
-            }
             res.json({
                 success: true,
                 slots: newSlots,
@@ -2005,11 +2067,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone redeem error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
@@ -2044,10 +2106,10 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     app.post('/api/flip/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -2069,7 +2131,7 @@ module.exports = function registerGameRoutes(app, deps) {
                         username,
                         amount: previousReward,
                         operationType: 'flip_cashout',
-                        description: `翻卡牌开始新一轮自动结算 ${previousReward} 电币`,
+                        description: `翻卡牌开始新一轮自动结算 ${previousReward} 积分`,
                         ipAddress: req.ip,
                         userAgent: req.get('User-Agent'),
                         requireSufficientBalance: false,
@@ -2084,16 +2146,14 @@ module.exports = function registerGameRoutes(app, deps) {
                     newBalance = rewardResult.balance;
                 }
 
-                postCommitTasks.push(async () => {
-                    await logFlipAction({
-                        username,
-                        actionType: 'end',
-                        reward: previousReward,
-                        goodCount: previousState.good_count,
-                        badCount: previousState.bad_count,
-                        ended: true
-                    });
-                });
+                await logFlipAction({
+                    username,
+                    actionType: 'end',
+                    reward: previousReward,
+                    goodCount: previousState.good_count,
+                    badCount: previousState.bad_count,
+                    ended: true
+                }, client);
             }
 
             const board = Array(9).fill(null);
@@ -2107,9 +2167,6 @@ module.exports = function registerGameRoutes(app, deps) {
             await saveFlipState(username, state, client);
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Flip start post-commit log failed:', err));
-            }
             res.json({
                 success: true,
                 nextCost: flipCosts[0],
@@ -2119,19 +2176,19 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Flip start error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
     app.post('/api/flip/flip', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -2228,7 +2285,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username,
                     amount: reward,
                     operationType: 'flip_reward',
-                    description: `翻卡牌奖励 ${reward} 电币`,
+                    description: `翻卡牌奖励 ${reward} 积分`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
@@ -2244,23 +2301,19 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             await saveFlipState(username, state, client);
-            if (state.ended) {
-                postCommitTasks.push(async () => {
-                    await logFlipAction({
-                        username,
-                        actionType: 'end',
-                        reward,
-                        goodCount: state.good_count,
-                        badCount: state.bad_count,
-                        ended: true
-                    });
-                });
-            }
+            await logFlipAction({
+                username,
+                actionType: 'flip',
+                cost,
+                reward,
+                cardIndex,
+                cardType,
+                goodCount: state.good_count,
+                badCount: state.bad_count,
+                ended: state.ended
+            }, client);
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Flip flip post-commit log failed:', err));
-            }
             res.json({
                 success: true,
                 cardIndex,
@@ -2272,19 +2325,19 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance: rewardBalance
             });
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Flip card error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
     app.post('/api/flip/cashout', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
@@ -2312,7 +2365,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 username,
                 amount: reward,
                 operationType: 'flip_cashout',
-                description: `翻卡牌退出奖励 ${reward} 电币`,
+                description: `翻卡牌退出奖励 ${reward} 积分`,
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent'),
                 requireSufficientBalance: false,
@@ -2325,32 +2378,27 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: rewardResult.message });
             }
 
-            postCommitTasks.push(async () => {
-                await logFlipAction({
-                    username,
-                    actionType: 'end',
-                    reward,
-                    goodCount: state.good_count,
-                    badCount: state.bad_count,
-                    ended: true
-                });
-            });
+            await logFlipAction({
+                username,
+                actionType: 'end',
+                reward,
+                goodCount: state.good_count,
+                badCount: state.bad_count,
+                ended: true
+            }, client);
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Flip cashout post-commit log failed:', err));
-            }
             res.json({
                 success: true,
                 reward,
                 newBalance: rewardResult.balance
             });
         } catch (error) {
-            try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Flip cashout error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
@@ -2358,7 +2406,7 @@ module.exports = function registerGameRoutes(app, deps) {
     app.post('/api/blindbox/open', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const username = req.session.user.username;
         const tierKey = String(req.body.tier || '').trim();
-        const countNum = Number.parseInt(req.body.count, 10);
+        const countNum = Number(req.body.count);
 
         const tier = blindboxTiers.find((item) => item.key === tierKey);
         if (!tier) {
@@ -2409,13 +2457,13 @@ module.exports = function registerGameRoutes(app, deps) {
             });
         const totalRewardValue = sortedRewards.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
 
-        const client = await pool.connect();
+        let client;
         let balanceAfter = null;
         let batchId = null;
         let firstInventoryId = null;
         let bilibiliRoomId = null;
-        const postCommitTasks = [];
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
 
             const lock = await client.query(
@@ -2498,39 +2546,29 @@ module.exports = function registerGameRoutes(app, deps) {
                 }
             }
 
+            await client.query(
+                `INSERT INTO blindbox_logs (
+                    username, tier_key, tier_name, box_count, total_cost, total_reward_value, rewards, batch_id, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                [
+                    username,
+                    tierKey,
+                    tier.nameZh,
+                    countNum,
+                    totalCost,
+                    totalRewardValue,
+                    JSON.stringify(sortedRewards),
+                    batchId
+                ]
+            );
+
             await client.query('COMMIT');
         } catch (error) {
-            await client.query('ROLLBACK');
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Blindbox open error:', error);
             return res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
-        }
-
-        postCommitTasks.push(async () => {
-            try {
-                await pool.query(
-                    `INSERT INTO blindbox_logs (
-                        username, tier_key, tier_name, box_count, total_cost, total_reward_value, rewards, batch_id, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-                    [
-                        username,
-                        tierKey,
-                        tier.nameZh,
-                        countNum,
-                        totalCost,
-                        totalRewardValue,
-                        JSON.stringify(sortedRewards),
-                        batchId
-                    ]
-                );
-            } catch (dbError) {
-                console.error('Blindbox log error:', dbError);
-            }
-        });
-
-        for (const task of postCommitTasks) {
-            task().catch((err) => console.error('Blindbox post-commit log failed:', err));
+            client?.release();
         }
 
         let enqueueResult = null;
@@ -2553,10 +2591,10 @@ module.exports = function registerGameRoutes(app, deps) {
 
     // 决斗挑战 Duel 游戏API
     app.post('/api/duel/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
-        const client = await pool.connect();
+        let client;
         try {
+            client = await pool.connect();
             await client.query('BEGIN');
-            const postCommitTasks = [];
             const username = req.session.user.username;
             const giftType = req.body.giftType;
             const power = Number(req.body.power);
@@ -2566,7 +2604,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '无效的奖品档位' });
             }
 
-            if (!Number.isFinite(power) || power < 1 || power > 80) {
+            if (!Number.isInteger(power) || power < 1 || power > 80) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '功力范围为1-80' });
             }
@@ -2600,7 +2638,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username,
                     amount: reward,
                     operationType: 'duel_win',
-                    description: `决斗挑战获胜：${duelRewards[giftType].name} ${reward} 电币`,
+                    description: `决斗挑战获胜：${duelRewards[giftType].name} ${reward} 积分`,
                     ipAddress: req.ip,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
@@ -2616,31 +2654,21 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance = rewardResult.balance;
             }
 
-            // 提交后记录 duel 日志，避免事务内多一次 I/O
-            postCommitTasks.push(async () => {
-                try {
-                    await pool.query(
-                        `INSERT INTO duel_logs (
-                            username, gift_type, reward, power, cost, success, created_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-                        [
-                            username,
-                            giftType,
-                            reward,
-                            power,
-                            cost,
-                            success
-                        ]
-                    );
-                } catch (dbError) {
-                    console.error('Duel log error:', dbError);
-                }
-            });
+            await client.query(
+                `INSERT INTO duel_logs (
+                    username, gift_type, reward, power, cost, success, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                [
+                    username,
+                    giftType,
+                    reward,
+                    power,
+                    cost,
+                    success
+                ]
+            );
 
             await client.query('COMMIT');
-            for (const task of postCommitTasks) {
-                task().catch((err) => console.error('Duel post-commit log failed:', err));
-            }
 
             if (req.session.user) {
                 req.session.user.balance = newBalance;
@@ -2656,17 +2684,20 @@ module.exports = function registerGameRoutes(app, deps) {
                 newBalance
             });
         } catch (error) {
-            await client.query('ROLLBACK').catch(() => {});
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Duel play error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
         } finally {
-            client.release();
+            client?.release();
         }
     });
 
     // Spin API 路由
     app.post('/api/spin',
+        requireLogin,
+        requireAuthorized,
         basicRateLimit,
+        userActionRateLimit,
         csrfProtection,
         (req, res) => {
         try {
@@ -2686,7 +2717,8 @@ module.exports = function registerGameRoutes(app, deps) {
     app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (req, res) => {
         try {
             const { gameType } = req.params;
-            const { page = 1, limit = 10 } = req.query;
+            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
             const username = req.session.user.username;
             const offset = (page - 1) * limit;
 

@@ -26,7 +26,7 @@ const formatScratchResult = (result) => {
     let formatted = result;
     formatted = formatted.replace('未中奖', 'No Win');
     formatted = formatted.replace('中奖', 'Win');
-    formatted = formatted.replace('电币', 'coins');
+    formatted = formatted.replace('积分', 'points');
     return formatted;
 };
 
@@ -131,16 +131,17 @@ const formatScratchResult = (result) => {
             return;
         }
         
-        if (newPassword.length < 6) {
-            showToast(t('新密码至少需要6个字符', 'Password must be at least 6 characters'), 'error');
+        if (newPassword.length < 12 || newPassword.length > 128 || !/\p{L}/u.test(newPassword) || !/\p{N}/u.test(newPassword)) {
+            showToast(t('新密码须为12-128位，并同时包含字母和数字', 'Password must be 12-128 characters with letters and numbers'), 'error');
             return;
         }
         
         try {
-            const response = await fetch('/api/change-password', {
+            const response = await window.idempotentFetch('/api/change-password', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': profileCsrfToken
                 },
                 body: JSON.stringify({
                     currentPassword,
@@ -185,14 +186,14 @@ const formatScratchResult = (result) => {
         currentPage = 1;
         
         const titles = {
-            quiz: t('🧠 知识问答记录', '🧠 Quiz Records'),
-            slot: t('🎰 老虎机记录', '🎰 Slot Records'),
-            scratch: t('🎟️ 刮刮乐记录', '🎟️ Scratch Records'),
-            wish: t('🌟 祈愿记录', '🌟 Wish Records'),
-            blindbox: t('🎁 盲盒记录', '🎁 Blind Box Records'),
-            stone: t('🪨 合石头记录', '🪨 Stone Match Records'),
-            flip: t('🃏 翻卡牌记录', '🃏 Card Flip Records'),
-            duel: t('⚔️ 决斗挑战记录', '⚔️ Duel Records')
+            quiz: t('知识问答记录', 'Quiz Records'),
+            slot: t('老虎机记录', 'Slot Records'),
+            scratch: t('刮刮乐记录', 'Scratch Records'),
+            wish: t('祈愿记录', 'Wish Records'),
+            blindbox: t('盲盒记录', 'Blind Box Records'),
+            stone: t('合石头记录', 'Stone Match Records'),
+            flip: t('翻卡牌记录', 'Card Flip Records'),
+            duel: t('决斗挑战记录', 'Duel Records')
         };
         
         document.getElementById('recordsTitle').textContent = titles[gameType];
@@ -267,7 +268,7 @@ const formatScratchResult = (result) => {
                 }
                 const createdAt = item.created_at || '';
                 const expiresAt = item.expires_note || item.expires_at || '-';
-                const statusText = formatBackpackStatus(item.status, item.expires_at);
+                const statusText = formatBackpackStatus(item.status, item.expires_at, item.delivery_status);
                 const canSend = item.status === 'stored';
                 const actionBtn = canSend
                     ? `<button class="view-records-btn" data-backpack-id="${item.id}">${t('送出', 'Send')}</button>`
@@ -292,22 +293,25 @@ const formatScratchResult = (result) => {
         }
     }
 
-    function formatBackpackStatus(status, expiresAt) {
+    function formatBackpackStatus(status, expiresAt, deliveryStatus) {
         if (status === 'stored') {
             if (!expiresAt) {
-                return t('📦 待发送', '📦 Pending');
+                return t('待发送', 'Pending');
             }
             const now = new Date();
             const expireTime = new Date(expiresAt);
             if (expireTime <= now) {
-                return t('⏳ 到期自动送出中', '⏳ Auto-sending');
+                return t('到期自动送出中', 'Auto-sending');
             }
-            return t('📦 待发送', '📦 Pending');
+            return t('待发送', 'Pending');
         }
-        if (status === 'queued') return t('🚚 发送中', '🚚 Sending');
-        if (status === 'sent') return t('✅ 已发送', '✅ Sent');
-        if (status === 'failed') return t('❌ 发送失败', '❌ Failed');
-        if (status === 'expired') return t('⌛ 已过期', '⌛ Expired');
+        if (status === 'queued' && deliveryStatus === 'uncertain') {
+            return t('结果待确认', 'Awaiting confirmation');
+        }
+        if (status === 'queued') return t('发送中', 'Sending');
+        if (status === 'sent') return t('已发送', 'Sent');
+        if (status === 'failed') return t('发送失败', 'Failed');
+        if (status === 'expired') return t('已过期', 'Expired');
         return status;
     }
 
@@ -315,7 +319,7 @@ const formatScratchResult = (result) => {
 
     async function sendBackpackItem(id) {
         try {
-            const response = await fetch('/api/wish/backpack/send', {
+            const response = await window.idempotentFetch('/api/wish/backpack/send', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -351,13 +355,13 @@ const formatScratchResult = (result) => {
         if (gameType === 'quiz') {
             tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('得分', 'Score')}</th></tr></thead>`;
         } else if (gameType === 'slot') {
-            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('获得电币', 'Coins Earned')}</th><th>${t('转动结果', 'Reels')}</th></tr></thead>`;
+            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('获得积分', 'Points Earned')}</th><th>${t('转动结果', 'Reels')}</th></tr></thead>`;
         } else if (gameType === 'scratch') {
             tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('档位', 'Tier')}</th><th>${t('匹配数', 'Matches')}</th></tr></thead>`;
         } else if (gameType === 'wish') {
-            tableHTML += `<thead><tr><th>${t('祈愿时间', 'Wish Time')}</th><th>${t('次数', 'Count')}</th><th>${t('消耗电币', 'Cost')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
+            tableHTML += `<thead><tr><th>${t('祈愿时间', 'Wish Time')}</th><th>${t('次数', 'Count')}</th><th>${t('消耗积分', 'Cost')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
         } else if (gameType === 'blindbox') {
-            tableHTML += `<thead><tr><th>${t('抽取时间', 'Time')}</th><th>${t('档位', 'Tier')}</th><th>${t('数量', 'Count')}</th><th>${t('消耗电币', 'Cost')}</th><th>${t('总价值', 'Total Value')}</th></tr></thead>`;
+            tableHTML += `<thead><tr><th>${t('抽取时间', 'Time')}</th><th>${t('档位', 'Tier')}</th><th>${t('数量', 'Count')}</th><th>${t('消耗积分', 'Cost')}</th><th>${t('总价值', 'Total Value')}</th></tr></thead>`;
         } else if (gameType === 'stone') {
             tableHTML += `<thead><tr><th>${t('操作时间', 'Time')}</th><th>${t('操作', 'Action')}</th><th>${t('花费', 'Cost')}</th><th>${t('变化', 'Change')}</th></tr></thead>`;
         } else if (gameType === 'flip') {
@@ -385,8 +389,8 @@ const formatScratchResult = (result) => {
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
-                        <td>${record.result === 'lost' ? t('❌ 未中奖', '❌ No Win') : t('✅ 中奖', '✅ Win')}</td>
-                        <td>${record.payout || 0} ${t('电币', 'coins')}</td>
+                        <td>${record.result === 'lost' ? t('未中奖', 'No Win') : t('中奖', 'Win')}</td>
+                        <td>${record.payout || 0} ${t('积分', 'points')}</td>
                         <td>[${amountsText}]</td>
                     </tr>
                 `;
@@ -395,7 +399,7 @@ const formatScratchResult = (result) => {
                     <tr>
                         <td>${playedAt}</td>
                         <td>${formatScratchResult(record.result)}</td>
-                        <td>${record.tier_cost} ${t('电币', 'coins')}</td>
+                        <td>${record.tier_cost} ${t('积分', 'points')}</td>
                         <td>${record.matches_count} ${t('个', '')}</td>
                     </tr>
                 `;
@@ -403,13 +407,13 @@ const formatScratchResult = (result) => {
                 const successCount = Number(record.success_count || 0);
                 const wishGiftName = getWishGiftName(record.gift_type, record.gift_name) || t('礼物', 'Gift');
                 const resultText = successCount > 0
-                    ? `✅ ${wishGiftName} x${successCount}`
-                    : t('❌ 未中奖', '❌ No Win');
+                    ? `${wishGiftName} x${successCount}`
+                    : t('未中奖', 'No Win');
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
                         <td>${record.batch_count}</td>
-                        <td>${record.total_cost} ${t('电币', 'coins')}</td>
+                        <td>${record.total_cost} ${t('积分', 'points')}</td>
                         <td>${resultText}</td>
                     </tr>
                 `;
@@ -419,8 +423,8 @@ const formatScratchResult = (result) => {
                         <td>${playedAt}</td>
                         <td>${record.tier_name}</td>
                         <td>${record.box_count}</td>
-                        <td>${record.total_cost} ${t('电币', 'coins')}</td>
-                        <td>${record.total_reward_value} ${t('电币', 'coins')}</td>
+                        <td>${record.total_cost} ${t('积分', 'points')}</td>
+                        <td>${record.total_reward_value} ${t('积分', 'points')}</td>
                     </tr>
                 `;
             } else if (gameType === 'stone') {
@@ -431,7 +435,7 @@ const formatScratchResult = (result) => {
                     <tr>
                         <td>${playedAt}</td>
                         <td>${formatStoneAction(record.action_type)}</td>
-                        <td>${costText} ${t('电币', 'coins')}</td>
+                        <td>${costText} ${t('积分', 'points')}</td>
                         <td>${beforeSlots} → ${afterSlots}</td>
                     </tr>
                 `;
@@ -446,15 +450,15 @@ const formatScratchResult = (result) => {
                     <tr>
                         <td>${playedAt}</td>
                         <td>${actionText}</td>
-                        <td>${amountText} ${t('电币', 'coins')}</td>
+                        <td>${amountText} ${t('积分', 'points')}</td>
                         <td>${resultText}</td>
                     </tr>
                 `;
             } else if (gameType === 'duel') {
                 const giftName = formatDuelGift(record.gift_type);
                 const resultText = record.success
-                    ? t(`✅ 成功 +${record.reward}`, `✅ Success +${record.reward}`)
-                    : t('❌ 失败', '❌ Failed');
+                    ? t(`成功 +${record.reward}`, `Success +${record.reward}`)
+                    : t('失败', 'Failed');
                 tableHTML += `
                     <tr>
                         <td>${playedAt}</td>
