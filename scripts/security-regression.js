@@ -21,6 +21,7 @@ const giftSender = read('bilibili_gift_sender.py');
 const ipManager = read('ip-manager.js');
 const migrationRunner = read('scripts/run_idempotency_migration.js');
 const idempotency = read('lib/idempotency.js');
+const idempotencyMigration = read('migrations/create_idempotency_keys.sql');
 const adminClient = read('public/js/admin.js');
 const quizClient = read('public/js/quiz.js');
 const profileClient = read('public/js/profile.js');
@@ -50,6 +51,8 @@ check('password changes replay success after response loss', server.includes("'/
 check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, options)'));
 check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 3') && idempotency.includes('retryQuery(pool'));
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
+check('idempotency migration upgrades the legacy schema', idempotencyMigration.includes('RENAME COLUMN idem_key TO idempotency_key') && idempotencyMigration.includes("SET status = 'pending'") && server.includes("'create_idempotency_keys.sql'"));
+check('database migrations are serialized across instances', server.includes("pg_advisory_lock(hashtext('minimal_games_schema_migration'))") && server.includes("pg_advisory_unlock(hashtext('minimal_games_schema_migration'))"));
 check('PK report charging is keyed by a unique report ID', gifts.includes('ON CONFLICT (report_id) DO NOTHING') && pkReportMigration.includes('UNIQUE INDEX'));
 check('completed gift callbacks repair blindbox queue continuation', gifts.includes('enqueueNextStoredBlindbox(username, taskId)'));
 

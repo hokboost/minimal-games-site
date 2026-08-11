@@ -14,6 +14,73 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     CONSTRAINT idempotency_keys_user_key_unique UNIQUE (username, idempotency_key)
 );
 
+-- Older deployments used idem_key/method/path and "processing". Rename in
+-- place so existing responses and their unique index remain intact.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'idempotency_keys'
+          AND column_name = 'idem_key'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'idempotency_keys'
+          AND column_name = 'idempotency_key'
+    ) THEN
+        ALTER TABLE idempotency_keys RENAME COLUMN idem_key TO idempotency_key;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'idempotency_keys'
+          AND column_name = 'method'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'idempotency_keys'
+          AND column_name = 'request_method'
+    ) THEN
+        ALTER TABLE idempotency_keys RENAME COLUMN method TO request_method;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'idempotency_keys'
+          AND column_name = 'path'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'idempotency_keys'
+          AND column_name = 'request_path'
+    ) THEN
+        ALTER TABLE idempotency_keys RENAME COLUMN path TO request_path;
+    END IF;
+END
+$$;
+
+UPDATE idempotency_keys
+SET status = 'pending'
+WHERE status = 'processing';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'idempotency_keys'::regclass
+          AND conname = 'idempotency_keys_status_check'
+    ) THEN
+        ALTER TABLE idempotency_keys
+            ADD CONSTRAINT idempotency_keys_status_check
+            CHECK (status IN ('pending', 'completed'));
+    END IF;
+END
+$$;
+
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_updated_at
 ON idempotency_keys(updated_at);
 

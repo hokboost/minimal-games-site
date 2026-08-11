@@ -8,8 +8,10 @@ CREATE TABLE IF NOT EXISTS quiz_sessions (
     settled_at TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_quiz_sessions_user_status
+CREATE INDEX IF NOT EXISTS idx_quiz_sessions_user_status_expires
     ON quiz_sessions (username, status, expires_at DESC);
+
+DROP INDEX IF EXISTS idx_quiz_sessions_user_status;
 
 CREATE TABLE IF NOT EXISTS quiz_question_tokens (
     token TEXT PRIMARY KEY,
@@ -23,5 +25,7 @@ CREATE TABLE IF NOT EXISTS quiz_question_tokens (
 ALTER TABLE quiz_question_tokens
     ADD COLUMN IF NOT EXISTS consumed_at TIMESTAMPTZ;
 
-CREATE INDEX IF NOT EXISTS idx_quiz_tokens_session
+CREATE INDEX IF NOT EXISTS idx_quiz_tokens_session_consumed
     ON quiz_question_tokens (session_id, consumed_at, created_at);
+
+DROP INDEX IF EXISTS idx_quiz_tokens_session;

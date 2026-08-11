@@ -279,10 +279,16 @@ const PORT = process.env.PORT || 3000;
 
 // 数据库初始化函数
 async function initializeDatabase() {
+    let migrationLockClient;
     try {
         console.log('🔧 检查数据库结构...');
+        migrationLockClient = await pool.connect();
+        await migrationLockClient.query(
+            "SELECT pg_advisory_lock(hashtext('minimal_games_schema_migration'))"
+        );
 
         for (const migrationName of [
+            'add_idempotency_key.sql',
             'create_idempotency_keys.sql',
             'create_quiz_runtime_tables.sql',
             'add_pk_report_id.sql'
@@ -472,6 +478,17 @@ async function initializeDatabase() {
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);
         return false;
+    } finally {
+        if (migrationLockClient) {
+            try {
+                await migrationLockClient.query(
+                    "SELECT pg_advisory_unlock(hashtext('minimal_games_schema_migration'))"
+                );
+            } catch (unlockError) {
+                console.error('❌ 释放数据库迁移锁失败:', unlockError);
+            }
+            migrationLockClient.release();
+        }
     }
 }
 
