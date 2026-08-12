@@ -6,13 +6,26 @@ const csrfToken = document.body.dataset.csrfToken || '';
 
 function adminFetch(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
+    const requestOptions = { ...options };
     if (method !== 'GET') {
-        options.headers = {
-            ...(options.headers || {}),
+        requestOptions.headers = {
+            ...(requestOptions.headers || {}),
             'X-CSRF-Token': csrfToken
         };
     }
-    return method === 'GET' ? fetch(url, options) : window.idempotentFetch(url, options);
+    if (method === 'GET') return fetch(url, requestOptions);
+    if (typeof window.idempotentFetch !== 'function') {
+        return Promise.reject(new Error('Request helper did not load'));
+    }
+    return window.idempotentFetch(url, requestOptions);
+}
+
+async function readJsonResponse(response) {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok && !data.message) {
+        data.message = `${t('请求失败', 'Request failed')} (${response.status})`;
+    }
+    return data;
 }
 
 document.addEventListener('click', (event) => {
@@ -52,9 +65,6 @@ document.addEventListener('click', (event) => {
     if (event.target.closest('#refresh-cookies')) {
         return refreshCookies();
     }
-    if (event.target.closest('#bind-room')) {
-        return bindUserRoom();
-    }
     if (event.target.closest('#unbind-room')) {
         return unbindUserRoom();
     }
@@ -63,6 +73,13 @@ document.addEventListener('click', (event) => {
     }
     if (event.target.closest('#change-self-password')) {
         return changeSelfPassword();
+    }
+});
+
+document.addEventListener('submit', (event) => {
+    if (event.target.matches('#bind-room-form')) {
+        event.preventDefault();
+        bindUserRoom();
     }
 });
 
@@ -624,31 +641,30 @@ function addElectricCoin(username, btn) {
     
     
     async function bindUserRoom() {
+        const button = document.getElementById('bind-room');
+        const originalLabel = button.textContent;
         try {
             const username = document.getElementById('bindUsername').value.trim();
             const roomId = document.getElementById('bindRoomId').value.trim();
             
             if (!username) {
-                showMessage(t('请输入用户名', 'Please enter username'), 'error');
+                setRoomBindStatus(t('请选择用户名', 'Please select a username'), 'error');
                 return;
             }
             
             if (!roomId) {
-                showMessage(t('请输入房间号', 'Please enter room ID'), 'error');
+                setRoomBindStatus(t('请输入房间号', 'Please enter room ID'), 'error');
                 return;
             }
             
-            if (!/^\d{6,12}$/.test(roomId)) {
-                showMessage(t('房间号格式不正确，应为6-12位数字', 'Room ID should be 6-12 digits'), 'error');
+            if (!/^\d{1,12}$/.test(roomId) || Number(roomId) <= 0) {
+                setRoomBindStatus(t('房间号格式不正确，应为1-12位数字', 'Room ID should be 1-12 digits'), 'error');
                 return;
             }
             
-            if (!confirm(t(
-                `确定要为用户 "${username}" 绑定房间号 "${roomId}" 吗？`,
-                `Bind room "${roomId}" for "${username}"?`
-            ))) {
-                return;
-            }
+            button.disabled = true;
+            button.textContent = t('绑定中...', 'Binding...');
+            setRoomBindStatus(t('正在保存房间绑定...', 'Saving room binding...'), 'info');
             
             const response = await adminFetch('/api/bilibili/room', {
                 method: 'POST',
@@ -661,23 +677,45 @@ function addElectricCoin(username, btn) {
                 })
             });
             
-            const result = await response.json();
+            const result = await readJsonResponse(response);
             
-            if (result.success) {
-                showMessage(translateServerMessage(result.message), 'success');
+            if (response.ok && result.success) {
+                const message = translateServerMessage(result.message);
+                setRoomBindStatus(message, 'success');
+                showMessage(message, 'success');
                 
-                document.getElementById('bindUsername').value = '';
                 document.getElementById('bindRoomId').value = '';
                 
-                loadRoomBindings();
+                await loadRoomBindings();
             } else {
-                showMessage(translateServerMessage(result.message) || t('绑定失败', 'Bind failed'), 'error');
+                const message = translateServerMessage(result.message) || t('绑定失败', 'Bind failed');
+                setRoomBindStatus(message, 'error');
+                showMessage(message, 'error');
             }
             
         } catch (error) {
             console.error(t('绑定房间失败:', 'Bind room failed:'), error);
-            showMessage(t('网络错误，请稍后重试', 'Network error, please try again'), 'error');
+            const message = t('绑定请求失败，请刷新页面后重试', 'Binding failed. Refresh the page and try again.');
+            setRoomBindStatus(message, 'error');
+            showMessage(message, 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = originalLabel;
         }
+    }
+
+    function setRoomBindStatus(message, type) {
+        const status = document.getElementById('roomBindStatus');
+        const colors = {
+            success: ['rgba(35, 131, 90, 0.14)', '#176544'],
+            error: ['rgba(200, 75, 68, 0.14)', '#a23732'],
+            info: ['rgba(50, 111, 173, 0.14)', '#285d91']
+        };
+        const [background, color] = colors[type] || colors.info;
+        status.hidden = false;
+        status.style.background = background;
+        status.style.color = color;
+        status.textContent = message;
     }
 
     

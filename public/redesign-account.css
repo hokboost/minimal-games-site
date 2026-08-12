@@ -1311,7 +1311,7 @@ body.app-redesign.page-admin .room-management > div:not(:last-child) {
     background: var(--account-surface-soft) !important;
 }
 
-body.app-redesign.page-admin .room-management > div > div[style*="grid-template-columns"] {
+body.app-redesign.page-admin .room-management > div > :is(div, form)[style*="grid-template-columns"] {
     gap: 10px !important;
 }
 
@@ -1834,7 +1834,7 @@ body.app-redesign.page-coming-soon .action-btn:hover {
         min-height: 0;
     }
 
-    body.app-redesign.page-admin .room-management > div > div[style*="grid-template-columns"] {
+    body.app-redesign.page-admin .room-management > div > :is(div, form)[style*="grid-template-columns"] {
         grid-template-columns: 1fr !important;
     }
 

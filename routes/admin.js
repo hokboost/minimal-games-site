@@ -1077,14 +1077,16 @@ module.exports = function registerAdminRoutes(app, deps) {
         try {
             const { roomId, targetUsername } = req.body;
             const adminUsername = req.session.user.username;
-            const usernameToUpdate = targetUsername || adminUsername; // 允许管理员为其他用户设置房间号
-            const normalizedRoomId = String(roomId || '');
+            const usernameToUpdate = typeof targetUsername === 'string' && targetUsername.trim()
+                ? targetUsername.trim()
+                : adminUsername;
+            const normalizedRoomId = String(roomId || '').trim();
 
-            // 验证房间号格式（数字，6-12位）
-            if (!/^\d{6,12}$/.test(normalizedRoomId)) {
+            // B站既有短房间号，也有较长的普通房间号。
+            if (!/^\d{1,12}$/.test(normalizedRoomId) || Number(normalizedRoomId) <= 0) {
                 return res.status(400).json({
                     success: false,
-                    message: '房间号格式不正确，应为6-12位数字'
+                    message: '房间号格式不正确，应为1-12位数字'
                 });
             }
 

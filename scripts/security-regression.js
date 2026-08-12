@@ -27,6 +27,7 @@ const wishMigration = read('migrations/create_wish_tables.sql');
 const musicPlayer = read('public/js/music-player.js');
 const languageSwitcher = read('views/partials/language-switcher.ejs');
 const adminClient = read('public/js/admin.js');
+const adminView = read('views/admin.ejs');
 const quizClient = read('public/js/quiz.js');
 const profileClient = read('public/js/profile.js');
 const pkReportMigration = read('migrations/add_pk_report_id.sql');
@@ -62,7 +63,8 @@ check('quiz next is protected against duplicate token issuance', server.includes
 check('quiz advances without an artificial answer delay', quizClient.includes('questionIndex += 1;\n        nextQuestion();') && !/setTimeout\(\(\) => \{\s*questionIndex \+= 1;\s*nextQuestion\(\);/m.test(quizClient));
 check('quiz leaderboard includes valid administrator scores and uses explicit day boundaries', !games.includes('u.is_admin = FALSE') && games.includes("s.submitted_at::timestamptz >= date_trunc('day', NOW())") && quizClient.includes('if (!response.ok || data.success !== true)'));
 check('password changes replay success after response loss', server.includes("'/api/change-password'") && profileClient.includes("idempotentFetch('/api/change-password'"));
-check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, options)'));
+check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, requestOptions)'));
+check('admin room binding submits reliably and accepts short Bilibili room IDs', adminView.includes('id="bind-room-form" novalidate') && adminView.includes('data-ux-event="admin.bind_room"') && adminClient.includes("document.addEventListener('submit'") && !adminClient.includes('Bind room "${roomId}" for') && adminClient.includes('/^\\d{1,12}$/') && admin.includes('/^\\d{1,12}$/'));
 check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 3') && idempotency.includes('retryQuery(pool'));
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
 check('idempotency migration upgrades the legacy schema', idempotencyMigration.includes('RENAME COLUMN idem_key TO idempotency_key') && idempotencyMigration.includes("SET status = 'pending'") && server.includes("'create_idempotency_keys.sql'"));
