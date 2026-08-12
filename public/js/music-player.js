@@ -66,9 +66,11 @@
         siteFrame = null;
         document.body.classList.remove('music-shell-active');
         document.querySelector('.site-layout')?.removeAttribute('inert');
+        window.UXAnalytics?.resumePage();
     }
 
     function openInSiteFrame(url, pushHistory = true) {
+        window.UXAnalytics?.pausePage('shell_covered');
         if (!siteFrame) {
             siteFrame = document.createElement('iframe');
             siteFrame.className = 'music-site-frame';
@@ -137,16 +139,23 @@
         document.body.classList.remove('music-resume-pending');
         saveState(true);
         updateButtons();
+        window.UXAnalytics?.track('music_started', 'featured_track', {
+            currentSeconds: Math.round(audio.currentTime || 0)
+        });
     });
     audio.addEventListener('pause', () => {
         if (unloading) return;
         desiredPlaying = false;
         saveState(false);
         updateButtons();
+        window.UXAnalytics?.track('music_paused', 'featured_track', {
+            currentSeconds: Math.round(audio.currentTime || 0)
+        });
     });
     audio.addEventListener('timeupdate', () => saveState(desiredPlaying));
     audio.addEventListener('volumechange', () => saveState(desiredPlaying));
     audio.addEventListener('ended', () => {
+        window.UXAnalytics?.track('music_completed', 'featured_track', {});
         desiredPlaying = false;
         audio.currentTime = 0;
         saveState(false);

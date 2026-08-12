@@ -30,6 +30,10 @@ const adminClient = read('public/js/admin.js');
 const quizClient = read('public/js/quiz.js');
 const profileClient = read('public/js/profile.js');
 const pkReportMigration = read('migrations/add_pk_report_id.sql');
+const uxAnalytics = read('routes/analytics.js');
+const uxTracker = read('public/js/ux-analytics.js');
+const uxMigration = read('migrations/create_ux_analytics.sql');
+const analyticsView = read('views/admin-analytics.ejs');
 
 check('production rejects CSRF bypass flags', server.includes('禁止启用 CSRF_TEST_MODE') && security.includes("process.env.NODE_ENV !== 'production'"));
 check('password changes require CSRF', /app\.post\('\/api\/change-password', requireLogin, requireCSRF/.test(server));
@@ -66,6 +70,13 @@ check('wish migration upgrades legacy production columns', server.includes("'cre
 check('music playback persists across page navigation', languageSwitcher.includes("include('persistent-music-player')") && musicPlayer.includes("window.addEventListener('pagehide'") && musicPlayer.includes('sessionStorage.setItem') && musicPlayer.includes('openInSiteFrame(url)') && musicPlayer.includes('music-shell-child'));
 check('PK report charging is keyed by a unique report ID', gifts.includes('ON CONFLICT (report_id) DO NOTHING') && pkReportMigration.includes('UNIQUE INDEX'));
 check('completed gift callbacks repair blindbox queue continuation', gifts.includes('enqueueNextStoredBlindbox(username, taskId)'));
+check('UX analytics migration is startup-managed', server.includes("'create_ux_analytics.sql'") && uxMigration.includes('CREATE TABLE IF NOT EXISTS ux_page_views'));
+check('UX heartbeats are cumulative and idempotent', uxAnalytics.includes('GREATEST(ux_page_views.active_ms') && uxAnalytics.includes('ON CONFLICT (id) DO NOTHING'));
+check('UX ingestion derives identity and IP from the server session', uxAnalytics.includes('req.session?.user?.id') && uxAnalytics.includes('req.clientIP'));
+check('UX tracker measures active time and sends page exits with beacon', uxTracker.includes('ACTIVE_WINDOW_MS') && uxTracker.includes('navigator.sendBeacon') && uxTracker.includes("eventType: 'page_exit'") && server.includes("express.text({ type: 'text/plain', limit: '32kb' })") && server.includes("error?.type === 'stream.not.readable'"));
+check('UX tracker rotates sessions after prolonged inactivity', uxTracker.includes("endPage('session_timeout', true)") && uxTracker.includes('SESSION_IDLE_MS'));
+check('UX tracker never captures form values or DOM text', !uxTracker.includes('.value') && !uxTracker.includes('textContent') && !uxTracker.includes('innerText'));
+check('UX admin report includes page and preference analysis', analyticsView.includes('analytics.pages') && analyticsView.includes('analytics.languages') && analyticsView.includes('analytics.preferences'));
 
 const failed = checks.filter((item) => !item.condition);
 for (const item of checks) {

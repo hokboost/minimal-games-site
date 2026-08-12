@@ -100,6 +100,7 @@ const registerAdminRoutes = require('./routes/admin');
 const registerGiftRoutes = require('./routes/gifts');
 const registerWishRoutes = require('./routes/wish');
 const registerGameRoutes = require('./routes/games');
+const registerAnalyticsRoutes = require('./routes/analytics');
 
 // 导入i18n国际化
 const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
@@ -291,6 +292,7 @@ async function initializeDatabase() {
         for (const migrationName of [
             'add_idempotency_key.sql',
             'add_registration_ip.sql',
+            'create_ux_analytics.sql',
             'create_wish_tables.sql',
             'create_idempotency_keys.sql',
             'create_quiz_runtime_tables.sql',
@@ -541,6 +543,24 @@ async function runDatabaseMaintenance() {
                 LIMIT 5000
             )
         `);
+        await client.query(`
+            DELETE FROM ux_events
+            WHERE id IN (
+                SELECT id FROM ux_events
+                WHERE occurred_at < NOW() - INTERVAL '180 days'
+                ORDER BY occurred_at
+                LIMIT 5000
+            )
+        `);
+        await client.query(`
+            DELETE FROM ux_sessions
+            WHERE id IN (
+                SELECT id FROM ux_sessions
+                WHERE last_seen_at < NOW() - INTERVAL '365 days'
+                ORDER BY last_seen_at
+                LIMIT 1000
+            )
+        `);
     } catch (error) {
         console.error('数据库维护失败:', error);
     } finally {
@@ -606,8 +626,17 @@ app.use(session({
 
 // 基础中间件
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api/ux/batch', express.text({ type: 'text/plain', limit: '32kb' }));
 app.use(express.json({ limit: '2mb', strict: true }));
 app.use(express.urlencoded({ extended: true, limit: '256kb', parameterLimit: 100 }));
+app.use('/api/ux/batch', (error, req, res, next) => {
+    // Browsers may terminate an ordinary heartbeat while preserving the
+    // pagehide beacon. Telemetry is best-effort, so aborted bodies are ignored.
+    if (error?.type === 'request.aborted' || error?.type === 'stream.not.readable') {
+        return res.status(204).end();
+    }
+    return next(error);
+});
 app.use(mongoSanitize()); // 防止NoSQL注入
 
 // 国际化中间件
@@ -2169,6 +2198,14 @@ app.use(createIdempotencyMiddleware({
     paths: idempotentWritePaths,
     validateExistingRequest: validateExistingIdempotentRequest
 }));
+
+registerAnalyticsRoutes(app, {
+    pool,
+    rateLimit,
+    requireLogin,
+    requireAdmin,
+    security
+});
 
 registerAdminRoutes(app, {
     pool,

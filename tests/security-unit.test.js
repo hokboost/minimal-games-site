@@ -15,6 +15,13 @@ const {
     stableStringify
 } = require('../lib/idempotency');
 const BalanceLogger = require('../balance-logger');
+const {
+    clampInteger,
+    normalizeRoute,
+    normalizeTimestamp,
+    sanitizeMetadata,
+    sanitizePreferences
+} = require('../lib/ux-analytics');
 
 function signSessionId(sessionId, secret) {
     const signature = crypto.createHmac('sha256', secret)
@@ -62,6 +69,68 @@ test('malformed first forwarded value falls back instead of trusting a later val
         ip: '10.20.30.40'
     };
     assert.equal(getClientIp(req, { trustForwardedHeaders: true }), '10.20.30.40');
+});
+
+test('UX routes drop query strings and reject control characters', () => {
+    assert.equal(normalizeRoute('/wish?token=secret#result'), '/wish');
+    assert.equal(normalizeRoute('https://example.com/private'), '/unknown');
+    assert.equal(normalizeRoute('/wish\nforged'), '/unknown');
+});
+
+test('UX integer and timestamp values are bounded', () => {
+    assert.equal(clampInteger(null, 1, 100, null), null);
+    assert.equal(clampInteger(500, 1, 100, 0), 100);
+    const now = new Date('2026-08-12T12:00:00.000Z');
+    assert.equal(
+        normalizeTimestamp('2020-01-01T00:00:00.000Z', { now, maxPastMs: 1000 }).toISOString(),
+        '2026-08-12T11:59:59.000Z'
+    );
+});
+
+test('UX preferences retain safe capabilities and clamp dimensions', () => {
+    assert.deepEqual(sanitizePreferences({
+        deviceType: 'mobile',
+        browserLanguage: 'zh-CN',
+        preferredLanguages: ['zh-CN', 'en-CA', 'zh-CN', '<bad>'],
+        screenWidth: 99999,
+        viewportHeight: 844,
+        colorScheme: 'dark',
+        reducedMotion: true
+    }), {
+        deviceType: 'mobile',
+        platform: null,
+        browserLanguage: 'zh-CN',
+        preferredLanguages: ['zh-CN', 'en-CA'],
+        appLanguage: null,
+        timezone: null,
+        timezoneOffsetMinutes: 0,
+        screenWidth: 20000,
+        screenHeight: null,
+        viewportWidth: null,
+        viewportHeight: 844,
+        pixelRatio: null,
+        orientation: null,
+        colorScheme: 'dark',
+        reducedMotion: true,
+        highContrast: false,
+        touchCapable: false,
+        cookiesEnabled: false,
+        standalone: false,
+        hardwareConcurrency: null,
+        deviceMemoryGb: null,
+        connectionType: null,
+        saveData: false
+    });
+});
+
+test('UX metadata drops nested objects and unsafe keys', () => {
+    assert.deepEqual(sanitizeMetadata({
+        game: 'quiz',
+        success: true,
+        durationMs: 42,
+        nested: { answer: 'private' },
+        'bad-key': 'ignored'
+    }), { game: 'quiz', success: true, durationMs: 42 });
 });
 
 test('cookie parsing preserves encoded values containing equals signs', () => {

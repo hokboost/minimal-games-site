@@ -14,6 +14,7 @@
             <h1><%= lang === 'zh' ? '管理后台' : 'Admin panel' %></h1>
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '欢迎，' : 'Welcome, ' %><%= user.username %></span>
+                <a href="/admin/analytics"><%= lang === 'zh' ? 'UX 分析' : 'UX analytics' %></a>
                 <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
                 <a href="/logout"><%= lang === 'zh' ? '退出登录' : 'Log out' %></a>
             </div>

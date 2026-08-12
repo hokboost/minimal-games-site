@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/analytics.css">
+</head>
+<body class="app-redesign page-admin-analytics">
+    <%- include('partials/language-switcher') %>
+    <%
+        const summary = analytics.summary || {};
+        const duration = (seconds) => {
+            const value = Number(seconds) || 0;
+            if (value < 60) return `${value}s`;
+            const minutes = Math.floor(value / 60);
+            const remainder = value % 60;
+            return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+        };
+        const dateTime = (value) => value
+            ? new Date(value).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-CA', { hour12: false })
+            : '-';
+    %>
+
+    <main class="analytics-layout">
+        <header class="analytics-header">
+            <div>
+                <p class="analytics-eyebrow"><%= lang === 'zh' ? '行为数据' : 'Behavior data' %></p>
+                <h1><%= lang === 'zh' ? 'UX 分析' : 'UX analytics' %></h1>
+            </div>
+            <nav class="analytics-nav" aria-label="<%= lang === 'zh' ? '管理导航' : 'Admin navigation' %>">
+                <a href="/admin"><%= lang === 'zh' ? '管理后台' : 'Admin' %></a>
+                <a href="/"><%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="/logout"><%= lang === 'zh' ? '退出' : 'Log out' %></a>
+            </nav>
+        </header>
+
+        <div class="analytics-period" role="group" aria-label="<%= lang === 'zh' ? '时间范围' : 'Date range' %>">
+            <% [1, 7, 30, 90].forEach(option => { %>
+                <a href="/admin/analytics?days=<%= option %>" aria-current="<%= days === option ? 'page' : 'false' %>">
+                    <%= option === 1 ? (lang === 'zh' ? '今天' : 'Today') : `${option} ${lang === 'zh' ? '天' : 'days'}` %>
+                </a>
+            <% }) %>
+        </div>
+
+        <section class="analytics-summary" aria-label="<%= lang === 'zh' ? '概览' : 'Overview' %>">
+            <div><span><%= lang === 'zh' ? '会话' : 'Sessions' %></span><strong><%= summary.sessions || 0 %></strong></div>
+            <div><span><%= lang === 'zh' ? '登录用户' : 'Users' %></span><strong><%= summary.users || 0 %></strong></div>
+            <div><span><%= lang === 'zh' ? '页面访问' : 'Page views' %></span><strong><%= summary.page_views || 0 %></strong></div>
+            <div><span><%= lang === 'zh' ? '平均活跃' : 'Avg. active' %></span><strong><%= duration(summary.avg_active_seconds) %></strong></div>
+            <div><span><%= lang === 'zh' ? '中位活跃' : 'Median active' %></span><strong><%= duration(summary.median_active_seconds) %></strong></div>
+            <div><span><%= lang === 'zh' ? '10秒内离开' : 'Under 10s' %></span><strong><%= summary.short_visit_rate || 0 %>%</strong></div>
+        </section>
+
+        <section class="analytics-section">
+            <div class="section-heading">
+                <h2><%= lang === 'zh' ? '页面表现' : 'Page performance' %></h2>
+                <span><%= analytics.pages.length %></span>
+            </div>
+            <div class="analytics-table-wrap">
+                <table>
+                    <thead><tr>
+                        <th><%= lang === 'zh' ? '页面' : 'Page' %></th>
+                        <th><%= lang === 'zh' ? '访问' : 'Views' %></th>
+                        <th><%= lang === 'zh' ? '会话' : 'Sessions' %></th>
+                        <th><%= lang === 'zh' ? '用户' : 'Users' %></th>
+                        <th><%= lang === 'zh' ? '平均活跃' : 'Avg. active' %></th>
+                        <th><%= lang === 'zh' ? '中位活跃' : 'Median active' %></th>
+                        <th><%= lang === 'zh' ? '滚动' : 'Scroll' %></th>
+                        <th><%= lang === 'zh' ? '短访问' : 'Under 10s' %></th>
+                    </tr></thead>
+                    <tbody>
+                    <% if (!analytics.pages.length) { %>
+                        <tr><td colspan="8" class="empty"><%= lang === 'zh' ? '暂无数据' : 'No data' %></td></tr>
+                    <% } %>
+                    <% analytics.pages.forEach(row => { %>
+                        <tr>
+                            <td class="route"><%= row.route %></td>
+                            <td><%= row.views %></td><td><%= row.sessions %></td><td><%= row.users %></td>
+                            <td><%= duration(row.avg_active_seconds) %></td>
+                            <td><%= duration(row.median_active_seconds) %></td>
+                            <td><%= row.avg_scroll_percent %>%</td>
+                            <td><%= row.short_visit_rate %>%</td>
+                        </tr>
+                    <% }) %>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="analytics-section">
+            <div class="section-heading"><h2><%= lang === 'zh' ? '设备与语言偏好' : 'Device and language preferences' %></h2></div>
+            <div class="preference-columns">
+                <div>
+                    <h3><%= lang === 'zh' ? '设备' : 'Device' %></h3>
+                    <ol class="rank-list">
+                        <% analytics.devices.forEach(row => { %><li><span><%= row.label %></span><strong><%= row.sessions %></strong></li><% }) %>
+                    </ol>
+                </div>
+                <div>
+                    <h3><%= lang === 'zh' ? '浏览器语言' : 'Browser language' %></h3>
+                    <ol class="rank-list">
+                        <% analytics.languages.forEach(row => { %><li><span><%= row.label %></span><strong><%= row.sessions %></strong></li><% }) %>
+                    </ol>
+                </div>
+                <div>
+                    <h3><%= lang === 'zh' ? '时区' : 'Timezone' %></h3>
+                    <ol class="rank-list">
+                        <% analytics.timezones.forEach(row => { %><li><span><%= row.label %></span><strong><%= row.sessions %></strong></li><% }) %>
+                    </ol>
+                </div>
+            </div>
+            <div class="analytics-table-wrap compact-table">
+                <table>
+                    <thead><tr>
+                        <th><%= lang === 'zh' ? '配色' : 'Color' %></th>
+                        <th><%= lang === 'zh' ? '减少动画' : 'Reduced motion' %></th>
+                        <th><%= lang === 'zh' ? '高对比度' : 'High contrast' %></th>
+                        <th><%= lang === 'zh' ? '网络' : 'Network' %></th>
+                        <th><%= lang === 'zh' ? '节省流量' : 'Data saver' %></th>
+                        <th><%= lang === 'zh' ? '会话' : 'Sessions' %></th>
+                    </tr></thead>
+                    <tbody>
+                    <% analytics.preferences.forEach(row => { %>
+                        <tr>
+                            <td><%= row.color_scheme || 'unknown' %></td>
+                            <td><%= row.reduced_motion ? (lang === 'zh' ? '是' : 'Yes') : (lang === 'zh' ? '否' : 'No') %></td>
+                            <td><%= row.high_contrast ? (lang === 'zh' ? '是' : 'Yes') : (lang === 'zh' ? '否' : 'No') %></td>
+                            <td><%= row.connection_type || 'unknown' %></td>
+                            <td><%= row.save_data ? (lang === 'zh' ? '是' : 'Yes') : (lang === 'zh' ? '否' : 'No') %></td>
+                            <td><%= row.sessions %></td>
+                        </tr>
+                    <% }) %>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <div class="analytics-split">
+            <section class="analytics-section">
+                <div class="section-heading"><h2><%= lang === 'zh' ? '常见路径' : 'Top paths' %></h2></div>
+                <div class="analytics-table-wrap"><table>
+                    <thead><tr><th><%= lang === 'zh' ? '来源' : 'From' %></th><th><%= lang === 'zh' ? '去向' : 'To' %></th><th><%= lang === 'zh' ? '次数' : 'Count' %></th></tr></thead>
+                    <tbody>
+                    <% analytics.paths.forEach(row => { %><tr><td class="route"><%= row.from_route %></td><td class="route"><%= row.to_route %></td><td><%= row.transitions %></td></tr><% }) %>
+                    <% if (!analytics.paths.length) { %><tr><td colspan="3" class="empty"><%= lang === 'zh' ? '暂无数据' : 'No data' %></td></tr><% } %>
+                    </tbody>
+                </table></div>
+            </section>
+            <section class="analytics-section">
+                <div class="section-heading"><h2><%= lang === 'zh' ? '关键事件' : 'Key events' %></h2></div>
+                <div class="analytics-table-wrap"><table>
+                    <thead><tr><th><%= lang === 'zh' ? '事件' : 'Event' %></th><th><%= lang === 'zh' ? '目标' : 'Target' %></th><th><%= lang === 'zh' ? '次数' : 'Count' %></th></tr></thead>
+                    <tbody>
+                    <% analytics.events.forEach(row => { %><tr><td><%= row.event_type %></td><td><%= row.element_name %></td><td><%= row.events %></td></tr><% }) %>
+                    <% if (!analytics.events.length) { %><tr><td colspan="3" class="empty"><%= lang === 'zh' ? '暂无数据' : 'No data' %></td></tr><% } %>
+                    </tbody>
+                </table></div>
+            </section>
+        </div>
+
+        <section class="analytics-section">
+            <div class="section-heading"><h2><%= lang === 'zh' ? '最近访问' : 'Recent visits' %></h2></div>
+            <div class="analytics-table-wrap">
+                <table>
+                    <thead><tr>
+                        <th><%= lang === 'zh' ? '时间' : 'Time' %></th>
+                        <th><%= lang === 'zh' ? '用户' : 'User' %></th>
+                        <th><%= lang === 'zh' ? '页面' : 'Page' %></th>
+                        <th><%= lang === 'zh' ? '活跃' : 'Active' %></th>
+                        <th><%= lang === 'zh' ? '滚动' : 'Scroll' %></th>
+                        <th><%= lang === 'zh' ? '设备' : 'Device' %></th>
+                        <th><%= lang === 'zh' ? '显示' : 'Display' %></th>
+                        <th><%= lang === 'zh' ? '语言' : 'Language' %></th>
+                        <th><%= lang === 'zh' ? '时区' : 'Timezone' %></th>
+                        <th>IP</th>
+                    </tr></thead>
+                    <tbody>
+                    <% analytics.recent.forEach(row => { %>
+                        <tr>
+                            <td class="nowrap"><%= dateTime(row.entered_at) %></td>
+                            <td><%= row.username %></td><td class="route"><%= row.route %></td>
+                            <td><%= duration(row.active_seconds) %></td><td><%= row.max_scroll_percent %>%</td>
+                            <td><%= row.device_type %><%= row.platform ? ` · ${row.platform}` : '' %></td>
+                            <td class="nowrap"><%= row.viewport_width && row.viewport_height ? `${row.viewport_width}×${row.viewport_height}` : '-' %><%= row.color_scheme ? ` · ${row.color_scheme}` : '' %><%= row.connection_type ? ` · ${row.connection_type}` : '' %></td>
+                            <td><%= row.browser_language || '-' %></td>
+                            <td><%= row.timezone || '-' %></td><td class="nowrap"><%= row.ip_address || '-' %></td>
+                        </tr>
+                    <% }) %>
+                    <% if (!analytics.recent.length) { %><tr><td colspan="10" class="empty"><%= lang === 'zh' ? '暂无数据' : 'No data' %></td></tr><% } %>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
