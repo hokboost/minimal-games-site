@@ -241,23 +241,6 @@ const adminStrictLimit = (() => {
     };
 })();
 
-// 管理接口 IP 白名单（通过 env 配置，逗号分隔），未配置则不拦截
-function adminIPWhitelist(req, res, next) {
-    const whitelist = (process.env.ADMIN_IP_WHITELIST || '').split(',').map((ip) => ip.trim()).filter(Boolean);
-    if (whitelist.length === 0) {
-        return next();
-    }
-    const ip = getRealIP(req);
-    if (!whitelist.includes(ip)) {
-        return res.status(403).json({
-            success: false,
-            message: '管理员 IP 未授权',
-            code: 'ADMIN_IP_REJECTED'
-        });
-    }
-    return next();
-}
-
 // 管理接口签名校验（HMAC-SHA256），默认关闭（ADMIN_SIGN_ENFORCE=true 时开启）
 function verifyAdminSignature(req, res, next) {
     // 1. 如果已有管理员Session（浏览器访问），直接放行
@@ -435,7 +418,6 @@ module.exports = {
     requireSession,
     csrfProtection,
     generateFingerprint,
-    adminIPWhitelist,
     verifyAdminSignature,
     adminRateLimit,
     adminStrictLimit,

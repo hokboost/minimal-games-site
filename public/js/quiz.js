@@ -198,10 +198,8 @@
             answerIndex
         });
 
-        setTimeout(() => {
-            questionIndex += 1;
-            nextQuestion();
-        }, 800);
+        questionIndex += 1;
+        nextQuestion();
     }
 
     function startTotalTimer() {

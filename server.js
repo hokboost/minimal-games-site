@@ -289,6 +289,7 @@ async function initializeDatabase() {
 
         for (const migrationName of [
             'add_idempotency_key.sql',
+            'create_wish_tables.sql',
             'create_idempotency_keys.sql',
             'create_quiz_runtime_tables.sql',
             'add_pk_report_id.sql'

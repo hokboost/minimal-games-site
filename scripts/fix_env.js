@@ -29,7 +29,6 @@ const envContent = [
     `ADMIN_SIGN_SECRET=${randomSecret()}`,
     'ADMIN_SIGN_ENFORCE=true',
     'GIFT_TASKS_HMAC_ENFORCE=true',
-    `ADMIN_IP_WHITELIST=${process.env.ADMIN_IP_WHITELIST || ''}`,
     `GIFT_TASKS_IP_WHITELIST=${process.env.GIFT_TASKS_IP_WHITELIST || ''}`,
     ''
 ].join('\n');

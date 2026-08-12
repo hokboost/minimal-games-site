@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS wish_results (
 -- 创建祈愿进度表（跟踪每个用户的祈愿进度）
 CREATE TABLE IF NOT EXISTS wish_progress (
     id SERIAL PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
+    username VARCHAR(50) NOT NULL,
     gift_type VARCHAR(50) NOT NULL DEFAULT 'deepsea_singer',
     total_wishes INTEGER DEFAULT 0, -- 总祈愿次数
     consecutive_fails INTEGER DEFAULT 0, -- 连续失败次数
@@ -65,13 +65,94 @@ CREATE TABLE IF NOT EXISTS wish_inventory (
     FOREIGN KEY (username) REFERENCES users(username)
 );
 
+-- Early deployments used wish_type/reward_name/wish_name. Rename those
+-- columns in place so all historical rows and dependent indexes are retained.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_progress' AND column_name = 'wish_type'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_progress' AND column_name = 'gift_type'
+    ) THEN
+        ALTER TABLE wish_progress RENAME COLUMN wish_type TO gift_type;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_results' AND column_name = 'wish_type'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_results' AND column_name = 'gift_type'
+    ) THEN
+        ALTER TABLE wish_results RENAME COLUMN wish_type TO gift_type;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_results' AND column_name = 'reward_name'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_results' AND column_name = 'reward'
+    ) THEN
+        ALTER TABLE wish_results RENAME COLUMN reward_name TO reward;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_sessions' AND column_name = 'wish_type'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_sessions' AND column_name = 'gift_type'
+    ) THEN
+        ALTER TABLE wish_sessions RENAME COLUMN wish_type TO gift_type;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_sessions' AND column_name = 'wish_name'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wish_sessions' AND column_name = 'gift_name'
+    ) THEN
+        ALTER TABLE wish_sessions RENAME COLUMN wish_name TO gift_name;
+    END IF;
+END
+$$;
+
 ALTER TABLE wish_results ADD COLUMN IF NOT EXISTS gift_type VARCHAR(50) DEFAULT 'deepsea_singer';
 ALTER TABLE wish_progress ADD COLUMN IF NOT EXISTS gift_type VARCHAR(50) NOT NULL DEFAULT 'deepsea_singer';
 ALTER TABLE wish_sessions ADD COLUMN IF NOT EXISTS gift_type VARCHAR(50) NOT NULL DEFAULT 'deepsea_singer';
 ALTER TABLE wish_sessions ADD COLUMN IF NOT EXISTS gift_name VARCHAR(100) NOT NULL DEFAULT '深海歌姬';
 
 ALTER TABLE wish_progress DROP CONSTRAINT IF EXISTS wish_progress_username_key;
-ALTER TABLE wish_progress ADD CONSTRAINT wish_progress_user_gift_unique UNIQUE (username, gift_type);
+ALTER TABLE wish_progress DROP CONSTRAINT IF EXISTS wish_progress_user_type_unique;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'wish_progress'::regclass
+          AND conname = 'wish_progress_user_gift_unique'
+    ) THEN
+        ALTER TABLE wish_progress
+            ADD CONSTRAINT wish_progress_user_gift_unique UNIQUE (username, gift_type);
+    END IF;
+END
+$$;
+
+DROP INDEX IF EXISTS idx_wish_progress_user_type;
 
 -- 创建索引提高查询性能
 CREATE INDEX IF NOT EXISTS idx_wish_results_username_created ON wish_results(username, created_at DESC);
@@ -83,10 +164,3 @@ CREATE INDEX IF NOT EXISTS idx_wish_sessions_username_created ON wish_sessions(u
 CREATE INDEX IF NOT EXISTS idx_wish_sessions_user_gift ON wish_sessions(username, gift_type);
 CREATE INDEX IF NOT EXISTS idx_wish_inventory_username_created ON wish_inventory(username, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_wish_inventory_status ON wish_inventory(status, expires_at);
-
--- 插入默认配置
-INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
-SELECT username, 'deepsea_singer', 0, 0, 0, 0 
-FROM users 
-WHERE username NOT IN (SELECT username FROM wish_progress WHERE gift_type = 'deepsea_singer')
-ON CONFLICT (username, gift_type) DO NOTHING;

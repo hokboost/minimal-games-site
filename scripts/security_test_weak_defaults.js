@@ -9,7 +9,6 @@
  * 1. 管理员密码重置默认为123456
  * 2. SESSION_SECRET是否为示例值
  * 3. CSRF_TEST_MODE是否意外启用
- * 4. 管理员IP白名单是否未配置
  */
 
 const { URL } = require('url');
@@ -329,9 +328,8 @@ async function main() {
     console.log('\n建议：');
     console.log('  1. 确保生产环境 CSRF_TEST_MODE=false');
     console.log('  2. 使用强随机的 SESSION_SECRET (64字节+)');
-    console.log('  3. 配置管理员IP白名单 (ADMIN_IP_WHITELIST)');
-    console.log('  4. 禁用详细错误信息输出到前端');
-    console.log('  5. 定期更新所有依赖包');
+    console.log('  3. 禁用详细错误信息输出到前端');
+    console.log('  4. 定期更新所有依赖包');
 }
 
 main().catch((error) => {

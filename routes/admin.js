@@ -20,13 +20,13 @@ module.exports = function registerAdminRoutes(app, deps) {
     } = deps;
 
     // 安全中间件存在性兜底，防止依赖缺失导致路由注册报错
-    const adminIPWhitelist = security.adminIPWhitelist || ((req, res, next) => next());
     const verifyAdminSignature = security.verifyAdminSignature || ((req, res, next) => next());
     const adminRateLimit = security.adminRateLimit || ((req, res, next) => next());
     const adminStrictLimit = security.adminStrictLimit || ((req, res, next) => next());
 
-    // 页面类接口：登录+admin+IP白名单+限流，不强制签名（浏览器点击可用）
-    const adminGuards = [requireLogin, requireAdmin, adminIPWhitelist, adminRateLimit, adminStrictLimit];
+    // Page routes require an authenticated admin and rate limits. Admins may
+    // connect from changing addresses, so access is never tied to client IP.
+    const adminGuards = [requireLogin, requireAdmin, adminRateLimit, adminStrictLimit];
     // API 类接口：在 adminGuards 基础上强制签名（可选关闭，用 ADMIN_SIGN_SECRET 控制）
     const adminApiGuards = verifyAdminSignature === ((req, res, next) => next())
         ? adminGuards

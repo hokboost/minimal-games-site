@@ -22,6 +22,7 @@ const ipManager = read('ip-manager.js');
 const migrationRunner = read('scripts/run_idempotency_migration.js');
 const idempotency = read('lib/idempotency.js');
 const idempotencyMigration = read('migrations/create_idempotency_keys.sql');
+const wishMigration = read('migrations/create_wish_tables.sql');
 const adminClient = read('public/js/admin.js');
 const quizClient = read('public/js/quiz.js');
 const profileClient = read('public/js/profile.js');
@@ -34,6 +35,7 @@ check('CSRF tokens use a per-session secret', server.includes('req.session.csrfS
 check('legacy CSRF sessions only upgrade on safe methods', server.includes("req.method === 'GET' || req.method === 'HEAD'") && server.includes('Mutating requests never accept legacy tokens'));
 check('admin password writes use password_hash', admin.includes('UPDATE users SET password_hash = $1') && !admin.includes('UPDATE users SET password = $1'));
 check('admin routes use CSRF', /app\.post\('\/api\/admin\/[^']+', \.\.\.adminApiGuards, requireCSRF/g.test(admin));
+check('admin access is not restricted by client IP', !admin.includes('adminIPWhitelist') && !security.includes('ADMIN_IP_REJECTED') && !security.includes('ADMIN_IP_WHITELIST'));
 check('gift exchange uses an allowlist', gifts.includes('redeemableGiftTypes') && gifts.includes("new Set(['heartbox', 'fanlight', 'tiedu_one'])"));
 check('wish simulator uses role authorization', wish.includes('req.session.user.is_admin !== true') && !wish.includes("username !== 'hokboost'"));
 check('paid games use action rate limits', games.includes("app.post('/api/scratch/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection"));
@@ -47,12 +49,14 @@ check('gift balance checks require explicit insufficient text', !giftSender.incl
 check('routine IP activity writes are throttled', ipManager.includes("if (action === 'request')") && ipManager.includes('now - lastWrite < 60 * 1000'));
 check('migration runner contains no embedded database URL', migrationRunner.includes("require('../db')") && !migrationRunner.includes('postgres://'));
 check('quiz next is protected against duplicate token issuance', server.includes("'/api/quiz/next'") && quizClient.includes("idempotentFetch('/api/quiz/next'"));
+check('quiz advances without an artificial answer delay', quizClient.includes('questionIndex += 1;\n        nextQuestion();') && !/setTimeout\(\(\) => \{\s*questionIndex \+= 1;\s*nextQuestion\(\);/m.test(quizClient));
 check('password changes replay success after response loss', server.includes("'/api/change-password'") && profileClient.includes("idempotentFetch('/api/change-password'"));
 check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, options)'));
 check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 3') && idempotency.includes('retryQuery(pool'));
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
 check('idempotency migration upgrades the legacy schema', idempotencyMigration.includes('RENAME COLUMN idem_key TO idempotency_key') && idempotencyMigration.includes("SET status = 'pending'") && server.includes("'create_idempotency_keys.sql'"));
 check('database migrations are serialized across instances', server.includes("pg_advisory_lock(hashtext('minimal_games_schema_migration'))") && server.includes("pg_advisory_unlock(hashtext('minimal_games_schema_migration'))"));
+check('wish migration upgrades legacy production columns', server.includes("'create_wish_tables.sql'") && wishMigration.includes('RENAME COLUMN wish_type TO gift_type') && wishMigration.includes('RENAME COLUMN reward_name TO reward') && wishMigration.includes('RENAME COLUMN wish_name TO gift_name'));
 check('PK report charging is keyed by a unique report ID', gifts.includes('ON CONFLICT (report_id) DO NOTHING') && pkReportMigration.includes('UNIQUE INDEX'));
 check('completed gift callbacks repair blindbox queue continuation', gifts.includes('enqueueNextStoredBlindbox(username, taskId)'));
 
