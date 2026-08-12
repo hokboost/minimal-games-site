@@ -80,6 +80,7 @@ const sessionSecret = process.env.SESSION_SECRET || developmentSessionSecret;
 const { parseCookies, decodeSignedSessionCookie } = require('./lib/session-auth');
 const { createIdempotencyMiddleware } = require('./lib/idempotency');
 const { getClientIp } = require('./lib/client-ip');
+const { requestContextMiddleware, setRequestId } = require('./lib/request-context');
 
 let giftConfig = {};
 try {
@@ -174,7 +175,7 @@ io.use(async (socket, next) => {
         }
 
         const currentUser = await pool.query(
-            'SELECT id, username, authorized, is_admin FROM users WHERE username = $1',
+            'SELECT id, username, authorized, is_admin, deactivated FROM users WHERE username = $1',
             [sessionData.user.username]
         );
         const activeSession = await pool.query(
@@ -182,7 +183,7 @@ io.use(async (socket, next) => {
             [sessionId, sessionData.user.username]
         );
         const user = currentUser.rows[0];
-        if (!user?.authorized || activeSession.rows[0]?.is_active !== true) {
+        if (!user?.authorized || user.deactivated === true || activeSession.rows[0]?.is_active !== true) {
             return next(new Error('Session is no longer authorized'));
         }
 
@@ -296,7 +297,8 @@ async function initializeDatabase() {
             'create_wish_tables.sql',
             'create_idempotency_keys.sql',
             'create_quiz_runtime_tables.sql',
-            'add_pk_report_id.sql'
+            'add_pk_report_id.sql',
+            'strengthen_financial_audit.sql'
         ]) {
             const migrationPath = path.join(__dirname, 'migrations', migrationName);
             await pool.query(fs.readFileSync(migrationPath, 'utf8'));
@@ -538,7 +540,7 @@ async function runDatabaseMaintenance() {
                 SELECT id
                 FROM idempotency_keys
                 WHERE status = 'completed'
-                  AND updated_at < NOW() - INTERVAL '7 days'
+                  AND updated_at < NOW() - INTERVAL '180 days'
                 ORDER BY updated_at
                 LIMIT 5000
             )
@@ -625,6 +627,7 @@ app.use(session({
 }));
 
 // 基础中间件
+app.use(requestContextMiddleware);
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/ux/batch', express.text({ type: 'text/plain', limit: '32kb' }));
 app.use(express.json({ limit: '2mb', strict: true }));
@@ -717,7 +720,7 @@ const requireLogin = async (req, res, next) => {
     try {
         const username = req.session.user.username;
         const result = await pool.query(`
-            SELECT u.id, u.username, u.authorized, u.is_admin,
+            SELECT u.id, u.username, u.authorized, u.is_admin, u.deactivated,
                    a.is_active, a.termination_reason
             FROM users u
             LEFT JOIN active_sessions a
@@ -726,7 +729,7 @@ const requireLogin = async (req, res, next) => {
         `, [username, req.sessionID]);
         const current = result.rows[0];
 
-        if (!current || current.is_active !== true) {
+        if (!current || current.deactivated === true || current.is_active !== true) {
             const kicked = current?.termination_reason === 'new_device_login';
             return req.session.destroy(() => {
                 res.clearCookie('minimal_games_sid');
@@ -1131,6 +1134,15 @@ app.post('/login', loginLimiter, async (req, res) => {
 
         const user = result.rows[0];
         const now = new Date();
+
+        if (user.deactivated === true) {
+            await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_deactivated');
+            return res.status(401).render('login', {
+                title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                error: uiText(res, '用户名或密码错误！', 'Invalid username or password!'),
+                csrfToken: generateCSRFToken(req)
+            });
+        }
         
         // 4. 账户锁定检查
         if (user.locked_until && new Date(user.locked_until) > now) {
@@ -1352,11 +1364,13 @@ app.post('/api/change-password', requireLogin, requireCSRF, async (req, res) => 
         if (otherSessionIds.length > 0) {
             await client.query('DELETE FROM user_sessions WHERE sid = ANY($1::text[])', [otherSessionIds]);
         }
+        const responseBody = { success: true, message: '密码修改成功！' };
+        await req.finalizeIdempotency?.(client, 200, responseBody);
         await client.query('COMMIT');
 
         disconnectUserSockets(username, otherSessionIds);
 
-        res.json({ success: true, message: '密码修改成功！' });
+        res.json(responseBody);
     } catch (error) {
         if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('修改密码失败:', error);
@@ -1764,7 +1778,7 @@ async function logStoneAction({
 // 祈愿背包 API
 // ====================
 
-async function enqueueWishInventorySend({ inventoryId, username, isAuto = false }) {
+async function enqueueWishInventorySend({ inventoryId, username, isAuto = false, idempotencyRequest = null }) {
     let client;
     try {
         client = await pool.connect();
@@ -1851,8 +1865,11 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false 
             WHERE id = $2
         `, [exchangeResult.rows[0].id, inventoryId]);
 
+        const result = { success: true, exchangeId: exchangeResult.rows[0].id };
+        const responseBody = { success: true, message: '礼物已加入发送队列', exchangeId: result.exchangeId };
+        await idempotencyRequest?.finalizeIdempotency?.(client, 200, responseBody);
         await client.query('COMMIT');
-        return { success: true, exchangeId: exchangeResult.rows[0].id };
+        return result;
     } catch (error) {
         if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('背包礼物入队失败:', error);
@@ -2085,6 +2102,8 @@ async function requireApiKey(req, res, next) {
             return res.status(401).json({ success: false, message: '重复请求' });
         }
         nonceCache.set(nonceHeader, timestampMs);
+        req.requestNonce = nonceHeader;
+        setRequestId(nonceHeader);
         if (!requireApiKey.lastNonceCleanupAt || now - requireApiKey.lastNonceCleanupAt > 60 * 60 * 1000) {
             requireApiKey.lastNonceCleanupAt = now;
             pool.query("DELETE FROM api_request_nonces WHERE created_at < NOW() - INTERVAL '1 day'")
@@ -2145,6 +2164,7 @@ const idempotentWritePaths = [
     '/api/flip/cashout',
     '/api/blindbox/open',
     '/api/duel/play',
+    '/api/spin',
     '/api/wish/play',
     '/api/wish-batch',
     '/api/wish/backpack/send',

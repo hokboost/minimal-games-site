@@ -160,7 +160,7 @@ const { username, csrfToken } = document.body.dataset;
             const nonce = generateNonce();
             
             try {
-                const response = await fetch('/api/spin', {
+                const response = await window.idempotentFetch('/api/spin', {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',

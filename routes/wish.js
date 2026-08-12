@@ -232,9 +232,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     success ? rewardValue : 0
                 ]);
 
-                await client.query('COMMIT');
-
-                return res.json({
+                const responseBody = {
                     success: true,
                     wishSuccess: success,
                     reward: reward,
@@ -255,7 +253,11 @@ module.exports = function registerWishRoutes(app, deps) {
                     },
                     isGuaranteed: isGuaranteed,
                     giftName: rewardName
-                });
+                };
+                await req.finalizeIdempotency?.(client, 200, responseBody);
+                await client.query('COMMIT');
+
+                return res.json(responseBody);
             } catch (error) {
                 if (client) await client.query('ROLLBACK').catch((rollbackError) => {
                     console.error('Wish play rollback failed:', rollbackError);
@@ -424,12 +426,17 @@ module.exports = function registerWishRoutes(app, deps) {
                 return res.status(400).json({ success: false, message: '参数无效' });
             }
 
-            const result = await enqueueWishInventorySend({ inventoryId, username, isAuto: false });
+            const result = await enqueueWishInventorySend({
+                inventoryId,
+                username,
+                isAuto: false,
+                idempotencyRequest: req
+            });
             if (!result.success) {
                 return res.status(400).json({ success: false, message: result.message });
             }
 
-            res.json({ success: true, message: '礼物已加入发送队列' });
+            res.json({ success: true, message: '礼物已加入发送队列', exchangeId: result.exchangeId });
         } catch (error) {
             console.error('背包送出失败:', error);
             res.status(500).json({ success: false, message: '送出失败' });
@@ -629,9 +636,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     successCount * rewardValue
                 ]);
 
-                await client.query('COMMIT');
-
-                return res.json({
+                const responseBody = {
                     success: true,
                     successCount,
                     newBalance: finalBalance,
@@ -648,7 +653,11 @@ module.exports = function registerWishRoutes(app, deps) {
                             : null,
                         guarantee_count: config.guaranteeCount
                     }
-                });
+                };
+                await req.finalizeIdempotency?.(client, 200, responseBody);
+                await client.query('COMMIT');
+
+                return res.json(responseBody);
 
             } catch (error) {
                 if (client) {

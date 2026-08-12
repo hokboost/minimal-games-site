@@ -342,16 +342,17 @@ module.exports = function registerGameRoutes(app, deps) {
                 INSERT INTO quiz_sessions (id, username, status, created_at, expires_at)
                 VALUES ($1, $2, 'active', NOW(), NOW() + INTERVAL '20 minutes')
             `, [sessionId, username]);
-            await client.query('COMMIT');
-
-            req.session.quizSessionId = sessionId;
-
-            res.json({
+            const responseBody = {
                 success: true,
                 message: '游戏开始，已扣除10积分',
                 newBalance: balanceResult.balance,
                 quizSessionId: sessionId
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+
+            req.session.quizSessionId = sessionId;
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Quiz start error:', error);
@@ -658,9 +659,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 INSERT INTO quiz_question_tokens (token, session_id, question_id, created_at)
                 VALUES ($1, $2, $3, NOW())
             `, [token, quizSessionId, question.id]);
-            await client.query('COMMIT');
-
-            res.json({
+            const responseBody = {
                 success: true,
                 question: {
                     id: question.id,
@@ -669,7 +668,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 },
                 token,
                 signature
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Quiz next error:', error);
@@ -849,17 +852,19 @@ module.exports = function registerGameRoutes(app, deps) {
                 "UPDATE quiz_sessions SET status = 'settled', settled_at = NOW() WHERE id = $1",
                 [quizSessionId]
             );
-            await client.query('COMMIT');
-            req.session.quizSessionId = null;
-
-            res.json({
+            const responseBody = {
                 success: true,
                 score: correctCount,
                 total: normalizedAnswers.length,
                 reward,
                 newBalance,
                 proof
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            req.session.quizSessionId = null;
+
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Quiz submit error:', error);
@@ -944,13 +949,15 @@ module.exports = function registerGameRoutes(app, deps) {
                 );
                 if (pendingResult.rows.length) {
                     const pending = pendingResult.rows[0];
-                    await client.query('COMMIT');
-                    return res.json({
+                    const responseBody = {
                         success: true,
                         message: '继续等待审核',
                         level: Number(pending.level || 1),
                         setId: pending.set_id !== null ? Number(pending.set_id) : null
-                    });
+                    };
+                    await req.finalizeIdempotency?.(client, 200, responseBody);
+                    await client.query('COMMIT');
+                    return res.json(responseBody);
                 }
 
                 let level = 1;
@@ -1094,9 +1101,11 @@ module.exports = function registerGameRoutes(app, deps) {
                         [username]
                     );
                 }
+                const responseBody = { success: true, message: '开始成功', level, setId };
+                await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
 
-                res.json({ success: true, message: '开始成功', level, setId });
+                res.json(responseBody);
             } catch (error) {
                 await client.query('ROLLBACK').catch(() => {});
                 throw error;
@@ -1422,6 +1431,12 @@ module.exports = function registerGameRoutes(app, deps) {
                     }
                 }
 
+                const responseBody = {
+                    success: true,
+                    message: isCorrect ? '自动审核通过' : '自动审核未通过',
+                    status
+                };
+                await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
             } catch (txError) {
                 await client.query('ROLLBACK').catch(() => {});
@@ -1558,9 +1573,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 })
             ]);
 
-            await client.query('COMMIT');
-
-            res.json({
+            const responseBody = {
                 success: true,
                 outcome: outcome.type,
                 multiplier: outcome.multiplier,
@@ -1568,7 +1581,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 reels: slotResults,
                 newBalance: currentBalance,
                 finalBalance: finalBalance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+
+            res.json(responseBody);
 
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
@@ -1731,9 +1748,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 [username, payout, matchedCount, tier, JSON.stringify(winningNumbers), JSON.stringify(userSlots), proof]
             );
 
-            await client.query('COMMIT');
-
-            res.json({
+            const responseBody = {
                 success: true,
                 reward: payout,
                 payout: payout,
@@ -1744,7 +1759,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 winningNumbers: winningNumbers,
                 slots: userSlots,
                 balance: finalBalance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+
+            res.json(responseBody);
 
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
@@ -1826,12 +1845,14 @@ module.exports = function registerGameRoutes(app, deps) {
                 afterSlots: slots
             }, client);
 
-            await client.query('COMMIT');
-            res.json({
+            const responseBody = {
                 success: true,
                 slots,
                 newBalance: balanceResult.balance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone add error:', error);
@@ -1889,12 +1910,14 @@ module.exports = function registerGameRoutes(app, deps) {
                 afterSlots: newSlots
             }, client);
 
-            await client.query('COMMIT');
-            res.json({
+            const responseBody = {
                 success: true,
                 slots: newSlots,
                 newBalance: balanceResult.balance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone fill error:', error);
@@ -1981,14 +2004,16 @@ module.exports = function registerGameRoutes(app, deps) {
                 afterSlots: newSlots
             }, client);
 
-            await client.query('COMMIT');
-            res.json({
+            const responseBody = {
                 success: true,
                 slots: newSlots,
                 newBalance: balanceResult.balance,
                 replacedSlot: index,
                 nextReplaceIndex
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone replace error:', error);
@@ -2059,13 +2084,15 @@ module.exports = function registerGameRoutes(app, deps) {
                 afterSlots: newSlots
             }, client);
 
-            await client.query('COMMIT');
-            res.json({
+            const responseBody = {
                 success: true,
                 slots: newSlots,
                 reward,
                 newBalance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Stone redeem error:', error);
@@ -2166,15 +2193,17 @@ module.exports = function registerGameRoutes(app, deps) {
             };
             await saveFlipState(username, state, client);
 
-            await client.query('COMMIT');
-            res.json({
+            const responseBody = {
                 success: true,
                 nextCost: flipCosts[0],
                 previousReward,
                 previousGood: previousState.good_count,
                 previousBad: previousState.bad_count,
                 newBalance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Flip start error:', error);
@@ -2313,8 +2342,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 ended: state.ended
             }, client);
 
-            await client.query('COMMIT');
-            res.json({
+            const responseBody = {
                 success: true,
                 cardIndex,
                 cardType,
@@ -2323,7 +2351,10 @@ module.exports = function registerGameRoutes(app, deps) {
                 ended: state.ended,
                 reward,
                 newBalance: rewardBalance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Flip card error:', error);
@@ -2387,12 +2418,14 @@ module.exports = function registerGameRoutes(app, deps) {
                 ended: true
             }, client);
 
-            await client.query('COMMIT');
-            res.json({
+            const responseBody = {
                 success: true,
                 reward,
                 newBalance: rewardResult.balance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Flip cashout error:', error);
@@ -2562,6 +2595,15 @@ module.exports = function registerGameRoutes(app, deps) {
                 ]
             );
 
+            const durableResponse = {
+                success: true,
+                balanceAfter,
+                batchId,
+                rewards,
+                queued: false,
+                enqueueMessage: bilibiliRoomId ? '礼物将在事务提交后加入发送队列' : null
+            };
+            await req.finalizeIdempotency?.(client, 200, durableResponse);
             await client.query('COMMIT');
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
@@ -2668,13 +2710,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 ]
             );
 
-            await client.query('COMMIT');
-
-            if (req.session.user) {
-                req.session.user.balance = newBalance;
-            }
-
-            res.json({
+            const responseBody = {
                 success: true,
                 duelSuccess: success,
                 reward,
@@ -2682,7 +2718,14 @@ module.exports = function registerGameRoutes(app, deps) {
                 balanceAfterBet,
                 balanceAfterReward: newBalance,
                 newBalance
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+
+            if (req.session.user) {
+                req.session.user.balance = newBalance;
+            }
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Duel play error:', error);

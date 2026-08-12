@@ -1,5 +1,6 @@
 // 余额变动日志记录器
 const pool = require('./db');
+const { getRequestId } = require('./lib/request-context');
 
 class BalanceLogger {
     /**
@@ -24,29 +25,27 @@ class BalanceLogger {
         description = '',
         gameData = null,
         ipAddress = null,
-        userAgent = null
+        userAgent = null,
+        requestId = null
     }) {
-        try {
-            await pool.query(`
-                INSERT INTO balance_logs (
-                    username, operation_type, amount, balance_before, balance_after,
-                    description, game_data, ip_address, user_agent
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            `, [
-                username,
-                operationType,
-                        amount,
-                        balanceBefore,
-                        balanceAfter,
-                        description,
-                        gameData ? JSON.stringify(gameData) : null,
-                        ipAddress,
-                        userAgent
-                    ]);
-        } catch (error) {
-            console.error('记录余额日志失败:', error);
-            // 不抛出错误，避免影响主业务
-        }
+        await pool.query(`
+            INSERT INTO balance_logs (
+                username, operation_type, amount, balance_before, balance_after,
+                description, game_data, ip_address, user_agent, request_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `, [
+            username,
+            operationType,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            description,
+            gameData ? JSON.stringify(gameData) : null,
+            ipAddress,
+            userAgent,
+            requestId || getRequestId()
+        ]);
+        return true;
     }
 
     /**
@@ -70,6 +69,7 @@ class BalanceLogger {
         gameData = null,
         ipAddress = null,
         userAgent = null,
+        requestId = null,
         requireSufficientBalance = true,
         client: externalClient = null,
         managedTransaction = false
@@ -142,8 +142,8 @@ class BalanceLogger {
                     await client.query(`
                         INSERT INTO balance_logs (
                             username, operation_type, amount, balance_before, balance_after,
-                            description, game_data, ip_address, user_agent
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            description, game_data, ip_address, user_agent, request_id
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     `, [
                         username,
                         operationType,
@@ -153,7 +153,8 @@ class BalanceLogger {
                         description,
                         gameData ? JSON.stringify(gameData) : null,
                         ipAddress,
-                        userAgent
+                        userAgent,
+                        requestId || getRequestId()
                     ]);
 
                     if (useSavepoint) {

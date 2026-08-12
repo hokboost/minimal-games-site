@@ -35,6 +35,7 @@ const pkReportMigration = read('migrations/add_pk_report_id.sql');
 const uxAnalytics = read('routes/analytics.js');
 const uxTracker = read('public/js/ux-analytics.js');
 const uxMigration = read('migrations/create_ux_analytics.sql');
+const financialAuditMigration = read('migrations/strengthen_financial_audit.sql');
 const analyticsView = read('views/admin-analytics.ejs');
 
 check('production rejects CSRF bypass flags', server.includes('禁止启用 CSRF_TEST_MODE') && security.includes("process.env.NODE_ENV !== 'production'"));
@@ -66,7 +67,11 @@ check('quiz leaderboard includes valid administrator scores and uses explicit da
 check('password changes replay success after response loss', server.includes("'/api/change-password'") && profileClient.includes("idempotentFetch('/api/change-password'"));
 check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, requestOptions)'));
 check('admin room binding submits reliably and accepts short Bilibili room IDs', adminView.includes('id="bind-room-form" novalidate') && adminView.includes('data-ux-event="admin.bind_room"') && adminClient.includes("document.addEventListener('submit'") && !adminClient.includes('Bind room "${roomId}" for') && adminClient.includes('/^\\d{1,12}$/') && admin.includes('/^\\d{1,12}$/'));
-check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 3') && idempotency.includes('retryQuery(pool'));
+check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 5') && idempotency.includes('retryQuery(pool'));
+check('financial responses finalize inside business transactions', games.includes('req.finalizeIdempotency?.(client, 200, responseBody)') && wish.includes('req.finalizeIdempotency?.(client, 200, responseBody)'));
+check('balance ledger is append-only and validates new arithmetic', financialAuditMigration.includes('balance_logs_append_only') && financialAuditMigration.includes('balance_logs_amount_matches_check'));
+check('account deactivation preserves financial audit history', admin.includes('账户已停用，审计记录已保留') && !admin.includes("DELETE FROM balance_logs"));
+check('spin results are idempotent', server.includes("'/api/spin'") && read('public/js/spin.js').includes("idempotentFetch('/api/spin'"));
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
 check('idempotency migration upgrades the legacy schema', idempotencyMigration.includes('RENAME COLUMN idem_key TO idempotency_key') && idempotencyMigration.includes("SET status = 'pending'") && server.includes("'create_idempotency_keys.sql'"));
 check('database migrations are serialized across instances', server.includes("pg_advisory_lock(hashtext('minimal_games_schema_migration'))") && server.includes("pg_advisory_unlock(hashtext('minimal_games_schema_migration'))"));

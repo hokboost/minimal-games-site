@@ -100,6 +100,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                             amount: Number(lockedTask.cost),
                             operationType: 'gift_timeout_refund',
                             description: `礼物任务超时自动退款: ${lockedTask.cost} 积分`,
+                            gameData: { taskId: task.id, reason: 'pending_timeout' },
                             requireSufficientBalance: false,
                             client,
                             managedTransaction: true
@@ -246,8 +247,10 @@ module.exports = function registerGiftRoutes(app, deps) {
                  VALUES ($1, $2, 'start', 'pending')`,
                 [username, String(roomId)]
             );
+            const responseBody = { success: true, queued: true };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
-            return res.json({ success: true, queued: true });
+            return res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('PK start error:', error);
@@ -287,8 +290,10 @@ module.exports = function registerGiftRoutes(app, deps) {
                  VALUES ($1, 'stop', 'pending')`,
                 [username]
             );
+            const responseBody = { success: true, queued: true };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
-            return res.json({ success: true, queued: true });
+            return res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('PK stop error:', error);
@@ -521,6 +526,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                         amount: -resolvedTicketCount,
                         operationType: 'pk_ticket',
                         description: `PK自动上票扣费：${resolvedTicketCount} 积分`,
+                        gameData: { reportId, roomId, ticketCount: resolvedTicketCount },
                         ipAddress: req.clientIP,
                         userAgent: req.get('User-Agent'),
                         requireSufficientBalance: false,
@@ -713,6 +719,16 @@ module.exports = function registerGiftRoutes(app, deps) {
                     ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, $7, $8)
                     RETURNING id
                 `, insertParams);
+                const exchangeId = insertResult.rows[0].id;
+                const responseBody = {
+                    success: true,
+                    message: '兑换成功，礼物正在发送中，请稍候...',
+                    exchangeId,
+                    newBalance: currentBalance - costNum,
+                    deliveryStatus: 'pending',
+                    note: '资金已锁定，礼物发送完成后确认扣费'
+                };
+                await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
 
                 console.log(`🔒 用户 ${username} 资金已锁定: ${costNum} 积分，剩余余额: ${currentBalance - costNum} 积分`); // ✅ FIX
@@ -754,6 +770,7 @@ module.exports = function registerGiftRoutes(app, deps) {
             res.json({
                 success: true,
                 message: `兑换成功${deliveryMessage}`,
+                exchangeId,
                 newBalance: currentBalance - costNum, // ✅ FIX
                 deliveryStatus: bilibiliRoomId ? 'pending' : 'no_room',
                 note: '资金已锁定，礼物发送完成后确认扣费'

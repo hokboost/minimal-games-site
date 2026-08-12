@@ -75,7 +75,11 @@ module.exports = function registerAdminRoutes(app, deps) {
             }
 
             const usersResult = await pool.query(
-                'SELECT username, balance, spins_allowed, authorized, is_admin, login_failures, last_failure_time, locked_until FROM users ORDER BY username'
+                `SELECT username, balance, spins_allowed, authorized, is_admin,
+                        login_failures, last_failure_time, locked_until
+                 FROM users
+                 WHERE deactivated = false
+                 ORDER BY username`
             );
 
             const users = usersResult.rows.map(user => ({
@@ -395,6 +399,7 @@ module.exports = function registerAdminRoutes(app, deps) {
 
     // 添加积分
     app.post('/api/admin/add-electric-coin', ...adminApiGuards, requireCSRF, async (req, res) => {
+        let client;
         try {
             const { username } = req.body;
             const amount = Number(req.body.amount);
@@ -406,6 +411,9 @@ module.exports = function registerAdminRoutes(app, deps) {
             if (amount > 100000) {
                 return res.status(400).json({ success: false, message: '单次添加不能超过100,000积分' });
             }
+
+            client = await pool.connect();
+            await client.query('BEGIN');
 
             // 使用余额日志系统进行管理员充值
             const balanceResult = await BalanceLogger.updateBalance({
@@ -420,21 +428,30 @@ module.exports = function registerAdminRoutes(app, deps) {
                 },
                 ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
-                requireSufficientBalance: false
+                requireSufficientBalance: false,
+                client,
+                managedTransaction: true
             });
 
             if (!balanceResult.success) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: balanceResult.message });
             }
 
-            res.json({
+            const responseBody = {
                 success: true,
                 newBalance: balanceResult.balance,
                 addedAmount: amount
-            });
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('添加积分失败:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
+        } finally {
+            client?.release();
         }
     });
 
@@ -448,7 +465,7 @@ module.exports = function registerAdminRoutes(app, deps) {
             }
 
             const result = await pool.query(
-                'UPDATE users SET authorized = true WHERE username = $1 RETURNING username',
+                'UPDATE users SET authorized = true WHERE username = $1 AND deactivated = false RETURNING username',
                 [username]
             );
 
@@ -545,11 +562,17 @@ module.exports = function registerAdminRoutes(app, deps) {
             if (sessionIds.length > 0) {
                 await client.query('DELETE FROM user_sessions WHERE sid = ANY($1::text[])', [sessionIds]);
             }
+            const responseBody = {
+                success: true,
+                message: '密码重置成功',
+                temporaryPassword
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
 
             disconnectUserSockets(username, sessionIds);
 
-            res.json({ success: true, message: '密码重置成功', temporaryPassword });
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('重置密码失败:', error);
@@ -616,6 +639,13 @@ module.exports = function registerAdminRoutes(app, deps) {
                     message: `余额修改失败: ${balanceResult.message}`
                 });
             }
+            const responseBody = {
+                success: true,
+                message: '余额修改成功',
+                newBalance: balance,
+                oldBalance: currentBalance
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
 
             await auditAdminAction({
@@ -626,12 +656,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 clientIP: req.clientIP
             });
 
-            res.json({
-                success: true,
-                message: '余额修改成功',
-                newBalance: balance,
-                oldBalance: currentBalance
-            });
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('修改余额失败:', error);
@@ -794,7 +819,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 await client.query('BEGIN');
 
                 const userResult = await client.query(
-                    'SELECT is_admin FROM users WHERE username = $1 FOR UPDATE',
+                    'SELECT is_admin, deactivated FROM users WHERE username = $1 FOR UPDATE',
                     [username]
                 );
                 if (userResult.rows.length === 0) {
@@ -818,48 +843,32 @@ module.exports = function registerAdminRoutes(app, deps) {
                     );
                 }
 
-                await client.query('DELETE FROM active_sessions WHERE username = $1', [username]);
-                await client.query('DELETE FROM ip_activities WHERE username = $1', [username]);
-                await client.query('DELETE FROM login_logs WHERE username = $1', [username]);
-                await client.query('DELETE FROM security_events WHERE username = $1', [username]);
-                await client.query('DELETE FROM balance_logs WHERE username = $1', [username]);
-                await client.query('DELETE FROM gift_exchanges WHERE username = $1', [username]);
-                await client.query('DELETE FROM idempotency_keys WHERE username = $1', [username]);
+                await client.query(`
+                    UPDATE active_sessions
+                    SET is_active = false,
+                        terminated_at = NOW(),
+                        termination_reason = 'account_deactivated'
+                    WHERE username = $1
+                `, [username]);
+                await client.query(`
+                    UPDATE users
+                    SET deactivated = true,
+                        authorized = false,
+                        bilibili_room_id = NULL
+                    WHERE username = $1
+                `, [username]);
+                await client.query(`
+                    INSERT INTO security_events (
+                        event_type, username, ip_address, description, severity
+                    ) VALUES ('admin_action', $1, $2, $3, 'high')
+                `, [
+                    req.session.user.username,
+                    req.clientIP,
+                    `deactivate_account: ${username} - financial history preserved`
+                ]);
 
-                await client.query(
-                    'DELETE FROM quiz_sessions WHERE username = $1',
-                    [username]
-                );
-
-                await client.query(
-                    'DELETE FROM submission_details WHERE submission_id IN (SELECT id FROM submissions WHERE username = $1)',
-                    [username]
-                );
-                await client.query('DELETE FROM submissions WHERE username = $1', [username]);
-                await client.query('DELETE FROM slot_results WHERE username = $1', [username]);
-                await client.query('DELETE FROM scratch_results WHERE username = $1', [username]);
-
-                await client.query('DELETE FROM wish_results WHERE username = $1', [username]);
-                await client.query('DELETE FROM wish_sessions WHERE username = $1', [username]);
-                await client.query('DELETE FROM wish_progress WHERE username = $1', [username]);
-                await client.query('DELETE FROM wish_inventory WHERE username = $1', [username]);
-                await client.query('DELETE FROM blindbox_logs WHERE username = $1', [username]);
-
-                await client.query('DELETE FROM dictation_submissions WHERE username = $1', [username]);
-                await client.query('DELETE FROM dictation_progress WHERE username = $1', [username]);
-                await client.query('DELETE FROM dictation_sessions WHERE username = $1', [username]);
-                await client.query('DELETE FROM dictation_allowances WHERE username = $1', [username]);
-                await client.query('DELETE FROM pk_tasks WHERE username = $1', [username]);
-                await client.query('DELETE FROM pk_runner_state WHERE username = $1', [username]);
-                await client.query('DELETE FROM pk_gift_logs WHERE username = $1', [username]);
-
-                await client.query('DELETE FROM stone_logs WHERE username = $1', [username]);
-                await client.query('DELETE FROM stone_states WHERE username = $1', [username]);
-                await client.query('DELETE FROM flip_logs WHERE username = $1', [username]);
-                await client.query('DELETE FROM flip_states WHERE username = $1', [username]);
-                await client.query('DELETE FROM duel_logs WHERE username = $1', [username]);
-
-                await client.query('DELETE FROM users WHERE username = $1', [username]);
+                const responseBody = { success: true, message: '账户已停用，审计记录已保留' };
+                await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
             } catch (error) {
                 await client.query('ROLLBACK');
@@ -870,7 +879,7 @@ module.exports = function registerAdminRoutes(app, deps) {
 
             disconnectUserSockets(username);
 
-            res.json({ success: true, message: '账户删除成功' });
+            res.json({ success: true, message: '账户已停用，审计记录已保留' });
         } catch (error) {
             console.error('删除账户失败:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
@@ -994,11 +1003,13 @@ module.exports = function registerAdminRoutes(app, deps) {
             if (otherSessionIds.length > 0) {
                 await client.query('DELETE FROM user_sessions WHERE sid = ANY($1::text[])', [otherSessionIds]);
             }
+            const responseBody = { success: true, message: '密码修改成功' };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
 
             disconnectUserSockets(username, otherSessionIds);
 
-            res.json({ success: true, message: '密码修改成功' });
+            res.json(responseBody);
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('修改密码失败:', error);
@@ -1512,6 +1523,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                         amount: Number(lockedTask.cost),
                         operationType: 'admin_stuck_gift_refund',
                         description: `管理员 ${adminUser} 重置礼物任务 ${task.id}`,
+                        gameData: { taskId: task.id, adminUser },
                         requireSufficientBalance: false,
                         client,
                         managedTransaction: true
