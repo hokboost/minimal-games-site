@@ -1,0 +1,17 @@
+<aside class="persistent-music-player" aria-label="<%= lang === 'zh' ? '全站音乐播放器' : 'Site-wide music player' %>">
+    <img
+        src="/assets/images/li-daimo-wuwang.jpg"
+        alt=""
+        width="500"
+        height="500"
+        decoding="async"
+    >
+    <div class="persistent-track-copy">
+        <strong><%= lang === 'zh' ? '勿忘' : 'Don’t Forget' %></strong>
+        <span><%= lang === 'zh' ? '李代沫' : 'Li Daimo' %></span>
+    </div>
+    <audio id="persistent-music-audio" controls preload="metadata">
+        <source src="/assets/audio/li-daimo-wuwang.mp3" type="audio/mpeg">
+        <%= lang === 'zh' ? '你的浏览器不支持音频播放。' : 'Your browser does not support audio playback.' %>
+    </audio>
+</aside>

@@ -23,6 +23,8 @@ const migrationRunner = read('scripts/run_idempotency_migration.js');
 const idempotency = read('lib/idempotency.js');
 const idempotencyMigration = read('migrations/create_idempotency_keys.sql');
 const wishMigration = read('migrations/create_wish_tables.sql');
+const musicPlayer = read('public/js/music-player.js');
+const languageSwitcher = read('views/partials/language-switcher.ejs');
 const adminClient = read('public/js/admin.js');
 const quizClient = read('public/js/quiz.js');
 const profileClient = read('public/js/profile.js');
@@ -57,6 +59,7 @@ check('idempotency replays revalidate current authorization and CSRF', server.in
 check('idempotency migration upgrades the legacy schema', idempotencyMigration.includes('RENAME COLUMN idem_key TO idempotency_key') && idempotencyMigration.includes("SET status = 'pending'") && server.includes("'create_idempotency_keys.sql'"));
 check('database migrations are serialized across instances', server.includes("pg_advisory_lock(hashtext('minimal_games_schema_migration'))") && server.includes("pg_advisory_unlock(hashtext('minimal_games_schema_migration'))"));
 check('wish migration upgrades legacy production columns', server.includes("'create_wish_tables.sql'") && wishMigration.includes('RENAME COLUMN wish_type TO gift_type') && wishMigration.includes('RENAME COLUMN reward_name TO reward') && wishMigration.includes('RENAME COLUMN wish_name TO gift_name'));
+check('music playback persists across page navigation', languageSwitcher.includes("include('persistent-music-player')") && musicPlayer.includes("window.addEventListener('pagehide'") && musicPlayer.includes('sessionStorage.setItem') && musicPlayer.includes('openInSiteFrame(url)') && musicPlayer.includes('music-shell-child'));
 check('PK report charging is keyed by a unique report ID', gifts.includes('ON CONFLICT (report_id) DO NOTHING') && pkReportMigration.includes('UNIQUE INDEX'));
 check('completed gift callbacks repair blindbox queue continuation', gifts.includes('enqueueNextStoredBlindbox(username, taskId)'));
 

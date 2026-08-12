@@ -13,8 +13,8 @@
         <h2 id="featured-track-title"><%= lang === 'zh' ? '勿忘' : 'Don’t Forget' %></h2>
         <p><%= lang === 'zh' ? '李代沫 · 单曲 · 3:56' : 'Li Daimo · Single · 3:56' %></p>
     </div>
-    <audio class="featured-track-audio" controls preload="metadata">
-        <source src="/assets/audio/li-daimo-wuwang.mp3" type="audio/mpeg">
-        <%= lang === 'zh' ? '你的浏览器不支持音频播放。' : 'Your browser does not support audio playback.' %>
-    </audio>
+    <button class="featured-track-toggle" type="button" data-featured-track-toggle aria-pressed="false">
+        <span aria-hidden="true">▶</span>
+        <span data-featured-track-label><%= lang === 'zh' ? '播放' : 'Play' %></span>
+    </button>
 </section>

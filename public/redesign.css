@@ -33,7 +33,7 @@ body.app-redesign {
     min-width: 320px;
     min-height: 100vh;
     margin: 0;
-    padding: 0;
+    padding: 0 0 92px;
     background: var(--paper);
     color: var(--ink);
     font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
@@ -144,6 +144,87 @@ body.app-redesign {
 .language-switcher .lang-btn:hover {
     border-color: rgba(8, 125, 114, 0.42);
     color: var(--teal);
+}
+
+/* Persistent site music */
+.persistent-music-player {
+    position: fixed;
+    right: 14px;
+    bottom: 12px;
+    z-index: 9998;
+    display: grid;
+    width: min(calc(100% - 28px), 650px);
+    grid-template-columns: 48px minmax(105px, 150px) minmax(250px, 1fr);
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(23, 29, 27, 0.14);
+    border-radius: 8px;
+    padding: 8px;
+    background: rgba(252, 251, 248, 0.96);
+    box-shadow: 0 12px 36px rgba(23, 29, 27, 0.18);
+    backdrop-filter: blur(12px);
+}
+
+.persistent-music-player > img {
+    width: 48px;
+    height: 48px;
+    border-radius: 5px;
+    object-fit: cover;
+}
+
+.persistent-track-copy {
+    display: grid;
+    min-width: 0;
+    line-height: 1.2;
+}
+
+.persistent-track-copy strong,
+.persistent-track-copy span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.persistent-track-copy strong {
+    color: var(--ink);
+    font-size: 0.88rem;
+}
+
+.persistent-track-copy span {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 0.7rem;
+}
+
+#persistent-music-audio {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: 42px;
+    accent-color: var(--coral);
+}
+
+.music-resume-pending .persistent-music-player {
+    border-color: rgba(232, 91, 74, 0.48);
+}
+
+.music-site-frame {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: var(--paper);
+}
+
+body.music-shell-active {
+    overflow: hidden;
+}
+
+html.music-shell-child .language-switcher,
+html.music-shell-child .persistent-music-player {
+    display: none !important;
 }
 
 /* Shared site shell */
@@ -505,11 +586,18 @@ body.app-redesign {
     font-size: 0.78rem;
 }
 
-.featured-track-audio {
-    display: block;
-    width: 100%;
-    min-width: 0;
-    accent-color: var(--coral);
+.featured-track-toggle {
+    display: inline-flex;
+    min-width: 112px;
+    justify-self: end;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--ink);
+}
+
+.featured-track-toggle:hover {
+    background: var(--teal);
 }
 
 /* Access states */
@@ -1114,6 +1202,24 @@ body.app-redesign {
         padding: 5px 8px;
     }
 
+    .persistent-music-player {
+        right: 8px;
+        bottom: 8px;
+        width: calc(100% - 16px);
+        grid-template-columns: 44px minmax(0, 1fr);
+        gap: 8px;
+        padding: 7px;
+    }
+
+    .persistent-music-player > img {
+        width: 44px;
+        height: 44px;
+    }
+
+    .persistent-track-copy {
+        display: none;
+    }
+
     .site-header {
         display: flex;
         min-height: 0;
@@ -1204,9 +1310,10 @@ body.app-redesign {
         height: 64px;
     }
 
-    .featured-track-audio {
+    .featured-track-toggle {
         grid-column: 1 / -1;
-        height: 44px;
+        width: 100%;
+        justify-self: stretch;
     }
 
     .access-banner,
