@@ -28,6 +28,7 @@ const musicPlayer = read('public/js/music-player.js');
 const languageSwitcher = read('views/partials/language-switcher.ejs');
 const adminClient = read('public/js/admin.js');
 const adminView = read('views/admin.ejs');
+const giftsClient = read('public/js/gifts.js');
 const quizClient = read('public/js/quiz.js');
 const profileClient = read('public/js/profile.js');
 const pkReportMigration = read('migrations/add_pk_report_id.sql');
@@ -73,6 +74,7 @@ check('wish migration upgrades legacy production columns', server.includes("'cre
 check('music playback persists across page navigation', languageSwitcher.includes("include('persistent-music-player')") && musicPlayer.includes("window.addEventListener('pagehide'") && musicPlayer.includes('sessionStorage.setItem') && musicPlayer.includes('openInSiteFrame(url)') && musicPlayer.includes('music-shell-child'));
 check('PK report charging is keyed by a unique report ID', gifts.includes('ON CONFLICT (report_id) DO NOTHING') && pkReportMigration.includes('UNIQUE INDEX'));
 check('completed gift callbacks repair blindbox queue continuation', gifts.includes('enqueueNextStoredBlindbox(username, taskId)'));
+check('PK controls preserve queued intent until the runner confirms state', gifts.includes('desiredRunning') && gifts.includes("ORDER BY id DESC") && giftsClient.includes('schedulePkStatusRefresh') && giftsClient.includes("transition: desiredRunning ? 'start' : 'stop'") && !giftsClient.includes('setTimeout(updatePkStatus, 1200)'));
 check('UX analytics migration is startup-managed', server.includes("'create_ux_analytics.sql'") && uxMigration.includes('CREATE TABLE IF NOT EXISTS ux_page_views'));
 check('UX heartbeats are cumulative and idempotent', uxAnalytics.includes('GREATEST(ux_page_views.active_ms') && uxAnalytics.includes('ON CONFLICT (id) DO NOTHING'));
 check('UX ingestion derives identity and IP from the server session', uxAnalytics.includes('req.session?.user?.id') && uxAnalytics.includes('req.clientIP'));

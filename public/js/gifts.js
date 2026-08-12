@@ -349,30 +349,82 @@
         const pkToggleBtn = document.getElementById('pkToggleBtn');
         const pkStatusText = document.getElementById('pkStatusText');
         const { csrfToken } = document.body.dataset;
+        let pkState = { running: false, desiredRunning: false, transition: null };
+        let pkStateGeneration = 0;
+        let pkStatusRequestId = 0;
+        let pkStatusTimer = null;
 
-        async function updatePkStatus() {
+        function renderPkStatus(state) {
             if (!pkToggleBtn) return;
-            try {
-                const response = await fetch('/api/pk/status');
-                const result = await response.json();
-                const running = !!result.running;
-                pkToggleBtn.classList.toggle('stop', running);
-                pkToggleBtn.textContent = running
-                    ? t('关闭自动打PK', 'Stop Auto PK')
-                    : t('开启自动打PK', 'Start Auto PK');
-                if (pkStatusText) {
-                    pkStatusText.textContent = running
+            const transitioning = state.transition === 'start' || state.transition === 'stop';
+            const desiredRunning = transitioning ? state.transition === 'start' : !!state.running;
+            pkState = {
+                running: !!state.running,
+                desiredRunning,
+                transition: transitioning ? state.transition : null
+            };
+
+            pkToggleBtn.classList.toggle('stop', desiredRunning);
+            pkToggleBtn.textContent = desiredRunning
+                ? t('关闭自动打PK', 'Stop Auto PK')
+                : t('开启自动打PK', 'Start Auto PK');
+            pkToggleBtn.disabled = transitioning;
+            pkToggleBtn.setAttribute('aria-busy', String(transitioning));
+            if (pkStatusText) {
+                if (state.transition === 'start') {
+                    pkStatusText.textContent = t('状态：启动中', 'Status: Starting');
+                } else if (state.transition === 'stop') {
+                    pkStatusText.textContent = t('状态：停止中', 'Status: Stopping');
+                } else {
+                    pkStatusText.textContent = state.running
                         ? t('状态：运行中', 'Status: Running')
                         : t('状态：未运行', 'Status: Stopped');
                 }
+            }
+        }
+
+        function schedulePkStatusRefresh(delay, generation = pkStateGeneration) {
+            clearTimeout(pkStatusTimer);
+            if (document.visibilityState === 'hidden') return;
+            pkStatusTimer = setTimeout(() => updatePkStatus(generation), delay);
+        }
+
+        async function updatePkStatus(generation = pkStateGeneration) {
+            if (!pkToggleBtn) return;
+            const requestId = ++pkStatusRequestId;
+            try {
+                const response = await fetch('/api/pk/status', { cache: 'no-store' });
+                const result = await response.json();
+                if (generation !== pkStateGeneration || requestId !== pkStatusRequestId) return;
+                if (!response.ok || result.success !== true) {
+                    throw new Error(result.message || `HTTP ${response.status}`);
+                }
+                renderPkStatus({
+                    running: !!result.running,
+                    desiredRunning: typeof result.desiredRunning === 'boolean'
+                        ? result.desiredRunning
+                        : !!result.running,
+                    transition: result.transition || null
+                });
+                schedulePkStatusRefresh(result.transition ? 1000 : 5000, generation);
             } catch (error) {
+                if (generation !== pkStateGeneration || requestId !== pkStatusRequestId) return;
                 console.error('PK status error:', error);
+                schedulePkStatusRefresh(3000, generation);
             }
         }
 
         async function togglePk() {
             if (!pkToggleBtn) return;
-            const isStopping = pkToggleBtn.classList.contains('stop');
+            const isStopping = pkState.desiredRunning;
+            const desiredRunning = !isStopping;
+            const generation = ++pkStateGeneration;
+            clearTimeout(pkStatusTimer);
+            renderPkStatus({
+                running: pkState.running,
+                desiredRunning,
+                transition: desiredRunning ? 'start' : 'stop'
+            });
             pkToggleBtn.disabled = true;
             try {
                 const path = isStopping ? '/api/pk/stop' : '/api/pk/start';
@@ -385,32 +437,29 @@
                     body: JSON.stringify({})
                 });
                 const result = await response.json();
-                if (!result.success) {
+                if (!response.ok || !result.success) {
                     showMessage(translateServerMessage(result.message) || t('操作失败', 'Action failed'), 'error');
+                    await updatePkStatus(generation);
                 } else {
-                    const runningNext = !isStopping;
-                    pkToggleBtn.classList.toggle('stop', runningNext);
-                    pkToggleBtn.textContent = runningNext
-                        ? t('关闭自动打PK', 'Stop Auto PK')
-                        : t('开启自动打PK', 'Start Auto PK');
-                    if (pkStatusText) {
-                        pkStatusText.textContent = runningNext
-                            ? t('状态：启动中', 'Status: Starting')
-                            : t('状态：停止中', 'Status: Stopping');
-                    }
+                    schedulePkStatusRefresh(250, generation);
                 }
             } catch (error) {
                 console.error('PK toggle error:', error);
                 showMessage(t('操作失败', 'Action failed'), 'error');
-            } finally {
-                pkToggleBtn.disabled = false;
-                setTimeout(updatePkStatus, 1200);
+                await updatePkStatus(generation);
             }
         }
 
         if (pkToggleBtn) {
             pkToggleBtn.addEventListener('click', togglePk);
             updatePkStatus();
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    updatePkStatus(pkStateGeneration);
+                } else {
+                    clearTimeout(pkStatusTimer);
+                }
+            });
         }
 
         

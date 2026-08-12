@@ -172,12 +172,35 @@ module.exports = function registerGiftRoutes(app, deps) {
     app.get('/api/pk/status', requireLogin, requireAuthorized, security.basicRateLimit, async (req, res) => {
         try {
             const username = req.session.user.username;
-            const stateResult = await pool.query(
-                'SELECT running FROM pk_runner_state WHERE username = $1',
-                [username]
-            );
-            const running = stateResult.rows.length > 0 ? !!stateResult.rows[0].running : false;
-            res.json({ success: true, running });
+            const statusResult = await pool.query(`
+                SELECT COALESCE(state.running, FALSE) AS running,
+                       active_task.action,
+                       active_task.status
+                FROM (SELECT $1::varchar AS username) AS requested
+                LEFT JOIN pk_runner_state AS state ON state.username = requested.username
+                LEFT JOIN LATERAL (
+                    SELECT action, status
+                    FROM pk_tasks
+                    WHERE username = requested.username
+                      AND status IN ('pending', 'processing')
+                    ORDER BY id DESC
+                    LIMIT 1
+                ) AS active_task ON TRUE
+            `, [username]);
+            const activeTask = statusResult.rows[0] || {};
+            const running = activeTask.running === true;
+            const transition = activeTask?.action === 'start' || activeTask?.action === 'stop'
+                ? activeTask.action
+                : null;
+            const desiredRunning = transition ? transition === 'start' : running;
+            res.set('Cache-Control', 'no-store');
+            res.json({
+                success: true,
+                running,
+                desiredRunning,
+                transition,
+                transitionStatus: activeTask?.status || null
+            });
         } catch (error) {
             console.error('PK status error:', error);
             res.status(500).json({ success: false, message: '服务器错误' });
@@ -204,11 +227,11 @@ module.exports = function registerGiftRoutes(app, deps) {
                 `SELECT id, action, status
                  FROM pk_tasks
                  WHERE username = $1 AND status IN ('pending', 'processing')
-                 ORDER BY created_at
+                 ORDER BY id DESC
                  FOR UPDATE`,
                 [username]
             );
-            if (pendingResult.rows.some((task) => task.action === 'start')) {
+            if (pendingResult.rows[0]?.action === 'start') {
                 await client.query('ROLLBACK');
                 return res.json({ success: true, queued: true, message: '已在队列中' });
             }
@@ -245,11 +268,11 @@ module.exports = function registerGiftRoutes(app, deps) {
                 `SELECT id, action, status
                  FROM pk_tasks
                  WHERE username = $1 AND status IN ('pending', 'processing')
-                 ORDER BY created_at
+                 ORDER BY id DESC
                  FOR UPDATE`,
                 [username]
             );
-            if (pendingResult.rows.some((task) => task.action === 'stop')) {
+            if (pendingResult.rows[0]?.action === 'stop') {
                 await client.query('ROLLBACK');
                 return res.json({ success: true, queued: true, message: '已在队列中' });
             }
