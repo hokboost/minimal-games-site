@@ -459,6 +459,59 @@ body.app-redesign {
     font-size: 0.85rem;
 }
 
+/* Featured music */
+.featured-track {
+    display: grid;
+    grid-template-columns: 76px minmax(170px, 1fr) minmax(280px, 520px);
+    align-items: center;
+    gap: 18px;
+    margin-top: 18px;
+    border: 1px solid rgba(23, 29, 27, 0.1);
+    border-radius: 8px;
+    padding: 12px 16px 12px 12px;
+    background: var(--surface-strong);
+    box-shadow: var(--shadow-small);
+}
+
+.featured-track-cover {
+    width: 76px;
+    height: 76px;
+    border-radius: 6px;
+    object-fit: cover;
+}
+
+.featured-track-copy {
+    min-width: 0;
+}
+
+.featured-track-copy .eyebrow {
+    margin-bottom: 2px;
+}
+
+.featured-track-copy h2,
+.featured-track-copy p {
+    margin: 0;
+}
+
+.featured-track-copy h2 {
+    color: var(--ink);
+    font-size: 1.2rem;
+    line-height: 1.2;
+}
+
+.featured-track-copy p {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+
+.featured-track-audio {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    accent-color: var(--coral);
+}
+
 /* Access states */
 .access-banner {
     display: flex;
@@ -1138,6 +1191,22 @@ body.app-redesign {
 
     .hero-notes {
         margin-top: 17px;
+    }
+
+    .featured-track {
+        grid-template-columns: 64px minmax(0, 1fr);
+        gap: 12px;
+        padding: 11px;
+    }
+
+    .featured-track-cover {
+        width: 64px;
+        height: 64px;
+    }
+
+    .featured-track-audio {
+        grid-column: 1 / -1;
+        height: 44px;
     }
 
     .access-banner,

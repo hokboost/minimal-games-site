@@ -36,6 +36,8 @@
                 </div>
             </section>
 
+            <%- include('partials/featured-track') %>
+
             <% if (!(typeof user !== 'undefined' && user && user.authorized)) { %>
                 <section class="access-banner <%= user ? 'pending' : '' %>" aria-labelledby="access-title">
                     <div>

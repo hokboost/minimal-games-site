@@ -1,0 +1,20 @@
+<section class="featured-track" aria-labelledby="featured-track-title">
+    <img
+        class="featured-track-cover"
+        src="/assets/images/li-daimo-wuwang.jpg"
+        alt="<%= lang === 'zh' ? '李代沫《勿忘》封面' : 'Cover art for Don’t Forget by Li Daimo' %>"
+        width="500"
+        height="500"
+        loading="lazy"
+        decoding="async"
+    >
+    <div class="featured-track-copy">
+        <span class="eyebrow"><%= lang === 'zh' ? '我最喜欢的歌' : 'A personal favorite' %></span>
+        <h2 id="featured-track-title"><%= lang === 'zh' ? '勿忘' : 'Don’t Forget' %></h2>
+        <p><%= lang === 'zh' ? '李代沫 · 单曲 · 3:56' : 'Li Daimo · Single · 3:56' %></p>
+    </div>
+    <audio class="featured-track-audio" controls preload="metadata">
+        <source src="/assets/audio/li-daimo-wuwang.mp3" type="audio/mpeg">
+        <%= lang === 'zh' ? '你的浏览器不支持音频播放。' : 'Your browser does not support audio playback.' %>
+    </audio>
+</section>
