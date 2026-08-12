@@ -2,7 +2,6 @@ const pool = require('./db');
 
 class SessionManager {
     constructor() {
-        this.activeSessions = new Map(); // 内存中活跃会话缓存
         this.cleanupInterval = 30 * 60 * 1000; // 30分钟清理一次过期会话
         this.startCleanup();
     }
@@ -28,10 +27,10 @@ class SessionManager {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${username}`]);
+            await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`session:${username}`]);
 
             const userResult = await client.query(
-                `SELECT id, username, authorized, is_admin, password_hash
+                `SELECT id, username, authorized, is_admin, password_hash, deactivated
                  FROM users
                  WHERE username = $1
                  FOR UPDATE`,
@@ -41,6 +40,10 @@ class SessionManager {
                 throw new Error('Cannot create a session for a missing user');
             }
             const currentUser = userResult.rows[0];
+            if (currentUser.deactivated === true) {
+                await client.query('ROLLBACK');
+                return { success: false, reason: 'account_unavailable' };
+            }
             if (expectedPasswordHash && currentUser.password_hash !== expectedPasswordHash) {
                 await client.query('ROLLBACK');
                 return { success: false, reason: 'credentials_changed' };
@@ -71,7 +74,7 @@ class SessionManager {
                 }
             }
 
-            await client.query(`
+            const activeSession = await client.query(`
                 INSERT INTO active_sessions (
                     username, session_id, ip_address, user_agent, 
                     created_at, last_activity, is_active
@@ -80,32 +83,30 @@ class SessionManager {
                 username = $1, ip_address = $3, user_agent = $4,
                 created_at = NOW(), last_activity = NOW(), is_active = true,
                 terminated_at = NULL, termination_reason = NULL
+                WHERE active_sessions.username = EXCLUDED.username
+                RETURNING session_id
             `, [username, sessionId, ip, userAgent]);
+            if (activeSession.rowCount !== 1) {
+                throw new Error('Session identifier belongs to another account');
+            }
             await client.query('COMMIT');
 
-            for (const session of otherSessions) {
-                this.activeSessions.delete(session.session_id);
-            }
-            this.activeSessions.set(sessionId, {
-                username,
-                ip,
-                userAgent,
-                lastActivity: Date.now(),
-                createdAt: Date.now()
-            });
-
             if (otherSessions.length > 0 && notifyCallback) {
-                notifyCallback(username, {
-                    type: 'device_logout',
-                    title: '账号安全提醒',
-                    message: '您的账号已在新设备登录，其他设备已自动退出',
-                    details: {
-                        newLogin: true,
-                        kickedDevices: otherSessions.length,
-                        timestamp: new Date().toISOString()
-                    },
-                    level: 'warning'
-                }, sessionId);
+                try {
+                    await Promise.resolve(notifyCallback(username, {
+                        type: 'device_logout',
+                        title: '账号安全提醒',
+                        message: '您的账号已在新设备登录，其他设备已自动退出',
+                        details: {
+                            newLogin: true,
+                            kickedDevices: otherSessions.length,
+                            timestamp: new Date().toISOString()
+                        },
+                        level: 'warning'
+                    }, sessionId));
+                } catch (notifyError) {
+                    console.error('会话已提交，但设备通知发送失败:', notifyError);
+                }
             }
             return {
                 success: true,
@@ -133,7 +134,7 @@ class SessionManager {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${username}`]);
+            await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`session:${username}`]);
             const otherSessions = await client.query(`
                 SELECT session_id, ip_address, user_agent, created_at 
                 FROM active_sessions 
@@ -155,21 +156,22 @@ class SessionManager {
             }
             await client.query('COMMIT');
 
-            for (const session of otherSessions.rows) {
-                this.activeSessions.delete(session.session_id);
-            }
             if (otherSessions.rows.length > 0 && notifyCallback) {
-                notifyCallback(username, {
-                    type: 'device_logout',
-                    title: '账号安全提醒',
-                    message: '您的账号已在新设备登录，其他设备已自动退出',
-                    details: {
-                        newLogin: true,
-                        kickedDevices: otherSessions.rows.length,
-                        timestamp: new Date().toISOString()
-                    },
-                    level: 'warning'
-                }, currentSessionId);
+                try {
+                    await Promise.resolve(notifyCallback(username, {
+                        type: 'device_logout',
+                        title: '账号安全提醒',
+                        message: '您的账号已在新设备登录，其他设备已自动退出',
+                        details: {
+                            newLogin: true,
+                            kickedDevices: otherSessions.rows.length,
+                            timestamp: new Date().toISOString()
+                        },
+                        level: 'warning'
+                    }, currentSessionId));
+                } catch (notifyError) {
+                    console.error('会话已提交，但设备通知发送失败:', notifyError);
+                }
             }
 
             return otherSessions.rows.length;
@@ -187,32 +189,16 @@ class SessionManager {
     async validateSession(sessionId) {
         try {
             const result = await pool.query(`
-                SELECT username, ip_address, user_agent, created_at 
-                FROM active_sessions 
+                UPDATE active_sessions
+                SET last_activity = NOW()
                 WHERE session_id = $1 AND is_active = true
+                RETURNING username, ip_address, user_agent, created_at
             `, [sessionId]);
 
             if (result.rows.length > 0) {
-                const session = result.rows[0];
-                // 添加到内存缓存
-                this.activeSessions.set(sessionId, {
-                    username: session.username,
-                    ip: session.ip_address,
-                    userAgent: session.user_agent,
-                    lastActivity: Date.now(),
-                    createdAt: new Date(session.created_at).getTime()
-                });
-
-                await pool.query(`
-                    UPDATE active_sessions 
-                    SET last_activity = NOW() 
-                    WHERE session_id = $1
-                `, [sessionId]);
-
                 return true;
             }
 
-            this.activeSessions.delete(sessionId);
             return false;
 
         } catch (error) {
@@ -235,8 +221,6 @@ class SessionManager {
 
             await client.query('DELETE FROM user_sessions WHERE sid = $1', [sessionId]);
             await client.query('COMMIT');
-
-            this.activeSessions.delete(sessionId);
 
             return true;
 
@@ -280,19 +264,11 @@ class SessionManager {
                 WHERE created_at > NOW() - INTERVAL '24 hours'
             `);
 
-            const memoryStats = {
-                cached_sessions: this.activeSessions.size,
-                memory_usage: JSON.stringify([...this.activeSessions]).length
-            };
-
-            return {
-                ...stats.rows[0],
-                ...memoryStats
-            };
+            return stats.rows[0];
 
         } catch (error) {
             console.error('获取会话统计失败:', error);
-            return null;
+            throw error;
         }
     }
 
@@ -309,17 +285,7 @@ class SessionManager {
                 RETURNING session_id
             `);
 
-            // 2. 清理内存缓存中的过期会话
-            const now = Date.now();
-            const expiredThreshold = 24 * 60 * 60 * 1000; // 24小时
-
-            for (const [sessionId, session] of this.activeSessions) {
-                if (now - session.lastActivity > expiredThreshold) {
-                    this.activeSessions.delete(sessionId);
-                }
-            }
-
-            // 3. 批量清理对应的session存储
+            // 2. 批量清理对应的session存储
             const expiredSessionIds = result.rows.map((session) => session.session_id);
             if (expiredSessionIds.length > 0) {
                 await pool.query(
@@ -355,14 +321,14 @@ class SessionManager {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`session:${username}`]);
+            await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`session:${username}`]);
             const userResult = await client.query(
                 'SELECT is_admin FROM users WHERE username = $1 FOR UPDATE',
                 [username]
             );
             if (userResult.rows[0]?.is_admin === true) {
                 await client.query('ROLLBACK');
-                console.log(`拒绝强制注销管理员账号: ${username}`);
+                console.log('拒绝强制注销管理员账号', { username });
                 return 0;
             }
 
@@ -383,9 +349,7 @@ class SessionManager {
             }
             await client.query('COMMIT');
 
-            for (const sessionId of sessionIds) this.activeSessions.delete(sessionId);
-
-            console.log(`强制注销用户 ${username} 的 ${sessionIds.length} 个会话`);
+            console.log('强制注销用户会话完成', { username, sessionCount: sessionIds.length });
             return sessionIds.length;
 
         } catch (error) {

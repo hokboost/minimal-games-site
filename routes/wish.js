@@ -1,32 +1,36 @@
 module.exports = function registerWishRoutes(app, deps) {
+    const requireFunction = require('../lib/require-function');
+    const { multiplyMoney, parseInteger, parseMoney } = require('../lib/integer-money');
+    const { runWishSimulation } = require('../lib/wish-simulation');
     const {
         pool,
         BalanceLogger,
-        GameLogic,
         getWishConfig,
         requireLogin,
         requireAuthorized,
+        requireCSRF,
         security,
         generateCSRFToken,
         broadcastDanmaku,
-        enqueueWishInventorySend
+        enqueueWishInventorySend,
+        paidActionConcurrencyGuard
     } = deps;
-    // 兜底，防止 security 中未提供特定中间件时报 undefined
-    const userActionRateLimit = security.userActionRateLimit || ((req, res, next) => next());
-    const basicRateLimit = security.basicRateLimit || ((req, res, next) => next());
-    const csrfProtection = security.csrfProtection || ((req, res, next) => next());
+    const userActionRateLimit = requireFunction(security, 'userActionRateLimit', 'security middleware');
+    const basicRateLimit = requireFunction(security, 'basicRateLimit', 'security middleware');
+    const readHeavyRateLimit = requireFunction(security, 'readHeavyRateLimit', 'security middleware');
+    const adminStrictLimit = requireFunction(security, 'adminStrictLimit', 'security middleware');
+    const csrfProtection = requireFunction({ requireCSRF }, 'requireCSRF', 'route dependency');
+    const rejectWhenOverloaded = requireFunction(
+        { paidActionConcurrencyGuard },
+        'paidActionConcurrencyGuard',
+        'route dependency'
+    );
     const { randomInt, randomBytes } = require('crypto');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
-    const rejectWhenOverloaded = (req, res, next) => {
-        if (pool.waitingCount > 30) {
-            return res.status(503).json({ success: false, message: '服务器繁忙，请稍后重试' });
-        }
-        return next();
-    };
     const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/statement timeout, deadlock, serialization
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    app.get('/wish', requireLogin, requireAuthorized, basicRateLimit, (req, res) => {
+    app.get('/wish', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         // 初始化session
         if (!req.session.initialized) {
             req.session.initialized = true;
@@ -36,28 +40,24 @@ module.exports = function registerWishRoutes(app, deps) {
         }
 
         const username = req.session.user.username;
-        let balance = 0;
-
-        pool.query(
-            'SELECT balance FROM users WHERE username = $1',
-            [username]
-        ).then((result) => {
-            balance = result.rows.length > 0 ? parseFloat(result.rows[0].balance) : 0;
-            res.render('wish', {
+        try {
+            const result = await pool.query(
+                'SELECT balance FROM users WHERE username = $1',
+                [username]
+            );
+            if (result.rows.length !== 1) {
+                return res.status(404).send('用户不存在');
+            }
+            return res.render('wish', {
                 username,
-                balance,
+                balance: parseMoney(result.rows[0].balance, 'user balance', { min: 0 }),
                 csrfToken: req.session.csrfToken,
                 canWishTest: req.session.user.is_admin === true
             });
-        }).catch((dbError) => {
+        } catch (dbError) {
             console.error('Database query error:', dbError);
-            res.render('wish', {
-                username,
-                balance,
-                csrfToken: req.session.csrfToken,
-                canWishTest: req.session.user.is_admin === true
-            });
-        });
+            return res.status(503).send('余额服务暂不可用');
+        }
     });
 
     app.post('/api/wish/play',
@@ -69,17 +69,29 @@ module.exports = function registerWishRoutes(app, deps) {
         csrfProtection,
         async (req, res) => {
         const username = req.session.user.username;
-        const giftType = req.body.giftType || 'deepsea_singer';
+        const giftType = typeof req.body?.giftType === 'string'
+            ? req.body.giftType.trim()
+            : 'deepsea_singer';
         const config = getWishConfig(giftType);
         if (!config) {
             return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
         }
 
-        const wishCost = config.cost;
-        const successRate = config.successRate;
+        let wishCost;
+        let rewardValue;
+        const successRate = Number(config.successRate);
         const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
         const rewardName = config.name;
-        const rewardValue = config.rewardValue;
+        try {
+            wishCost = parseMoney(config.cost, 'wish cost', { min: 1 });
+            rewardValue = parseMoney(config.rewardValue, 'wish reward value', { min: 0 });
+            if (!Number.isFinite(successRate) || successRate < 0 || successRate > 1) {
+                throw new Error('Wish success rate configuration is invalid');
+            }
+        } catch (error) {
+            console.error('Wish configuration is invalid');
+            return res.status(500).json({ success: false, message: '祈愿配置错误' });
+        }
 
         const maxAttempts = 2;
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -87,7 +99,7 @@ module.exports = function registerWishRoutes(app, deps) {
             try {
                 client = await pool.connect();
                 await client.query('BEGIN');
-                const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':wish\')) AS locked', [username]);
+                const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':wish\', 0)) AS locked', [username]);
                 if (!lock.rows[0].locked) {
                     await client.query('ROLLBACK');
                     return res.status(429).json({ success: false, message: '祈愿过于频繁，请稍后重试' });
@@ -99,15 +111,20 @@ module.exports = function registerWishRoutes(app, deps) {
                     ON CONFLICT (username, gift_type) DO NOTHING
                 `, [username, giftType]);
                 const progressResult = await client.query(
-                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
+                    `SELECT total_wishes, consecutive_fails, total_spent, total_rewards_value,
+                            last_success_at
+                     FROM wish_progress
+                     WHERE username = $1 AND gift_type = $2
+                     FOR UPDATE`,
                     [username, giftType]
                 );
 
                 const progress = progressResult.rows[0];
-                const totalWishes = Number(progress.total_wishes) || 0;
-                const consecutiveFails = Number(progress.consecutive_fails) || 0;
-                const totalSpent = Number(progress.total_spent) || 0;
-                const totalRewardsValue = Number(progress.total_rewards_value) || 0;
+                if (!progress) throw new Error('Wish progress row was not created');
+                const totalWishes = parseInteger(progress.total_wishes, 'total wishes', { min: 0 });
+                const consecutiveFails = parseInteger(progress.consecutive_fails, 'consecutive fails', { min: 0 });
+                const totalSpent = parseMoney(progress.total_spent, 'total spent', { min: 0 });
+                const totalRewardsValue = parseMoney(progress.total_rewards_value, 'total rewards value', { min: 0 });
 
                 // 扣除祈愿费用（同一事务）
                 const betResult = await BalanceLogger.updateBalance({
@@ -149,7 +166,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     );
                     const roomId = roomResult.rows[0]?.bilibili_room_id || null;
                     const expiresAt = roomId
-                        ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
+                        ? "((date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day 23 hours 59 minutes 59 seconds') AT TIME ZONE 'Asia/Shanghai')"
                         : "'infinity'::timestamptz";
 
                     await client.query(`
@@ -160,24 +177,31 @@ module.exports = function registerWishRoutes(app, deps) {
                         VALUES (
                             $1, $2, $3, $4, 'stored',
                             ${expiresAt},
-                            (NOW() AT TIME ZONE 'Asia/Shanghai'),
-                            (NOW() AT TIME ZONE 'Asia/Shanghai')
+                            NOW(),
+                            NOW()
                         )
                     `, [username, giftType, rewardName, config.bilibiliGiftId]);
                 }
 
                 // 更新祈愿进度
-                const newTotalWishes = totalWishes + 1;
-                const newConsecutiveFails = success ? 0 : consecutiveFails + 1;
-                const newTotalSpent = totalSpent + wishCost;
-                const newTotalRewardsValue = totalRewardsValue + (success ? rewardValue : 0);
+                const newTotalWishes = parseInteger(totalWishes + 1, 'new total wishes', { min: 0 });
+                const newConsecutiveFails = success
+                    ? 0
+                    : parseInteger(consecutiveFails + 1, 'new consecutive fails', { min: 0 });
+                const newTotalSpent = parseMoney(totalSpent + wishCost, 'new total spent', { min: 0 });
+                const newTotalRewardsValue = parseMoney(
+                    totalRewardsValue + (success ? rewardValue : 0),
+                    'new total rewards value',
+                    { min: 0 }
+                );
 
-                await client.query(`
+                const progressUpdated = await client.query(`
                     UPDATE wish_progress 
                     SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
-                        last_success_at = CASE WHEN $5 THEN (NOW() AT TIME ZONE 'Asia/Shanghai') ELSE last_success_at END,
-                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                        last_success_at = CASE WHEN $5 THEN NOW() ELSE last_success_at END,
+                        updated_at = NOW()
                     WHERE username = $6 AND gift_type = $7
+                    RETURNING username
                 `, [
                     newTotalWishes,
                     newConsecutiveFails,
@@ -187,17 +211,34 @@ module.exports = function registerWishRoutes(app, deps) {
                     username,
                     giftType
                     ]);
+                if (progressUpdated.rowCount !== 1) {
+                    throw new Error('Wish progress state changed concurrently');
+                }
 
-                const crypto = require('crypto');
-                const proof = crypto.createHash('sha256')
-                    .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                    .digest('hex');
+                const sessionResult = await client.query(`
+                    INSERT INTO wish_sessions (
+                        username, gift_type, gift_name, batch_count, total_cost,
+                        success_count, total_reward_value, created_at
+                    )
+                    VALUES ($1, $2, $3, 1, $4, $5, $6, NOW())
+                    RETURNING id
+                `, [
+                    username,
+                    giftType,
+                    rewardName,
+                    wishCost,
+                    success ? 1 : 0,
+                    success ? rewardValue : 0
+                ]);
+                const wishSessionId = sessionResult.rows[0].id;
+                const resultTrace = randomBytes(24).toString('hex');
                 await client.query(`
                     INSERT INTO wish_results (
                         username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
-                        wishes_count, is_guaranteed, game_details, created_at
+                        wishes_count, is_guaranteed, game_details, wish_session_id, batch_position,
+                        result_trace, created_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, NOW())
                 `, [
                     username,
                     giftType,
@@ -213,23 +254,10 @@ module.exports = function registerWishRoutes(app, deps) {
                         success_rate: successRate,
                         is_guaranteed: isGuaranteed,
                         consecutive_fails_before: consecutiveFails,
-                        proof,
                         timestamp: new Date().toISOString()
-                    })
-                ]);
-                await client.query(`
-                    INSERT INTO wish_sessions (
-                        username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
-                `, [
-                    username,
-                    giftType,
-                    rewardName,
-                    1,
-                    wishCost,
-                    success ? 1 : 0,
-                    success ? rewardValue : 0
+                    }),
+                    wishSessionId,
+                    resultTrace
                 ]);
 
                 const responseBody = {
@@ -252,7 +280,8 @@ module.exports = function registerWishRoutes(app, deps) {
                         guarantee_count: config.guaranteeCount
                     },
                     isGuaranteed: isGuaranteed,
-                    giftName: rewardName
+                    giftName: rewardName,
+                    resultTrace
                 };
                 await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
@@ -276,15 +305,18 @@ module.exports = function registerWishRoutes(app, deps) {
     });
 
     // 获取祈愿历史记录
-    app.get('/api/wish/history', requireLogin, requireAuthorized, async (req, res) => {
+    app.get('/api/wish/history', requireLogin, requireAuthorized, readHeavyRateLimit, async (req, res) => {
         try {
             const username = req.session.user.username;
-            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const page = Math.min(500, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
             const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
             const offset = (page - 1) * limit;
 
             const result = await pool.query(`
-                SELECT * FROM wish_results 
+                SELECT id, gift_type, cost, success, reward, reward_value,
+                       balance_before, balance_after, wishes_count, is_guaranteed,
+                       wish_session_id, batch_position, result_trace, created_at
+                FROM wish_results
                 WHERE username = $1 
                 ORDER BY created_at DESC 
                 LIMIT $2 OFFSET $3
@@ -301,8 +333,8 @@ module.exports = function registerWishRoutes(app, deps) {
                 pagination: {
                     page: page,
                     limit: limit,
-                    total: parseInt(countResult.rows[0].count),
-                    hasMore: (page * limit) < parseInt(countResult.rows[0].count)
+                    total: parseInteger(countResult.rows[0].count, 'wish history count', { min: 0 }),
+                    hasMore: (page * limit) < parseInteger(countResult.rows[0].count, 'wish history count', { min: 0 })
                 }
             });
 
@@ -313,53 +345,53 @@ module.exports = function registerWishRoutes(app, deps) {
     });
 
     // 获取祈愿进度
-    app.get('/api/wish/progress', requireLogin, requireAuthorized, async (req, res) => {
+    app.get('/api/wish/progress', requireLogin, requireAuthorized, readHeavyRateLimit, async (req, res) => {
         try {
             const username = req.session.user.username;
-            const giftType = req.query.giftType || 'deepsea_singer';
+            const giftType = typeof req.query.giftType === 'string'
+                ? req.query.giftType.trim()
+                : 'deepsea_singer';
             const config = getWishConfig(giftType);
             if (!config) {
                 return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
             }
             const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
 
-            let result = await pool.query(
-                'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
+            const result = await pool.query(
+                `SELECT total_wishes, consecutive_fails, total_spent,
+                        total_rewards_value, last_success_at
+                 FROM wish_progress
+                 WHERE username = $1 AND gift_type = $2`,
                 [username, giftType]
             );
-
-            // 如果用户没有祈愿记录，创建一个
-            if (result.rows.length === 0) {
-                await pool.query(`
-                    INSERT INTO wish_progress (username, gift_type, total_wishes, consecutive_fails, total_spent, total_rewards_value)
-                    VALUES ($1, $2, 0, 0, 0, 0)
-                    ON CONFLICT (username, gift_type) DO NOTHING
-                `, [username, giftType]);
-
-                result = await pool.query(
-                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2',
-                    [username, giftType]
-                );
-            }
-
-            const progress = result.rows[0];
+            const progress = result.rows[0] || {
+                total_wishes: 0,
+                consecutive_fails: 0,
+                total_spent: 0,
+                total_rewards_value: 0,
+                last_success_at: null
+            };
+            const totalWishes = parseInteger(progress.total_wishes, 'total wishes', { min: 0 });
+            const consecutiveFails = parseInteger(progress.consecutive_fails, 'consecutive fails', { min: 0 });
+            const totalSpent = parseMoney(progress.total_spent, 'total spent', { min: 0 });
+            const totalRewardsValue = parseMoney(progress.total_rewards_value, 'total rewards value', { min: 0 });
 
             res.json({
                 success: true,
                 progress: {
-                    total_wishes: progress.total_wishes,
-                    consecutive_fails: progress.consecutive_fails,
-                    total_spent: progress.total_spent,
-                    total_rewards_value: progress.total_rewards_value,
+                    total_wishes: totalWishes,
+                    consecutive_fails: consecutiveFails,
+                    total_spent: totalSpent,
+                    total_rewards_value: totalRewardsValue,
                     last_success_at: progress.last_success_at,
                     progress_percentage: Number.isFinite(guaranteeThreshold)
-                        ? Math.min((progress.consecutive_fails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1)
+                        ? Math.min((consecutiveFails / (guaranteeThreshold + 1)) * 100, 100).toFixed(1)
                         : null,
                     wishes_until_guarantee: Number.isFinite(guaranteeThreshold)
-                        ? Math.max(0, guaranteeThreshold + 1 - progress.consecutive_fails)
+                        ? Math.max(0, guaranteeThreshold + 1 - consecutiveFails)
                         : null,
                     next_is_guaranteed: Number.isFinite(guaranteeThreshold)
-                        ? progress.consecutive_fails >= guaranteeThreshold
+                        ? consecutiveFails >= guaranteeThreshold
                         : false,
                     guarantee_count: config.guaranteeCount,
                     gift_name: config.name
@@ -372,9 +404,19 @@ module.exports = function registerWishRoutes(app, deps) {
         }
     });
 
-    app.get('/api/wish/backpack', requireLogin, requireAuthorized, async (req, res) => {
+    app.get('/api/wish/backpack', requireLogin, requireAuthorized, readHeavyRateLimit, async (req, res) => {
         try {
             const username = req.session.user.username;
+            const page = Number(req.query.page || 1);
+            const limit = Number(req.query.limit || 100);
+            if (!Number.isSafeInteger(page) || page < 1
+                || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+                return res.status(400).json({ success: false, message: '分页参数无效' });
+            }
+            const offset = (page - 1) * limit;
+            if (!Number.isSafeInteger(offset)) {
+                return res.status(400).json({ success: false, message: '分页参数无效' });
+            }
             const result = await pool.query(`
                 SELECT wi.id,
                        wi.gift_name,
@@ -398,12 +440,23 @@ module.exports = function registerWishRoutes(app, deps) {
                 LEFT JOIN gift_exchanges ge ON ge.id = wi.gift_exchange_id
                 WHERE wi.username = $1
                 ORDER BY wi.created_at DESC
-                LIMIT 100
-            `, [username]);
+                LIMIT $2 OFFSET $3
+            `, [username, limit, offset]);
+            const countResult = await pool.query(
+                'SELECT COUNT(*)::bigint AS total FROM wish_inventory WHERE username = $1',
+                [username]
+            );
+            const total = parseInteger(countResult.rows[0]?.total || 0, 'wish inventory count', { min: 0 });
 
             res.json({
                 success: true,
-                items: result.rows
+                items: result.rows,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    pages: Math.ceil(total / limit)
+                }
             });
         } catch (error) {
             console.error('获取背包失败:', error);
@@ -412,6 +465,7 @@ module.exports = function registerWishRoutes(app, deps) {
     });
 
     app.post('/api/wish/backpack/send',
+        rejectWhenOverloaded,
         requireLogin,
         requireAuthorized,
         basicRateLimit,
@@ -420,7 +474,7 @@ module.exports = function registerWishRoutes(app, deps) {
         async (req, res) => {
         try {
             const username = req.session.user.username;
-            const inventoryId = Number(req.body.inventoryId);
+            const inventoryId = Number(req.body?.inventoryId);
 
             if (!Number.isSafeInteger(inventoryId) || inventoryId < 1) {
                 return res.status(400).json({ success: false, message: '参数无效' });
@@ -453,8 +507,10 @@ module.exports = function registerWishRoutes(app, deps) {
         csrfProtection,
         async (req, res) => {
         const username = req.session.user.username;
-        const batchCount = Number(req.body.batchCount || 10);
-        const giftType = req.body.giftType || 'deepsea_singer';
+        const batchCount = Number(req.body?.batchCount || 10);
+        const giftType = typeof req.body?.giftType === 'string'
+            ? req.body.giftType.trim()
+            : 'deepsea_singer';
         const config = getWishConfig(giftType);
         if (!config) {
             return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
@@ -463,11 +519,21 @@ module.exports = function registerWishRoutes(app, deps) {
             return res.status(400).json({ success: false, message: '仅支持10次祈愿' });
         }
 
-        const wishCost = config.cost;
-        const successRate = config.successRate;
+        let wishCost;
+        let rewardValue;
+        const successRate = Number(config.successRate);
         const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
         const rewardName = config.name;
-        const rewardValue = config.rewardValue;
+        try {
+            wishCost = parseMoney(config.cost, 'wish cost', { min: 1 });
+            rewardValue = parseMoney(config.rewardValue, 'wish reward value', { min: 0 });
+            if (!Number.isFinite(successRate) || successRate < 0 || successRate > 1) {
+                throw new Error('Wish success rate configuration is invalid');
+            }
+        } catch (error) {
+            console.error('Wish batch configuration is invalid');
+            return res.status(500).json({ success: false, message: '祈愿配置错误' });
+        }
         const maxAttempts = 2;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -475,14 +541,14 @@ module.exports = function registerWishRoutes(app, deps) {
             try {
                 client = await pool.connect();
                 await client.query('BEGIN');
-                const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':wish\')) AS locked', [username]);
+                const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':wish\', 0)) AS locked', [username]);
                 if (!lock.rows[0].locked) {
                     await client.query('ROLLBACK');
                     return res.status(429).json({ success: false, message: '祈愿过于频繁，请稍后重试' });
                 }
 
                 // 扣款放入同一事务，确保后续失败可以回滚
-                const totalCost = wishCost * batchCount;
+                const totalCost = multiplyMoney(wishCost, batchCount, 'wish batch cost');
                 const totalBetResult = await BalanceLogger.updateBalance({
                     username,
                     amount: -totalCost,
@@ -497,7 +563,6 @@ module.exports = function registerWishRoutes(app, deps) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: totalBetResult.message });
                 }
-                const startingBalance = totalBetResult.balanceBefore;
                 const finalBalance = totalBetResult.balance;
 
                 await client.query(`
@@ -506,16 +571,24 @@ module.exports = function registerWishRoutes(app, deps) {
                     ON CONFLICT (username, gift_type) DO NOTHING
                 `, [username, giftType]);
                 const progressResult = await client.query(
-                    'SELECT * FROM wish_progress WHERE username = $1 AND gift_type = $2 FOR UPDATE',
+                    `SELECT total_wishes, consecutive_fails, total_spent,
+                            total_rewards_value, last_success_at
+                     FROM wish_progress
+                     WHERE username = $1 AND gift_type = $2
+                     FOR UPDATE`,
                     [username, giftType]
                 );
-
+                if (!progressResult.rows[0]) throw new Error('Wish progress row was not created');
                 let progress = {
                     ...progressResult.rows[0],
-                    total_wishes: Number(progressResult.rows[0].total_wishes) || 0,
-                    consecutive_fails: Number(progressResult.rows[0].consecutive_fails) || 0,
-                    total_spent: Number(progressResult.rows[0].total_spent) || 0,
-                    total_rewards_value: Number(progressResult.rows[0].total_rewards_value) || 0
+                    total_wishes: parseInteger(progressResult.rows[0].total_wishes, 'total wishes', { min: 0 }),
+                    consecutive_fails: parseInteger(progressResult.rows[0].consecutive_fails, 'consecutive fails', { min: 0 }),
+                    total_spent: parseMoney(progressResult.rows[0].total_spent, 'total spent', { min: 0 }),
+                    total_rewards_value: parseMoney(
+                        progressResult.rows[0].total_rewards_value,
+                        'total rewards value',
+                        { min: 0 }
+                    )
                 };
                 const roomResult = await client.query(
                     'SELECT bilibili_room_id FROM users WHERE username = $1',
@@ -523,13 +596,19 @@ module.exports = function registerWishRoutes(app, deps) {
                 );
                 const roomId = roomResult.rows[0]?.bilibili_room_id || null;
                 const expiresAt = roomId
-                    ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
+                    ? "((date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day 23 hours 59 minutes 59 seconds') AT TIME ZONE 'Asia/Shanghai')"
                     : "'infinity'::timestamptz";
+                const wishSessionResult = await client.query(`
+                    INSERT INTO wish_sessions (
+                        username, gift_type, gift_name, batch_count, total_cost,
+                        success_count, total_reward_value, created_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, 0, 0, NOW())
+                    RETURNING id
+                `, [username, giftType, rewardName, batchCount, totalCost]);
+                const wishSessionId = wishSessionResult.rows[0].id;
                 let successCount = 0;
                 for (let i = 0; i < batchCount; i++) {
-                    const balanceBefore = startingBalance - (wishCost * i);
-                    const balanceAfterThis = balanceBefore - wishCost;
-
                     // 判断是否成功
                     const isGuaranteed = Number.isFinite(guaranteeThreshold) && progress.consecutive_fails >= guaranteeThreshold;
                     const randomSuccess = randomFloat() < successRate;
@@ -546,51 +625,47 @@ module.exports = function registerWishRoutes(app, deps) {
                             VALUES (
                                 $1, $2, $3, $4, 'stored',
                                 ${expiresAt},
-                                (NOW() AT TIME ZONE 'Asia/Shanghai'),
-                                (NOW() AT TIME ZONE 'Asia/Shanghai')
+                                NOW(),
+                                NOW()
                             )
                         `, [username, giftType, rewardName, config.bilibiliGiftId]);
                     }
 
-                    // 更新祈愿进度
-                    const newTotalWishes = progress.total_wishes + 1;
-                    const newConsecutiveFails = success ? 0 : progress.consecutive_fails + 1;
-                    const newTotalSpent = progress.total_spent + wishCost;
-                    const newTotalRewardsValue = progress.total_rewards_value + (success ? rewardValue : 0);
-
-                    await client.query(`
-                        UPDATE wish_progress 
-                        SET total_wishes = $1, consecutive_fails = $2, total_spent = $3, total_rewards_value = $4,
-                            last_success_at = CASE WHEN $5 THEN (NOW() AT TIME ZONE 'Asia/Shanghai') ELSE last_success_at END,
-                            updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-                        WHERE username = $6 AND gift_type = $7
-                    `, [
-                        newTotalWishes,
-                        newConsecutiveFails,
-                        newTotalSpent,
-                        newTotalRewardsValue,
-                        success,
-                        username,
-                        giftType
-                    ]);
-
-                    // 保存祈愿记录
-
+                    const newTotalWishes = parseInteger(
+                        progress.total_wishes + 1,
+                        'new total wishes',
+                        { min: 0 }
+                    );
+                    const newConsecutiveFails = success
+                        ? 0
+                        : parseInteger(
+                            progress.consecutive_fails + 1,
+                            'new consecutive fails',
+                            { min: 0 }
+                        );
+                    const newTotalSpent = parseMoney(
+                        progress.total_spent + wishCost,
+                        'new total spent',
+                        { min: 0 }
+                    );
+                    const newTotalRewardsValue = parseMoney(
+                        progress.total_rewards_value + (success ? rewardValue : 0),
+                        'new total rewards value',
+                        { min: 0 }
+                    );
 
                     if (success) {
                         successCount += 1;
                     }
 
-                    const crypto = require('crypto');
-                    const proof = crypto.createHash('sha256')
-                        .update(`${username}-wish-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                        .digest('hex');
+                    const resultTrace = randomBytes(24).toString('hex');
                     await client.query(`
                         INSERT INTO wish_results (
                             username, gift_type, cost, success, reward, reward_value, balance_before, balance_after,
-                            wishes_count, is_guaranteed, game_details, created_at
+                            wishes_count, is_guaranteed, game_details, wish_session_id,
+                            batch_position, result_trace, created_at
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                        VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $11, $12, NOW())
                     `, [
                         username,
                         giftType,
@@ -598,17 +673,17 @@ module.exports = function registerWishRoutes(app, deps) {
                         success,
                         reward,
                         success ? rewardValue : null,
-                        balanceBefore,
-                        balanceAfterThis,
                         newTotalWishes,
                         isGuaranteed,
                         JSON.stringify({
                             success_rate: successRate,
                             is_guaranteed: isGuaranteed,
                             consecutive_fails_before: progress.consecutive_fails,
-                            proof,
                             timestamp: new Date().toISOString()
-                        })
+                        }),
+                        wishSessionId,
+                        i + 1,
+                        resultTrace
                     ]);
 
                     progress = {
@@ -621,20 +696,46 @@ module.exports = function registerWishRoutes(app, deps) {
                     };
                 }
 
-                await client.query(`
-                    INSERT INTO wish_sessions (
-                        username, gift_type, gift_name, batch_count, total_cost, success_count, total_reward_value, created_at
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))
+                const progressUpdated = await client.query(`
+                    UPDATE wish_progress
+                    SET total_wishes = $1,
+                        consecutive_fails = $2,
+                        total_spent = $3,
+                        total_rewards_value = $4,
+                        last_success_at = CASE WHEN $5 THEN NOW() ELSE last_success_at END,
+                        updated_at = NOW()
+                    WHERE username = $6 AND gift_type = $7
+                    RETURNING username
                 `, [
+                    progress.total_wishes,
+                    progress.consecutive_fails,
+                    progress.total_spent,
+                    progress.total_rewards_value,
+                    successCount > 0,
                     username,
-                    giftType,
-                    rewardName,
-                    batchCount,
-                    wishCost * batchCount,
-                    successCount,
-                    successCount * rewardValue
+                    giftType
                 ]);
+                if (progressUpdated.rowCount !== 1) {
+                    throw new Error('Wish batch progress state changed concurrently');
+                }
+                const totalRewardValue = multiplyMoney(
+                    rewardValue,
+                    successCount,
+                    'wish batch reward value'
+                );
+                const sessionUpdated = await client.query(`
+                    UPDATE wish_sessions
+                    SET success_count = $1, total_reward_value = $2
+                    WHERE id = $3
+                    RETURNING id
+                `, [
+                    successCount,
+                    totalRewardValue,
+                    wishSessionId
+                ]);
+                if (sessionUpdated.rowCount !== 1) {
+                    throw new Error('Wish batch session state changed concurrently');
+                }
 
                 const responseBody = {
                     success: true,
@@ -687,6 +788,7 @@ module.exports = function registerWishRoutes(app, deps) {
         requireLogin,
         requireAuthorized,
         basicRateLimit,
+        adminStrictLimit,
         csrfProtection,
         async (req, res) => {
         try {
@@ -695,8 +797,10 @@ module.exports = function registerWishRoutes(app, deps) {
                 return res.status(403).json({ success: false, message: '无权限' });
             }
 
-            const giftType = req.body.giftType || 'deepsea_singer';
-            const count = Number(req.body.count || 100000);
+            const giftType = typeof req.body?.giftType === 'string'
+                ? req.body.giftType.trim()
+                : 'deepsea_singer';
+            const count = Number(req.body?.count || 100000);
             const config = getWishConfig(giftType);
             if (!config) {
                 return res.status(400).json({ success: false, message: '无效的祈愿礼物类型' });
@@ -707,20 +811,11 @@ module.exports = function registerWishRoutes(app, deps) {
             }
 
             const guaranteeThreshold = Number.isFinite(config.guaranteeCount) ? (config.guaranteeCount - 1) : null;
-            let consecutiveFails = 0;
-            let successCount = 0;
-
-            for (let i = 0; i < count; i++) {
-                const isGuaranteed = Number.isFinite(guaranteeThreshold) && consecutiveFails >= guaranteeThreshold;
-            const randomSuccess = randomFloat() < config.successRate;
-                const success = isGuaranteed || randomSuccess;
-                if (success) {
-                    successCount += 1;
-                    consecutiveFails = 0;
-                } else {
-                    consecutiveFails += 1;
-                }
-            }
+            const { successCount } = await runWishSimulation({
+                count,
+                successRate: Number(config.successRate),
+                guaranteeThreshold
+            });
 
             res.json({
                 success: true,

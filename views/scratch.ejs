@@ -5,7 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></title>
     <link rel="stylesheet" href="/styles.css">
-    <style>
+    <style nonce="<%= cspNonce %>">
+        #scratchContent .scratch-card-number {
+            color: #fff;
+            font-size: 1.8rem;
+            font-weight: bold;
+        }
+
+        #scratchContent .scratch-card-prize {
+            color: #ccc;
+            font-size: 0.8rem;
+        }
+
+        .grid-item.grid-item-winning {
+            border: 2px solid #ffd700;
+            background: rgba(255, 215, 0, 0.2);
+        }
+
+        .grid-item.grid-item-prize {
+            border: 2px solid #00c853;
+            background: rgba(0, 200, 83, 0.2);
+        }
+
+        #scratchContent :is(.grid-item-winning, .grid-item-prize) .scratch-card-prize {
+            color: #00c853;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+
+        .scratch-instruction,
+        .scratch-result-message {
+            color: #ffeb3b;
+        }
+
+        .scratch-result-panel {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .scratch-result-message {
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+
+        .scratch-result-details { color: #ccc; }
     .container {
         max-width: 900px;
         margin: 0 auto;
@@ -402,7 +447,7 @@
             </div>
         </div>
 
-        <div class="board" id="game-board" style="display: none;">
+        <div class="board" id="game-board" hidden>
             <h2><%= lang === 'zh' ? '刮开你的号码' : 'Reveal your numbers' %></h2>
             <div class="game-info">
                 <div id="current-tier-info"></div>
@@ -422,17 +467,7 @@
             </div>
         </div>
 
-        <div style="
-            max-width: 760px;
-            margin: 2rem auto 0;
-            padding: 1rem;
-            background: rgba(0,0,0,0.5);
-            border-radius: 8px;
-            font-size: 0.85rem;
-            color: #ccc;
-            line-height: 1.5;
-            text-align: center;
-        ">
+        <div class="game-disclaimer scratch-disclaimer">
             <% if (lang === 'zh') { %>
                 <strong>免责声明：</strong>本刮刮乐功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得。参与完全免费，符合中华人民共和国相关法律法规。使用本功能即表示您确认这不是博彩游戏。严禁未满18周岁用户使用，请理性娱乐。
             <% } else { %>

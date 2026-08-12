@@ -1,15 +1,16 @@
 module.exports = function registerGameRoutes(app, deps) {
+    const requireFunction = require('../lib/require-function');
     const {
         pool,
         BalanceLogger,
         GameLogic,
         questions,
         generateCSRFToken,
-        generateUsername,
         requireLogin,
         requireAuthorized,
+        requireCSRF,
+        dictationTokenSecret,
         security,
-        questionMap,
         randomStoneColor,
         normalizeStoneSlots,
         getMaxSameCount,
@@ -26,61 +27,110 @@ module.exports = function registerGameRoutes(app, deps) {
         logFlipAction,
         duelRewards,
         calculateDuelCost,
-        enqueueWishInventorySend
+        paidActionConcurrencyGuard,
+        giftConfig
     } = deps;
-    // 兜底，防止 security 中未提供特定中间件时报 undefined
-    const userActionRateLimit = security.userActionRateLimit || ((req, res, next) => next());
-    const basicRateLimit = security.basicRateLimit || ((req, res, next) => next());
-    const csrfProtection = security.csrfProtection || ((req, res, next) => next());
-    const { randomInt, randomBytes } = require('crypto');
+    const userActionRateLimit = requireFunction(security, 'userActionRateLimit', 'security middleware');
+    const basicRateLimit = requireFunction(security, 'basicRateLimit', 'security middleware');
+    const readHeavyRateLimit = requireFunction(security, 'readHeavyRateLimit', 'security middleware');
+    const csrfProtection = requireFunction({ requireCSRF }, 'requireCSRF', 'route dependency');
+    const rejectWhenOverloaded = requireFunction(
+        { paidActionConcurrencyGuard },
+        'paidActionConcurrencyGuard',
+        'route dependency'
+    );
+    if (!dictationTokenSecret || Buffer.byteLength(String(dictationTokenSecret)) < 32) {
+        throw new Error('Missing dictation token secret');
+    }
+    const { createHash, randomInt, randomBytes } = require('crypto');
+    const { parseMoney } = require('../lib/integer-money');
+    const { randomArrayIndex, randomArrayItem } = require('../lib/random-index');
     const fs = require('fs');
     const path = require('path');
+    const { pinyin } = require('pinyin');
+    const { PNG } = require('pngjs');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
+    const loadUserBalance = async (username) => {
+        const result = await pool.query(
+            'SELECT balance FROM users WHERE username = $1',
+            [username]
+        );
+        if (result.rows.length !== 1) {
+            throw new Error('Authenticated user disappeared while loading balance');
+        }
+        return parseMoney(result.rows[0].balance, 'user balance', { min: 0 });
+    };
+    const QUIZ_QUESTION_COUNT = 15;
+    const quizBankVersion = createHash('sha256')
+        .update(JSON.stringify(questions))
+        .digest('hex');
+    if (!Array.isArray(questions) || questions.length < QUIZ_QUESTION_COUNT) {
+        throw new Error(`Quiz requires at least ${QUIZ_QUESTION_COUNT} valid questions`);
+    }
+    const createQuizSnapshot = () => {
+        const available = questions.map((question) => ({
+            id: question.id,
+            question: String(question.question || ''),
+            options: Array.isArray(question.options) ? question.options.map(String) : [],
+            correct: Number(question.correct)
+        }));
+        if (available.some((question) => (
+            question.id === null || question.id === undefined
+            || !question.question
+            || question.options.length < 2
+            || !Number.isInteger(question.correct)
+            || question.correct < 0
+            || question.correct >= question.options.length
+        ))) {
+            throw new Error('Quiz question bank contains invalid questions');
+        }
+        if (new Set(available.map((question) => String(question.id))).size !== available.length) {
+            throw new Error('Quiz question IDs must be unique');
+        }
+        const selected = [];
+        while (selected.length < QUIZ_QUESTION_COUNT) {
+            const index = randomArrayIndex(available.length);
+            selected.push(available.splice(index, 1)[0]);
+        }
+        return selected;
+    };
     const dictationHomophoneCache = {
         map: null
     };
-    const dictationCharSetCache = {
-        loaded: false,
-        set: null
-    };
-
-    const toneMarkMap = new Map([
-        ['ā', ['a', 1]], ['á', ['a', 2]], ['ǎ', ['a', 3]], ['à', ['a', 4]],
-        ['ē', ['e', 1]], ['é', ['e', 2]], ['ě', ['e', 3]], ['è', ['e', 4]],
-        ['ī', ['i', 1]], ['í', ['i', 2]], ['ǐ', ['i', 3]], ['ì', ['i', 4]],
-        ['ō', ['o', 1]], ['ó', ['o', 2]], ['ǒ', ['o', 3]], ['ò', ['o', 4]],
-        ['ū', ['u', 1]], ['ú', ['u', 2]], ['ǔ', ['u', 3]], ['ù', ['u', 4]],
-        ['ǖ', ['v', 1]], ['ǘ', ['v', 2]], ['ǚ', ['v', 3]], ['ǜ', ['v', 4]],
-        ['ń', ['n', 2]], ['ň', ['n', 3]], ['ǹ', ['n', 4]],
-        ['ḿ', ['m', 2]]
-    ]);
-
-    const toneMarkToNumber = (raw) => {
-        if (!raw) {
-            return '';
+    const dictationBankPath = path.join(__dirname, '..', 'data', 'dictation-words.json');
+    const dictationAudioDirectory = path.join(__dirname, '..', 'private', 'dictation-audio');
+    const dictationBankRaw = fs.readFileSync(dictationBankPath, 'utf8');
+    const dictationBankVersion = createHash('sha256').update(dictationBankRaw).digest('hex');
+    const dictationWords = JSON.parse(dictationBankRaw).map((item) => ({
+        id: String(item.id || ''),
+        set_id: Number(item.set_id),
+        word: String(item.word || '').trim(),
+        pronunciation: String(item.pronunciation || '').trim(),
+        definition: String(item.definition || '').trim()
+    }));
+    if (dictationWords.length === 0 || dictationWords.some((item) => (
+        !item.id || !Number.isSafeInteger(item.set_id) || !item.word || !item.pronunciation
+    ))) {
+        throw new Error('Invalid private dictation question bank');
+    }
+    const dictationAudioById = new Map(dictationWords.map((item) => {
+        if (!/^[A-Za-z0-9_-]{1,50}$/.test(item.id)) {
+            throw new Error(`Invalid dictation audio id: ${item.id}`);
         }
-        let tone = 5;
-        let base = '';
-        for (const ch of String(raw)) {
-            const mapped = toneMarkMap.get(ch);
-            if (mapped) {
-                base += mapped[0];
-                tone = mapped[1];
-                continue;
-            }
-            if (ch === 'ü') {
-                base += 'v';
-                continue;
-            }
-            if (/[a-z]/i.test(ch)) {
-                base += ch.toLowerCase();
-            }
+        const audio = fs.readFileSync(path.join(dictationAudioDirectory, `${item.id}.wav`));
+        const isWave = audio.length >= 44
+            && audio.subarray(0, 4).toString('ascii') === 'RIFF'
+            && audio.subarray(8, 12).toString('ascii') === 'WAVE';
+        if (!isWave || audio.length > 2 * 1024 * 1024) {
+            throw new Error(`Invalid dictation audio asset: ${item.id}`);
         }
-        if (!base) {
-            return '';
-        }
-        return `${base}${tone}`;
-    };
+        return [item.id, audio];
+    }));
+    const dictationSets = new Map();
+    for (const item of dictationWords) {
+        if (!dictationSets.has(item.set_id)) dictationSets.set(item.set_id, []);
+        dictationSets.get(item.set_id).push(item);
+    }
 
     const normalizeNumberSyllable = (raw) => {
         if (!raw) {
@@ -110,44 +160,28 @@ module.exports = function registerGameRoutes(app, deps) {
         if (dictationHomophoneCache.map) {
             return dictationHomophoneCache.map;
         }
-        const fs = require('fs');
-        let sourcePath = null;
-        try {
-            sourcePath = require.resolve('pinyin/lib/cjs/pinyin.js');
-        } catch (error) {
-            console.error('Homophone map resolve error:', error);
-            dictationHomophoneCache.map = new Map();
-            return dictationHomophoneCache.map;
-        }
-        let raw = '';
-        try {
-            raw = fs.readFileSync(sourcePath, 'utf8');
-        } catch (error) {
-            console.error('Homophone map read error:', error);
-            dictationHomophoneCache.map = new Map();
-            return dictationHomophoneCache.map;
-        }
-        const regex = /dict\[0x([0-9a-f]+)\] = "([^"]+)"/gi;
         const map = new Map();
-        let match;
-        while ((match = regex.exec(raw)) !== null) {
-            const codepoint = Number.parseInt(match[1], 16);
-            if (!Number.isFinite(codepoint)) {
-                continue;
-            }
-            const char = String.fromCodePoint(codepoint);
-            const pinyinList = String(match[2]).split(',');
-            for (const entry of pinyinList) {
-                const key = toneMarkToNumber(entry);
+        const characters = [];
+        for (let codepoint = 0x4e00; codepoint <= 0x9fff; codepoint += 1) {
+            characters.push(String.fromCodePoint(codepoint));
+        }
+        const readings = pinyin(characters.join(''), {
+            style: 'tone2',
+            heteronym: true,
+            segment: false
+        });
+        characters.forEach((character, index) => {
+            for (const entry of readings[index] || []) {
+                const key = normalizeNumberSyllable(entry);
                 if (!key) {
                     continue;
                 }
                 if (!map.has(key)) {
                     map.set(key, new Set());
                 }
-                map.get(key).add(char);
+                map.get(key).add(character);
             }
-        }
+        });
         const normalized = new Map();
         for (const [key, set] of map.entries()) {
             normalized.set(key, Array.from(set));
@@ -155,28 +189,132 @@ module.exports = function registerGameRoutes(app, deps) {
         dictationHomophoneCache.map = normalized;
         return dictationHomophoneCache.map;
     };
+    loadHomophoneMap();
 
-    const loadDictationCharSet = () => {
-        if (dictationCharSetCache.loaded) {
-            return dictationCharSetCache.set;
+    const buildDictationPrompt = (item) => {
+        const homophoneMap = loadHomophoneMap();
+        const syllables = item.pronunciation ? item.pronunciation.split(/\s+/) : [];
+        const homophones = syllables.map((syllable) => {
+            const base = getSyllableBase(syllable);
+            const merged = new Set();
+            for (let tone = 1; tone <= 5; tone += 1) {
+                for (const character of homophoneMap.get(`${base}${tone}`) || []) {
+                    merged.add(character);
+                }
+            }
+            return Array.from(merged);
+        });
+        return {
+            id: String(item.id),
+            set_id: Number(item.set_id),
+            pronunciation: String(item.pronunciation || ''),
+            definition: String(item.definition || ''),
+            homophones,
+            audioUrl: '/api/dictation/audio'
+        };
+    };
+
+    const signDictationQuestion = ({ username, sessionId, level, questionId, bankVersion }) => (
+        require('crypto').createHmac('sha256', dictationTokenSecret)
+            .update(`${username}\n${sessionId}\n${level}\n${questionId}\n${bankVersion}`)
+            .digest('hex')
+    );
+
+    const questionTokensMatch = (provided, expected) => {
+        if (!/^[a-f0-9]{64}$/i.test(String(provided || ''))) return false;
+        const providedBuffer = Buffer.from(String(provided).toLowerCase(), 'hex');
+        const expectedBuffer = Buffer.from(expected, 'hex');
+        return providedBuffer.length === expectedBuffer.length
+            && require('crypto').timingSafeEqual(providedBuffer, expectedBuffer);
+    };
+
+    const getSessionQuestion = async (client, { username, sessionId, setId, level }) => {
+        const sessionResult = await client.query(`
+            SELECT bank_version, question_snapshot
+            FROM dictation_sessions
+            WHERE id = $1 AND username = $2 AND set_id = $3 AND result = 'in_progress'
+            FOR UPDATE
+        `, [sessionId, username, setId]);
+        if (sessionResult.rows.length !== 1) {
+            throw new Error('Dictation session is not active');
         }
-        dictationCharSetCache.loaded = true;
-        const fs = require('fs');
-        const path = require('path');
-        const filePath = path.join(__dirname, '..', 'public', 'dictation', '8105.txt');
-        if (!fs.existsSync(filePath)) {
-            dictationCharSetCache.set = null;
-            return dictationCharSetCache.set;
+
+        let snapshot = sessionResult.rows[0].question_snapshot;
+        let bankVersion = sessionResult.rows[0].bank_version;
+        if (!Array.isArray(snapshot) || snapshot.length < 3 || !bankVersion) {
+            snapshot = (dictationSets.get(Number(setId)) || []).map((item) => ({ ...item }));
+            bankVersion = dictationBankVersion;
+            if (snapshot.length < 3) throw new Error('Dictation set is incomplete');
+            await client.query(`
+                UPDATE dictation_sessions
+                SET bank_version = $1, question_snapshot = $2
+                WHERE id = $3
+            `, [bankVersion, JSON.stringify(snapshot), sessionId]);
         }
-        try {
-            const raw = fs.readFileSync(filePath, 'utf8');
-            const chars = raw.replace(/\s+/g, '').split('');
-            dictationCharSetCache.set = new Set(chars);
-        } catch (error) {
-            console.error('Dictation 8105 load error:', error);
-            dictationCharSetCache.set = null;
+
+        const question = snapshot[Number(level) - 1];
+        if (!question || !question.id || !question.word || !question.pronunciation) {
+            throw new Error('Dictation question is missing from the session snapshot');
         }
-        return dictationCharSetCache.set;
+        return { question, bankVersion };
+    };
+
+    const issueDictationQuestion = async (client, context) => {
+        const { username, sessionId, setId, level } = context;
+        const { question, bankVersion } = await getSessionQuestion(client, context);
+        const questionToken = signDictationQuestion({
+            username,
+            sessionId,
+            level,
+            questionId: String(question.id),
+            bankVersion
+        });
+        const tokenHash = createHash('sha256').update(questionToken).digest('hex');
+        const issuedResult = await client.query(`
+            UPDATE dictation_progress
+            SET question_id = $1,
+                question_token_hash = $2,
+                bank_version = $3,
+                question_issued_at = NOW(),
+                updated_at = NOW()
+            WHERE username = $4 AND session_id = $5 AND level = $6 AND set_id = $7
+            RETURNING username
+        `, [String(question.id), tokenHash, bankVersion, username, sessionId, level, setId]);
+        if (issuedResult.rows.length !== 1) {
+            throw new Error('Dictation progress changed while issuing the question');
+        }
+        return {
+            question: buildDictationPrompt(question),
+            questionToken,
+            bankVersion
+        };
+    };
+
+    const readIssuedDictationQuestion = (row, username) => {
+        const level = Number(row?.level);
+        const setId = Number(row?.set_id);
+        const snapshot = row?.question_snapshot;
+        const bankVersion = row?.session_bank_version;
+        const question = Number.isInteger(level) && Array.isArray(snapshot)
+            ? snapshot[level - 1]
+            : null;
+        if (!Number.isInteger(level) || level < 1 || level > 3
+            || !Number.isSafeInteger(setId) || !row?.session_id
+            || !question?.id || Number(question.set_id) !== setId
+            || !bankVersion || row.bank_version !== bankVersion
+            || String(row.question_id || '') !== String(question.id)) {
+            return null;
+        }
+        const questionToken = signDictationQuestion({
+            username,
+            sessionId: row.session_id,
+            level,
+            questionId: String(question.id),
+            bankVersion
+        });
+        const tokenHash = createHash('sha256').update(questionToken).digest('hex');
+        if (!questionTokensMatch(row.question_token_hash, tokenHash)) return null;
+        return { level, setId, question, questionToken, bankVersion };
     };
 
     const blindboxTiers = [
@@ -221,85 +359,107 @@ module.exports = function registerGameRoutes(app, deps) {
         }
     };
 
-    const rejectWhenOverloaded = (req, res, next) => {
-        // 等待队列过多时快速失败，防止池子耗尽
-        if (pool.waitingCount > 30) {
-            return res.status(503).json({ success: false, message: '服务器繁忙，请稍后重试' });
-        }
-        return next();
-    };
-
-    const blindboxGiftConfigPath = path.join(__dirname, '..', 'gift-codes.json');
-
     const loadBlindboxGiftMap = () => {
-        const raw = fs.readFileSync(blindboxGiftConfigPath, 'utf8');
-        const config = JSON.parse(raw);
-        const poolConfig = config.礼物池配置 || {};
+        const poolConfig = giftConfig?.礼物池配置 || {};
         return Object.entries(poolConfig).reduce((acc, [giftId, info]) => {
             const name = Array.isArray(info) ? info[0] : info?.name;
             const value = Array.isArray(info) ? info[1] : info?.value;
+            const numericValue = Number(value);
+            if (!/^\d+$/.test(String(giftId))
+                || typeof name !== 'string'
+                || !name.trim()
+                || !Number.isSafeInteger(numericValue)
+                || numericValue < 0) {
+                throw new Error(`Invalid blindbox gift configuration: ${giftId}`);
+            }
             acc[giftId] = {
-                name: name || giftId,
-                value: Number(value) || 0
+                name: name.trim(),
+                value: numericValue
             };
             return acc;
-        }, {});
+        }, Object.create(null));
     };
 
+    const blindboxGiftMap = loadBlindboxGiftMap();
+    if (Object.keys(blindboxGiftMap).length === 0) {
+        throw new Error('Blindbox gift pool configuration is empty');
+    }
+
     const buildBlindboxPool = (tierConfig) => {
-        const giftMap = loadBlindboxGiftMap();
-        return (tierConfig.items || []).map((item) => ({
-            giftId: String(item.giftId),
-            name: item.name || giftMap[item.giftId]?.name || String(item.giftId),
-            value: Number(giftMap[item.giftId]?.value) || 0,
-            weight: Number(item.weight) || 0
-        })).filter((item) => item.giftId && item.weight > 0);
+        if (!tierConfig || !Number.isSafeInteger(tierConfig.cost) || tierConfig.cost <= 0
+            || !Array.isArray(tierConfig.items) || tierConfig.items.length === 0) {
+            throw new Error('Invalid blindbox tier configuration');
+        }
+
+        const seenGiftIds = new Set();
+        return tierConfig.items.map((item) => {
+            const giftId = String(item?.giftId || '');
+            const gift = blindboxGiftMap[giftId];
+            const weight = Number(item?.weight);
+            if (!/^\d+$/.test(giftId) || !gift) {
+                throw new Error(`Blindbox reward is missing from gift pool configuration: ${giftId}`);
+            }
+            if (seenGiftIds.has(giftId)) {
+                throw new Error(`Duplicate blindbox reward in tier: ${giftId}`);
+            }
+            if (!Number.isFinite(weight) || weight <= 0) {
+                throw new Error(`Invalid blindbox reward weight: ${giftId}`);
+            }
+            const weightUnits = Math.round(weight * 1_000_000);
+            if (!Number.isSafeInteger(weightUnits) || weightUnits < 1
+                || Math.abs(weight - (weightUnits / 1_000_000)) > Number.EPSILON) {
+                throw new Error(`Blindbox reward weight requires more than six decimals: ${giftId}`);
+            }
+            seenGiftIds.add(giftId);
+            return {
+                giftId,
+                name: item.name || gift.name,
+                value: gift.value,
+                weight,
+                weightUnits
+            };
+        });
     };
 
     const pickBlindboxReward = (pool) => {
-        const totalWeight = pool.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
-        if (totalWeight <= 0) {
-            return null;
-        }
-        const roll = randomFloat() * totalWeight;
+        const totalWeight = pool.reduce((sum, item) => sum + item.weightUnits, 0);
+        if (totalWeight !== 1_000_000) return null;
+        const roll = randomInt(0, totalWeight);
         let acc = 0;
         for (const item of pool) {
-            acc += Number(item.weight) || 0;
-            if (roll <= acc) {
-                return item;
-            }
+            acc += item.weightUnits;
+            if (roll < acc) return item;
         }
-        return pool[pool.length - 1] || null;
+        throw new Error('Blindbox random draw exceeded configured weight');
     };
 
+    const blindboxPools = new Map(Object.entries(blindboxConfigs).map(([key, config]) => {
+        const configuredPool = buildBlindboxPool(config);
+        const totalWeight = configuredPool.reduce((sum, item) => sum + item.weightUnits, 0);
+        if (configuredPool.length === 0 || totalWeight !== 1_000_000) {
+            throw new Error(`Blindbox tier ${key} weights must total 1`);
+        }
+        return [key, configuredPool];
+    }));
+
     app.get('/quiz', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
-        // 初始化session
-        if (!req.session.initialized) {
-            req.session.initialized = true;
-            req.session.createdAt = Date.now();
-            // 🛡️ 安全修复：统一使用csrf库生成token
-            generateCSRFToken(req);
-        }
-
-        const username = req.session.user.username;
-
-        // 获取用户积分余额
-        let balance = 0;
         try {
-            const result = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
-                [username]
-            );
-            balance = result.rows.length > 0 ? result.rows[0].balance : 0;
-        } catch (dbError) {
-            console.error('Database query error:', dbError);
+            if (!req.session.initialized) {
+                req.session.initialized = true;
+                req.session.createdAt = Date.now();
+                generateCSRFToken(req);
+            }
+            const username = req.session.user.username;
+            const balance = await loadUserBalance(username);
+            return res.render('quiz', {
+                username,
+                balance,
+                csrfToken: req.session.csrfToken
+            });
+        } catch (error) {
+            console.error('Quiz page balance load failed:', error);
+            return res.status(503).send('余额服务暂不可用');
         }
-
-        res.render('quiz', {
-            username,
-            balance,
-            csrfToken: req.session.csrfToken
-        });
     });
 
     // Quiz 开始游戏 API - 扣除积分 + 创建付费会话
@@ -307,7 +467,7 @@ module.exports = function registerGameRoutes(app, deps) {
         let client;
         try {
             client = await pool.connect();
-            const { username } = req.body;
+            const { username } = req.body || {};
 
             // 验证用户名
             if (username !== req.session.user.username) {
@@ -315,7 +475,51 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             await client.query('BEGIN');
-            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`quiz:${username}`]);
+            await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`quiz:${username}`]);
+            const activeResult = await client.query(`
+                SELECT id, expires_at, expected_question_count, question_snapshot
+                FROM quiz_sessions
+                WHERE username = $1 AND status = 'active'
+                ORDER BY created_at DESC
+                LIMIT 1
+                FOR UPDATE
+            `, [username]);
+            const activeSession = activeResult.rows[0] || null;
+            const canResume = activeSession
+                && new Date(activeSession.expires_at).getTime() > Date.now()
+                && Number(activeSession.expected_question_count) === QUIZ_QUESTION_COUNT
+                && Array.isArray(activeSession.question_snapshot)
+                && activeSession.question_snapshot.length === QUIZ_QUESTION_COUNT;
+            if (canResume) {
+                const balanceResult = await client.query(
+                    'SELECT balance FROM users WHERE username = $1',
+                    [username]
+                );
+                if (balanceResult.rows.length !== 1) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ success: false, message: '用户不存在' });
+                }
+                const responseBody = {
+                    success: true,
+                    message: '已恢复未完成的答题',
+                    newBalance: parseMoney(balanceResult.rows[0].balance, 'user balance', { min: 0 }),
+                    quizSessionId: activeSession.id,
+                    expectedQuestionCount: QUIZ_QUESTION_COUNT,
+                    resumed: true
+                };
+                await req.finalizeIdempotency?.(client, 200, responseBody);
+                await client.query('COMMIT');
+                req.session.quizSessionId = activeSession.id;
+                return res.json(responseBody);
+            }
+            if (activeSession) {
+                await client.query(`
+                    UPDATE quiz_sessions
+                    SET status = 'expired', settled_at = NOW()
+                    WHERE id = $1 AND status = 'active'
+                `, [activeSession.id]);
+            }
+
             const balanceResult = await BalanceLogger.updateBalance({
                 username,
                 amount: -10,
@@ -333,20 +537,39 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const sessionId = GameLogic.generateToken(16);
+            const questionSnapshot = createQuizSnapshot();
             await client.query(`
-                UPDATE quiz_sessions
-                SET status = 'replaced', settled_at = NOW()
-                WHERE username = $1 AND status = 'active'
-            `, [username]);
+                INSERT INTO quiz_sessions (
+                    id, username, status, created_at, expires_at,
+                    expected_question_count, question_bank_version, question_snapshot
+                )
+                VALUES ($1, $2, 'active', NOW(), NOW() + INTERVAL '20 minutes', $3, $4, $5)
+            `, [
+                sessionId,
+                username,
+                QUIZ_QUESTION_COUNT,
+                quizBankVersion,
+                JSON.stringify(questionSnapshot)
+            ]);
+            const questionTokens = questionSnapshot.map(() => GameLogic.generateToken(16));
             await client.query(`
-                INSERT INTO quiz_sessions (id, username, status, created_at, expires_at)
-                VALUES ($1, $2, 'active', NOW(), NOW() + INTERVAL '20 minutes')
-            `, [sessionId, username]);
+                INSERT INTO quiz_question_tokens (token, session_id, question_id, question_index, created_at)
+                SELECT token, $1, question_id, question_index, NOW()
+                FROM unnest($2::text[], $3::text[], $4::integer[])
+                    AS issued(token, question_id, question_index)
+            `, [
+                sessionId,
+                questionTokens,
+                questionSnapshot.map((question) => String(question.id)),
+                questionSnapshot.map((question, index) => index)
+            ]);
             const responseBody = {
                 success: true,
                 message: '游戏开始，已扣除10积分',
                 newBalance: balanceResult.balance,
-                quizSessionId: sessionId
+                quizSessionId: sessionId,
+                expectedQuestionCount: QUIZ_QUESTION_COUNT,
+                resumed: false
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -374,12 +597,7 @@ module.exports = function registerGameRoutes(app, deps) {
             const username = req.session.user.username;
 
             // 获取用户余额
-            const userResult = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
-                [username]
-            );
-
-            const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+            const balance = await loadUserBalance(username);
 
             res.render('slot', {
                 username,
@@ -404,12 +622,7 @@ module.exports = function registerGameRoutes(app, deps) {
             const username = req.session.user.username;
 
             // 获取用户余额
-            const userResult = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
-                [username]
-            );
-
-            const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+            const balance = await loadUserBalance(username);
 
             res.render('scratch', {
                 username,
@@ -441,6 +654,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
         } catch (error) {
             console.error('Dictation attempts fetch error:', error);
+            return res.status(503).send('听写次数服务暂不可用');
         }
         if (attempts <= 0) {
             return res.redirect('/');
@@ -476,12 +690,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const username = req.session.user.username;
-            const userResult = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
-                [username]
-            );
-
-            const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+            const balance = await loadUserBalance(username);
 
             res.render('stone', {
                 username,
@@ -503,12 +712,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const username = req.session.user.username;
-            const userResult = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
-                [username]
-            );
-
-            const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+            const balance = await loadUserBalance(username);
 
             res.render('flip', {
                 username,
@@ -530,12 +734,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const username = req.session.user.username;
-            const userResult = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
-                [username]
-            );
-
-            const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+            const balance = await loadUserBalance(username);
 
             res.render('duel', {
                 username,
@@ -557,12 +756,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const username = req.session.user.username;
-            const userResult = await pool.query(
-                'SELECT balance FROM users WHERE username = $1',
-                [username]
-            );
-
-            const balance = userResult.rows.length > 0 ? parseFloat(userResult.rows[0].balance) : 0;
+            const balance = await loadUserBalance(username);
 
             res.render('blindbox', {
                 username,
@@ -579,9 +773,15 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // Quiz API 路由
-    app.get('/api/user-info', basicRateLimit, (req, res) => {
-        const username = generateUsername();
-        res.json({ success: true, username });
+    app.get('/api/user-info', requireLogin, requireAuthorized, readHeavyRateLimit, async (req, res) => {
+        try {
+            const username = req.session.user.username;
+            const balance = await loadUserBalance(username);
+            return res.json({ success: true, username, balance });
+        } catch (error) {
+            console.error('User info load failed');
+            return res.status(503).json({ success: false, message: '用户信息暂不可用' });
+        }
     });
 
     app.post('/api/quiz/next',
@@ -593,10 +793,16 @@ module.exports = function registerGameRoutes(app, deps) {
         let client;
         try {
             client = await pool.connect();
-            const { username: requestUsername } = req.body;
+            const { username: requestUsername } = req.body || {};
+            const questionIndex = Number(req.body?.questionIndex);
             const username = req.session.user.username;
             if (requestUsername && requestUsername !== username) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
+            }
+            if (!Number.isInteger(questionIndex)
+                || questionIndex < 0
+                || questionIndex >= QUIZ_QUESTION_COUNT) {
+                return res.status(400).json({ success: false, message: '题目序号无效' });
             }
 
             let quizSessionId = req.session.quizSessionId;
@@ -618,9 +824,9 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             await client.query('BEGIN');
-            await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`quiz-next:${quizSessionId}`]);
+            await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`quiz-next:${quizSessionId}`]);
             const sessionResult = await client.query(`
-                SELECT status, expires_at
+                SELECT status, expires_at, expected_question_count, question_snapshot
                 FROM quiz_sessions
                 WHERE id = $1 AND username = $2
                 FOR UPDATE
@@ -634,31 +840,24 @@ module.exports = function registerGameRoutes(app, deps) {
                 await client.query('ROLLBACK');
                 return res.status(403).json({ success: false, message: '答题会话无效或已过期，请重新开始' });
             }
-
-            const issuedTokens = await client.query(
-                'SELECT question_id FROM quiz_question_tokens WHERE session_id = $1 ORDER BY created_at',
-                [quizSessionId]
-            );
-            if (issuedTokens.rows.length >= 15) {
+            const snapshot = sessionData.question_snapshot;
+            if (Number(sessionData.expected_question_count) !== QUIZ_QUESTION_COUNT
+                || !Array.isArray(snapshot)
+                || snapshot.length !== QUIZ_QUESTION_COUNT) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ success: false, message: '题目数量已达上限，请提交答案' });
+                return res.status(409).json({ success: false, message: '答题会话数据不完整，请联系管理员' });
             }
-
-            const serverSeen = issuedTokens.rows
-                .map((row) => Number(row.question_id))
-                .filter(Number.isInteger);
-            const question = GameLogic.quiz.getRandomQuestion(questions, serverSeen, issuedTokens.rows.length);
-            if (!question) {
+            const question = snapshot[questionIndex];
+            const tokenResult = await client.query(`
+                SELECT token, question_id
+                FROM quiz_question_tokens
+                WHERE session_id = $1 AND question_index = $2
+            `, [quizSessionId, questionIndex]);
+            const issued = tokenResult.rows[0];
+            if (!question || !issued || String(question.id) !== String(issued.question_id)) {
                 await client.query('ROLLBACK');
-                return res.json({ success: false, message: '没有更多题目了' });
+                return res.status(409).json({ success: false, message: '题目快照损坏，请联系管理员' });
             }
-
-            const token = GameLogic.generateToken(16);
-            const signature = GameLogic.generateToken(16);
-            await client.query(`
-                INSERT INTO quiz_question_tokens (token, session_id, question_id, created_at)
-                VALUES ($1, $2, $3, NOW())
-            `, [token, quizSessionId, question.id]);
             const responseBody = {
                 success: true,
                 question: {
@@ -666,8 +865,8 @@ module.exports = function registerGameRoutes(app, deps) {
                     question: question.question,
                     options: question.options
                 },
-                token,
-                signature
+                token: issued.token,
+                questionIndex
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -691,13 +890,16 @@ module.exports = function registerGameRoutes(app, deps) {
         let client;
         try {
             client = await pool.connect();
-            const { username, answers = [] } = req.body;
+            const { username, answers = [] } = req.body || {};
 
             if (username !== req.session.user.username) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
-            if (!Array.isArray(answers) || answers.length < 1 || answers.length > 15) {
-                return res.status(400).json({ success: false, message: '答案数量无效' });
+            if (!Array.isArray(answers) || answers.length !== QUIZ_QUESTION_COUNT) {
+                return res.status(400).json({
+                    success: false,
+                    message: `必须完成全部 ${QUIZ_QUESTION_COUNT} 道题后才能提交`
+                });
             }
 
             const normalizedAnswers = [];
@@ -705,7 +907,7 @@ module.exports = function registerGameRoutes(app, deps) {
             for (const answer of answers) {
                 const token = typeof answer?.token === 'string' ? answer.token : '';
                 const answerIndex = Number(answer?.answerIndex);
-                if (!token || !Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 20) {
+                if (!token || !Number.isInteger(answerIndex) || answerIndex < -1 || answerIndex > 20) {
                     return res.status(400).json({ success: false, message: '答案格式无效' });
                 }
                 if (submittedTokens.has(token)) {
@@ -735,7 +937,7 @@ module.exports = function registerGameRoutes(app, deps) {
 
             await client.query('BEGIN');
             const sessionResult = await client.query(`
-                SELECT status, expires_at
+                SELECT status, expires_at, expected_question_count, question_snapshot
                 FROM quiz_sessions
                 WHERE id = $1 AND username = $2
                 FOR UPDATE
@@ -753,20 +955,30 @@ module.exports = function registerGameRoutes(app, deps) {
                 await client.query('ROLLBACK');
                 return res.status(403).json({ success: false, message: '答题会话已过期，请重新开始' });
             }
+            const expectedCount = Number(sessionData.expected_question_count);
+            const questionSnapshot = sessionData.question_snapshot;
+            if (expectedCount !== QUIZ_QUESTION_COUNT
+                || !Array.isArray(questionSnapshot)
+                || questionSnapshot.length !== expectedCount
+                || normalizedAnswers.length !== expectedCount) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '答题会话数据不完整' });
+            }
 
             const tokenResult = await client.query(`
-                SELECT token, question_id
+                SELECT token, question_id, question_index
                 FROM quiz_question_tokens
                 WHERE session_id = $1
-                  AND token = ANY($2::text[])
                   AND consumed_at IS NULL
+                ORDER BY question_index
                 FOR UPDATE
-            `, [quizSessionId, Array.from(submittedTokens)]);
-            if (tokenResult.rows.length !== normalizedAnswers.length) {
+            `, [quizSessionId]);
+            if (tokenResult.rows.length !== expectedCount
+                || tokenResult.rows.some((row) => !submittedTokens.has(row.token))) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({
                     success: false,
-                    message: '存在无效或已使用的题目令牌'
+                    message: '必须且只能提交本局全部题目令牌'
                 });
             }
 
@@ -775,23 +987,30 @@ module.exports = function registerGameRoutes(app, deps) {
             const answerDetails = [];
             for (const answer of normalizedAnswers) {
                 const tokenData = tokensByValue.get(answer.token);
-                const question = questionMap.get(Number(tokenData.question_id));
-                if (!question || answer.answerIndex >= question.options.length) {
+                const snapshotIndex = Number(tokenData?.question_index);
+                const question = questionSnapshot[snapshotIndex];
+                if (!tokenData
+                    || !Number.isInteger(snapshotIndex)
+                    || String(question?.id) !== String(tokenData.question_id)
+                    || !Array.isArray(question?.options)
+                    || answer.answerIndex >= question.options.length
+                    || !Number.isInteger(Number(question.correct))) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({ success: false, message: '题目或答案无效' });
                 }
-                const isCorrect = GameLogic.quiz.validateAnswer(question, answer.answerIndex);
+                const isCorrect = answer.answerIndex >= 0
+                    && answer.answerIndex === Number(question.correct);
                 if (isCorrect) correctCount += 1;
                 answerDetails.push({ question, answerIndex: answer.answerIndex, isCorrect });
             }
 
-            const crypto = require('crypto');
-            const proof = crypto.createHash('sha256')
-                .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                .digest('hex');
+            const resultTrace = randomBytes(24).toString('hex');
             const submissionResult = await client.query(
-                'INSERT INTO submissions (username, score, submitted_at, proof) VALUES ($1, $2, NOW(), $3) RETURNING id',
-                [username, correctCount, proof]
+                `INSERT INTO submissions (
+                    username, score, submitted_at, result_trace, quiz_session_id
+                 ) VALUES ($1, $2, NOW(), $3, $4)
+                 RETURNING id`,
+                [username, correctCount, resultTrace, quizSessionId]
             );
             const submissionId = submissionResult.rows[0].id;
 
@@ -803,7 +1022,9 @@ module.exports = function registerGameRoutes(app, deps) {
                     [
                         submissionId,
                         detail.question.id,
-                        detail.question.options[detail.answerIndex],
+                        detail.answerIndex >= 0
+                            ? detail.question.options[detail.answerIndex]
+                            : null,
                         detail.isCorrect,
                         detail.question.options[detail.question.correct]
                     ]
@@ -841,24 +1062,33 @@ module.exports = function registerGameRoutes(app, deps) {
                     'SELECT balance FROM users WHERE username = $1',
                     [username]
                 );
-                newBalance = Number(balanceResult.rows[0]?.balance || 0);
+                if (balanceResult.rows.length !== 1) {
+                    throw new Error('Quiz owner disappeared during settlement');
+                }
+                newBalance = parseMoney(balanceResult.rows[0].balance, 'user balance', { min: 0 });
             }
 
-            await client.query(
+            const consumedTokens = await client.query(
                 'UPDATE quiz_question_tokens SET consumed_at = NOW() WHERE session_id = $1 AND token = ANY($2::text[])',
                 [quizSessionId, Array.from(submittedTokens)]
             );
-            await client.query(
-                "UPDATE quiz_sessions SET status = 'settled', settled_at = NOW() WHERE id = $1",
+            if (consumedTokens.rowCount !== expectedCount) {
+                throw new Error('Quiz token state changed concurrently');
+            }
+            const settledSession = await client.query(
+                "UPDATE quiz_sessions SET status = 'settled', settled_at = NOW() WHERE id = $1 AND status = 'active' RETURNING id",
                 [quizSessionId]
             );
+            if (settledSession.rowCount !== 1) {
+                throw new Error('Quiz session state changed concurrently');
+            }
             const responseBody = {
                 success: true,
                 score: correctCount,
                 total: normalizedAnswers.length,
                 reward,
                 newBalance,
-                proof
+                resultTrace
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -875,7 +1105,7 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // Quiz 排行榜 API
-    app.get('/api/quiz/leaderboard', requireLogin, requireAuthorized, async (req, res) => {
+    app.get('/api/quiz/leaderboard', requireLogin, requireAuthorized, readHeavyRateLimit, async (req, res) => {
         try {
             // Show each account's best score for the current Shanghai calendar day.
             const result = await pool.query(`
@@ -885,8 +1115,10 @@ module.exports = function registerGameRoutes(app, deps) {
                            s.username, s.score, s.submitted_at::timestamptz AS submitted_at
                     FROM submissions s
                     JOIN users u ON u.username = s.username
-                    WHERE s.submitted_at::timestamptz >= date_trunc('day', NOW())
-                      AND s.submitted_at::timestamptz < date_trunc('day', NOW()) + INTERVAL '1 day'
+                    WHERE s.submitted_at::timestamptz >=
+                          (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')
+                      AND s.submitted_at::timestamptz <
+                          ((date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + INTERVAL '1 day') AT TIME ZONE 'Asia/Shanghai')
                     ORDER BY s.username, s.score DESC, s.submitted_at::timestamptz ASC
                 ) ranked
                 ORDER BY score DESC, submitted_at ASC
@@ -904,10 +1136,10 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // 余额变动记录 API
-    app.get('/api/balance/logs', requireLogin, requireAuthorized, async (req, res) => {
+    app.get('/api/balance/logs', requireLogin, requireAuthorized, readHeavyRateLimit, async (req, res) => {
         try {
             const username = req.session.user.username;
-            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const page = Math.min(500, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
             const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
             const offset = (page - 1) * limit;
 
@@ -938,6 +1170,10 @@ module.exports = function registerGameRoutes(app, deps) {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
+                await client.query(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    [`dictation:${username}`]
+                );
                 const pendingResult = await client.query(
                     `SELECT level, set_id
                      FROM dictation_submissions
@@ -1020,15 +1256,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 } else if (level > 3) {
                     level = 3;
                 }
+                if (level > 1 && (!Number.isSafeInteger(setId) || !sessionId)) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({ success: false, message: '听写进度不完整，请联系管理员核对' });
+                }
 
                 if (level === 1 || !setId) {
-                    const fs = require('fs');
-                    const path = require('path');
-                    const filePath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
-                    const raw = await fs.promises.readFile(filePath, 'utf8');
-                    const data = JSON.parse(raw);
-                    const setIds = Array.from(new Set(data.map((item) => Number(item.set_id || 1))))
-                        .filter((v) => Number.isFinite(v));
+                    const setIds = Array.from(dictationSets.keys());
                     if (setIds.length === 0) {
                         await client.query('ROLLBACK');
                         return res.status(500).json({ success: false, message: '题库未配置' });
@@ -1069,19 +1303,29 @@ module.exports = function registerGameRoutes(app, deps) {
                         }
                     }
                     if (!sessionId) {
+                        const snapshot = dictationSets.get(Number(setId));
                         const sessionResult = await client.query(
-                            'INSERT INTO dictation_sessions (username, set_id, started_at, result) VALUES ($1, $2, NOW(), $3) RETURNING id',
-                            [username, setId, 'in_progress']
+                            `INSERT INTO dictation_sessions (
+                                username, set_id, started_at, result, bank_version, question_snapshot
+                             ) VALUES ($1, $2, NOW(), 'in_progress', $3, $4)
+                             RETURNING id`,
+                            [username, setId, dictationBankVersion, JSON.stringify(snapshot)]
                         );
                         sessionId = sessionResult.rows[0].id;
                         consumeAttempt = level === 1;
                     }
                 }
 
-                await client.query(
-                    'UPDATE dictation_progress SET level = $1, set_id = $2, session_id = $3, updated_at = NOW() WHERE username = $4',
+                const progressUpdated = await client.query(
+                    `UPDATE dictation_progress
+                     SET level = $1, set_id = $2, session_id = $3, updated_at = NOW()
+                     WHERE username = $4
+                     RETURNING username`,
                     [level, setId, sessionId, username]
                 );
+                if (progressUpdated.rowCount !== 1) {
+                    throw new Error('Dictation progress state changed during start');
+                }
 
                 if (consumeAttempt) {
                     const attemptsResult = await client.query(
@@ -1096,12 +1340,28 @@ module.exports = function registerGameRoutes(app, deps) {
                         return res.status(403).json({ success: false, message: '听写次数不足' });
                     }
 
-                    await client.query(
-                        'UPDATE dictation_allowances SET attempts = GREATEST(attempts - 1, 0), updated_at = NOW() WHERE username = $1',
+                    const consumedAttempt = await client.query(
+                        `UPDATE dictation_allowances
+                         SET attempts = attempts - 1, updated_at = NOW()
+                         WHERE username = $1 AND attempts > 0
+                         RETURNING attempts`,
                         [username]
                     );
+                    if (consumedAttempt.rowCount !== 1) {
+                        throw new Error('Dictation allowance state changed concurrently');
+                    }
                 }
-                const responseBody = { success: true, message: '开始成功', level, setId };
+                const issued = await issueDictationQuestion(client, { username, sessionId, setId, level });
+                const responseBody = {
+                    success: true,
+                    message: '开始成功',
+                    level,
+                    setId,
+                    sessionId,
+                    question: issued.question,
+                    questionToken: issued.questionToken,
+                    bankVersion: issued.bankVersion
+                };
                 await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
 
@@ -1122,10 +1382,15 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             const username = req.session.user?.username || '';
             const result = await pool.query(
-                `SELECT status, level, word, set_id, admin_message
-                 FROM dictation_submissions
-                 WHERE username = $1
-                 ORDER BY created_at DESC
+                `SELECT submission.status, submission.level, submission.word,
+                        submission.set_id, submission.admin_message
+                 FROM dictation_submissions AS submission
+                 LEFT JOIN dictation_progress AS progress
+                   ON progress.username = submission.username
+                 WHERE submission.username = $1
+                   AND (progress.session_id IS NULL
+                        OR submission.session_id = progress.session_id)
+                 ORDER BY submission.created_at DESC, submission.id DESC
                  LIMIT 1`,
                 [username]
             );
@@ -1177,69 +1442,210 @@ module.exports = function registerGameRoutes(app, deps) {
         userActionRateLimit,
         csrfProtection,
         async (req, res) => {
+        let client;
         try {
             const username = req.session.user?.username || '';
-            const latest = await pool.query(
-                `SELECT status
-                 FROM dictation_submissions
-                 WHERE username = $1
-                 ORDER BY created_at DESC
-                 LIMIT 1`,
+            client = await pool.connect();
+            await client.query('BEGIN');
+            await client.query(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                [`dictation:${username}`]
+            );
+            const progressResult = await client.query(
+                'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1 FOR UPDATE',
                 [username]
+            );
+            if (progressResult.rows.length !== 1) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '听写进度不存在' });
+            }
+            const level = Number(progressResult.rows[0].level || 1);
+            const setId = Number(progressResult.rows[0].set_id);
+            const sessionId = progressResult.rows[0].session_id;
+            if (!Number.isInteger(level) || level < 1 || level > 3
+                || !Number.isSafeInteger(setId) || !sessionId) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '听写进度不完整' });
+            }
+            const latest = await client.query(
+                `SELECT id, status
+                 FROM dictation_submissions
+                 WHERE username = $1 AND session_id = $2 AND level = $3
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+                 FOR UPDATE`,
+                [username, sessionId, level]
             );
             if (!latest.rows.length || latest.rows[0].status !== 'rewrite') {
+                await client.query('ROLLBACK');
                 return res.status(403).json({ success: false, message: '当前不支持重写' });
             }
-            const progressResult = await pool.query(
-                'SELECT level FROM dictation_progress WHERE username = $1',
-                [username]
-            );
-            const level = progressResult.rows.length ? Number(progressResult.rows[0].level || 1) : 1;
-            res.json({ success: true, level });
+            const issued = await issueDictationQuestion(client, { username, sessionId, setId, level });
+            const responseBody = {
+                success: true,
+                level,
+                setId,
+                sessionId,
+                question: issued.question,
+                questionToken: issued.questionToken,
+                bankVersion: issued.bankVersion
+            };
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            res.json(responseBody);
         } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
             console.error('Dictation retry error:', error);
             res.status(500).json({ success: false, message: '开始失败' });
+        } finally {
+            client?.release();
         }
     });
 
-    app.get('/api/dictation/words', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+    app.get('/api/dictation/current', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
-            const fs = require('fs');
-            const path = require('path');
-            const filePath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
-            const raw = await fs.promises.readFile(filePath, 'utf8');
-            const data = JSON.parse(raw);
-            const homophoneMap = loadHomophoneMap();
-            const dictationCharSet = loadDictationCharSet();
-            const words = data.map((item) => {
-                const pronunciation = typeof item.pronunciation === 'string' ? item.pronunciation.trim() : '';
-                const syllables = pronunciation ? pronunciation.split(/\s+/) : [];
-                const homophones = syllables.map((syllable) => {
-                    const base = getSyllableBase(syllable);
-                    if (!base) {
-                        return [];
-                    }
-                    const merged = new Set();
-                    for (let tone = 1; tone <= 5; tone += 1) {
-                        const key = `${base}${tone}`;
-                        const list = homophoneMap.get(key) || [];
-                        list.forEach((char) => merged.add(char));
-                    }
-                    let result = Array.from(merged);
-                    if (dictationCharSet) {
-                        result = result.filter((char) => dictationCharSet.has(char));
-                    }
-                    return result;
-                });
-                return {
-                    ...item,
-                    homophones
-                };
+            const username = req.session.user.username;
+            const result = await pool.query(`
+                SELECT progress.level, progress.set_id, progress.session_id,
+                       progress.question_id, progress.question_token_hash, progress.bank_version,
+                       session.question_snapshot, session.bank_version AS session_bank_version
+                FROM dictation_progress AS progress
+                JOIN dictation_sessions AS session
+                  ON session.id = progress.session_id
+                 AND session.username = progress.username
+                 AND session.result = 'in_progress'
+                WHERE progress.username = $1
+            `, [username]);
+            if (result.rows.length !== 1) {
+                return res.status(404).json({ success: false, message: '当前没有进行中的听写' });
+            }
+            const row = result.rows[0];
+            const issued = readIssuedDictationQuestion(row, username);
+            if (!issued) {
+                return res.status(409).json({ success: false, message: '听写题目状态不完整，请重新开始' });
+            }
+            return res.json({
+                success: true,
+                level: issued.level,
+                setId: issued.setId,
+                sessionId: row.session_id,
+                question: buildDictationPrompt(issued.question),
+                questionToken: issued.questionToken,
+                bankVersion: issued.bankVersion
             });
-            res.json({ success: true, words });
         } catch (error) {
-            console.error('Dictation words load error:', error);
-            res.status(500).json({ success: false, message: '加载听写词库失败' });
+            console.error('Dictation current question load error:', error);
+            res.status(500).json({ success: false, message: '加载当前听写题目失败' });
+        }
+    });
+
+    app.get('/api/dictation/audio', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+        try {
+            const username = req.session.user.username;
+            const result = await pool.query(`
+                SELECT progress.level, progress.set_id, progress.session_id,
+                       progress.question_id, progress.question_token_hash, progress.bank_version,
+                       session.question_snapshot, session.bank_version AS session_bank_version
+                FROM dictation_progress AS progress
+                JOIN dictation_sessions AS session
+                  ON session.id = progress.session_id
+                 AND session.username = progress.username
+                 AND session.result = 'in_progress'
+                WHERE progress.username = $1
+            `, [username]);
+            if (result.rows.length !== 1) {
+                return res.status(404).json({ success: false, message: '当前没有进行中的听写' });
+            }
+
+            const row = result.rows[0];
+            const issued = readIssuedDictationQuestion(row, username);
+            if (!issued || !questionTokensMatch(req.query.token, issued.questionToken)) {
+                return res.status(409).json({ success: false, message: '听写音频状态不匹配' });
+            }
+
+            const audio = dictationAudioById.get(String(issued.question.id));
+            if (!audio) {
+                return res.status(503).json({ success: false, message: '听写音频暂不可用' });
+            }
+
+            res.set({
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'private, no-store',
+                'Content-Type': 'audio/wav',
+                'X-Content-Type-Options': 'nosniff'
+            });
+            const range = req.get('Range');
+            const match = typeof range === 'string' ? range.match(/^bytes=(\d+)-(\d*)$/) : null;
+            if (!match) {
+                res.set('Content-Length', String(audio.length));
+                return res.send(audio);
+            }
+
+            const start = Number(match[1]);
+            const requestedEnd = match[2] ? Number(match[2]) : audio.length - 1;
+            const end = Math.min(requestedEnd, audio.length - 1);
+            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end) {
+                res.set('Content-Range', `bytes */${audio.length}`);
+                return res.status(416).end();
+            }
+            const chunk = audio.subarray(start, end + 1);
+            res.status(206).set({
+                'Content-Length': String(chunk.length),
+                'Content-Range': `bytes ${start}-${end}/${audio.length}`
+            });
+            return res.send(chunk);
+        } catch (error) {
+            console.error('Dictation audio load error:', error);
+            return res.status(500).json({ success: false, message: '加载听写音频失败' });
+        }
+    });
+
+    app.get('/api/dictation/submissions/:id/image', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
+        const submissionId = Number.parseInt(req.params.id, 10);
+        if (!Number.isSafeInteger(submissionId) || submissionId <= 0) {
+            return res.status(400).json({ success: false, message: '图片编号无效' });
+        }
+        try {
+            const result = await pool.query(`
+                SELECT submission.username, submission.image_path,
+                       upload.storage_path, upload.content_sha256, upload.content
+                FROM dictation_submissions AS submission
+                LEFT JOIN dictation_uploads AS upload ON upload.id = submission.upload_id
+                WHERE submission.id = $1
+            `, [submissionId]);
+            const row = result.rows[0];
+            if (!row) return res.status(404).json({ success: false, message: '图片不存在' });
+            if (req.session.user.is_admin !== true && row.username !== req.session.user.username) {
+                return res.status(403).json({ success: false, message: '无权查看该图片' });
+            }
+
+            res.set({
+                'Cache-Control': 'private, no-store',
+                'Content-Type': 'image/png',
+                'X-Content-Type-Options': 'nosniff'
+            });
+            if (Buffer.isBuffer(row.content) && row.content.length > 0) {
+                if (row.content_sha256) res.set('ETag', `"sha256-${row.content_sha256}"`);
+                return res.send(row.content);
+            }
+
+            let filePath;
+            if (row.storage_path && /^[a-f0-9]{48}\.png$/.test(row.storage_path)) {
+                filePath = path.join(__dirname, '..', 'private', 'dictation-uploads', row.storage_path);
+            } else {
+                const legacyMatch = String(row.image_path || '').match(/^\/uploads\/dictation\/([A-Za-z0-9_.-]+\.png)$/);
+                if (!legacyMatch) return res.status(404).json({ success: false, message: '图片不存在' });
+                filePath = path.join(__dirname, '..', 'public', 'uploads', 'dictation', legacyMatch[1]);
+            }
+
+            return res.sendFile(filePath, (error) => {
+                if (error && !res.headersSent) {
+                    res.status(error.code === 'ENOENT' ? 404 : 500).json({ success: false, message: '图片读取失败' });
+                }
+            });
+        } catch (error) {
+            console.error('Dictation image read error:', error);
+            return res.status(500).json({ success: false, message: '图片读取失败' });
         }
     });
 
@@ -1251,7 +1657,6 @@ module.exports = function registerGameRoutes(app, deps) {
         userActionRateLimit,
         csrfProtection,
         async (req, res) => {
-        let imageDiskPath = null;
         try {
             const sanitizeText = (value, maxLen) => {
                 if (typeof value !== 'string') {
@@ -1261,13 +1666,11 @@ module.exports = function registerGameRoutes(app, deps) {
             };
 
             const wordId = sanitizeText(req.body?.wordId, 50);
-            const word = sanitizeText(req.body?.word, 120);
-            const pronunciation = sanitizeText(req.body?.pronunciation, 120);
-            const definition = sanitizeText(req.body?.definition, 400);
+            const questionToken = sanitizeText(req.body?.questionToken, 128);
             const userInput = sanitizeText(req.body?.input, 120);
             const imageData = req.body?.imageData;
 
-            if (!wordId) {
+            if (!wordId || !questionToken) {
                 return res.status(400).json({ success: false, message: '缺少题目信息' });
             }
             if (!userInput) {
@@ -1276,43 +1679,8 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const userId = req.session.user?.id || null;
             const username = req.session.user?.username || '';
-            let level = 1;
-            let setId = null;
-            let sessionId = null;
-            let correctWord = '';
-            const progressResult = await pool.query(
-                'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1',
-                [username]
-            );
-            if (progressResult.rows.length) {
-                level = Number(progressResult.rows[0].level || 1);
-                setId = progressResult.rows[0].set_id !== null ? Number(progressResult.rows[0].set_id) : null;
-                sessionId = progressResult.rows[0].session_id || null;
-            }
-
-            const fs = require('fs');
-            const path = require('path');
-            const wordsPath = path.join(__dirname, '..', 'public', 'dictation', 'words.json');
-            const raw = await fs.promises.readFile(wordsPath, 'utf8');
-            const data = JSON.parse(raw);
-            const matched = data.find((item) => String(item.id) === String(wordId));
-            if (!matched || typeof matched.word !== 'string') {
-                return res.status(400).json({ success: false, message: '题目不存在' });
-            }
-            const matchedSetId = Number(matched.set_id);
-            const setWords = data.filter((item) => Number(item.set_id) === matchedSetId);
-            const matchedLevel = setWords.findIndex((item) => String(item.id) === String(wordId)) + 1;
-            if (!sessionId || matchedSetId !== setId || matchedLevel !== level) {
-                return res.status(409).json({ success: false, message: '题目与当前听写进度不匹配' });
-            }
-            correctWord = matched.word.trim();
             const normalizeAnswer = (value) => String(value || '').replace(/\s+/g, '');
-            const normalizedInput = normalizeAnswer(userInput);
-            const normalizedWord = normalizeAnswer(correctWord);
-            const isCorrect = normalizedInput && normalizedWord && normalizedInput === normalizedWord;
-            const status = isCorrect ? 'correct' : 'wrong';
-            const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'dictation');
-            let imagePath = null;
+            let validatedImage = null;
             if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/png;base64,')) {
                 const base64Data = imageData.slice('data:image/png;base64,'.length);
                 if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64Data)) {
@@ -1321,47 +1689,97 @@ module.exports = function registerGameRoutes(app, deps) {
                 const imageBuffer = Buffer.from(base64Data, 'base64');
                 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
                 if (imageBuffer.length === 0 || imageBuffer.length > 1.5 * 1024 * 1024 ||
-                    imageBuffer.length < pngSignature.length ||
+                    imageBuffer.length < 24 ||
                     !imageBuffer.subarray(0, pngSignature.length).equals(pngSignature)) {
                     return res.status(400).json({ success: false, message: '仅支持不超过 1.5MB 的 PNG 图片' });
                 }
-                await fs.promises.mkdir(uploadDir, { recursive: true });
-                const filename = `${Date.now()}_${randomBytes(12).toString('hex')}.png`;
-                const filePath = path.join(uploadDir, filename);
-                await fs.promises.writeFile(filePath, imageBuffer, { flag: 'wx', mode: 0o600 });
-                imageDiskPath = filePath;
-                imagePath = `/uploads/dictation/${filename}`;
+                const headerWidth = imageBuffer.readUInt32BE(16);
+                const headerHeight = imageBuffer.readUInt32BE(20);
+                if (headerWidth < 1 || headerHeight < 1 || headerWidth > 2048 || headerHeight > 2048
+                    || headerWidth * headerHeight > 4_000_000) {
+                    return res.status(400).json({ success: false, message: '图片尺寸无效或过大' });
+                }
+                try {
+                    const decoded = PNG.sync.read(imageBuffer, { checkCRC: true });
+                    if (decoded.width !== headerWidth || decoded.height !== headerHeight) {
+                        throw new Error('PNG dimensions changed while decoding');
+                    }
+                    const reencoded = PNG.sync.write(decoded, { colorType: 6 });
+                    if (reencoded.length > 1.5 * 1024 * 1024) {
+                        return res.status(400).json({ success: false, message: '处理后的图片超过 1.5MB' });
+                    }
+                    validatedImage = {
+                        buffer: reencoded,
+                        width: decoded.width,
+                        height: decoded.height,
+                        sha256: createHash('sha256').update(reencoded).digest('hex')
+                    };
+                } catch (error) {
+                    return res.status(400).json({ success: false, message: 'PNG 图片无法解码' });
+                }
+            } else if (imageData !== undefined && imageData !== null && imageData !== '') {
+                return res.status(400).json({ success: false, message: '图片数据无效' });
             }
 
             const client = await pool.connect();
+            let responseBody;
             try {
                 await client.query('BEGIN');
+                await client.query(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    [`dictation:${username}`]
+                );
                 const lockedProgress = await client.query(
-                    'SELECT level, set_id, session_id FROM dictation_progress WHERE username = $1 FOR UPDATE',
+                    `SELECT level, set_id, session_id, question_id,
+                            question_token_hash, bank_version
+                     FROM dictation_progress
+                     WHERE username = $1
+                     FOR UPDATE`,
                     [username]
                 );
                 const currentProgress = lockedProgress.rows[0];
-                if (!currentProgress
-                    || Number(currentProgress.level) !== level
-                    || Number(currentProgress.set_id) !== setId
-                    || String(currentProgress.session_id) !== String(sessionId)) {
+                if (!currentProgress) {
                     await client.query('ROLLBACK');
-                    if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
-                    return res.status(409).json({ success: false, message: '听写进度已变化，请刷新后重试' });
+                    return res.status(409).json({ success: false, message: '听写进度不存在' });
                 }
-                const activeSession = await client.query(`
-                    SELECT id
-                    FROM dictation_sessions
-                    WHERE id = $1 AND username = $2 AND set_id = $3 AND result = 'in_progress'
-                    FOR UPDATE
-                `, [sessionId, username, setId]);
-                if (activeSession.rows.length === 0) {
+                const level = Number(currentProgress.level);
+                const setId = Number(currentProgress.set_id);
+                const sessionId = currentProgress.session_id;
+                if (!Number.isInteger(level) || level < 1 || level > 3
+                    || !Number.isSafeInteger(setId) || !sessionId) {
                     await client.query('ROLLBACK');
-                    if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
-                    return res.status(409).json({ success: false, message: '听写会话已结束' });
+                    return res.status(409).json({ success: false, message: '听写进度不完整' });
                 }
+                const { question, bankVersion } = await getSessionQuestion(client, {
+                    username,
+                    sessionId,
+                    setId,
+                    level
+                });
+                const expectedToken = signDictationQuestion({
+                    username,
+                    sessionId,
+                    level,
+                    questionId: String(question.id),
+                    bankVersion
+                });
+                const expectedTokenHash = createHash('sha256').update(expectedToken).digest('hex');
+                if (String(question.id) !== wordId
+                    || Number(question.set_id) !== setId
+                    || String(currentProgress.question_id || '') !== wordId
+                    || currentProgress.bank_version !== bankVersion
+                    || !questionTokensMatch(currentProgress.question_token_hash, expectedTokenHash)
+                    || !questionTokensMatch(questionToken, expectedToken)) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({ success: false, message: '题目与当前听写进度不匹配' });
+                }
+                const correctWord = String(question.word).trim();
+                const normalizedInput = normalizeAnswer(userInput);
+                const normalizedWord = normalizeAnswer(correctWord);
+                const isCorrect = Boolean(normalizedInput && normalizedWord && normalizedInput === normalizedWord);
+                const status = isCorrect ? 'correct' : 'wrong';
                 const previousSubmission = await client.query(`
-                    SELECT status
+                    SELECT id, status
                     FROM dictation_submissions
                     WHERE username = $1 AND session_id = $2 AND level = $3
                     ORDER BY created_at DESC
@@ -1370,88 +1788,168 @@ module.exports = function registerGameRoutes(app, deps) {
                 `, [username, sessionId, level]);
                 if (previousSubmission.rows.length > 0 && previousSubmission.rows[0].status !== 'rewrite') {
                     await client.query('ROLLBACK');
-                    if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
                     return res.status(409).json({ success: false, message: '本关答案已提交' });
                 }
-                await client.query(
+                if (previousSubmission.rows[0]?.status === 'rewrite') {
+                    const superseded = await client.query(
+                        `UPDATE dictation_submissions
+                         SET status = 'superseded'
+                         WHERE id = $1 AND status = 'rewrite'
+                         RETURNING id`,
+                        [previousSubmission.rows[0].id]
+                    );
+                    if (superseded.rowCount !== 1) {
+                        throw new Error('Dictation rewrite state changed concurrently');
+                    }
+                }
+                const sessionVersionResult = await client.query(`
+                    UPDATE dictation_sessions
+                    SET version = version + 1
+                    WHERE id = $1 AND username = $2 AND result = 'in_progress'
+                    RETURNING version
+                `, [sessionId, username]);
+                if (sessionVersionResult.rows.length !== 1) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({ success: false, message: '听写会话已结束' });
+                }
+                const sessionVersion = Number(sessionVersionResult.rows[0].version);
+                const submissionResult = await client.query(
                     `INSERT INTO dictation_submissions
-                        (user_id, username, word_id, word, pronunciation, definition, user_input, status, level, set_id, session_id, image_path, ip_address, user_agent)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+                        (user_id, username, word_id, word, pronunciation, definition, user_input,
+                         status, level, set_id, session_id, image_path, ip_address, user_agent,
+                         bank_version, session_version)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, $12, $13, $14, $15)
+                     RETURNING id`,
                     [
                         userId,
                         username,
                         wordId,
                         correctWord || null,
-                        typeof matched.pronunciation === 'string' ? matched.pronunciation.slice(0, 120) : null,
-                        typeof matched.definition === 'string' ? matched.definition.slice(0, 400) : null,
+                        String(question.pronunciation || '').slice(0, 120) || null,
+                        String(question.definition || '').slice(0, 400) || null,
                         userInput,
                         status,
-                        Number.isFinite(level) ? level : 1,
-                        Number.isFinite(setId) ? setId : null,
-                        sessionId || null,
-                        imagePath,
+                        level,
+                        setId,
+                        sessionId,
                         req.clientIP,
-                        req.get('User-Agent')
+                        req.get('User-Agent'),
+                        bankVersion,
+                        sessionVersion
                     ]
                 );
-
-                if (username) {
-                    let nextLevel = 1;
-                    if (status === 'correct') {
-                        nextLevel = Math.min(Math.max(Number(level || 1), 1) + 1, 3);
-                    }
-                    const progressUpdate = await client.query(
-                        'UPDATE dictation_progress SET level = $1, set_id = $2, session_id = $3, updated_at = NOW() WHERE username = $4',
-                        [nextLevel, setId, sessionId, username]
-                    );
-                    if (progressUpdate.rowCount === 0) {
-                        await client.query(
-                            'INSERT INTO dictation_progress (username, level, set_id, session_id) VALUES ($1, $2, $3, $4)',
-                            [username, nextLevel, setId, sessionId]
-                        );
-                    }
-
-                    if (sessionId) {
-                        let sessionResult = null;
-                        if (status === 'wrong') {
-                            sessionResult = 'failed';
-                        } else if (status === 'correct' && level >= 3) {
-                            sessionResult = 'passed';
-                        }
-                        if (sessionResult) {
-                            await client.query(
-                                'UPDATE dictation_sessions SET result = $1, ended_at = NOW() WHERE id = $2',
-                                [sessionResult, sessionId]
-                            );
-                            await client.query(
-                                'UPDATE dictation_progress SET level = 1, set_id = NULL, session_id = NULL, updated_at = NOW() WHERE username = $1',
-                                [username]
-                            );
-                        }
+                const submissionId = submissionResult.rows[0].id;
+                if (validatedImage) {
+                    const uploadId = randomBytes(24).toString('hex');
+                    const filename = `${uploadId}.png`;
+                    await client.query(`
+                        INSERT INTO dictation_uploads (
+                            id, submission_id, storage_path, content_sha256,
+                            byte_size, width, height, content
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    `, [
+                        uploadId,
+                        submissionId,
+                        filename,
+                        validatedImage.sha256,
+                        validatedImage.buffer.length,
+                        validatedImage.width,
+                        validatedImage.height,
+                        validatedImage.buffer
+                    ]);
+                    const uploadLinked = await client.query(`
+                        UPDATE dictation_submissions
+                        SET upload_id = $1, image_path = $2
+                        WHERE id = $3
+                        RETURNING id
+                    `, [uploadId, `/api/dictation/submissions/${submissionId}/image`, submissionId]);
+                    if (uploadLinked.rowCount !== 1) {
+                        throw new Error('Dictation upload was not linked to its submission');
                     }
                 }
 
-                const responseBody = {
+                const nextLevel = status === 'correct'
+                    ? Math.min(level + 1, 3)
+                    : 1;
+                const progressAdvanced = await client.query(
+                    `UPDATE dictation_progress
+                     SET level = $1, set_id = $2, session_id = $3,
+                         question_id = NULL, question_token_hash = NULL,
+                         question_issued_at = NULL, updated_at = NOW()
+                     WHERE username = $4 AND session_id = $3
+                     RETURNING username`,
+                    [nextLevel, setId, sessionId, username]
+                );
+                if (progressAdvanced.rowCount !== 1) {
+                    throw new Error('Dictation progress state changed during submission');
+                }
+
+                let nextQuestion = null;
+                let sessionResult = null;
+                if (status === 'wrong') {
+                    sessionResult = 'failed';
+                } else if (status === 'correct' && level >= 3) {
+                    sessionResult = 'passed';
+                }
+                if (sessionResult) {
+                    const sessionEnded = await client.query(
+                        `UPDATE dictation_sessions
+                         SET result = $1, ended_at = NOW()
+                         WHERE id = $2 AND username = $3 AND result = 'in_progress'
+                         RETURNING id`,
+                        [sessionResult, sessionId, username]
+                    );
+                    if (sessionEnded.rowCount !== 1) {
+                        throw new Error('Dictation session state changed while ending');
+                    }
+                    const progressCleared = await client.query(
+                        `UPDATE dictation_progress
+                         SET level = 1, set_id = NULL, session_id = NULL,
+                             question_id = NULL, question_token_hash = NULL,
+                             bank_version = NULL, question_issued_at = NULL, updated_at = NOW()
+                         WHERE username = $1 AND session_id = $2
+                         RETURNING username`,
+                        [username, sessionId]
+                    );
+                    if (progressCleared.rowCount !== 1) {
+                        throw new Error('Dictation progress was not cleared');
+                    }
+                } else {
+                    const nextIssued = await issueDictationQuestion(client, {
+                        username,
+                        sessionId,
+                        setId,
+                        level: nextLevel
+                    });
+                    nextQuestion = {
+                        level: nextLevel,
+                        setId,
+                        sessionId,
+                        question: nextIssued.question,
+                        questionToken: nextIssued.questionToken,
+                        bankVersion: nextIssued.bankVersion
+                    };
+                }
+
+                responseBody = {
                     success: true,
                     message: isCorrect ? '自动审核通过' : '自动审核未通过',
-                    status
+                    status,
+                    level,
+                    answer: correctWord,
+                    nextQuestion
                 };
                 await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
             } catch (txError) {
                 await client.query('ROLLBACK').catch(() => {});
-                if (imageDiskPath) await fs.promises.unlink(imageDiskPath).catch(() => {});
                 throw txError;
             } finally {
                 client.release();
             }
 
-            res.json({ success: true, message: isCorrect ? '自动审核通过' : '自动审核未通过', status });
+            res.json(responseBody);
         } catch (error) {
-            if (imageDiskPath) {
-                const fs = require('fs');
-                await fs.promises.unlink(imageDiskPath).catch(() => {});
-            }
             console.error('Dictation submit error:', error);
             res.status(500).json({ success: false, message: '提交失败' });
         }
@@ -1463,7 +1961,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const { username, betAmount } = req.body;
+            const { username, betAmount } = req.body || {};
             const betValue = Number(betAmount);
 
             if (username !== req.session.user.username) {
@@ -1502,14 +2000,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 { type: '×0.5', multiplier: 0.5 }
             ];
 
-            const randomIndex = randomInt(0, 5);
-            const outcome = outcomes[randomIndex];
+            const outcome = randomArrayItem(outcomes);
 
             const payout = Math.floor(betValue * outcome.multiplier);
 
             const baseAmounts = [50, 100, 150, 200];
             const amounts = baseAmounts.map((num) => Math.max(1, Math.round(num * betValue / 100)));
-            const randomAmount = () => amounts[randomInt(0, amounts.length)];
+            const randomAmount = () => randomArrayItem(amounts);
             const isLose = payout <= 0;
             let slotResults = isLose ? [randomAmount(), randomAmount(), randomAmount()] : [payout, payout, payout];
             if (isLose) {
@@ -1545,13 +2042,10 @@ module.exports = function registerGameRoutes(app, deps) {
                 finalBalance = winResult.balance;
             }
 
-            const crypto = require('crypto');
-            const proof = crypto.createHash('sha256')
-                .update(`${username}-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                .digest('hex');
+            const resultTrace = randomBytes(24).toString('hex');
             await client.query(`
                 INSERT INTO slot_results (
-                    username, result, won, proof, created_at,
+                    username, result, won, result_trace, created_at,
                     bet_amount, payout_amount, balance_before, balance_after, multiplier, game_details
                 )
                 VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10)
@@ -1559,7 +2053,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 username,
                 JSON.stringify(slotResults),
                 outcome.type,
-                proof,
+                resultTrace,
                 betValue,
                 payout,
                 betResult.balanceBefore,
@@ -1579,8 +2073,8 @@ module.exports = function registerGameRoutes(app, deps) {
                 multiplier: outcome.multiplier,
                 payout: payout,
                 reels: slotResults,
-                newBalance: currentBalance,
-                finalBalance: finalBalance
+                newBalance: finalBalance,
+                resultTrace
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -1602,8 +2096,8 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const { username } = req.body;
-            const tier = Number(req.body.tier);
+            const { username } = req.body || {};
+            const tier = Number(req.body?.tier);
 
             if (username !== req.session.user.username) {
                 await client.query('ROLLBACK');
@@ -1711,14 +2205,14 @@ module.exports = function registerGameRoutes(app, deps) {
 
                 // 如果应该中奖且还没有匹配号码
                 if (payout > 0 && matchedCount === 0) {
-                    num = winningNumbers[randomInt(0, winningNumbers.length)];
+                    num = randomArrayItem(winningNumbers);
                     prize = `${payout} 积分`; // 使用实际中奖金额
                     matchedCount++;
                 } else {
                     do {
                         num = randomInt(1, 101);
                     } while (winningNumbers.includes(num));
-                    prize = `${tierRewards[randomInt(0, tierRewards.length)]} 积分`;
+                    prize = `${randomArrayItem(tierRewards)} 积分`;
                 }
 
                 userSlots.push({
@@ -1737,15 +2231,27 @@ module.exports = function registerGameRoutes(app, deps) {
                 };
             }
 
-            const crypto = require('crypto');
-            const proof = crypto.createHash('sha256')
-                .update(`${username}-scratch-${Date.now()}-${randomBytes(8).toString('hex')}`)
-                .digest('hex');
+            const resultTrace = randomBytes(24).toString('hex');
             await client.query(
                 `INSERT INTO scratch_results (
-                    username, reward, matches_count, tier_cost, winning_numbers, slots, proof, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
-                [username, payout, matchedCount, tier, JSON.stringify(winningNumbers), JSON.stringify(userSlots), proof]
+                    username, reward, matches_count, tier_cost, winning_numbers, slots,
+                    result_trace, reward_list, tier_config, balance_before, balance_after,
+                    game_details, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
+                [
+                    username,
+                    payout,
+                    matchedCount,
+                    tier,
+                    JSON.stringify(winningNumbers),
+                    JSON.stringify(userSlots),
+                    resultTrace,
+                    JSON.stringify(tierRewards),
+                    JSON.stringify(selectedTier),
+                    betResult.balanceBefore,
+                    finalBalance,
+                    JSON.stringify({ outcome: outcomeType, randomBucket: Math.floor(random / 100) })
+                ]
             );
 
             const responseBody = {
@@ -1758,7 +2264,8 @@ module.exports = function registerGameRoutes(app, deps) {
                 winning_numbers: winningNumbers,
                 winningNumbers: winningNumbers,
                 slots: userSlots,
-                balance: finalBalance
+                balance: finalBalance,
+                resultTrace
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -1804,7 +2311,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':stone\', 0)) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
@@ -1867,7 +2374,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':stone\', 0)) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
@@ -1932,13 +2439,13 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':stone\', 0)) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
             }
             const username = req.session.user.username;
-            const index = Number(req.body.index);
+            const index = Number(req.body?.index);
             const slots = await getStoneState(username, client, { forUpdate: true });
             const beforeSlots = slots.slice();
 
@@ -2028,7 +2535,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':stone\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':stone\', 0)) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后重试' });
@@ -2073,7 +2580,10 @@ module.exports = function registerGameRoutes(app, deps) {
                     'SELECT balance FROM users WHERE username = $1',
                     [username]
                 );
-                newBalance = balanceResult.rows.length > 0 ? balanceResult.rows[0].balance : 0;
+                if (balanceResult.rows.length !== 1) {
+                    throw new Error('Stone owner disappeared during settlement');
+                }
+                newBalance = parseMoney(balanceResult.rows[0].balance, 'user balance', { min: 0 });
             }
 
             await logStoneAction({
@@ -2137,7 +2647,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':flip\', 0)) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
@@ -2218,13 +2728,13 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':flip\', 0)) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
             }
             const username = req.session.user.username;
-            const cardIndex = Number(req.body.cardIndex);
+            const cardIndex = Number(req.body?.cardIndex);
 
             if (!Number.isInteger(cardIndex) || cardIndex < 0 || cardIndex > 8) {
                 await client.query('ROLLBACK');
@@ -2369,7 +2879,7 @@ module.exports = function registerGameRoutes(app, deps) {
         try {
             client = await pool.connect();
             await client.query('BEGIN');
-            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtext($1 || \':flip\')) AS locked', [req.session.user.username]);
+            const lock = await client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':flip\', 0)) AS locked', [req.session.user.username]);
             if (!lock.rows[0].locked) {
                 await client.query('ROLLBACK');
                 return res.status(429).json({ success: false, message: '操作过于频繁，请稍后再试' });
@@ -2386,6 +2896,11 @@ module.exports = function registerGameRoutes(app, deps) {
             if (state.bad_count > 0) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '坏牌已出现，无法退出' });
+            }
+
+            if (!Number.isSafeInteger(state.good_count) || state.good_count < 1) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: '至少翻到一张好牌后才能退出' });
             }
 
             const reward = flipCashoutRewards[state.good_count] || 0;
@@ -2438,8 +2953,8 @@ module.exports = function registerGameRoutes(app, deps) {
     // 惊喜盲盒
     app.post('/api/blindbox/open', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, async (req, res) => {
         const username = req.session.user.username;
-        const tierKey = String(req.body.tier || '').trim();
-        const countNum = Number(req.body.count);
+        const tierKey = String(req.body?.tier || '').trim();
+        const countNum = Number(req.body?.count);
 
         const tier = blindboxTiers.find((item) => item.key === tierKey);
         if (!tier) {
@@ -2454,41 +2969,15 @@ module.exports = function registerGameRoutes(app, deps) {
             return res.status(400).json({ success: false, message: '盲盒配置不存在' });
         }
 
-        let blindboxPool;
-        try {
-            blindboxPool = buildBlindboxPool(tierConfig);
-        } catch (error) {
-            console.error('Blindbox pool load error:', error);
-            return res.status(500).json({ success: false, message: '礼物池加载失败' });
-        }
+        const blindboxPool = blindboxPools.get(tierKey);
 
         if (!blindboxPool.length) {
             return res.status(500).json({ success: false, message: '礼物池为空' });
         }
 
         const totalCost = tier.cost * countNum;
-        const rewards = [];
-        for (let i = 0; i < countNum; i += 1) {
-            const reward = pickBlindboxReward(blindboxPool);
-            if (!reward) {
-                return res.status(500).json({ success: false, message: '抽取失败，请稍后再试' });
-            }
-            rewards.push({
-                giftId: String(reward.giftId),
-                name: reward.name,
-                value: Number(reward.value) || 0
-            });
-        }
-
-        const sortedRewards = rewards
-            .map((item, index) => ({ ...item, originalIndex: index }))
-            .sort((a, b) => {
-                if (b.value !== a.value) {
-                    return b.value - a.value;
-                }
-                return a.originalIndex - b.originalIndex;
-            });
-        const totalRewardValue = sortedRewards.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+        let rewards = [];
+        let sortedRewards = [];
 
         let client;
         let balanceAfter = null;
@@ -2500,7 +2989,7 @@ module.exports = function registerGameRoutes(app, deps) {
             await client.query('BEGIN');
 
             const lock = await client.query(
-                'SELECT pg_try_advisory_xact_lock(hashtext($1 || \':blindbox\')) AS locked',
+                'SELECT pg_try_advisory_xact_lock(hashtextextended($1 || \':blindbox\', 0)) AS locked',
                 [username]
             );
             if (!lock.rows[0]?.locked) {
@@ -2525,13 +3014,33 @@ module.exports = function registerGameRoutes(app, deps) {
             }
             balanceAfter = betResult.balance;
 
+            for (let i = 0; i < countNum; i += 1) {
+                const reward = pickBlindboxReward(blindboxPool);
+                if (!reward) throw new Error('Blindbox reward selection failed');
+                rewards.push({
+                    giftId: String(reward.giftId),
+                    name: reward.name,
+                    value: Number(reward.value) || 0
+                });
+            }
+            sortedRewards = rewards
+                .map((item, index) => ({ ...item, originalIndex: index }))
+                .sort((a, b) => {
+                    if (b.value !== a.value) return b.value - a.value;
+                    return a.originalIndex - b.originalIndex;
+                });
+            const totalRewardValue = sortedRewards.reduce(
+                (sum, item) => sum + (Number(item.value) || 0),
+                0
+            );
+
             const roomResult = await client.query(
                 'SELECT bilibili_room_id FROM users WHERE username = $1',
                 [username]
             );
             bilibiliRoomId = roomResult.rows[0]?.bilibili_room_id || null;
             const expiresAt = bilibiliRoomId
-                ? "(date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds')"
+                ? "((date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day 23 hours 59 minutes 59 seconds') AT TIME ZONE 'Asia/Shanghai')"
                 : "'infinity'::timestamptz";
 
             batchId = randomBytes(8).toString('hex');
@@ -2556,8 +3065,8 @@ module.exports = function registerGameRoutes(app, deps) {
                     VALUES (
                         $1, $2, $3, $4, 'stored',
                         ${expiresAt},
-                        (NOW() AT TIME ZONE 'Asia/Shanghai'),
-                        (NOW() AT TIME ZONE 'Asia/Shanghai'),
+                        NOW(),
+                        NOW(),
                         'blindbox',
                         $5,
                         $6,
@@ -2582,7 +3091,7 @@ module.exports = function registerGameRoutes(app, deps) {
             await client.query(
                 `INSERT INTO blindbox_logs (
                     username, tier_key, tier_name, box_count, total_cost, total_reward_value, rewards, batch_id, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
                 [
                     username,
                     tierKey,
@@ -2595,13 +3104,24 @@ module.exports = function registerGameRoutes(app, deps) {
                 ]
             );
 
+            if (bilibiliRoomId && firstInventoryId) {
+                await client.query(`
+                    INSERT INTO delivery_outbox (event_type, aggregate_id, payload)
+                    VALUES ('enqueue_inventory', $1, $2)
+                    ON CONFLICT (event_type, aggregate_id) DO NOTHING
+                `, [
+                    firstInventoryId,
+                    JSON.stringify({ username, source: 'blindbox', batchId })
+                ]);
+            }
+
             const durableResponse = {
                 success: true,
                 balanceAfter,
                 batchId,
                 rewards,
-                queued: false,
-                enqueueMessage: bilibiliRoomId ? '礼物将在事务提交后加入发送队列' : null
+                queued: Boolean(bilibiliRoomId && firstInventoryId),
+                enqueueMessage: bilibiliRoomId ? '礼物已加入可恢复发送队列' : null
             };
             await req.finalizeIdempotency?.(client, 200, durableResponse);
             await client.query('COMMIT');
@@ -2613,21 +3133,13 @@ module.exports = function registerGameRoutes(app, deps) {
             client?.release();
         }
 
-        let enqueueResult = null;
-        if (bilibiliRoomId && firstInventoryId && enqueueWishInventorySend) {
-            enqueueResult = await enqueueWishInventorySend({
-                inventoryId: firstInventoryId,
-                username
-            });
-        }
-
         return res.json({
             success: true,
             balanceAfter,
             batchId,
             rewards,
-            queued: !!enqueueResult?.success,
-            enqueueMessage: enqueueResult?.message || null
+            queued: Boolean(bilibiliRoomId && firstInventoryId),
+            enqueueMessage: bilibiliRoomId ? '礼物已加入可恢复发送队列' : null
         });
     });
 
@@ -2638,13 +3150,16 @@ module.exports = function registerGameRoutes(app, deps) {
             client = await pool.connect();
             await client.query('BEGIN');
             const username = req.session.user.username;
-            const giftType = req.body.giftType;
-            const power = Number(req.body.power);
+            const giftType = typeof req.body?.giftType === 'string'
+                ? req.body.giftType.trim()
+                : '';
+            const power = Number(req.body?.power);
 
-            if (!duelRewards[giftType]) {
+            if (!Object.hasOwn(duelRewards, giftType)) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '无效的奖品档位' });
             }
+            const duelReward = duelRewards[giftType];
 
             if (!Number.isInteger(power) || power < 1 || power > 80) {
                 await client.query('ROLLBACK');
@@ -2671,7 +3186,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const success = randomFloat() < successRate;
-            const reward = success ? duelRewards[giftType].reward : 0;
+            const reward = success ? duelReward.reward : 0;
 
             const balanceAfterBet = balanceResult.balance;
             let newBalance = balanceAfterBet;
@@ -2680,7 +3195,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username,
                     amount: reward,
                     operationType: 'duel_win',
-                    description: `决斗挑战获胜：${duelRewards[giftType].name} ${reward} 积分`,
+                    description: `决斗挑战获胜：${duelReward.name} ${reward} 积分`,
                     ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
@@ -2699,7 +3214,7 @@ module.exports = function registerGameRoutes(app, deps) {
             await client.query(
                 `INSERT INTO duel_logs (
                     username, gift_type, reward, power, cost, success, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+                ) VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
                 [
                     username,
                     giftType,
@@ -2757,10 +3272,10 @@ module.exports = function registerGameRoutes(app, deps) {
     });
 
     // 获取用户游戏记录
-    app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, async (req, res) => {
+    app.get('/api/game-records/:gameType', requireLogin, requireAuthorized, readHeavyRateLimit, async (req, res) => {
         try {
             const { gameType } = req.params;
-            const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            const page = Math.min(500, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
             const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
             const username = req.session.user.username;
             const offset = (page - 1) * limit;

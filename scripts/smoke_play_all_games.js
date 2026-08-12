@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 /**
@@ -12,7 +13,7 @@
  * - Wish: play 1 次
  *
  * 环境变量：
- *   TARGET_URL (默认 https://www.wuguijiang.com)
+ *   TARGET_URL (默认 http://localhost:3000)
  *   AUTH_USER   登录用户名
  *   AUTH_PASS   登录密码
  */
@@ -20,7 +21,7 @@
 const { URL } = require('url');
 const fetch = require('node-fetch');
 
-const baseUrl = process.env.TARGET_URL || 'https://www.wuguijiang.com';
+const baseUrl = process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER;
 const password = process.env.AUTH_PASS;
 

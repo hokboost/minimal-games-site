@@ -1,44 +1,26 @@
 (() => {
     const ENDPOINT = '/api/ux/batch';
+    const BOOTSTRAP_ENDPOINT = '/api/ux/bootstrap';
+    const REVOKE_ENDPOINT = '/api/ux/revoke';
+    const CONSENT_VERSION = '2026-08-12';
     const HEARTBEAT_MS = 15000;
     const ACTIVE_WINDOW_MS = 30000;
-    const SESSION_IDLE_MS = 30 * 60 * 1000;
-    const anonymousKey = 'minimal-games:ux-anonymous:v1';
-    const sessionKey = 'minimal-games:ux-session:v1';
-    const tabKey = 'minimal-games:ux-tab:v1';
-    const apiActions = new Map([
-        ['/api/quiz/start', ['quiz', 'start']],
-        ['/api/quiz/next', ['quiz', 'next']],
-        ['/api/quiz/submit', ['quiz', 'submit']],
-        ['/api/dictation/start', ['dictation', 'start']],
-        ['/api/dictation/retry', ['dictation', 'retry']],
-        ['/api/dictation/submit', ['dictation', 'submit']],
-        ['/api/slot/play', ['slot', 'play']],
-        ['/api/scratch/play', ['scratch', 'play']],
-        ['/api/stone/add', ['stone', 'add']],
-        ['/api/stone/fill', ['stone', 'fill']],
-        ['/api/stone/replace', ['stone', 'replace']],
-        ['/api/stone/redeem', ['stone', 'redeem']],
-        ['/api/flip/start', ['flip', 'start']],
-        ['/api/flip/flip', ['flip', 'flip']],
-        ['/api/flip/cashout', ['flip', 'cashout']],
-        ['/api/blindbox/open', ['blindbox', 'open']],
-        ['/api/duel/play', ['duel', 'play']],
-        ['/api/wish/play', ['wish', 'play']],
-        ['/api/wish-batch', ['wish', 'batch']],
-        ['/api/gifts/exchange', ['gifts', 'exchange']]
-    ]);
-    const completedActions = new Set([
-        'quiz.submit',
-        'slot.play',
-        'scratch.play',
-        'stone.redeem',
-        'flip.cashout',
-        'blindbox.open',
-        'duel.play',
-        'wish.play',
-        'wish.batch'
-    ]);
+    const CONSENT_KEY = 'minimal-games:ux-consent:v2';
+    const TAB_KEY = 'minimal-games:ux-tab-nonce:v2';
+    const QUEUE_KEY = 'minimal-games:ux-queue:v2';
+    const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
+    const t = (zh, en) => lang === 'zh' ? zh : en;
+    const noop = () => {};
+    const noopAnalytics = Object.freeze({
+        track: noop,
+        pausePage: noop,
+        resumePage: noop,
+        flush: noop
+    });
+    window.UXAnalytics = noopAnalytics;
+
+    let issuedSession = null;
+    let revokeCurrentSession = async () => {};
 
     function uuid() {
         if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -47,6 +29,11 @@
         bytes[8] = (bytes[8] & 0x3f) | 0x80;
         const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
         return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+
+    function isUuid(value) {
+        return typeof value === 'string'
+            && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
     }
 
     function readStorage(storage, key) {
@@ -60,32 +47,185 @@
     function writeStorage(storage, key, value) {
         try {
             storage.setItem(key, JSON.stringify(value));
+            return true;
         } catch {
-            // Analytics remains best-effort when storage is unavailable.
+            return false;
         }
     }
 
-    function getStableId(storage, key) {
-        const stored = readStorage(storage, key);
-        if (typeof stored === 'string' && stored.length === 36) return stored;
+    function readConsent() {
+        const value = readStorage(localStorage, CONSENT_KEY);
+        if (!value || value.version !== CONSENT_VERSION
+            || typeof value.analytics !== 'boolean'
+            || typeof value.detailedPreferences !== 'boolean') return null;
+        return value;
+    }
+
+    function storeConsent(analytics, detailedPreferences) {
+        writeStorage(localStorage, CONSENT_KEY, {
+            version: CONSENT_VERSION,
+            analytics: analytics === true,
+            detailedPreferences: analytics === true && detailedPreferences === true,
+            decidedAt: new Date().toISOString()
+        });
+    }
+
+    function clearTrackingStorage() {
+        try {
+            sessionStorage.removeItem(TAB_KEY);
+            sessionStorage.removeItem(QUEUE_KEY);
+        } catch {
+            // Storage may be disabled.
+        }
+    }
+
+    function element(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text) node.textContent = text;
+        return node;
+    }
+
+    function closePrivacyUi() {
+        document.querySelector('.ux-consent-banner')?.remove();
+        document.querySelector('.ux-privacy-overlay')?.remove();
+    }
+
+    function showPrivacySettings(firstVisit = false) {
+        closePrivacyUi();
+        const current = readConsent() || {
+            analytics: false,
+            detailedPreferences: false
+        };
+        const overlay = element('div', 'ux-privacy-overlay');
+        const dialog = element('section', 'ux-privacy-dialog');
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-labelledby', 'ux-privacy-title');
+
+        const title = element('h2', null, t('隐私设置', 'Privacy settings'));
+        title.id = 'ux-privacy-title';
+        const description = element(
+            'p',
+            'ux-privacy-description',
+            t('你可以决定是否允许网站记录页面停留与使用偏好。',
+                'Choose whether the site may record page engagement and usage preferences.')
+        );
+        const options = element('div', 'ux-privacy-options');
+
+        const analyticsLabel = element('label', 'ux-privacy-option');
+        const analyticsInput = document.createElement('input');
+        analyticsInput.type = 'checkbox';
+        analyticsInput.checked = current.analytics;
+        const analyticsText = element('span');
+        analyticsText.append(
+            element('strong', null, t('体验分析', 'Experience analytics')),
+            element('small', null, t('记录访问页面、活跃时长、滚动深度和操作类型。',
+                'Records visited pages, active time, scroll depth, and action categories.'))
+        );
+        analyticsLabel.append(analyticsInput, analyticsText);
+
+        const detailsLabel = element('label', 'ux-privacy-option');
+        const detailsInput = document.createElement('input');
+        detailsInput.type = 'checkbox';
+        detailsInput.checked = current.analytics && current.detailedPreferences;
+        detailsInput.disabled = !analyticsInput.checked;
+        const detailsText = element('span');
+        detailsText.append(
+            element('strong', null, t('设备与语言偏好', 'Device and language preferences')),
+            element('small', null, t('包括设备类型、语言、时区、屏幕和无障碍偏好，不保存 UX 记录的完整 IP。',
+                'Includes device type, language, time zone, screen, and accessibility preferences. Full IP addresses are not stored in UX records.'))
+        );
+        detailsLabel.append(detailsInput, detailsText);
+        options.append(analyticsLabel, detailsLabel);
+
+        analyticsInput.addEventListener('change', () => {
+            detailsInput.disabled = !analyticsInput.checked;
+            if (!analyticsInput.checked) detailsInput.checked = false;
+        });
+
+        const actions = element('div', 'ux-privacy-actions');
+        const cancelButton = element('button', 'ux-privacy-secondary', t('取消', 'Cancel'));
+        cancelButton.type = 'button';
+        const saveButton = element('button', 'ux-privacy-primary', t('保存', 'Save'));
+        saveButton.type = 'button';
+        if (!firstVisit) {
+            cancelButton.addEventListener('click', closePrivacyUi);
+            actions.appendChild(cancelButton);
+        }
+        saveButton.addEventListener('click', async () => {
+            const previous = readConsent();
+            const analytics = analyticsInput.checked;
+            const detailed = analytics && detailsInput.checked;
+            if (previous?.analytics && !analytics) {
+                await revokeCurrentSession();
+                clearTrackingStorage();
+            }
+            storeConsent(analytics, detailed);
+            closePrivacyUi();
+            if (analytics !== previous?.analytics
+                || detailed !== previous?.detailedPreferences) {
+                window.location.reload();
+            }
+        });
+        actions.appendChild(saveButton);
+        dialog.append(title, description, options, actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        analyticsInput.focus();
+    }
+
+    function showConsentBanner() {
+        closePrivacyUi();
+        const banner = element('aside', 'ux-consent-banner');
+        banner.setAttribute('role', 'region');
+        banner.setAttribute('aria-label', t('分析隐私选择', 'Analytics privacy choice'));
+        const text = element(
+            'p',
+            null,
+            t('允许体验分析后，网站会记录页面停留与设备偏好，用于改进使用体验。',
+                'Allow experience analytics to record page engagement and device preferences for product improvement.')
+        );
+        const actions = element('div', 'ux-consent-actions');
+        const reject = element('button', 'ux-privacy-secondary', t('仅必要功能', 'Necessary only'));
+        reject.type = 'button';
+        reject.addEventListener('click', () => {
+            storeConsent(false, false);
+            clearTrackingStorage();
+            closePrivacyUi();
+        });
+        const settings = element('button', 'ux-privacy-secondary', t('设置', 'Settings'));
+        settings.type = 'button';
+        settings.addEventListener('click', () => showPrivacySettings(true));
+        const accept = element('button', 'ux-privacy-primary', t('允许', 'Allow'));
+        accept.type = 'button';
+        accept.addEventListener('click', () => {
+            storeConsent(true, true);
+            closePrivacyUi();
+            window.location.reload();
+        });
+        actions.append(reject, settings, accept);
+        banner.append(text, actions);
+        document.body.appendChild(banner);
+    }
+
+    document.getElementById('privacy-settings-button')?.addEventListener('click', () => {
+        showPrivacySettings(false);
+    });
+    window.UXPrivacy = Object.freeze({ open: () => showPrivacySettings(false) });
+
+    const consent = readConsent();
+    if (!consent) {
+        showConsentBanner();
+        return;
+    }
+    if (!consent.analytics) return;
+
+    function getTabNonce() {
+        const stored = readStorage(sessionStorage, TAB_KEY);
+        if (isUuid(stored)) return stored;
         const created = uuid();
-        writeStorage(storage, key, created);
-        return created;
-    }
-
-    function getSession() {
-        const now = Date.now();
-        const stored = readStorage(sessionStorage, sessionKey);
-        if (
-            stored?.id && stored?.startedAt && Number.isFinite(stored.lastActivity)
-            && now - stored.lastActivity < SESSION_IDLE_MS
-        ) {
-            stored.lastActivity = now;
-            writeStorage(sessionStorage, sessionKey, stored);
-            return stored;
-        }
-        const created = { id: uuid(), startedAt: new Date(now).toISOString(), lastActivity: now };
-        writeStorage(sessionStorage, sessionKey, created);
+        writeStorage(sessionStorage, TAB_KEY, created);
         return created;
     }
 
@@ -119,6 +259,7 @@
     }
 
     function getPreferences() {
+        if (!consent.detailedPreferences) return {};
         const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
         return {
             deviceType: getDeviceType(),
@@ -147,279 +288,294 @@
         };
     }
 
-    const anonymousId = getStableId(localStorage, anonymousKey);
-    const tabId = getStableId(sessionStorage, tabKey);
-    let session = getSession();
-    let page = null;
-    let pendingEvents = [];
-    let lastInteractionAt = Date.now();
-    let lastTickAt = performance.now();
-    let paused = false;
-    let sending = false;
-
-    function startPage() {
-        const now = new Date();
-        page = {
-            id: uuid(),
-            route: normalizeRoute(window.location.href),
-            referrerRoute: document.referrer ? normalizeRoute(document.referrer) : null,
-            enteredAt: now.toISOString(),
-            enteredTimestamp: now.getTime(),
-            activeMs: 0,
-            maxScrollPercent: 0,
-            exitReason: null,
-            exitedAt: null,
-            ended: false,
-            isEmbedded: window.self !== window.top
-        };
-        paused = false;
-        lastInteractionAt = Date.now();
-        lastTickAt = performance.now();
-        updateScrollDepth();
-        track('page_view', 'page', { route: page.route, embedded: page.isEmbedded });
-        send('start');
-    }
-
-    function updateActivityClock() {
-        if (!page || page.ended) return;
-        const now = performance.now();
-        const elapsed = Math.max(0, Math.min(5000, now - lastTickAt));
-        const recentlyActive = Date.now() - lastInteractionAt <= ACTIVE_WINDOW_MS;
-        if (!paused && document.visibilityState === 'visible' && recentlyActive) {
-            page.activeMs += elapsed;
-        }
-        lastTickAt = now;
-    }
-
-    function updateScrollDepth() {
-        if (!page || page.ended) return;
-        const scrollable = Math.max(0, document.documentElement.scrollHeight - innerHeight);
-        const percent = scrollable === 0 ? 100 : Math.round(100 * Math.min(1, scrollY / scrollable));
-        page.maxScrollPercent = Math.max(page.maxScrollPercent, percent);
-    }
-
-    function noteInteraction() {
-        const now = Date.now();
-        if (now - session.lastActivity >= SESSION_IDLE_MS) {
-            endPage('session_timeout', true);
-            session = getSession();
-            startPage();
-        }
-        lastInteractionAt = now;
-        session.lastActivity = lastInteractionAt;
-        writeStorage(sessionStorage, sessionKey, session);
-    }
-
-    function track(eventType, elementName = null, metadata = {}) {
-        if (!page || page.ended) return;
-        pendingEvents.push({
-            id: uuid(),
-            pageViewId: page.id,
-            eventType,
-            elementName,
-            metadata,
-            occurredAt: new Date().toISOString()
-        });
-        if (pendingEvents.length > 100) pendingEvents = pendingEvents.slice(-100);
-    }
-
-    function pagePayload(exitReason = null) {
-        updateActivityClock();
-        updateScrollDepth();
-        const now = Date.now();
-        return {
-            id: page.id,
-            route: page.route,
-            referrerRoute: page.referrerRoute,
-            enteredAt: page.enteredAt,
-            exitedAt: page.exitedAt,
-            durationMs: Math.min(86400000, Math.max(0, now - page.enteredTimestamp)),
-            activeMs: Math.min(86400000, Math.round(page.activeMs)),
-            maxScrollPercent: page.maxScrollPercent,
-            exitReason: exitReason || page.exitReason,
-            isEmbedded: page.isEmbedded
-        };
-    }
-
-    function removeSentEvents(ids) {
-        if (!ids.size) return;
-        pendingEvents = pendingEvents.filter((event) => !ids.has(event.id));
-    }
-
-    function send(reason, options = {}) {
-        if (!page || (sending && !options.beacon)) return;
-        const pageId = page.id;
-        const eventSnapshot = pendingEvents.filter((event) => event.pageViewId === pageId).slice(0, 25);
-        const sentIds = new Set(eventSnapshot.map((event) => event.id));
-        const payload = {
-            reason,
-            session: {
-                id: session.id,
-                anonymousId,
-                tabId,
-                startedAt: session.startedAt,
-                preferences: getPreferences()
-            },
-            pageView: pagePayload(options.exitReason),
-            events: eventSnapshot.map(({ pageViewId, ...event }) => event)
-        };
-        const serialized = JSON.stringify(payload);
-
-        if (options.beacon && typeof navigator.sendBeacon === 'function') {
-            const accepted = navigator.sendBeacon(
-                ENDPOINT,
-                serialized
-            );
-            if (accepted) removeSentEvents(sentIds);
-            return;
-        }
-
-        sending = true;
-        fetch(ENDPOINT, {
+    async function bootstrap() {
+        const response = await fetch(BOOTSTRAP_ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: serialized,
-            credentials: 'same-origin',
-            keepalive: serialized.length < 60000
-        }).then((response) => {
-            if (response.ok) removeSentEvents(sentIds);
-        }).catch(() => {}).finally(() => {
-            sending = false;
+            body: JSON.stringify({
+                analytics: true,
+                detailedPreferences: consent.detailedPreferences,
+                consentVersion: CONSENT_VERSION,
+                tabNonce: getTabNonce()
+            }),
+            credentials: 'same-origin'
         });
+        if (!response.ok) throw new Error('analytics_bootstrap_failed');
+        const body = await response.json();
+        if (!body?.success || !isUuid(body.session?.id) || !isUuid(body.session?.anonymousId)
+            || !isUuid(body.session?.tabId) || !isUuid(body.session?.tabNonce)
+            || typeof body.session?.startedAt !== 'string'
+            || typeof body.session?.ingestToken !== 'string') {
+            throw new Error('analytics_bootstrap_invalid');
+        }
+        return body.session;
     }
 
-    function endPage(reason, useBeacon = true) {
-        if (!page || page.ended) return;
-        updateActivityClock();
-        page.ended = true;
-        page.exitReason = reason;
-        page.exitedAt = new Date().toISOString();
-        pendingEvents.push({
-            id: uuid(),
-            pageViewId: page.id,
-            eventType: 'page_exit',
-            elementName: 'page',
-            metadata: { reason },
-            occurredAt: page.exitedAt
+    bootstrap().then((session) => {
+        issuedSession = session;
+        startAnalytics(session);
+    }).catch(() => {
+        window.UXAnalytics = noopAnalytics;
+    });
+
+    function startAnalytics(session) {
+        let page = null;
+        let pendingEvents = [];
+        let lastInteractionAt = Date.now();
+        let lastTickAt = performance.now();
+        let paused = false;
+        let sending = false;
+        let retryCount = 0;
+        let retryTimer = null;
+        let queue = readStorage(sessionStorage, QUEUE_KEY);
+        queue = Array.isArray(queue)
+            ? queue.filter((batch) => batch?.payload?.session?.id === session.id).slice(-20)
+            : [];
+
+        function persistQueue() {
+            while (queue.length > 1
+                && JSON.stringify(queue).length > 120000) queue.shift();
+            writeStorage(sessionStorage, QUEUE_KEY, queue);
+        }
+
+        function updateActivityClock() {
+            if (!page || page.ended) return;
+            const now = performance.now();
+            const elapsed = Math.max(0, Math.min(5000, now - lastTickAt));
+            const recentlyActive = Date.now() - lastInteractionAt <= ACTIVE_WINDOW_MS;
+            if (!paused && document.visibilityState === 'visible' && recentlyActive) {
+                page.activeMs += elapsed;
+            }
+            lastTickAt = now;
+        }
+
+        function updateScrollDepth() {
+            if (!page || page.ended) return;
+            const scrollable = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+            const percent = scrollable === 0 ? 100 : Math.round(100 * Math.min(1, scrollY / scrollable));
+            page.maxScrollPercent = Math.max(page.maxScrollPercent, percent);
+        }
+
+        function noteInteraction() {
+            lastInteractionAt = Date.now();
+        }
+
+        function track(eventType, elementName = null, metadata = {}) {
+            if (!page || page.ended) return;
+            pendingEvents.push({
+                id: uuid(),
+                pageViewId: page.id,
+                eventType,
+                elementName,
+                metadata,
+                occurredAt: new Date().toISOString()
+            });
+            if (pendingEvents.length > 100) pendingEvents = pendingEvents.slice(-100);
+        }
+
+        function pagePayload(exitReason = null) {
+            updateActivityClock();
+            updateScrollDepth();
+            return {
+                id: page.id,
+                route: page.route,
+                referrerRoute: page.referrerRoute,
+                enteredAt: page.enteredAt,
+                exitedAt: page.exitedAt,
+                durationMs: Math.min(86400000, Math.max(0, Date.now() - page.enteredTimestamp)),
+                activeMs: Math.min(86400000, Math.round(page.activeMs)),
+                maxScrollPercent: page.maxScrollPercent,
+                exitReason: exitReason || page.exitReason,
+                isEmbedded: page.isEmbedded
+            };
+        }
+
+        function buildPayload(reason, exitReason = null) {
+            const events = pendingEvents.filter((event) => event.pageViewId === page.id).slice(0, 25);
+            return {
+                reason,
+                session: {
+                    id: session.id,
+                    anonymousId: session.anonymousId,
+                    tabId: session.tabId,
+                    tabNonce: session.tabNonce,
+                    startedAt: session.startedAt,
+                    ingestToken: session.ingestToken,
+                    detailedPreferences: consent.detailedPreferences,
+                    preferences: getPreferences()
+                },
+                pageView: pagePayload(exitReason),
+                events: events.map(({ pageViewId, ...event }) => event)
+            };
+        }
+
+        function enqueue(payload) {
+            const batch = { id: uuid(), payload };
+            const index = queue.findIndex((item) => (
+                item?.payload?.pageView?.id === payload.pageView.id
+            ));
+            if (index >= 0) queue[index] = batch;
+            else queue.push(batch);
+            queue = queue.slice(-20);
+            persistQueue();
+            return batch;
+        }
+
+        function scheduleRetry() {
+            if (retryTimer || queue.length === 0) return;
+            const delay = Math.min(60000, 1000 * (2 ** Math.min(retryCount, 6)));
+            retryTimer = setTimeout(() => {
+                retryTimer = null;
+                flushQueue();
+            }, delay);
+        }
+
+        async function flushQueue() {
+            if (sending || queue.length === 0) return;
+            const batch = queue[0];
+            sending = true;
+            try {
+                const response = await fetch(ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(batch.payload),
+                    credentials: 'same-origin',
+                    keepalive: true
+                });
+                if (response.ok) {
+                    queue = queue.filter((item) => item.id !== batch.id);
+                    const sentIds = new Set((batch.payload.events || []).map((event) => event.id));
+                    pendingEvents = pendingEvents.filter((event) => !sentIds.has(event.id));
+                    retryCount = 0;
+                    persistQueue();
+                } else if (response.status === 401 || response.status === 403) {
+                    queue = [];
+                    persistQueue();
+                } else {
+                    retryCount += 1;
+                }
+            } catch {
+                retryCount += 1;
+            } finally {
+                sending = false;
+                if (queue.length > 0) scheduleRetry();
+            }
+        }
+
+        function send(reason, options = {}) {
+            if (!page) return;
+            const batch = enqueue(buildPayload(reason, options.exitReason));
+            if (options.beacon && typeof navigator.sendBeacon === 'function') {
+                navigator.sendBeacon(ENDPOINT, JSON.stringify(batch.payload));
+                return;
+            }
+            flushQueue();
+        }
+
+        function startPage() {
+            const now = new Date();
+            page = {
+                id: uuid(),
+                route: normalizeRoute(window.location.href),
+                referrerRoute: document.referrer ? normalizeRoute(document.referrer) : null,
+                enteredAt: now.toISOString(),
+                enteredTimestamp: now.getTime(),
+                activeMs: 0,
+                maxScrollPercent: 0,
+                exitReason: null,
+                exitedAt: null,
+                ended: false,
+                isEmbedded: window.self !== window.top
+            };
+            paused = false;
+            lastInteractionAt = Date.now();
+            lastTickAt = performance.now();
+            updateScrollDepth();
+            track('page_view', 'page', { route: page.route, embedded: page.isEmbedded });
+            send('start');
+        }
+
+        function endPage(reason, useBeacon = true) {
+            if (!page || page.ended) return;
+            updateActivityClock();
+            page.exitReason = reason;
+            page.exitedAt = new Date().toISOString();
+            pendingEvents.push({
+                id: uuid(),
+                pageViewId: page.id,
+                eventType: 'page_exit',
+                elementName: 'page',
+                metadata: { reason },
+                occurredAt: page.exitedAt
+            });
+            page.ended = true;
+            send('exit', { beacon: useBeacon, exitReason: reason });
+        }
+
+        function pausePage(reason = 'shell_covered') {
+            endPage(reason, true);
+            paused = true;
+        }
+
+        function resumePage() {
+            if (page && !page.ended) return;
+            startPage();
+        }
+
+        revokeCurrentSession = async () => {
+            if (!issuedSession) return;
+            await fetch(REVOKE_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session: issuedSession }),
+                credentials: 'same-origin'
+            }).catch(() => {});
+        };
+
+        window.UXAnalytics = Object.freeze({
+            track,
+            pausePage,
+            resumePage,
+            flush: () => send('manual')
         });
-        send('exit', { beacon: useBeacon, exitReason: reason });
-    }
 
-    function pausePage(reason = 'shell_covered') {
-        endPage(reason, true);
-        paused = true;
-    }
+        for (const eventName of ['pointerdown', 'keydown', 'touchstart']) {
+            document.addEventListener(eventName, noteInteraction, { passive: true, capture: true });
+        }
+        document.addEventListener('scroll', () => {
+            noteInteraction();
+            updateScrollDepth();
+        }, { passive: true });
+        document.addEventListener('visibilitychange', () => {
+            updateActivityClock();
+            send('visibility');
+        });
+        window.addEventListener('resize', updateScrollDepth, { passive: true });
+        window.addEventListener('pagehide', () => endPage('pagehide', true));
+        window.addEventListener('error', (event) => {
+            track('client_error', 'window', { name: event.error?.name || 'Error' });
+        });
+        window.addEventListener('unhandledrejection', (event) => {
+            track('client_error', 'promise', { name: event.reason?.name || 'UnhandledRejection' });
+        });
+        document.addEventListener('click', (event) => {
+            const link = event.target.closest?.('a[href]');
+            if (link) {
+                const destination = normalizeRoute(link.href);
+                track(
+                    link.pathname?.startsWith('/set-language/') ? 'language_changed' : 'navigation_click',
+                    link.dataset.uxName || 'link',
+                    { destination }
+                );
+            }
+            const actionElement = event.target.closest?.('[data-ux-event]');
+            if (actionElement) track('ui_action', actionElement.dataset.uxEvent, {});
+        }, { capture: true });
 
-    function resumePage() {
-        if (page && !page.ended) return;
+        setInterval(updateActivityClock, 1000);
+        setInterval(() => send('heartbeat'), HEARTBEAT_MS);
+        persistQueue();
+        flushQueue();
         startPage();
     }
-
-    function classifyApiAction(pathname) {
-        return apiActions.get(pathname) || null;
-    }
-
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = async (input, init = {}) => {
-        let url;
-        try {
-            url = new URL(typeof input === 'string' ? input : input.url, window.location.href);
-        } catch {
-            return originalFetch(input, init);
-        }
-        const action = url.origin === window.location.origin ? classifyApiAction(url.pathname) : null;
-        if (!action || url.pathname === ENDPOINT) return originalFetch(input, init);
-
-        const started = performance.now();
-        try {
-            const response = await originalFetch(input, init);
-            let responseBody = null;
-            try {
-                responseBody = await response.clone().json();
-            } catch {
-                // Status still provides a useful outcome when the body is not JSON.
-            }
-            const [game, apiAction] = action;
-            const success = response.ok && responseBody?.success !== false;
-            const metadata = {
-                game,
-                action: apiAction,
-                success,
-                status: response.status,
-                durationMs: Math.round(performance.now() - started),
-                code: typeof responseBody?.code === 'string' ? responseBody.code.slice(0, 80) : null
-            };
-            track('api_action', `${game}.${apiAction}`, metadata);
-            if (apiAction === 'start' && success) track('game_started', game, { action: apiAction });
-            if (completedActions.has(`${game}.${apiAction}`) && success) {
-                track('game_completed', game, { action: apiAction });
-            }
-            if (!success) {
-                const insufficient = /余额不足|积分不足|balance|insufficient/i.test(
-                    `${responseBody?.code || ''} ${responseBody?.message || ''}`
-                );
-                track(insufficient ? 'insufficient_balance' : 'game_error', game, metadata);
-            }
-            return response;
-        } catch (error) {
-            const [game, apiAction] = action;
-            track('game_error', game, {
-                action: apiAction,
-                networkError: true,
-                durationMs: Math.round(performance.now() - started)
-            });
-            throw error;
-        }
-    };
-
-    window.UXAnalytics = Object.freeze({
-        track,
-        pausePage,
-        resumePage,
-        flush: () => send('manual')
-    });
-
-    for (const eventName of ['pointerdown', 'keydown', 'touchstart']) {
-        document.addEventListener(eventName, noteInteraction, { passive: true, capture: true });
-    }
-    document.addEventListener('scroll', () => {
-        noteInteraction();
-        updateScrollDepth();
-    }, { passive: true });
-    document.addEventListener('visibilitychange', () => {
-        updateActivityClock();
-        send('visibility');
-    });
-    window.addEventListener('resize', updateScrollDepth, { passive: true });
-    window.addEventListener('pagehide', () => endPage('pagehide', true));
-    window.addEventListener('error', (event) => {
-        track('client_error', 'window', {
-            name: event.error?.name || 'Error',
-            message: String(event.message || 'Unknown error').slice(0, 160)
-        });
-    });
-    window.addEventListener('unhandledrejection', (event) => {
-        track('client_error', 'promise', {
-            name: event.reason?.name || 'UnhandledRejection'
-        });
-    });
-    document.addEventListener('click', (event) => {
-        const link = event.target.closest?.('a[href]');
-        if (link) {
-            const destination = normalizeRoute(link.href);
-            track(
-                link.pathname?.startsWith('/set-language/') ? 'language_changed' : 'navigation_click',
-                link.dataset.uxName || 'link',
-                { destination }
-            );
-        }
-        const actionElement = event.target.closest?.('[data-ux-event]');
-        if (actionElement) {
-            track('ui_action', actionElement.dataset.uxEvent, {});
-        }
-    }, { capture: true });
-
-    setInterval(updateActivityClock, 1000);
-    setInterval(() => send('heartbeat'), HEARTBEAT_MS);
-    startPage();
 })();

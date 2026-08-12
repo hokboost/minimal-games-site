@@ -2,8 +2,6 @@
     const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
     const t = (zh, en) => (lang === 'zh' ? zh : en);
     const translateServerMessage = window.translateServerMessage || ((message) => message);
-    const escapeHTML = window.escapeHTML || ((value) => String(value ?? ''));
-
     const { csrfToken } = document.body.dataset;
     const tierGrid = document.getElementById('tierGrid');
     const countGroup = document.getElementById('countGroup');
@@ -77,10 +75,6 @@
         openBtn.disabled = true;
         summaryText.textContent = t('开启中...', 'Opening...');
 
-        if (currentBalance !== null) {
-            balanceEl.textContent = currentBalance - totalCost;
-        }
-
         try {
             const response = await window.idempotentFetch('/api/blindbox/open', {
                 method: 'POST',
@@ -109,15 +103,16 @@
                 balanceEl.textContent = result.balanceAfter;
             }
 
-            resultPanel.style.display = 'block';
-            resultList.innerHTML = '';
-            result.rewards.forEach((item) => {
+            resultPanel.hidden = false;
+            resultList.replaceChildren();
+            (Array.isArray(result.rewards) ? result.rewards : []).forEach((item) => {
                 const div = document.createElement('div');
                 div.className = 'result-item';
-                div.innerHTML = `
-                    <strong>${escapeHTML(item.name)}</strong>
-                    <span>${t('价值', 'Value')}: ${escapeHTML(item.value)} ${t('积分', 'points')}</span>
-                `;
+                const name = document.createElement('strong');
+                name.textContent = String(item.name ?? '');
+                const value = document.createElement('span');
+                value.textContent = `${t('价值', 'Value')}: ${String(item.value ?? '')} ${t('积分', 'points')}`;
+                div.append(name, value);
                 resultList.appendChild(div);
             });
 
@@ -139,9 +134,6 @@
         } catch (error) {
             console.error('Blindbox error:', error);
             summaryText.textContent = t('开启失败，请稍后重试', 'Open failed, try later');
-            if (currentBalance !== null) {
-                balanceEl.textContent = currentBalance;
-            }
         } finally {
             openBtn.disabled = false;
         }
@@ -176,29 +168,42 @@
         };
         const sections = Object.keys(config).map((key) => {
             const tier = config[key];
-            if (!tier || !Array.isArray(tier.items)) return '';
-            const rows = tier.items.map((item) => `
-                <tr>
-                    <td>${item.name || item.giftId}</td>
-                    <td>${formatPercent(item.weight)}</td>
-                </tr>
-            `).join('');
-            return `
-                <div class="rate-section">
-                    <h4>${tierTitles[key] || key}</h4>
-                    <table class="rate-table">
-                        <thead>
-                            <tr>
-                                <th>${t('礼物', 'Gift')}</th>
-                                <th>${t('概率', 'Rate')}</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-            `;
-        }).join('');
-        rateContent.innerHTML = sections || `<p>${t('暂无概率信息', 'No rate data')}</p>`;
+            if (!tier || !Array.isArray(tier.items)) return null;
+            const section = document.createElement('div');
+            section.className = 'rate-section';
+            const heading = document.createElement('h4');
+            heading.textContent = tierTitles[key] || key;
+            const table = document.createElement('table');
+            table.className = 'rate-table';
+            const head = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            for (const label of [t('礼物', 'Gift'), t('概率', 'Rate')]) {
+                const cell = document.createElement('th');
+                cell.textContent = label;
+                headRow.appendChild(cell);
+            }
+            head.appendChild(headRow);
+            const body = document.createElement('tbody');
+            for (const item of tier.items) {
+                const row = document.createElement('tr');
+                const name = document.createElement('td');
+                name.textContent = String(item?.name || item?.giftId || '');
+                const rate = document.createElement('td');
+                rate.textContent = formatPercent(item?.weight);
+                row.append(name, rate);
+                body.appendChild(row);
+            }
+            table.append(head, body);
+            section.append(heading, table);
+            return section;
+        }).filter(Boolean);
+        if (sections.length > 0) {
+            rateContent.replaceChildren(...sections);
+        } else {
+            const empty = document.createElement('p');
+            empty.textContent = t('暂无概率信息', 'No rate data');
+            rateContent.replaceChildren(empty);
+        }
     }
 
     if (rateBtn && rateModal) {

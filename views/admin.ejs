@@ -16,60 +16,37 @@
                 <span><%= lang === 'zh' ? '欢迎，' : 'Welcome, ' %><%= user.username %></span>
                 <a href="/admin/analytics"><%= lang === 'zh' ? 'UX 分析' : 'UX analytics' %></a>
                 <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
-                <a href="/logout"><%= lang === 'zh' ? '退出登录' : 'Log out' %></a>
+                <form method="POST" action="/logout" class="logout-form">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="logout-link-button"><%= lang === 'zh' ? '退出登录' : 'Log out' %></button>
+                </form>
             </div>
         </div>
 
         <div class="admin-content">
             
-            <div class="cookie-management" style="
-                background: linear-gradient(135deg, rgba(255, 152, 0, 0.1), rgba(255, 193, 7, 0.05));
-                border: 2px solid #ff9800; border-radius: 15px; padding: 1.5rem; margin-bottom: 2rem;
-            ">
-                <h2 style="color: #ff9800; margin-bottom: 1rem;"><%= lang === 'zh' ? 'B站 Cookie 管理' : 'Bilibili cookie management' %></h2>
-                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                    <div id="cookieStatus" style="
-                        padding: 0.8rem 1.2rem; border-radius: 8px; font-weight: bold;
-                        background: rgba(158, 158, 158, 0.2); color: #9e9e9e;
-                    "><%= lang === 'zh' ? '状态检查中...' : 'Checking status...' %></div>
+            <div class="cookie-management">
+                <h2><%= lang === 'zh' ? 'B站 Cookie 管理' : 'Bilibili cookie management' %></h2>
+                <div class="admin-cookie-toolbar">
+                    <div id="cookieStatus" class="cookie-status cookie-status-neutral"><%= lang === 'zh' ? '状态检查中...' : 'Checking status...' %></div>
                     
-                    <button id="check-cookie-status" style="
-                        padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #2196f3, #1976d2);
-                        color: white; border: none; border-radius: 8px; font-weight: bold;
-                        cursor: pointer; transition: all 0.3s ease;
-                    "><%= lang === 'zh' ? '检查状态' : 'Check Status' %></button>
+                    <button id="check-cookie-status"><%= lang === 'zh' ? '检查状态' : 'Check Status' %></button>
                     
-                    <button id="refresh-cookies" style="
-                        padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #ff9800, #f57c00);
-                        color: white; border: none; border-radius: 8px; font-weight: bold;
-                        cursor: pointer; transition: all 0.3s ease;
-                    "><%= lang === 'zh' ? '刷新 Cookie' : 'Refresh Cookie' %></button>
                 </div>
-                <div id="cookieDetails" style="margin-top: 1rem; font-size: 0.9rem; color: #ccc;"></div>
+                <div id="cookieDetails" class="cookie-details"></div>
             </div>
 
             
-            <div class="room-management" style="
-                background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(129, 199, 132, 0.05));
-                border: 2px solid #4caf50; border-radius: 15px; padding: 1.5rem; margin-bottom: 2rem;
-            ">
-                <h2 style="color: #4caf50; margin-bottom: 1rem;"><%= lang === 'zh' ? '直播间绑定' : 'Live room bindings' %></h2>
+            <div class="room-management">
+                <h2><%= lang === 'zh' ? '直播间绑定' : 'Live room bindings' %></h2>
                 
                 
-                <div style="
-                    background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
-                ">
-                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;"><%= lang === 'zh' ? '绑定新房间' : 'Bind New Room' %></h3>
-                    <form id="bind-room-form" novalidate style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 1rem; align-items: end;">
+                <div class="room-management-panel">
+                    <h3 class="admin-section-heading"><%= lang === 'zh' ? '绑定新房间' : 'Bind New Room' %></h3>
+                    <form id="bind-room-form" class="admin-room-grid admin-room-grid-bind" novalidate>
                         <div>
-                            <label style="display: block; margin-bottom: 0.3rem; color: #4caf50; font-size: 0.9rem;"><%= lang === 'zh' ? '用户名:' : 'Username:' %></label>
-                            <select id="bindUsername" required
-                                style="
-                                    width: 100%; padding: 0.8rem; border: 1px solid #555;
-                                    border-radius: 8px; background: rgba(255,255,255,0.1);
-                                    color: white; font-size: 1rem;
-                                "
-                            >
+                            <label class="admin-field-label" for="bindUsername"><%= lang === 'zh' ? '用户名:' : 'Username:' %></label>
+                            <select id="bindUsername" required>
                                 <% users.forEach(account => { %>
                                     <option value="<%= account.username %>" <%= account.username === userLoggedIn ? 'selected' : '' %>>
                                         <%= account.username %><%= account.username === userLoggedIn ? (lang === 'zh' ? '（自己）' : ' (You)') : '' %>
@@ -78,65 +55,36 @@
                             </select>
                         </div>
                         <div>
-                            <label style="display: block; margin-bottom: 0.3rem; color: #4caf50; font-size: 0.9rem;"><%= lang === 'zh' ? '直播间号:' : 'Room ID:' %></label>
+                            <label class="admin-field-label" for="bindRoomId"><%= lang === 'zh' ? '直播间号:' : 'Room ID:' %></label>
                             <input type="text" id="bindRoomId" inputmode="numeric" pattern="[0-9]{1,12}" maxlength="12" required autocomplete="off" placeholder="<%= lang === 'zh' ? 'B站直播间号 (例: 3929738)' : 'Bilibili room ID (e.g.: 3929738)' %>"
-                                style="
-                                    width: 100%; padding: 0.8rem; border: 1px solid #555;
-                                    border-radius: 8px; background: rgba(255,255,255,0.1);
-                                    color: white; font-size: 1rem;
-                                "
                             />
                         </div>
-                        <button type="submit" id="bind-room" data-ux-event="admin.bind_room" style="
-                            padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #4caf50, #45a049);
-                            color: white; border: none; border-radius: 8px; font-weight: bold;
-                            cursor: pointer; transition: all 0.3s ease; white-space: nowrap;
-                        "><%= lang === 'zh' ? '绑定房间' : 'Bind Room' %></button>
+                        <button type="submit" id="bind-room" data-ux-event="admin.bind_room"><%= lang === 'zh' ? '绑定房间' : 'Bind Room' %></button>
                     </form>
-                    <div id="roomBindStatus" role="status" aria-live="polite" hidden style="margin-top: 0.8rem; padding: 0.7rem 0.8rem; border-radius: 6px;"></div>
+                    <div id="roomBindStatus" class="room-bind-status room-bind-status-info" role="status" aria-live="polite" hidden></div>
                 </div>
 
                 
-                <div style="
-                    background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
-                ">
-                    <h3 style="color: #f44336; margin-bottom: 0.8rem; font-size: 1.1rem;"><%= lang === 'zh' ? '解除绑定' : 'Unbind' %></h3>
-                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: end;">
+                <div class="room-management-panel">
+                    <h3 class="admin-section-heading admin-section-heading-danger"><%= lang === 'zh' ? '解除绑定' : 'Unbind' %></h3>
+                    <div class="admin-room-grid admin-room-grid-unbind">
                         <div>
-                            <label style="display: block; margin-bottom: 0.3rem; color: #f44336; font-size: 0.9rem;"><%= lang === 'zh' ? '用户名:' : 'Username:' %></label>
-                            <input type="text" id="unbindUsername" placeholder="<%= lang === 'zh' ? '请输入要解绑的用户名' : 'Enter username to unbind' %>"
-                                style="
-                                    width: 100%; padding: 0.8rem; border: 1px solid #555;
-                                    border-radius: 8px; background: rgba(255,255,255,0.1);
-                                    color: white; font-size: 1rem;
-                                "
-                            />
+                            <label class="admin-field-label admin-field-label-danger" for="unbindUsername"><%= lang === 'zh' ? '用户名:' : 'Username:' %></label>
+                            <input type="text" id="unbindUsername" placeholder="<%= lang === 'zh' ? '请输入要解绑的用户名' : 'Enter username to unbind' %>">
                         </div>
-                        <button id="unbind-room" style="
-                            padding: 0.8rem 1.5rem; background: linear-gradient(135deg, #f44336, #d32f2f);
-                            color: white; border: none; border-radius: 8px; font-weight: bold;
-                            cursor: pointer; transition: all 0.3s ease; white-space: nowrap;
-                        "><%= lang === 'zh' ? '解除绑定' : 'Unbind' %></button>
+                        <button id="unbind-room"><%= lang === 'zh' ? '解除绑定' : 'Unbind' %></button>
                     </div>
                 </div>
 
                 
                 <div>
-                    <h3 style="color: #4caf50; margin-bottom: 0.8rem; font-size: 1.1rem;"><%= lang === 'zh' ? '当前绑定' : 'Current bindings' %></h3>
-                    <div id="currentBindings" style="
-                        background: rgba(0, 0, 0, 0.3); border-radius: 8px; padding: 1rem;
-                        min-height: 100px; color: #ccc;
-                    ">
-                        <div style="text-align: center; color: #999;">
+                    <h3 class="admin-section-heading"><%= lang === 'zh' ? '当前绑定' : 'Current bindings' %></h3>
+                    <div id="currentBindings">
+                        <div class="binding-empty">
                             <%= lang === 'zh' ? '正在加载绑定信息...' : 'Loading bindings...' %>
                         </div>
                     </div>
-                    <button id="load-room-bindings" style="
-                        margin-top: 0.8rem; padding: 0.6rem 1.2rem; 
-                        background: linear-gradient(135deg, #2196f3, #1976d2);
-                        color: white; border: none; border-radius: 6px; font-weight: bold;
-                        cursor: pointer; transition: all 0.3s ease;
-                    "><%= lang === 'zh' ? '刷新列表' : 'Refresh List' %></button>
+                    <button id="load-room-bindings"><%= lang === 'zh' ? '刷新列表' : 'Refresh List' %></button>
                 </div>
             </div>
 
@@ -283,8 +231,8 @@
                                         <td><%= row.user_input || '-' %></td>
                                         <td>
                                             <% if (row.image_path) { %>
-                                                <a href="<%= row.image_path %>" target="_blank" rel="noopener">
-                                                    <img src="<%= row.image_path %>" alt="dictation" style="width: 64px; height: 64px; object-fit: contain; background: #0b151b; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15);">
+                                                <a href="/api/dictation/submissions/<%= row.id %>/image" target="_blank" rel="noopener">
+                                                    <img class="dictation-thumbnail" src="/api/dictation/submissions/<%= row.id %>/image" alt="dictation">
                                                 </a>
                                             <% } else { %>
                                                 <%= lang === 'zh' ? '文本提交' : 'Text submission' %>
@@ -308,7 +256,7 @@
                                 <% }) %>
                             <% } else { %>
                                 <tr>
-                                    <td colspan="12" style="text-align: center; color: #aaa;">
+                                    <td colspan="12" class="table-empty">
                                         <%= lang === 'zh' ? '暂无听写提交记录' : 'No dictation submissions yet' %>
                                     </td>
                                 </tr>
@@ -344,7 +292,7 @@
                                 <% }) %>
                             <% } else { %>
                                 <tr>
-                                    <td colspan="5" style="text-align: center; color: #aaa;">
+                                    <td colspan="5" class="table-empty">
                                         <%= lang === 'zh' ? '暂无记录' : 'No records' %>
                                     </td>
                                 </tr>
@@ -356,7 +304,7 @@
         </div>
     </div>
 
-    <style>
+    <style nonce="<%= cspNonce %>">
     .container {
         max-width: 1400px;
         margin: 0 auto;

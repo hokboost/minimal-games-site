@@ -34,6 +34,10 @@ def load_cookies_from_txt(file_path):
     """从cookie.txt文件加载cookies"""
     cookies = []
     try:
+        if os.path.islink(file_path) or not os.path.isfile(file_path):
+            return []
+        if os.name != "nt" and (os.stat(file_path).st_mode & 0o077):
+            return []
         with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
                 if line.strip().startswith("#") or not line.strip():
@@ -56,8 +60,8 @@ def load_cookies_from_txt(file_path):
                     "path": path
                 })
         return cookies
-    except Exception as e:
-        safe_print(f"加载cookie文件失败: {e}")
+    except Exception:
+        safe_print("加载 Cookie 文件失败")
         return []
 
 def normalize_live_cookies(cookies):
@@ -241,7 +245,7 @@ def check_gift_send_result(page, gift_id, max_wait=3):
                     continue
         
         # 检查成功提示（如果有的话）
-        success_selectors = [".gift-success", ".send-success", "[class*='success']"]
+        success_selectors = [".gift-success", ".send-success"]
         for selector in success_selectors:
             elements = page.query_selector_all(selector)
             for element in elements:
@@ -253,8 +257,11 @@ def check_gift_send_result(page, gift_id, max_wait=3):
                 except:
                     continue
         
-        # 如果没有明确的错误或成功提示，假设成功
-        return {"success": True, "reason": "assumed_success"}
+        return {
+            "success": False,
+            "reason": "provider_confirmation_missing",
+            "outcome_uncertain": True
+        }
         
     except Exception as e:
         safe_print(f"检查送礼结果失败: {e}")
@@ -275,7 +282,6 @@ def send_gift_simple(gift_id, room_id, quantity=1):
         # 加载cookies
         safe_print("Loading cookies...")
         cookie_path = os.environ.get('BILI_COOKIE_PATH', 'C:/Users/user/Desktop/jiaobenbili/cookie.txt')
-        safe_print(f"Cookie path: {cookie_path}")
         cookies = load_cookies_from_txt(cookie_path)
         cookies = normalize_live_cookies(cookies)
         if not cookies:
@@ -283,7 +289,7 @@ def send_gift_simple(gift_id, room_id, quantity=1):
         cookie_names = {c.get("name") for c in cookies}
         if "SESSDATA" not in cookie_names or "bili_jct" not in cookie_names:
             return {"success": False, "error": "missing_key_cookies", "message": "缺少SESSDATA或bili_jct"}
-        safe_print(f"Cookies loaded: {len(cookies)}; has SESSDATA={'SESSDATA' in cookie_names}")
+        safe_print("Cookie 已加载")
         page.goto("https://www.bilibili.com/")
         page.context.add_cookies(cookies)
         time.sleep(1)
@@ -541,6 +547,10 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                 ''')
 
                 if not click_result or not click_result.get("success"):
+                    # page.evaluate returned normally and explicitly reported
+                    # that no gift element was clicked.
+                    if successful_sends == 0:
+                        send_attempted = False
                     debug = click_result.get("debug") if isinstance(click_result, dict) else None
                     safe_print(f"⚠️ 第{i+1}次点击失败，礼物元素不可用")
                     if debug:
@@ -587,6 +597,18 @@ def send_gift_simple(gift_id, room_id, quantity=1):
 
             safe_print(f"🎯 总计完成 {successful_sends}/{quantity} 个礼物发送")
 
+            if not send_attempted and successful_sends == 0:
+                return {
+                    "success": False,
+                    "error": "gift_not_found",
+                    "gift_id": gift_id,
+                    "room_id": room_id,
+                    "requested_quantity": quantity,
+                    "actual_quantity": 0,
+                    "partial_success": False,
+                    "outcome_uncertain": False
+                }
+
             # 如果已经检测到余额不足，直接返回失败并带上实际成功数
             if stopped_for_balance:
                 after_balance = None
@@ -603,9 +625,11 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                     "gift_id": gift_id,
                     "room_id": room_id,
                     "requested_quantity": quantity,
-                    "actual_quantity": successful_sends,
-                    "partial_success": successful_sends > 0,
-                    "coins_spent": successful_sends * price
+                    "actual_quantity": 0,
+                    "observed_clicks": successful_sends,
+                    "partial_success": False,
+                    "coins_spent": 0,
+                    "outcome_uncertain": send_attempted
                 }
             
             # 使用threeserver的完整验证逻辑
@@ -667,7 +691,8 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                         "requested_quantity": quantity,
                         "actual_quantity": 0,
                         "partial_success": False,
-                        "coins_spent": 0
+                        "coins_spent": 0,
+                        "outcome_uncertain": True
                     }
             
             # 根据验证结果返回适当的响应
@@ -716,22 +741,8 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                         "coins_spent": sent * price
                     }
             elif result.get("success"):
-                if result.get("reason") == "assumed_success" and price_bcoin >= 1 and before_balance is not None and after_balance is not None:
-                    delta = float(before_balance) - float(after_balance)
-                    if delta <= 0:
-                        safe_print("❌ 未检测到余额变化，判定送礼失败")
-                        return {
-                            "success": False,
-                            "error": "no_balance_change",
-                            "balance_insufficient": False,
-                            "gift_id": gift_id,
-                            "room_id": room_id,
-                            "requested_quantity": quantity,
-                            "actual_quantity": 0,
-                            "partial_success": False
-                        }
                 # 只有非余额不足的情况下才考虑部分成功
-                verified = "message" in result and result.get("reason") != "assumed_success"
+                verified = "message" in result
                 is_partial = successful_sends < quantity
                 
                 if is_partial:
@@ -763,7 +774,8 @@ def send_gift_simple(gift_id, room_id, quantity=1):
                     "room_id": room_id,
                     "requested_quantity": quantity,
                     "actual_quantity": 0,
-                    "partial_success": False
+                    "partial_success": False,
+                    "outcome_uncertain": bool(result.get("outcome_uncertain") or send_attempted)
                 }
                 
         except Exception as e:

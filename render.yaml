@@ -3,34 +3,33 @@ services:
     name: minimal-games-site
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm ci --omit=dev
     startCommand: npm start
+    healthCheckPath: /ready
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: 20.19.4
       - key: DB_USER
-        value: quiz_db_i6kg_user
+        sync: false
       - key: DB_PASS
         sync: false
-      - key: DB_HOST  
-        value: dpg-d16r57fdiees73dgmkj0-a.oregon-postgres.render.com
+      - key: DB_HOST
+        sync: false
       - key: DB_NAME
-        value: quiz_db_i6kg
+        sync: false
       - key: DB_PORT
         value: 5432
       - key: DB_SSL_CA
         value: ""
       - key: SESSION_SECRET
         sync: false
-      - key: FORCE_HTTPS
-        value: true
-      - key: LOG_LEVEL
-        value: info
+      - key: LOG_HASH_SECRET
+        sync: false
       - key: WINDOWS_API_KEY
         sync: false
       - key: GIFT_TASKS_HMAC_SECRET
         sync: false
-      - key: GIFT_TASKS_HMAC_ENFORCE
-        value: true
-      - key: ADMIN_SIGN_SECRET
+      - key: ADMIN_TOTP_SECRET
         sync: false

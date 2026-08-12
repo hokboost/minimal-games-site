@@ -14,6 +14,7 @@
 
         let selectedSlot = null;
         let currentState = null;
+        let actionInFlight = false;
 
         function updateBalance(balance) {
             if (typeof balance === 'number') {
@@ -49,18 +50,6 @@
 
             document.getElementById('rewardAmount').textContent = isFull ? `${reward} ${t('积分', 'points')}` : '--';
             document.getElementById('sameCount').textContent = t(`同色 ${maxSame}`, `Same Color ${maxSame}`);
-            const redeemBtn = document.getElementById('redeemBtn');
-            redeemBtn.disabled = !isFull;
-            redeemBtn.classList.toggle('ready', !redeemBtn.disabled);
-
-            const addOneBtn = document.getElementById('addOneBtn');
-            addOneBtn.disabled = isFull;
-            addOneBtn.classList.toggle('ready', !addOneBtn.disabled);
-
-            const fillBtn = document.getElementById('fillBtn');
-            fillBtn.disabled = isFull;
-            fillBtn.classList.toggle('ready', !fillBtn.disabled);
-
             const replaceCost = state.replaceCost;
             document.getElementById('replaceCost').textContent = replaceCost ? `${replaceCost} ${t('积分', 'points')}` : t('不可更换', 'Not Available');
 
@@ -70,9 +59,22 @@
                 document.querySelectorAll('.stone-slot').forEach((item) => item.classList.remove('selected'));
             }
 
-            const replaceBtn = document.getElementById('replaceBtn');
-            replaceBtn.disabled = !(state.canReplace && selectedSlot !== null);
-            replaceBtn.classList.toggle('ready', !replaceBtn.disabled);
+            syncActionControls();
+        }
+
+        function syncActionControls() {
+            const isFull = Boolean(currentState?.isFull);
+            const controls = {
+                redeemBtn: !isFull,
+                addOneBtn: isFull,
+                fillBtn: isFull,
+                replaceBtn: !(currentState?.canReplace && selectedSlot !== null)
+            };
+            Object.entries(controls).forEach(([id, disabledByState]) => {
+                const button = document.getElementById(id);
+                button.disabled = actionInFlight || disabledByState;
+                button.classList.toggle('ready', !button.disabled);
+            });
         }
 
         async function loadState(highlightIndex = null) {
@@ -84,32 +86,46 @@
         }
 
         async function postAction(url, body = {}) {
-            const response = await window.idempotentFetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': csrfToken
-                },
-                body: JSON.stringify(body)
-            });
-            const result = await response.json();
-            if (!result.success) {
-                alert(translateServerMessage(result.message) || t('操作失败', 'Action failed'));
+            if (actionInFlight) return null;
+            actionInFlight = true;
+            syncActionControls();
+            try {
+                const response = await window.idempotentFetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    body: JSON.stringify(body)
+                });
+                const result = await response.json();
+                if (!response.ok || result.success !== true) {
+                    alert(translateServerMessage(result.message) || t('操作失败', 'Action failed'));
+                    return null;
+                }
+                updateBalance(result.newBalance);
+                try {
+                    await loadState(result.replacedSlot ?? null);
+                } catch (error) {
+                    console.error('Stone state refresh error:', error);
+                    alert(t('操作已完成，但状态刷新失败，请刷新页面', 'Action completed, but state refresh failed. Reload the page.'));
+                }
+                if (Number.isInteger(result.nextReplaceIndex) && currentState?.canReplace) {
+                    selectedSlot = result.nextReplaceIndex;
+                    document.querySelectorAll('.stone-slot').forEach((item) => item.classList.remove('selected'));
+                    const nextSlot = document.querySelector(`.stone-slot[data-index="${selectedSlot}"]`);
+                    nextSlot?.classList.add('selected');
+                    document.getElementById('selectedSlot').textContent = selectedSlot + 1;
+                }
+                return result;
+            } catch (error) {
+                console.error('Stone action error:', error);
+                alert(t('网络异常，操作结果请重试核对', 'Network error. Retry to confirm the result.'));
                 return null;
+            } finally {
+                actionInFlight = false;
+                syncActionControls();
             }
-            updateBalance(result.newBalance);
-            await loadState(result.replacedSlot ?? null);
-            if (Number.isInteger(result.nextReplaceIndex) && currentState?.canReplace) {
-                selectedSlot = result.nextReplaceIndex;
-                document.querySelectorAll('.stone-slot').forEach((item) => item.classList.remove('selected'));
-                const nextSlot = document.querySelector(`.stone-slot[data-index="${selectedSlot}"]`);
-                nextSlot?.classList.add('selected');
-                document.getElementById('selectedSlot').textContent = selectedSlot + 1;
-                const replaceBtn = document.getElementById('replaceBtn');
-                replaceBtn.disabled = false;
-                replaceBtn.classList.add('ready');
-            }
-            return result;
         }
 
         document.getElementById('addOneBtn').addEventListener('click', () => {
@@ -147,11 +163,9 @@
                 slot.classList.add('selected');
                 selectedSlot = Number(slot.dataset.index);
                 document.getElementById('selectedSlot').textContent = selectedSlot + 1;
-                const replaceBtn = document.getElementById('replaceBtn');
-                replaceBtn.disabled = !(currentState.canReplace && selectedSlot !== null);
-                replaceBtn.classList.toggle('ready', !replaceBtn.disabled);
+                syncActionControls();
             });
         });
 
-        loadState();
+        loadState().catch((error) => console.error('Stone initial state error:', error));
     

@@ -30,14 +30,17 @@ const formatScratchResult = (result) => {
     return formatted;
 };
 
+    let toastTimer = null;
+
     function showToast(message, type = 'info') {
         const toast = document.getElementById('messageToast');
         toast.textContent = message;
         toast.className = `toast ${type}`;
-        toast.style.display = 'block';
-        
-        setTimeout(() => {
-            toast.style.display = 'none';
+        toast.hidden = false;
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+            toast.hidden = true;
+            toastTimer = null;
         }, 3000);
     }
 
@@ -103,13 +106,13 @@ const formatScratchResult = (result) => {
 
     
     function showChangePasswordModal() {
-        document.getElementById('changePasswordModal').style.display = 'block';
+        document.getElementById('changePasswordModal').hidden = false;
         document.getElementById('changePasswordForm').reset();
     }
 
     
     function closeChangePasswordModal() {
-        document.getElementById('changePasswordModal').style.display = 'none';
+        document.getElementById('changePasswordModal').hidden = true;
     }
 
     
@@ -170,6 +173,7 @@ const formatScratchResult = (result) => {
     document.addEventListener('keydown', function(event) {
         if (event.key === 'Escape') {
             closeChangePasswordModal();
+            closeGameRecordsModal();
         }
     });
 
@@ -197,21 +201,55 @@ const formatScratchResult = (result) => {
         };
         
         document.getElementById('recordsTitle').textContent = titles[gameType];
-        document.getElementById('gameRecordsModal').style.display = 'block';
+        document.getElementById('gameRecordsModal').hidden = false;
         
         loadGameRecords(gameType, currentPage);
     }
 
     function closeGameRecordsModal() {
-        document.getElementById('gameRecordsModal').style.display = 'none';
+        document.getElementById('gameRecordsModal').hidden = true;
+    }
+
+    function showContainerMessage(container, message) {
+        const messageElement = document.createElement('div');
+        messageElement.className = 'loading';
+        messageElement.textContent = String(message || '');
+        container.replaceChildren(messageElement);
+    }
+
+    function createRecordsTable(headers) {
+        const table = document.createElement('table');
+        table.className = 'records-table';
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        for (const header of headers) {
+            const th = document.createElement('th');
+            th.textContent = header;
+            headerRow.appendChild(th);
+        }
+        thead.appendChild(headerRow);
+        const tbody = document.createElement('tbody');
+        table.append(thead, tbody);
+        return { table, tbody };
+    }
+
+    function appendRecordRow(tbody, values) {
+        const row = document.createElement('tr');
+        for (const value of values) {
+            const cell = document.createElement('td');
+            if (value instanceof Node) cell.appendChild(value);
+            else cell.textContent = String(value ?? '');
+            row.appendChild(cell);
+        }
+        tbody.appendChild(row);
     }
 
     async function loadGameRecords(gameType, page = 1) {
         const recordsContent = document.getElementById('recordsContent');
         const recordsPagination = document.getElementById('recordsPagination');
         
-        recordsContent.innerHTML = `<div class="loading">${t('加载中...', 'Loading...')}</div>`;
-        recordsPagination.innerHTML = '';
+        showContainerMessage(recordsContent, t('加载中...', 'Loading...'));
+        recordsPagination.replaceChildren();
         
         try {
             const response = await fetch(`/api/game-records/${gameType}?page=${page}&limit=10`);
@@ -221,11 +259,14 @@ const formatScratchResult = (result) => {
                 renderGameRecords(data.records, gameType);
                 renderPagination(data.pagination, gameType);
             } else {
-                recordsContent.innerHTML = `<div class="loading">${t('加载失败', 'Load failed')}: ${translateServerMessage(data.message)}</div>`;
+                showContainerMessage(
+                    recordsContent,
+                    `${t('加载失败', 'Load failed')}: ${translateServerMessage(data.message) || ''}`
+                );
             }
         } catch (error) {
             console.error(t('加载游戏记录失败:', 'Failed to load game records:'), error);
-            recordsContent.innerHTML = `<div class="loading">${t('网络错误，请稍后重试', 'Network error, please try again')}</div>`;
+            showContainerMessage(recordsContent, t('网络错误，请稍后重试', 'Network error, please try again'));
         }
     }
 
@@ -233,25 +274,32 @@ const formatScratchResult = (result) => {
 
     async function loadWishBackpack(showAlerts = false) {
         const container = document.getElementById('backpackContent');
-        container.innerHTML = `<div class="loading">${t('加载中...', 'Loading...')}</div>`;
+        showContainerMessage(container, t('加载中...', 'Loading...'));
         
         try {
             const response = await fetch('/api/wish/backpack');
             const data = await response.json();
             
             if (!data.success) {
-                container.innerHTML = `<div class="loading">${t('加载失败', 'Load failed')}: ${translateServerMessage(data.message)}</div>`;
+                showContainerMessage(
+                    container,
+                    `${t('加载失败', 'Load failed')}: ${translateServerMessage(data.message) || ''}`
+                );
                 return;
             }
 
             if (!data.items || data.items.length === 0) {
-                container.innerHTML = `<div class="loading">${t('背包暂无礼物', 'No gifts in backpack')}</div>`;
+                showContainerMessage(container, t('背包暂无礼物', 'No gifts in backpack'));
                 return;
             }
 
-            let tableHTML = '<table class="records-table">';
-            tableHTML += `<thead><tr><th>${t('获得时间', 'Received')}</th><th>${t('礼物', 'Gift')}</th><th>${t('到期时间', 'Expires')}</th><th>${t('状态', 'Status')}</th><th>${t('操作', 'Action')}</th></tr></thead>`;
-            tableHTML += '<tbody>';
+            const { table, tbody } = createRecordsTable([
+                t('获得时间', 'Received'),
+                t('礼物', 'Gift'),
+                t('到期时间', 'Expires'),
+                t('状态', 'Status'),
+                t('操作', 'Action')
+            ]);
 
             data.items.forEach(item => {
                 if (showAlerts && item.last_failure_reason) {
@@ -270,26 +318,27 @@ const formatScratchResult = (result) => {
                 const expiresAt = item.expires_note || item.expires_at || '-';
                 const statusText = formatBackpackStatus(item.status, item.expires_at, item.delivery_status);
                 const canSend = item.status === 'stored';
-                const actionBtn = canSend
-                    ? `<button class="view-records-btn" data-backpack-id="${item.id}">${t('送出', 'Send')}</button>`
-                    : '-';
-
-                tableHTML += `
-                    <tr>
-                        <td>${createdAt}</td>
-                        <td>${getWishGiftName(item.gift_type, item.gift_name)}</td>
-                        <td>${expiresAt}</td>
-                        <td>${statusText}</td>
-                        <td>${actionBtn}</td>
-                    </tr>
-                `;
+                let action = '-';
+                if (canSend && Number.isSafeInteger(Number(item.id))) {
+                    const button = document.createElement('button');
+                    button.className = 'view-records-btn';
+                    button.dataset.backpackId = String(Number(item.id));
+                    button.textContent = t('送出', 'Send');
+                    action = button;
+                }
+                appendRecordRow(tbody, [
+                    createdAt,
+                    getWishGiftName(item.gift_type, item.gift_name),
+                    expiresAt,
+                    statusText,
+                    action
+                ]);
             });
 
-            tableHTML += '</tbody></table>';
-            container.innerHTML = tableHTML;
+            container.replaceChildren(table);
         } catch (error) {
             console.error(t('加载背包失败:', 'Failed to load backpack:'), error);
-            container.innerHTML = `<div class="loading">${t('网络错误，请稍后重试', 'Network error, please try again')}</div>`;
+            showContainerMessage(container, t('网络错误，请稍后重试', 'Network error, please try again'));
         }
     }
 
@@ -345,100 +394,74 @@ const formatScratchResult = (result) => {
         const recordsContent = document.getElementById('recordsContent');
         
         if (records.length === 0) {
-            recordsContent.innerHTML = `<div class="loading">${t('暂无游戏记录', 'No game records')}</div>`;
+            showContainerMessage(recordsContent, t('暂无游戏记录', 'No game records'));
             return;
         }
-        
-        let tableHTML = '<table class="records-table">';
-        
-        
-        if (gameType === 'quiz') {
-            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('得分', 'Score')}</th></tr></thead>`;
-        } else if (gameType === 'slot') {
-            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('获得积分', 'Points Earned')}</th><th>${t('转动结果', 'Reels')}</th></tr></thead>`;
-        } else if (gameType === 'scratch') {
-            tableHTML += `<thead><tr><th>${t('游戏时间', 'Time')}</th><th>${t('结果', 'Result')}</th><th>${t('档位', 'Tier')}</th><th>${t('匹配数', 'Matches')}</th></tr></thead>`;
-        } else if (gameType === 'wish') {
-            tableHTML += `<thead><tr><th>${t('祈愿时间', 'Wish Time')}</th><th>${t('次数', 'Count')}</th><th>${t('消耗积分', 'Cost')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
-        } else if (gameType === 'blindbox') {
-            tableHTML += `<thead><tr><th>${t('抽取时间', 'Time')}</th><th>${t('档位', 'Tier')}</th><th>${t('数量', 'Count')}</th><th>${t('消耗积分', 'Cost')}</th><th>${t('总价值', 'Total Value')}</th></tr></thead>`;
-        } else if (gameType === 'stone') {
-            tableHTML += `<thead><tr><th>${t('操作时间', 'Time')}</th><th>${t('操作', 'Action')}</th><th>${t('花费', 'Cost')}</th><th>${t('变化', 'Change')}</th></tr></thead>`;
-        } else if (gameType === 'flip') {
-            tableHTML += `<thead><tr><th>${t('操作时间', 'Time')}</th><th>${t('动作', 'Action')}</th><th>${t('成本/奖励', 'Cost/Reward')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
-        } else if (gameType === 'duel') {
-            tableHTML += `<thead><tr><th>${t('挑战时间', 'Challenge Time')}</th><th>${t('礼物', 'Gift')}</th><th>${t('功力', 'Power')}</th><th>${t('消耗', 'Cost')}</th><th>${t('结果', 'Result')}</th></tr></thead>`;
+        const headersByGame = {
+            quiz: [t('游戏时间', 'Time'), t('得分', 'Score')],
+            slot: [t('游戏时间', 'Time'), t('结果', 'Result'), t('获得积分', 'Points Earned'), t('转动结果', 'Reels')],
+            scratch: [t('游戏时间', 'Time'), t('结果', 'Result'), t('档位', 'Tier'), t('匹配数', 'Matches')],
+            wish: [t('祈愿时间', 'Wish Time'), t('次数', 'Count'), t('消耗积分', 'Cost'), t('结果', 'Result')],
+            blindbox: [t('抽取时间', 'Time'), t('档位', 'Tier'), t('数量', 'Count'), t('消耗积分', 'Cost'), t('总价值', 'Total Value')],
+            stone: [t('操作时间', 'Time'), t('操作', 'Action'), t('花费', 'Cost'), t('变化', 'Change')],
+            flip: [t('操作时间', 'Time'), t('动作', 'Action'), t('成本/奖励', 'Cost/Reward'), t('结果', 'Result')],
+            duel: [t('挑战时间', 'Challenge Time'), t('礼物', 'Gift'), t('功力', 'Power'), t('消耗', 'Cost'), t('结果', 'Result')]
+        };
+        const headers = headersByGame[gameType];
+        if (!headers) {
+            showContainerMessage(recordsContent, t('记录类型无效', 'Invalid record type'));
+            return;
         }
-        
-        tableHTML += '<tbody>';
-        
-        
+        const { table, tbody } = createRecordsTable(headers);
+
         records.forEach(record => {
             const playedAt = record.played_at || '';
-            
+            let values = [];
             if (gameType === 'quiz') {
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${record.score} ${t('分', 'pts')}</td>
-                    </tr>
-                `;
+                values = [playedAt, `${record.score ?? 0} ${t('分', 'pts')}`];
             } else if (gameType === 'slot') {
-                const amounts = JSON.parse(record.amounts || '[]');
-                const amountsText = amounts.join(', ');
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${record.result === 'lost' ? t('未中奖', 'No Win') : t('中奖', 'Win')}</td>
-                        <td>${record.payout || 0} ${t('积分', 'points')}</td>
-                        <td>[${amountsText}]</td>
-                    </tr>
-                `;
+                let amounts = [];
+                try {
+                    const parsed = typeof record.amounts === 'string'
+                        ? JSON.parse(record.amounts || '[]')
+                        : record.amounts;
+                    amounts = Array.isArray(parsed) ? parsed.slice(0, 20) : [];
+                } catch {
+                    amounts = [];
+                }
+                values = [
+                    playedAt,
+                    record.result === 'lost' ? t('未中奖', 'No Win') : t('中奖', 'Win'),
+                    `${record.payout || 0} ${t('积分', 'points')}`,
+                    `[${amounts.join(', ')}]`
+                ];
             } else if (gameType === 'scratch') {
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${formatScratchResult(record.result)}</td>
-                        <td>${record.tier_cost} ${t('积分', 'points')}</td>
-                        <td>${record.matches_count} ${t('个', '')}</td>
-                    </tr>
-                `;
+                values = [
+                    playedAt,
+                    formatScratchResult(record.result),
+                    `${record.tier_cost ?? 0} ${t('积分', 'points')}`,
+                    `${record.matches_count ?? 0} ${t('个', '')}`
+                ];
             } else if (gameType === 'wish') {
                 const successCount = Number(record.success_count || 0);
                 const wishGiftName = getWishGiftName(record.gift_type, record.gift_name) || t('礼物', 'Gift');
                 const resultText = successCount > 0
                     ? `${wishGiftName} x${successCount}`
                     : t('未中奖', 'No Win');
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${record.batch_count}</td>
-                        <td>${record.total_cost} ${t('积分', 'points')}</td>
-                        <td>${resultText}</td>
-                    </tr>
-                `;
+                values = [playedAt, record.batch_count ?? 0, `${record.total_cost ?? 0} ${t('积分', 'points')}`, resultText];
             } else if (gameType === 'blindbox') {
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${record.tier_name}</td>
-                        <td>${record.box_count}</td>
-                        <td>${record.total_cost} ${t('积分', 'points')}</td>
-                        <td>${record.total_reward_value} ${t('积分', 'points')}</td>
-                    </tr>
-                `;
+                values = [
+                    playedAt,
+                    record.tier_name || '',
+                    record.box_count ?? 0,
+                    `${record.total_cost ?? 0} ${t('积分', 'points')}`,
+                    `${record.total_reward_value ?? 0} ${t('积分', 'points')}`
+                ];
             } else if (gameType === 'stone') {
                 const beforeSlots = formatStoneSlots(record.before_slots);
                 const afterSlots = formatStoneSlots(record.after_slots);
                 const costText = record.cost > 0 ? `-${record.cost}` : (record.reward > 0 ? `+${record.reward}` : '0');
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${formatStoneAction(record.action_type)}</td>
-                        <td>${costText} ${t('积分', 'points')}</td>
-                        <td>${beforeSlots} → ${afterSlots}</td>
-                    </tr>
-                `;
+                values = [playedAt, formatStoneAction(record.action_type), `${costText} ${t('积分', 'points')}`, `${beforeSlots} → ${afterSlots}`];
             } else if (gameType === 'flip') {
                 const actionText = formatFlipAction(record.action_type);
                 const amountText = record.reward > 0 ? `+${record.reward}` : '0';
@@ -446,33 +469,17 @@ const formatScratchResult = (result) => {
                     `好牌${record.good_count || 0}，坏牌${record.bad_count || 0}`,
                     `Good ${record.good_count || 0}, Bad ${record.bad_count || 0}`
                 );
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${actionText}</td>
-                        <td>${amountText} ${t('积分', 'points')}</td>
-                        <td>${resultText}</td>
-                    </tr>
-                `;
+                values = [playedAt, actionText, `${amountText} ${t('积分', 'points')}`, resultText];
             } else if (gameType === 'duel') {
                 const giftName = formatDuelGift(record.gift_type);
                 const resultText = record.success
                     ? t(`成功 +${record.reward}`, `Success +${record.reward}`)
                     : t('失败', 'Failed');
-                tableHTML += `
-                    <tr>
-                        <td>${playedAt}</td>
-                        <td>${giftName}</td>
-                        <td>${record.power}%</td>
-                        <td>-${record.cost}</td>
-                        <td>${resultText}</td>
-                    </tr>
-                `;
+                values = [playedAt, giftName, `${record.power ?? 0}%`, `-${record.cost ?? 0}`, resultText];
             }
+            appendRecordRow(tbody, values);
         });
-        
-        tableHTML += '</tbody></table>';
-        recordsContent.innerHTML = tableHTML;
+        recordsContent.replaceChildren(table);
     }
 
     function renderPagination(pagination, gameType) {
@@ -482,7 +489,6 @@ const formatScratchResult = (result) => {
             return;
         }
         
-        let paginationHTML = '';
         const total = pagination.total;
         const current = pagination.current;
         const windowSize = 2;
@@ -496,25 +502,35 @@ const formatScratchResult = (result) => {
         
         
         if (pagination.hasPrev) {
-            paginationHTML += `<button data-page="${pagination.current - 1}">${t('上一页', 'Prev')}</button>`;
+            const button = document.createElement('button');
+            button.dataset.page = String(pagination.current - 1);
+            button.textContent = t('上一页', 'Prev');
+            recordsPagination.appendChild(button);
         }
         
         
         for (let i = 0; i < pageList.length; i++) {
             const page = pageList[i];
             if (i > 0 && pageList[i - 1] !== page - 1) {
-                paginationHTML += `<span class="pagination-ellipsis">...</span>`;
+                const ellipsis = document.createElement('span');
+                ellipsis.className = 'pagination-ellipsis';
+                ellipsis.textContent = '...';
+                recordsPagination.appendChild(ellipsis);
             }
-            const activeClass = page === current ? 'active' : '';
-            paginationHTML += `<button class="${activeClass}" data-page="${page}">${page}</button>`;
+            const button = document.createElement('button');
+            if (page === current) button.className = 'active';
+            button.dataset.page = String(page);
+            button.textContent = String(page);
+            recordsPagination.appendChild(button);
         }
         
         
         if (pagination.hasNext) {
-            paginationHTML += `<button data-page="${pagination.current + 1}">${t('下一页', 'Next')}</button>`;
+            const button = document.createElement('button');
+            button.dataset.page = String(pagination.current + 1);
+            button.textContent = t('下一页', 'Next');
+            recordsPagination.appendChild(button);
         }
-        
-        recordsPagination.innerHTML = paginationHTML;
     }
 
     function formatStoneAction(actionType) {
@@ -571,7 +587,7 @@ const formatScratchResult = (result) => {
     }
 
     
-    window.onclick = function(event) {
+    window.addEventListener('click', function(event) {
         const changePasswordModal = document.getElementById('changePasswordModal');
         const gameRecordsModal = document.getElementById('gameRecordsModal');
         
@@ -581,7 +597,7 @@ const formatScratchResult = (result) => {
         if (event.target === gameRecordsModal) {
             closeGameRecordsModal();
         }
-    }
+    });
 
     
     loadWishBackpack(false);

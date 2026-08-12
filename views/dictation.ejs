@@ -50,6 +50,20 @@
                 <div class="dictation-definition" id="dictation-definition"></div>
             </div>
 
+            <div class="input-section">
+                <label><%= lang === 'zh' ? '手写练习（可选）' : 'Handwriting practice (optional)' %></label>
+                <div id="dictation-grid" class="dictation-grid">
+                    <% for (let index = 0; index < 4; index += 1) { %>
+                        <canvas class="dictation-cell" aria-label="<%= lang === 'zh' ? `第 ${index + 1} 个手写格` : `Handwriting cell ${index + 1}` %>"></canvas>
+                    <% } %>
+                </div>
+                <div class="dictation-grid-actions">
+                    <button id="eraser-btn" class="ghost-btn" type="button" disabled><%= lang === 'zh' ? '橡皮擦' : 'Eraser' %></button>
+                    <button id="clear-grid-btn" class="ghost-btn" type="button" disabled><%= lang === 'zh' ? '清空手写' : 'Clear handwriting' %></button>
+                    <span class="dictation-grid-hint"><%= lang === 'zh' ? '轻点格子可放大书写' : 'Tap a cell to enlarge it' %></span>
+                </div>
+            </div>
+
             <div class="submit-controls">
                 <button id="submit-btn" class="primary-btn" disabled><%= lang === 'zh' ? '确认提交' : 'Submit' %></button>
             </div>
@@ -59,9 +73,9 @@
 
         <div class="dictation-note">
             <% if (lang === 'zh') { %>
-                <strong>使用说明：</strong>点击开始后系统会自动播报词语与解释，请按拼音逐字选择同音字完成词语并提交。提交后进入人工审核，结果以后台人工判定为准。
+                <strong>使用说明：</strong>点击开始后系统会自动播报词语与解释，请按拼音逐字选择同音字完成词语并提交。系统会立即核对答案；管理员仅处理历史记录或特殊复核。
             <% } else { %>
-                <strong>How it works:</strong> After you start, the page reads the word and meaning aloud. Pick a homophone for each syllable and submit. Submissions are manually reviewed on the backend.
+                <strong>How it works:</strong> After you start, the page reads the word and meaning aloud. Pick a homophone for each syllable and submit for immediate verification. Admin review is reserved for legacy or exceptional cases.
             <% } %>
         </div>
     </div>
@@ -77,9 +91,24 @@
         </div>
     </div>
 
+    <div id="dictation-zoom" class="dictation-zoom" hidden>
+        <div class="dictation-zoom-card">
+            <div class="dictation-zoom-header">
+                <span><%= lang === 'zh' ? '放大书写' : 'Enlarged handwriting' %></span>
+                <button id="zoom-close-btn" class="ghost-btn" type="button" title="<%= lang === 'zh' ? '关闭' : 'Close' %>" aria-label="<%= lang === 'zh' ? '关闭' : 'Close' %>">&times;</button>
+            </div>
+            <canvas id="dictation-zoom-canvas" aria-label="<%= lang === 'zh' ? '放大手写区' : 'Enlarged handwriting area' %>"></canvas>
+            <div class="dictation-zoom-actions">
+                <button id="zoom-eraser-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '橡皮擦' : 'Eraser' %></button>
+                <button id="zoom-clear-btn" class="ghost-btn" type="button"><%= lang === 'zh' ? '清空' : 'Clear' %></button>
+                <button id="zoom-save-btn" class="primary-btn" type="button"><%= lang === 'zh' ? '保存' : 'Save' %></button>
+            </div>
+        </div>
+    </div>
+
     <script src="/js/dictation.js"></script>
 
-    <style>
+    <style nonce="<%= cspNonce %>">
         .container {
             max-width: 960px;
             margin: 0 auto;
@@ -409,6 +438,18 @@
             font-size: 0.95rem;
         }
 
+        .dictation-status-error {
+            color: #ff7675;
+        }
+
+        .dictation-status-success {
+            color: #1de9b6;
+        }
+
+        .dictation-status-info {
+            color: #ffeb3b;
+        }
+
         .dictation-note {
             margin-top: 2rem;
             padding: 1rem 1.2rem;
@@ -497,6 +538,7 @@
                 linear-gradient(to right, transparent 48%, rgba(255, 255, 255, 0.2) 49%, rgba(255, 255, 255, 0.2) 51%, transparent 52%),
                 linear-gradient(to bottom, transparent 48%, rgba(255, 255, 255, 0.2) 49%, rgba(255, 255, 255, 0.2) 51%, transparent 52%),
                 rgba(0, 0, 0, 0.55);
+            touch-action: none;
         }
 
         .dictation-zoom-actions {

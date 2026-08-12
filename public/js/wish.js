@@ -26,35 +26,58 @@
         };
 
         let currentGiftType = 'deepsea_singer';
+        let modalHideTimer = null;
+
+        function hideResultModal() {
+            const modal = document.getElementById('fullscreenModal');
+            modal.hidden = true;
+            if (modalHideTimer) {
+                clearTimeout(modalHideTimer);
+                modalHideTimer = null;
+            }
+        }
+
+        function displayResultModal(durationMs) {
+            const modal = document.getElementById('fullscreenModal');
+            if (modalHideTimer) clearTimeout(modalHideTimer);
+            modal.hidden = false;
+            modalHideTimer = setTimeout(hideResultModal, durationMs);
+        }
         
         function showModal(isSuccess, reward = null, rewardValue = 0, isGuaranteed = false) {
-            const modal = document.getElementById('fullscreenModal');
             const content = document.getElementById('modalContent');
             
             if (isSuccess) {
                 const displayName = reward || giftNames[currentGiftType]?.[lang] || t('礼物', 'Gift');
                 const displayValue = rewardValue || giftConfigs[currentGiftType]?.rewardValue || 0;
-                content.innerHTML = `
-                    <div>${t('祈愿成功！', 'Wish Success!')}</div>
-                    <div style="font-size: 2rem; margin: 15px 0;">${displayName}</div>
-                    <div style="font-size: 1.5rem; color: #f39c12;">${t('价值', 'Value')}: ${displayValue} ${t('积分', 'points')}</div>
-                    <div style="font-size: 1rem; color: #ccc; margin-top: 8px;">${t('已放入背包，可在个人资料中送出', 'Added to backpack, can be sent from your profile')}</div>
-                    ${isGuaranteed ? `<div style="font-size: 1rem; color: #e74c3c; margin-top: 10px;">${t('保底出货', 'Guaranteed drop')}</div>` : ''}
-                `;
+                const title = document.createElement('div');
+                title.textContent = t('祈愿成功！', 'Wish Success!');
+                const name = document.createElement('div');
+                name.className = 'wish-modal-reward-name';
+                name.textContent = String(displayName);
+                const value = document.createElement('div');
+                value.className = 'wish-modal-reward-value';
+                value.textContent = `${t('价值', 'Value')}: ${displayValue} ${t('积分', 'points')}`;
+                const note = document.createElement('div');
+                note.className = 'wish-modal-reward-note';
+                note.textContent = t(
+                    '已放入背包，可在个人资料中送出',
+                    'Added to backpack, can be sent from your profile'
+                );
+                content.replaceChildren(title, name, value, note);
+                if (isGuaranteed) {
+                    const guaranteed = document.createElement('div');
+                    guaranteed.className = 'wish-modal-guaranteed';
+                    guaranteed.textContent = t('保底出货', 'Guaranteed drop');
+                    content.appendChild(guaranteed);
+                }
                 content.className = 'modal-content modal-success';
             } else {
                 content.textContent = t('祈愿失败，再接再厉！', 'Wish failed, try again!');
                 content.className = 'modal-content modal-failure';
             }
             
-            modal.style.display = 'flex';
-            
-            
-            setTimeout(() => {
-                if (modal.style.display === 'flex') {
-                    modal.style.display = 'none';
-                }
-            }, 3000);
+            displayResultModal(3000);
         }
         
         function setCurrentGift(giftType) {
@@ -132,7 +155,6 @@
                     
                     
                     if (count === 10) {
-                        const modal = document.getElementById('fullscreenModal');
                         const content = document.getElementById('modalContent');
                         const rate = ((result.successCount / count) * 100).toFixed(2);
                         content.textContent = t(
@@ -140,10 +162,7 @@
                             `${config.name} 10x complete! Success ${result.successCount} (${rate}%)`
                         );
                         content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
-                        modal.style.display = 'flex';
-                        setTimeout(() => {
-                            modal.style.display = 'none';
-                        }, 3000);
+                        displayResultModal(3000);
                     } else if (result.wishSuccess) {
                         showModal(true, result.reward, result.rewardValue, result.isGuaranteed);
                     } else {
@@ -194,18 +213,13 @@
 
             if (config.guaranteeCount) {
                 const percent = (progressData.consecutive_fails / config.guaranteeCount) * 100;
-                bar.style.width = `${Math.min(percent, 100)}%`;
+                bar.value = Math.min(percent, 100);
                 text.textContent = `${progressData.consecutive_fails} / ${config.guaranteeCount}`;
-
-                if (progressData.consecutive_fails >= (config.guaranteeCount - 1)) {
-                    bar.style.background = '#c98708';
-                } else {
-                    bar.style.background = '#eb655c';
-                }
+                bar.classList.toggle('is-near-guarantee', progressData.consecutive_fails >= (config.guaranteeCount - 1));
             } else {
-                bar.style.width = '0%';
+                bar.value = 0;
                 text.textContent = t('无保底', 'No guarantee');
-                bar.style.background = '#eb655c';
+                bar.classList.remove('is-near-guarantee');
             }
         }
 
@@ -233,7 +247,7 @@
             constructor() {
                 this.container = document.getElementById('danmaku-container');
                 this.usedLanes = new Set(); 
-                this.maxLanes = Math.floor((window.innerHeight - 200) / 50);
+                this.maxLanes = Math.min(20, Math.max(1, Math.floor((window.innerHeight - 200) / 50)));
             }
             
             addMessage(data) {
@@ -243,7 +257,7 @@
                 
                 
                 const lane = this.getAvailableLane();
-                message.style.top = `${lane * 50 + 100}px`;
+                message.classList.add(`danmaku-lane-${lane}`);
                 
                 this.container.appendChild(message);
                 
@@ -288,17 +302,14 @@
             
             
             socket.on('new_danmaku', (data) => {
-                console.log(t('收到飘屏消息:', 'New danmaku:'), data);
-                danmakuManager.addMessage(data);
+                if (data && typeof data.content === 'string') danmakuManager.addMessage(data);
             });
             
             
             socket.on('recent_messages', (messages) => {
-                console.log(t('收到历史消息:', 'Recent messages:'), messages);
-                
-                messages.slice(0, 3).forEach((msg, index) => {
+                (Array.isArray(messages) ? messages : []).slice(0, 3).forEach((msg, index) => {
                     setTimeout(() => {
-                        danmakuManager.addMessage(msg);
+                        if (msg && typeof msg.content === 'string') danmakuManager.addMessage(msg);
                     }, index * 1000);
                 });
             });
@@ -330,7 +341,6 @@
                     return;
                 }
 
-                const modal = document.getElementById('fullscreenModal');
                 const content = document.getElementById('modalContent');
                 const giftLabelZh = giftNames[giftType]?.zh || result.giftName;
                 const giftLabelEn = giftNames[giftType]?.en || result.giftName;
@@ -339,10 +349,7 @@
                     `${giftLabelEn} 100k test: success ${result.successCount}, hit rate ${result.rate}`
                 );
                 content.className = result.successCount > 0 ? 'modal-content modal-success' : 'modal-content modal-failure';
-                modal.style.display = 'flex';
-                setTimeout(() => {
-                    modal.style.display = 'none';
-                }, 4000);
+                displayResultModal(4000);
             } catch (error) {
                 console.error(t('测试失败:', 'Test failed:'), error);
                 alert(t('网络错误，请重试', 'Network error, please try again'));
@@ -351,20 +358,22 @@
 
         function openProbabilityModal() {
             const list = document.getElementById('probabilityList');
-            const entries = Object.values(giftConfigs).map(item => {
-                return `• ${item.name} ${t('综合概率', 'Overall rate')}: ${item.overallRateText}`;
-            }).join('<br>');
-            list.innerHTML = entries;
-            document.getElementById('probabilityModal').style.display = 'flex';
+            const entries = Object.values(giftConfigs).map((item) => {
+                const row = document.createElement('div');
+                row.textContent = `• ${item.name} ${t('综合概率', 'Overall rate')}: ${item.overallRateText}`;
+                return row;
+            });
+            list.replaceChildren(...entries);
+            document.getElementById('probabilityModal').hidden = false;
         }
 
         function closeProbabilityModal() {
-            document.getElementById('probabilityModal').style.display = 'none';
+            document.getElementById('probabilityModal').hidden = true;
         }
 
         
         document.getElementById('fullscreenModal').addEventListener('click', function() {
-            this.style.display = 'none';
+            hideResultModal();
         });
 
         document.getElementById('probabilityModal').addEventListener('click', function(e) {
@@ -376,7 +385,7 @@
         
         if (canWishTest) {
             document.querySelectorAll('.admin-test-btn').forEach((btn) => {
-                btn.style.display = 'inline-block';
+                btn.hidden = false;
                 btn.addEventListener('click', () => simulateWish(btn.dataset.gift));
             });
         }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= lang === 'zh' ? '合石头' : 'Stone Match' %></title>
     <link rel="stylesheet" href="/styles.css">
-    <style>
+    <style nonce="<%= cspNonce %>">
         .container {
             max-width: 900px;
             margin: 0 auto;
@@ -324,17 +324,7 @@
             </div>
         </div>
 
-        <div style="
-            max-width: 760px;
-            margin: 2rem auto 0;
-            padding: 1rem;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            font-size: 0.85rem;
-            color: #ccc;
-            line-height: 1.5;
-            text-align: center;
-        ">
+        <div class="game-disclaimer">
             <% if (lang === 'zh') { %>
                 <strong>免责声明：</strong>本功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。虚拟积分无法兑换真实货币。严禁未满18周岁用户使用，请理性娱乐。
             <% } else { %>

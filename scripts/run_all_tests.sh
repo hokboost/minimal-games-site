@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET_URL=${TARGET_URL:-https://wuguijiang.com}
-export TARGET_URL
-export CSRF_AUTO_FILL=true
+if [[ -z "${TARGET_URL:-}" || -z "${AUTH_USER:-}" || -z "${AUTH_PASS:-}" ]]; then
+  echo "Usage: TARGET_URL=... AUTH_USER=... AUTH_PASS=... ALLOW_MUTATING_SECURITY_TESTS=I_ACKNOWLEDGE_TEST_SIDE_EFFECTS $0"
+  exit 1
+fi
 
-run_for_user() {
-  local u="$1"
-  export AUTH_USER="$u" AUTH_PASS="$u"
-  echo "=== Running as $u ==="
+export TARGET_URL AUTH_USER AUTH_PASS
+
+run_suite() {
   node scripts/security_test_bad_actor.js
   node scripts/security_test_blackhat_advanced.js
   node scripts/security_test_deep.js
@@ -21,7 +21,6 @@ run_for_user() {
   node scripts/security_test_stone_flip_race.js
   node scripts/security_test_tamper.js
   node scripts/security_test_unauth.js
-  node scripts/security_test_wish_guarantee_race.js
   node scripts/smoke_play_all_games.js
   node scripts/smoke_play_all_games_plus.js
   node scripts/test_concurrency_gifts.js
@@ -31,5 +30,4 @@ run_for_user() {
   node scripts/test_wish_flow.js
 }
 
-run_for_user 333333
-run_for_user 444444
+run_suite

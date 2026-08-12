@@ -39,19 +39,7 @@
             <button id="spinBtn"><%= lang === 'zh' ? '开始游戏' : 'Start game' %></button>
         </div>
         <p id="rewardResult" class="result-text"></p>
-        <div style="
-            max-width: 800px;
-            margin: 2rem auto 0;
-            padding: 1rem 1.5rem;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-            font-size: 0.9rem;
-            color: #ccc;
-            text-align: center;
-            line-height: 1.5;
-        ">
+        <div class="game-disclaimer slot-disclaimer">
             <% if (lang === 'zh') { %>
                 <strong>免责声明：</strong>本老虎机功能仅供娱乐消遣，不涉及任何形式的赌博、博彩或真实货币使用。无任何真实货币奖品可获得，参与完全免费，无需任何付费。本功能符合中华人民共和国相关法律法规，不属于博彩或彩票性质。使用本功能即表示您确认并接受这些条款。严禁未满18周岁用户使用，请理性娱乐。
             <% } else { %>
@@ -60,7 +48,7 @@
         </div>
     </div>
 
-    <style>
+    <style nonce="<%= cspNonce %>">
     .container {
         max-width: 900px;
         margin: 0 auto;
@@ -123,6 +111,17 @@
         font-weight: bold;
         color: #d63384;
         transition: transform 0.3s ease;
+    }
+
+    .slot-reels span.slot-reel-pulse {
+        transform: scale(1.4);
+    }
+
+    .slot-disclaimer {
+        max-width: 800px;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        font-size: 0.9rem;
     }
 
     .result-text {

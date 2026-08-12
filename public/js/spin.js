@@ -92,10 +92,6 @@ const { username, csrfToken } = document.body.dataset;
             canvas.height = size * dpr;
             
             
-            canvas.style.width = size + 'px';
-            canvas.style.height = size + 'px';
-            
-            
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             
             ctx.scale(dpr, dpr);
@@ -142,7 +138,8 @@ const { username, csrfToken } = document.body.dataset;
         
         function generateNonce(length = 16) {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+            const bytes = crypto.getRandomValues(new Uint8Array(length));
+            return Array.from(bytes, (value) => chars[value % chars.length]).join('');
         }
         
         async function spin() {
@@ -203,142 +200,50 @@ const { username, csrfToken } = document.body.dataset;
                         requestAnimationFrame(animate);
                     } else {
                         const displayPrize = getPrizeText(data.prize);
-                        let displayContent = `
-                            <div style="color: #28a745; font-weight: bold; text-align: center; font-size: 1.2rem; padding: 15px; background: #f8f9fa; border-radius: 10px; margin-top: 20px;">
-                                ${displayPrize}
-                            </div>
-                        `;
-                        
-                        
                         const prizeText = displayPrize;
-                        
-                        
-                        
-                        //     displayContent += `
-                        //         <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                        
-                        //         </div>
-                        //     `;
-                        // }
+                        const details = [];
+                        const addDetail = (condition, zh, en) => {
+                            if (condition) details.push(t(zh, en));
+                        };
                         
                         
                         const basicChallengeTasks = lang === 'zh'
                             ? ['找路人要吃的', '要帅哥微信', '美女合照', '美女要微信', '夸赞美女30秒']
                             : ['Ask a stranger for food', 'Ask a handsome guy for WeChat', 'Photo with a beautiful girl', 'Ask a beautiful girl for WeChat', 'Compliment a girl for 30s'];
                         
-                        if (basicChallengeTasks.some(task => prizeText.includes(task))) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('该任务为挑战任务', 'This is a challenge task')}
-                                </div>
-                            `;
-                        }
+                        addDetail(
+                            basicChallengeTasks.some(task => prizeText.includes(task)),
+                            '该任务为挑战任务',
+                            'This is a challenge task'
+                        );
                         
                         
                         const basicPunishmentTasks = lang === 'zh'
                             ? ['公主抱下蹲', '俯卧撑', '热舞', '深蹲', '大声清唱', '真心话']
                             : ['Princess carry squats', 'Push-ups', 'Dance', 'Squats', 'Sing loudly', 'Truth'];
                         
-                        if (basicPunishmentTasks.some(task => prizeText.includes(task))) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('纯惩罚，不加减资金', 'Punishment only, no money change')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '和路人帅哥合照' : 'Photo with a handsome stranger')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('用手机合照一张算成功 成功+4失败扣4', 'Take a photo to succeed: +4 success, -4 fail')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '集体反方向走一分钟' : 'Group walk backwards 1 minute')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('纯惩罚，不加减资金', 'Punishment only, no money change')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '和路人石头剪刀布' : 'Rock-paper-scissors with a stranger')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('三局两胜若获胜加20，输了扣20', 'Best of 3: win +20, lose -20')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '让路人B站关注一个乌龟酱' : 'Ask a stranger to follow on Bilibili')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('若路人没有B站，则让路人下载并关注 成功+4失败扣4', 'If they do not have Bilibili, ask them to download and follow: +4 success, -4 fail')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '找一名路人猜年龄' : 'Ask a stranger to guess your age')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('找到一名路人 猜测自己年龄 上下三岁及以内算成功 成功+4失败扣4', 'Guess your age within 3 years: +4 success, -4 fail')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '浏览器记录' : 'Browser History')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('念出自己最近一条浏览器记录 纯惩罚不加减资金', 'Read your latest browser history: punishment only, no money change')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '手拉手走一分钟' : 'Hold hands and walk 1 minute')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('两名男生手拉手走一分钟 纯惩罚 不加减资金', 'Two men hold hands and walk 1 minute: punishment only, no money change')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '垃圾清洁工' : 'Trash Cleaner')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('接下来5分钟内 走到路上看到所有垃圾都捡起来了，则挑战成功。成功加20失败扣20', 'Pick up all trash you see in the next 5 minutes: +20 success, -20 fail')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '含水对视' : 'Water stare challenge')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('两名男生各含一口矿泉水，对视达到10秒，则视为成功 成功加20失败扣20', 'Two men hold water and stare for 10 seconds: +20 success, -20 fail')}
-                                </div>
-                            `;
-                        }
-                        
-                        
-                        if (prizeText.includes(lang === 'zh' ? '背起走路' : 'Piggyback walk')) {
-                            displayContent += `
-                                <div style="color: #28a745; font-size: 1.1rem; margin-top: 10px; padding: 10px; background: #d4edda; border-radius: 8px;">
-                                    ${t('两名男生，一人背起一人，走1步加0.2积分，上限4积分，若小于5步则扣4积分', 'Piggyback: +0.2 points per step, max 4; if <5 steps then -4 points')}
-                                </div>
-                            `;
-                        }
-                        
-                        resultDiv.innerHTML = displayContent;
+                        addDetail(basicPunishmentTasks.some(task => prizeText.includes(task)), '纯惩罚，不加减资金', 'Punishment only, no money change');
+                        addDetail(prizeText.includes(lang === 'zh' ? '和路人帅哥合照' : 'Photo with a handsome stranger'), '用手机合照一张算成功 成功+4失败扣4', 'Take a photo to succeed: +4 success, -4 fail');
+                        addDetail(prizeText.includes(lang === 'zh' ? '集体反方向走一分钟' : 'Group walk backwards 1 minute'), '纯惩罚，不加减资金', 'Punishment only, no money change');
+                        addDetail(prizeText.includes(lang === 'zh' ? '和路人石头剪刀布' : 'Rock-paper-scissors with a stranger'), '三局两胜若获胜加20，输了扣20', 'Best of 3: win +20, lose -20');
+                        addDetail(prizeText.includes(lang === 'zh' ? '让路人B站关注一个乌龟酱' : 'Ask a stranger to follow on Bilibili'), '若路人没有B站，则让路人下载并关注 成功+4失败扣4', 'If they do not have Bilibili, ask them to download and follow: +4 success, -4 fail');
+                        addDetail(prizeText.includes(lang === 'zh' ? '找一名路人猜年龄' : 'Ask a stranger to guess your age'), '找到一名路人 猜测自己年龄 上下三岁及以内算成功 成功+4失败扣4', 'Guess your age within 3 years: +4 success, -4 fail');
+                        addDetail(prizeText.includes(lang === 'zh' ? '浏览器记录' : 'Browser History'), '念出自己最近一条浏览器记录 纯惩罚不加减资金', 'Read your latest browser history: punishment only, no money change');
+                        addDetail(prizeText.includes(lang === 'zh' ? '手拉手走一分钟' : 'Hold hands and walk 1 minute'), '两名男生手拉手走一分钟 纯惩罚 不加减资金', 'Two men hold hands and walk 1 minute: punishment only, no money change');
+                        addDetail(prizeText.includes(lang === 'zh' ? '垃圾清洁工' : 'Trash Cleaner'), '接下来5分钟内 走到路上看到所有垃圾都捡起来了，则挑战成功。成功加20失败扣20', 'Pick up all trash you see in the next 5 minutes: +20 success, -20 fail');
+                        addDetail(prizeText.includes(lang === 'zh' ? '含水对视' : 'Water stare challenge'), '两名男生各含一口矿泉水，对视达到10秒，则视为成功 成功加20失败扣20', 'Two men hold water and stare for 10 seconds: +20 success, -20 fail');
+                        addDetail(prizeText.includes(lang === 'zh' ? '背起走路' : 'Piggyback walk'), '两名男生，一人背起一人，走1步加0.2积分，上限4积分，若小于5步则扣4积分', 'Piggyback: +0.2 points per step, max 4; if <5 steps then -4 points');
+
+                        const prize = document.createElement('div');
+                        prize.className = 'spin-result-prize';
+                        prize.textContent = String(displayPrize || '');
+                        const detailNodes = details.map((detail) => {
+                            const node = document.createElement('div');
+                            node.className = 'spin-result-detail';
+                            node.textContent = detail;
+                            return node;
+                        });
+                        resultDiv.replaceChildren(prize, ...detailNodes);
                         button.disabled = false;
                         
                         
@@ -366,7 +271,9 @@ const { username, csrfToken } = document.body.dataset;
             const timerDiv = document.getElementById('countdown-timer');
             const displayDiv = document.getElementById('countdown-display');
             
-            timerDiv.style.display = 'block';
+            if (countdownInterval) clearInterval(countdownInterval);
+            timerDiv.hidden = false;
+            displayDiv.classList.remove('is-urgent');
             countdownEndTime = Date.now() + 5 * 60 * 1000; 
             
             countdownInterval = setInterval(() => {
@@ -382,7 +289,7 @@ const { username, csrfToken } = document.body.dataset;
                 
                 
                 if (remaining <= 30000) {
-                    displayDiv.style.animation = 'blink 1s infinite';
+                    displayDiv.classList.add('is-urgent');
                 }
             }, 100);
         }
@@ -397,6 +304,6 @@ const { username, csrfToken } = document.body.dataset;
             const timerDiv = document.getElementById('countdown-timer');
             const displayDiv = document.getElementById('countdown-display');
             
-            timerDiv.style.display = 'none';
-            displayDiv.style.animation = 'none';
+            timerDiv.hidden = true;
+            displayDiv.classList.remove('is-urgent');
         }

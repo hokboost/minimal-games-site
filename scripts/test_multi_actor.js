@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 /**
@@ -15,7 +16,7 @@
  *  - Flip: start 后并发 cashout 2 次（应只允许一次）
  *
  * 环境变量：
- *   TARGET_URL (默认 https://www.wuguijiang.com)
+ *   TARGET_URL (默认 http://localhost:3000)
  *   NORMAL_USER / NORMAL_PASS
  *   CHEAT_USER  / CHEAT_PASS
  */
@@ -23,7 +24,7 @@
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
-const baseUrl = process.env.TARGET_URL || 'https://www.wuguijiang.com';
+const baseUrl = process.env.TARGET_URL || 'http://localhost:3000';
 const normalUser = process.env.NORMAL_USER || '尧顺宇';
 const normalPass = process.env.NORMAL_PASS || 'yaoshunyu';
 const cheatUser = process.env.CHEAT_USER || '测试';

@@ -3,6 +3,11 @@
 <link rel="stylesheet" href="/redesign-account.css">
 
 <div class="language-switcher">
+    <button type="button" id="privacy-settings-button" class="privacy-settings-button"
+            title="<%= lang === 'zh' ? '隐私设置' : 'Privacy settings' %>"
+            aria-label="<%= lang === 'zh' ? '隐私设置' : 'Privacy settings' %>">
+        <%= lang === 'zh' ? '隐私' : 'Privacy' %>
+    </button>
     <% if (lang === 'zh') { %>
         <a href="/set-language/en" class="lang-btn" title="Switch to English" aria-label="Switch to English">
             EN

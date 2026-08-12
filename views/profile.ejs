@@ -14,7 +14,10 @@
             <h1><%= lang === 'zh' ? '个人资料' : 'Profile' %></h1>
             <div class="nav-links">
                 <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
-                <a href="/logout"><%= lang === 'zh' ? '退出登录' : 'Log out' %></a>
+                <form method="POST" action="/logout" class="logout-form">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="logout-link-button"><%= lang === 'zh' ? '退出登录' : 'Log out' %></button>
+                </form>
             </div>
         </div>
 
@@ -152,11 +155,11 @@
         </div>
 
 
-        <div id="gameRecordsModal" class="modal">
+        <div id="gameRecordsModal" class="modal" hidden>
             <div class="modal-content records-modal">
                 <div class="modal-header">
                     <h3 id="recordsTitle"><%= lang === 'zh' ? '游戏记录' : 'Game records' %></h3>
-                    <span class="close" id="close-records">&times;</span>
+                    <button type="button" class="close" id="close-records" aria-label="<%= lang === 'zh' ? '关闭' : 'Close' %>" title="<%= lang === 'zh' ? '关闭' : 'Close' %>">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div id="recordsContent">
@@ -177,11 +180,11 @@
     </div>
 
     
-    <div id="changePasswordModal" class="modal">
+    <div id="changePasswordModal" class="modal" hidden>
         <div class="modal-content">
             <div class="modal-header">
                 <h3><%= lang === 'zh' ? '修改密码' : 'Change password' %></h3>
-                <span class="close" id="close-change-password">&times;</span>
+                <button type="button" class="close" id="close-change-password" aria-label="<%= lang === 'zh' ? '关闭' : 'Close' %>" title="<%= lang === 'zh' ? '关闭' : 'Close' %>">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="changePasswordForm">
@@ -208,9 +211,9 @@
     </div>
 
     
-    <div id="messageToast" class="toast"></div>
+    <div id="messageToast" class="toast" role="status" aria-live="polite" hidden></div>
 
-    <style>
+    <style nonce="<%= cspNonce %>">
     .container {
         max-width: 1000px;
         margin: 0 auto;
@@ -490,7 +493,7 @@
 
     /* 模态框样式 */
     .modal {
-        display: none;
+        display: block;
         position: fixed;
         z-index: 1000;
         left: 0;
@@ -539,6 +542,9 @@
     }
 
     .close {
+        padding: 0;
+        border: 0;
+        background: transparent;
         color: #fff;
         font-size: 2rem;
         font-weight: bold;
@@ -638,7 +644,6 @@
         color: #fff;
         font-weight: bold;
         z-index: 1001;
-        display: none;
         animation: toastSlideIn 0.3s ease;
     }
 

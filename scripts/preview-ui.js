@@ -20,6 +20,7 @@ if (process.env.NODE_ENV === 'production') {
 
 const projectRoot = path.resolve(__dirname, '..');
 const app = express();
+app.locals.cspNonce = 'preview-only';
 const previewBalance = 12880;
 const csrfToken = 'preview-only-not-a-real-csrf-token';
 const previewUser = Object.freeze({

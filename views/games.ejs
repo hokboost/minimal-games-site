@@ -32,7 +32,10 @@
                     </div>
                     <div class="access-actions">
                         <% if (user) { %>
-                            <a href="/logout" class="secondary"><%= lang === 'zh' ? '退出账号' : 'Log out' %></a>
+                            <form method="POST" action="/logout" class="logout-form">
+                                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                                <button type="submit" class="secondary"><%= lang === 'zh' ? '退出账号' : 'Log out' %></button>
+                            </form>
                         <% } else { %>
                             <a href="/login" class="secondary"><%= t.auth.login %></a>
                             <a href="/register"><%= t.auth.register %></a>

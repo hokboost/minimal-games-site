@@ -31,14 +31,20 @@
     ];
 
     let activeReward = rewards[0];
+    let duelInFlight = false;
 
     function renderRewards() {
-        rewardList.innerHTML = '';
+        rewardList.replaceChildren();
         rewards.forEach((reward) => {
             const item = document.createElement('div');
             item.className = 'reward-item' + (reward.key === activeReward.key ? ' active' : '');
-            item.innerHTML = `<span>${reward.name}</span><strong>${reward.reward} ${t('积分', 'points')}</strong>`;
+            const name = document.createElement('span');
+            name.textContent = reward.name;
+            const value = document.createElement('strong');
+            value.textContent = `${reward.reward} ${t('积分', 'points')}`;
+            item.append(name, value);
             item.addEventListener('click', () => {
+                if (duelInFlight) return;
                 activeReward = reward;
                 renderRewards();
                 updatePower(powerInput.value);
@@ -78,20 +84,26 @@
     powerRange.addEventListener('input', (event) => updatePower(event.target.value));
     powerInput.addEventListener('input', (event) => updatePower(event.target.value));
 
+    function setDuelInFlight(inFlight) {
+        duelInFlight = inFlight;
+        duelBtn.disabled = inFlight;
+        powerRange.disabled = inFlight;
+        powerInput.disabled = inFlight;
+        rewardList.classList.toggle('disabled', inFlight);
+    }
+
     duelBtn.addEventListener('click', async () => {
-        duelBtn.disabled = true;
-        resultBox.textContent = t('挑战中...', 'Challenging...');
+        if (duelInFlight) return;
+        const selectedReward = activeReward;
         const power = Number(powerInput.value);
         const cost = calculateCost(power);
         const currentBalance = parseBalance(balanceEl.textContent);
         if (currentBalance !== null && currentBalance < cost) {
             resultBox.textContent = t('积分不足，无法挑战', 'Insufficient points');
-            duelBtn.disabled = false;
             return;
         }
-        if (currentBalance !== null && Number.isFinite(cost)) {
-            balanceEl.textContent = currentBalance - cost;
-        }
+        setDuelInFlight(true);
+        resultBox.textContent = t('挑战中...', 'Challenging...');
         try {
             const response = await window.idempotentFetch('/api/duel/play', {
                 method: 'POST',
@@ -100,7 +112,7 @@
                     'X-CSRF-Token': csrfToken || ''
                 },
                 body: JSON.stringify({
-                    giftType: activeReward.key,
+                    giftType: selectedReward.key,
                     power
                 })
             });
@@ -108,33 +120,23 @@
             const result = await response.json();
             if (!result.success) {
                 resultBox.textContent = translateServerMessage(result.message) || t('挑战失败', 'Challenge failed');
-                if (Number.isFinite(result.balanceAfterBet)) {
-                    balanceEl.textContent = result.balanceAfterBet;
-                } else if (Number.isFinite(currentBalance)) {
-                    balanceEl.textContent = currentBalance;
-                }
                 return;
             }
 
             const balanceAfterReward = parseBalance(result.balanceAfterReward);
             const balanceAfterBet = parseBalance(result.balanceAfterBet);
             const newBalance = parseBalance(result.newBalance);
-            const computedBalance = (currentBalance !== null && Number.isFinite(cost))
-                ? currentBalance - cost + (Number(result.reward) || 0)
-                : null;
-            if (result.reward > 0 && balanceAfterReward !== null) {
+            if (newBalance !== null) {
+                balanceEl.textContent = newBalance;
+            } else if (result.reward > 0 && balanceAfterReward !== null) {
                 balanceEl.textContent = balanceAfterReward;
             } else if (balanceAfterBet !== null) {
                 balanceEl.textContent = balanceAfterBet;
-            } else if (computedBalance !== null) {
-                balanceEl.textContent = computedBalance;
-            } else if (newBalance !== null) {
-                balanceEl.textContent = newBalance;
             }
             if (result.duelSuccess) {
                 resultBox.textContent = t(
-                    `挑战成功！获得 ${activeReward.reward} 积分`,
-                    `Success! Earned ${activeReward.reward} points`
+                    `挑战成功！获得 ${result.reward} 积分`,
+                    `Success! Earned ${result.reward} points`
                 );
             } else {
                 resultBox.textContent = t('挑战失败，再接再厉', 'Challenge failed, try again');
@@ -143,7 +145,7 @@
             console.error('Duel error:', error);
             resultBox.textContent = t('网络错误，请稍后重试', 'Network error, please try again');
         } finally {
-            duelBtn.disabled = false;
+            setDuelInFlight(false);
         }
     });
 

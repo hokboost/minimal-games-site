@@ -28,6 +28,7 @@
     let hasVerified = true;
     let currentGameData = null;
     let selectedTier = null;
+    let requestInFlight = false;
 
     const verifyBtn = document.getElementById('verify-btn');
     const backBtn = document.getElementById('back-btn');
@@ -53,42 +54,38 @@
         const cell = document.createElement('div');
         cell.className = 'grid-item';
 
-        const numberStyle = 'font-size: 1.8rem; font-weight: bold; color: #fff;';
-        let prizeStyle;
-        let bgStyle = '';
-
         const hasCoinPrize = typeof prize === 'string'
             && (prize.includes('积分') || prize.toLowerCase().includes('point'));
         const isThankYou = typeof prize === 'string'
             && (prize.includes('谢谢') || prize.toLowerCase().includes('thanks'));
 
         if (isWinningArea) {
-            prizeStyle = 'color: #00c853; font-weight: bold; font-size: 0.9rem;';
-            bgStyle = 'background: rgba(255, 215, 0, 0.2); border: 2px solid #FFD700;';
+            cell.classList.add('grid-item-winning');
         } else if (prize && hasCoinPrize && !isThankYou) {
-            prizeStyle = 'color: #00c853; font-weight: bold; font-size: 0.9rem;';
-            bgStyle = 'background: rgba(0, 200, 83, 0.2); border: 2px solid #00c853;';
+            cell.classList.add('grid-item-prize');
         } else {
-            prizeStyle = 'color: #ccc; font-size: 0.8rem;';
+            cell.classList.add('grid-item-empty');
         }
-
-        cell.style.cssText = bgStyle;
-        cell.innerHTML = `
-            <div style="${numberStyle}">${num}</div>
-            <div style="${prizeStyle}">${prize || ''}</div>
-        `;
+        const number = document.createElement('div');
+        number.className = 'scratch-card-number';
+        number.textContent = String(num ?? '');
+        const prizeText = document.createElement('div');
+        prizeText.className = 'scratch-card-prize';
+        prizeText.textContent = String(prize || '');
+        cell.append(number, prizeText);
         return cell;
     }
 
     function backToTierSelection() {
-        document.getElementById('game-board').style.display = 'none';
-        document.querySelector('.balance-tier-section').style.display = 'block';
+        document.getElementById('game-board').hidden = true;
+        document.querySelector('.balance-tier-section').hidden = false;
         hasVerified = true;
         currentGameData = null;
         selectedTier = null;
     }
 
     async function selectTier(cost, winCount) {
+        if (requestInFlight) return;
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
         if (currentBalance < cost) {
             alert(t(
@@ -99,6 +96,10 @@
         }
 
         selectedTier = { cost, winCount };
+        requestInFlight = true;
+        document.querySelectorAll('.tier-btn').forEach((button) => {
+            button.disabled = true;
+        });
 
         try {
             const response = await window.idempotentFetch('/api/scratch/play', {
@@ -145,19 +146,30 @@
         } catch (error) {
             console.error('Scratch game error:', error);
             alert(t('网络错误，请稍后重试', 'Network error, please try again'));
+        } finally {
+            requestInFlight = false;
+            document.querySelectorAll('.tier-btn').forEach((button) => {
+                button.disabled = false;
+            });
         }
     }
 
     async function startScratchGame(gameData) {
         hasVerified = false;
-        document.querySelector('.balance-tier-section').style.display = 'none';
-        document.getElementById('game-board').style.display = 'block';
+        document.querySelector('.balance-tier-section').hidden = true;
+        document.getElementById('game-board').hidden = false;
 
         const userCount = gameData.slots.length;
-        document.getElementById('current-tier-info').innerHTML = `
-            <div>${t('当前档位', 'Current Tier')}: ${selectedTier.cost} ${t('积分', 'points')} | ${t('中奖号码', 'Winning Numbers')}: ${gameData.winningNumbers.length} ${t('个', '')} | ${t('我的号码', 'My Numbers')}: ${userCount} ${t('个', '')}</div>
-            <div style="color: #ffeb3b;">${t('刮开涂层，点击验证查看中奖结果！', 'Scratch off and click verify to reveal your result!')}</div>
-        `;
+        const tierInfo = document.getElementById('current-tier-info');
+        const summary = document.createElement('div');
+        summary.textContent = `${t('当前档位', 'Current Tier')}: ${selectedTier.cost} ${t('积分', 'points')} | ${t('中奖号码', 'Winning Numbers')}: ${gameData.winningNumbers.length} ${t('个', '')} | ${t('我的号码', 'My Numbers')}: ${userCount} ${t('个', '')}`;
+        const instruction = document.createElement('div');
+        instruction.className = 'scratch-instruction';
+        instruction.textContent = t(
+            '刮开涂层，点击验证查看中奖结果！',
+            'Scratch off and click verify to reveal your result!'
+        );
+        tierInfo.replaceChildren(summary, instruction);
 
         const canvas = document.getElementById('scratchCanvas');
         const ctx = canvas.getContext('2d');
@@ -178,7 +190,7 @@
         ];
 
         const container = document.getElementById('scratchContent');
-        container.innerHTML = '';
+        container.replaceChildren();
         all.forEach(({ num, prize, isWinning }) => container.appendChild(createCard(num, prize, isWinning)));
 
         let isDrawing = false;
@@ -232,9 +244,10 @@
                 const dy = y - lastY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 const steps = Math.ceil(dist / 4);
-                for (let i = 0; i <= steps; i += 1) {
-                    const lerpX = lastX + (dx * i / steps);
-                    const lerpY = lastY + (dy * i / steps);
+                const drawSteps = Math.max(1, steps);
+                for (let i = 0; i <= drawSteps; i += 1) {
+                    const lerpX = lastX + (dx * i / drawSteps);
+                    const lerpY = lastY + (dy * i / drawSteps);
                     ctx.beginPath();
                     ctx.arc(lerpX, lerpY, 20, 0, Math.PI * 2);
                     ctx.fill();
@@ -244,7 +257,7 @@
             lastY = y;
         }
 
-        document.getElementById('game-result').innerHTML = '';
+        document.getElementById('game-result').replaceChildren();
     }
 
     function verifyWin() {
@@ -287,12 +300,16 @@
             );
         }
 
-        result.innerHTML = `
-            <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-                <div style="color: #ffeb3b; font-size: 1.1rem; margin-bottom: 0.5rem;">${resultMessage}</div>
-                <div style="color: #ccc;">${t('匹配号码', 'Matches')}: ${matched.length} ${t('个', '')} | ${t('余额', 'Balance')}: ${currentGameData.finalBalance ?? '--'} ${t('积分', 'points')}</div>
-            </div>
-        `;
+        const panel = document.createElement('div');
+        panel.className = 'scratch-result-panel';
+        const message = document.createElement('div');
+        message.className = 'scratch-result-message';
+        message.textContent = resultMessage;
+        const details = document.createElement('div');
+        details.className = 'scratch-result-details';
+        details.textContent = `${t('匹配号码', 'Matches')}: ${matched.length} ${t('个', '')} | ${t('余额', 'Balance')}: ${currentGameData.finalBalance ?? '--'} ${t('积分', 'points')}`;
+        panel.append(message, details);
+        result.replaceChildren(panel);
 
         if (typeof currentGameData.finalBalance === 'number') {
             document.getElementById('current-balance').textContent = currentGameData.finalBalance;

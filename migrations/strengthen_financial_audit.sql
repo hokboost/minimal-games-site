@@ -76,6 +76,32 @@ SELECT 'append-only-v1',
 FROM users
 ON CONFLICT (version, username) DO NOTHING;
 
+CREATE OR REPLACE FUNCTION establish_new_user_balance_audit_baseline()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    previous_log_id BIGINT;
+BEGIN
+    SELECT COALESCE(MAX(id), 0)
+    INTO previous_log_id
+    FROM balance_logs
+    WHERE username = NEW.username;
+
+    INSERT INTO balance_audit_baselines (
+        version, username, balance, last_balance_log_id
+    ) VALUES (
+        'append-only-v1', NEW.username, NEW.balance, previous_log_id
+    );
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS users_establish_balance_audit_baseline ON users;
+CREATE TRIGGER users_establish_balance_audit_baseline
+AFTER INSERT ON users
+FOR EACH ROW EXECUTE FUNCTION establish_new_user_balance_audit_baseline();
+
 ALTER TABLE idempotency_keys
     ADD COLUMN IF NOT EXISTS failure_reason TEXT;
 

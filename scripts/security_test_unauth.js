@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 const { URL } = require('url');
 
-const baseUrl = process.argv[2] || process.env.TARGET_URL || 'https://wuguijiang.com';
+const baseUrl = process.argv[2] || process.env.TARGET_URL || 'http://localhost:3000';
 const registerAttempts = Number(process.env.REGISTER_ATTEMPTS || 5);
 
 const cookieJar = new Map();

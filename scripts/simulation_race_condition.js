@@ -1,3 +1,4 @@
+require("./guard-test-target").enforceSafeTestTarget();
 const axios = require('axios');
 
 const BASE_URL = process.env.TARGET_URL || 'http://localhost:3000';

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 const { URL } = require('url');
 const crypto = require('crypto');
 
-const baseUrl = process.argv[2] || process.env.TARGET_URL || 'https://www.wuguijiang.com';
+const baseUrl = process.argv[2] || process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER;
 const password = process.env.AUTH_PASS;
 const concurrency = Number(process.env.CONCURRENCY || 20);

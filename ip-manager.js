@@ -23,8 +23,8 @@ class IPManager {
                     this.locationCache.delete(ip);
                 }
             }
-            for (const [key, timestamp] of this.activityWriteCache) {
-                if (now - timestamp > 5 * 60 * 1000) {
+            for (const [key, entry] of this.activityWriteCache) {
+                if (now - Number(entry?.lastWrite || 0) > 5 * 60 * 1000 && Number(entry?.pending || 0) === 0) {
                     this.activityWriteCache.delete(key);
                 }
             }
@@ -61,18 +61,31 @@ class IPManager {
     async recordIPActivity(ip, username, userAgent, action = 'access') {
         const activityKey = `${ip}\u0000${username || ''}\u0000${action}`;
         const now = Date.now();
+        let requestCount = 1;
         if (action === 'request') {
-            const lastWrite = this.activityWriteCache.get(activityKey) || 0;
-            if (now - lastWrite < 60 * 1000) return;
-            this.activityWriteCache.set(activityKey, now);
+            const entry = this.activityWriteCache.get(activityKey) || { lastWrite: 0, pending: 0 };
+            entry.pending += 1;
+            if (now - entry.lastWrite < 60 * 1000) {
+                this.activityWriteCache.set(activityKey, entry);
+                return;
+            }
+            requestCount = entry.pending;
+            this.activityWriteCache.set(activityKey, { lastWrite: now, pending: 0 });
         }
         try {
             await pool.query(`
-                INSERT INTO ip_activities (ip_address, username, user_agent, action, created_at)
-                VALUES ($1, $2, $3, $4, NOW())
-            `, [ip, username, userAgent, action]);
+                INSERT INTO ip_activities (
+                    ip_address, username, user_agent, action, request_count, created_at
+                ) VALUES ($1, $2, $3, $4, $5, NOW())
+            `, [ip, username, userAgent, action, requestCount]);
+            if (action !== 'request') this.clearRiskCacheForIP(ip);
         } catch (error) {
-            if (action === 'request') this.activityWriteCache.delete(activityKey);
+            if (action === 'request') {
+                const entry = this.activityWriteCache.get(activityKey) || { lastWrite: 0, pending: 0 };
+                entry.pending += requestCount;
+                entry.lastWrite = 0;
+                this.activityWriteCache.set(activityKey, entry);
+            }
             console.error('记录IP活动失败:', error);
         }
     }
@@ -106,7 +119,7 @@ class IPManager {
 
             // 检查IP是否在白名单
             const whitelistCheck = await pool.query(
-                'SELECT * FROM ip_whitelist WHERE ip_address = $1 AND is_active = true',
+                'SELECT 1 FROM ip_whitelist WHERE ip_address = $1 AND is_active = true',
                 [ip]
             );
             if (whitelistCheck.rows.length > 0) {
@@ -119,7 +132,8 @@ class IPManager {
 
             // 计算短期活动频率 (过去1小时)
             const recentActivity = await pool.query(`
-                SELECT COUNT(*) as count, COUNT(DISTINCT username) as unique_users
+                SELECT COALESCE(SUM(request_count), 0) as count,
+                       COUNT(DISTINCT username) as unique_users
                 FROM ip_activities 
                 WHERE ip_address = $1 AND created_at > NOW() - INTERVAL '1 hour'
             `, [ip]);
@@ -185,7 +199,7 @@ class IPManager {
 
         } catch (error) {
             console.error('IP风险评估失败:', error);
-            return { score: 50, reasons: ['系统评估异常'], level: 'MEDIUM' };
+            throw error;
         }
     }
 
@@ -221,7 +235,7 @@ class IPManager {
 
         } catch (error) {
             console.error('地理位置风险检查失败:', error);
-            return { score: 0, reason: null };
+            throw error;
         }
     }
 
@@ -234,19 +248,8 @@ class IPManager {
             }
         }
 
-        // 这里应该调用真实的地理位置API，暂时返回模拟数据
-        const location = {
-            country: '中国',
-            city: '北京',
-            region: '北京市'
-        };
-
-        this.locationCache.set(ip, {
-            location,
-            timestamp: Date.now()
-        });
-
-        return location;
+        // No geolocation provider is configured. Unknown data must not become a risk signal.
+        return null;
     }
 
     // 缓存风险评分
@@ -315,10 +318,10 @@ class IPManager {
         try {
             const stats = await pool.query(`
                 SELECT 
-                    COUNT(*) as total_requests,
+                    COALESCE(SUM(request_count), 0) as total_requests,
                     COUNT(DISTINCT username) as unique_users,
-                    COUNT(CASE WHEN action = 'login_success' THEN 1 END) as successful_logins,
-                    COUNT(CASE WHEN action = 'login_failed' THEN 1 END) as failed_logins,
+                    COALESCE(SUM(request_count) FILTER (WHERE action = 'login_success'), 0) as successful_logins,
+                    COALESCE(SUM(request_count) FILTER (WHERE action = 'login_failed'), 0) as failed_logins,
                     MIN(created_at) as first_seen,
                     MAX(created_at) as last_seen
                 FROM ip_activities 
@@ -328,7 +331,7 @@ class IPManager {
             return stats.rows[0];
         } catch (error) {
             console.error('获取IP统计失败:', error);
-            return null;
+            throw error;
         }
     }
 

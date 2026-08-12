@@ -1,60 +1,11 @@
-// 生产环境安全检查 - 必须在所有操作之前
 require('dotenv').config();
-
-if (process.env.NODE_ENV === 'production') {
-    // 强制检查SESSION_SECRET
-    if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'your-secret-key-change-this-in-production') {
-        console.error('🚨 生产环境安全错误: SESSION_SECRET 未正确配置！');
-        console.error('请设置环境变量 SESSION_SECRET 为足够长的随机字符串');
-        process.exit(1);
-    }
-    
-    // 放宽长度要求：16字节以上即可，建议32字节
-    if (process.env.SESSION_SECRET.length < 16) {
-        console.error('🚨 生产环境安全错误: SESSION_SECRET 长度过短！');
-        console.error('当前长度:', process.env.SESSION_SECRET.length);
-        console.error('最少需要16字节，建议32字节以上');
-        process.exit(1);
-    }
-    
-    if (process.env.SESSION_SECRET.length < 32) {
-        console.warn('⚠️ 生产环境安全警告: SESSION_SECRET 长度建议至少32字节');
-        console.warn('当前长度:', process.env.SESSION_SECRET.length);
-        console.warn('建议增加SESSION_SECRET长度以提高安全性');
-    }
-    
-    // 🛡️ 安全修复：检查Windows API密钥不能使用默认值
-    if (!process.env.WINDOWS_API_KEY || process.env.WINDOWS_API_KEY === 'your-secret-api-key-2024') {
-        console.error('🚨 生产环境安全错误: WINDOWS_API_KEY 未正确配置或使用默认值！');
-        console.error('请设置环境变量 WINDOWS_API_KEY 为足够长的随机字符串');
-        process.exit(1);
-    }
-    
-    if (process.env.WINDOWS_API_KEY.length < 32) {
-        console.error('🚨 生产环境安全错误: WINDOWS_API_KEY 长度过短！');
-        console.error('当前长度:', process.env.WINDOWS_API_KEY.length);
-        console.error('最少需要32字节的强随机字符串');
-        process.exit(1);
-    }
-
-    if (!process.env.GIFT_TASKS_HMAC_SECRET || process.env.GIFT_TASKS_HMAC_SECRET.length < 32) {
-        console.error('生产环境安全错误: GIFT_TASKS_HMAC_SECRET 必须是至少32字节的随机字符串');
-        process.exit(1);
-    }
-
-    if (process.env.CSRF_TEST_MODE === 'true' || process.env.CSRF_AUTO_FILL === 'true') {
-        console.error('生产环境安全错误: 禁止启用 CSRF_TEST_MODE 或 CSRF_AUTO_FILL');
-        process.exit(1);
-    }
-    
-    console.log('✅ 生产环境安全检查通过');
-}
+require('./lib/safe-logger').installSafeConsole();
+require('./lib/config-validation').validateServerEnvironment();
 
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
 const helmet = require('helmet');
-const mongoSanitize = require('express-mongo-sanitize');
 const http = require('http');
 const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
@@ -64,31 +15,54 @@ const csrf = require('csrf');
 // 数据库连接
 const pool = require('./db');
 const pgSession = require('connect-pg-simple')(session);
+const { applyDatabaseMigrations } = require('./lib/database-migrations');
 
 // 导入本地游戏数据和逻辑
 const questions = require('./data/questions');
 const GameLogic = require('./data/gameLogic');
 const BalanceLogger = require('./balance-logger');
+const { parseMoney } = require('./lib/integer-money');
 
 // 礼物配置
 const fs = require('fs');
 const axios = require('axios');
-const { getSimpleGiftSender } = require('./bilibili-gift-sender-simple');
 const crypto = require('crypto');
 const developmentSessionSecret = crypto.randomBytes(32).toString('hex');
 const sessionSecret = process.env.SESSION_SECRET || developmentSessionSecret;
+const dummyPasswordHash = bcrypt.hashSync('invalid-login-password-A1', 12);
 const { parseCookies, decodeSignedSessionCookie } = require('./lib/session-auth');
 const { createIdempotencyMiddleware } = require('./lib/idempotency');
-const { getClientIp } = require('./lib/client-ip');
+const { createAdminFailureAuditMiddleware } = require('./lib/admin-audit-failure');
+const { getClientIp, isTrustedProxyAddress } = require('./lib/client-ip');
 const { requestContextMiddleware, setRequestId } = require('./lib/request-context');
+const PostgresRateLimitStore = require('./lib/postgres-rate-limit-store');
+const { createConcurrencyGuard } = require('./lib/concurrency-guard');
+const { PostgresEventBus } = require('./lib/postgres-event-bus');
+const { queueMissingPkRunners } = require('./lib/pk-runner-recovery');
+const { hasActiveWorkerRoleLease } = require('./lib/worker-role-lease');
+const {
+    SIGNATURE_VERSION,
+    signRequest,
+    signaturesMatch
+} = require('./lib/request-signature');
 
-let giftConfig = {};
+let giftConfig;
 try {
     const giftConfigData = fs.readFileSync(path.join(__dirname, 'gift-codes.json'), 'utf8');
     giftConfig = JSON.parse(giftConfigData);
-    console.log('✅ 礼物配置加载成功');
+    const requiredGiftTypes = ['heartbox', 'fanlight', 'tiedu_one'];
+    if (!giftConfig || typeof giftConfig !== 'object' || !giftConfig.礼物映射) {
+        throw new Error('Gift mapping is missing');
+    }
+    for (const giftType of requiredGiftTypes) {
+        const gift = giftConfig.礼物映射[giftType];
+        if (!gift || typeof gift.名称 !== 'string' || !/^\d+$/.test(String(gift.bilibili_id || ''))
+            || !Number.isSafeInteger(gift.电币成本) || gift.电币成本 < 0) {
+            throw new Error(`Required gift configuration is invalid: ${giftType}`);
+        }
+    }
 } catch (error) {
-    console.error('❌ 礼物配置加载失败:', error.message);
+    throw new Error('礼物配置缺失或无效，拒绝启动服务', { cause: error });
 }
 
 // 导入安全管理模块
@@ -109,6 +83,14 @@ const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
 // CSRF 保护
 const tokens = new csrf();
 
+const paidActionConcurrencyGuard = createConcurrencyGuard({
+    pool,
+    maxInFlight: process.env.PAID_ACTION_MAX_IN_FLIGHT,
+    maxPerUser: process.env.PAID_ACTION_MAX_PER_USER,
+    maxPoolWaiters: process.env.PAID_ACTION_MAX_POOL_WAITERS,
+    maxEventLoopLagMs: process.env.PAID_ACTION_MAX_EVENT_LOOP_LAG_MS
+});
+
 const app = express();
 const server = http.createServer(app);
 
@@ -120,24 +102,37 @@ const sessionStore = new pgSession({
     errorLog: console.error
 });
 
+const configuredWebOrigins = new Set(
+    String(process.env.PUBLIC_ORIGINS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+);
+configuredWebOrigins.add('https://www.wuguijiang.com');
+configuredWebOrigins.add('https://wuguijiang.com');
+
+function isAllowedWebOrigin(origin) {
+    try {
+        const parsed = new URL(origin);
+        if (parsed.origin !== origin || parsed.username || parsed.password) return false;
+        if (process.env.NODE_ENV !== 'production') {
+            return parsed.protocol === 'http:'
+                && ['localhost', '127.0.0.1'].includes(parsed.hostname)
+                && parsed.port === String(PORT || 3000);
+        }
+        return parsed.protocol === 'https:' && configuredWebOrigins.has(parsed.origin);
+    } catch (error) {
+        return false;
+    }
+}
+
 const io = new Server(server, {
     cors: {
         origin: (origin, callback) => {
             if (!origin) {
-                return callback(null, true);
+                return callback(process.env.NODE_ENV === 'production' ? new Error('Origin required') : null, process.env.NODE_ENV !== 'production');
             }
-            if (process.env.NODE_ENV !== 'production') {
-                const allowedLocal = ["http://localhost:3000", "http://127.0.0.1:3000"];
-                return callback(null, allowedLocal.includes(origin));
-            }
-            const allowedProd = new Set([
-                "https://www.wuguijiang.com",
-                "https://wuguijiang.com"
-            ]);
-            if (allowedProd.has(origin) || origin.endsWith(".wuguijiang.com")) {
-                return callback(null, true);
-            }
-            return callback(new Error('Not allowed by CORS'));
+            return callback(isAllowedWebOrigin(origin) ? null : new Error('Not allowed by CORS'), isAllowedWebOrigin(origin));
         },
         methods: ["GET", "POST"],
         credentials: true
@@ -174,16 +169,19 @@ io.use(async (socket, next) => {
             return next(new Error('User not authenticated'));
         }
 
-        const currentUser = await pool.query(
-            'SELECT id, username, authorized, is_admin, deactivated FROM users WHERE username = $1',
-            [sessionData.user.username]
-        );
-        const activeSession = await pool.query(
-            'SELECT is_active FROM active_sessions WHERE session_id = $1 AND username = $2',
-            [sessionId, sessionData.user.username]
+        const currentUser = await pool.query(`
+            SELECT account.id, account.username, account.authorized, account.is_admin, account.deactivated
+            FROM users AS account
+            JOIN active_sessions AS active ON active.username = account.username
+            WHERE account.username = $1
+              AND active.session_id = $2
+              AND active.is_active = true
+              AND account.deactivated = false
+        `,
+            [sessionData.user.username, sessionId]
         );
         const user = currentUser.rows[0];
-        if (!user?.authorized || user.deactivated === true || activeSession.rows[0]?.is_active !== true) {
+        if (!user?.authorized) {
             return next(new Error('Session is no longer authorized'));
         }
 
@@ -195,7 +193,6 @@ io.use(async (socket, next) => {
             sessionId
         };
 
-        console.log(`✅ WebSocket认证成功: ${sessionData.user.username}`);
         next();
     } catch (error) {
         console.error('WebSocket认证失败:', error);
@@ -205,14 +202,13 @@ io.use(async (socket, next) => {
 
 io.on('connection', (socket) => {
     const username = socket.authenticatedUser.username;
-    console.log(`🔗 用户 ${username} 建立WebSocket连接: ${socket.id}`);
-
     // 🛡️ 安全修复：直接使用已验证的用户名，不再信任客户端
     if (!userSockets.has(username)) {
         userSockets.set(username, new Set());
     }
     userSockets.get(username).add(socket.id);
     socket.username = username;
+    socket.emit('recent_messages', danmaku.getRecentMessages(10));
 
     // 处理断开连接
     socket.on('disconnect', () => {
@@ -221,13 +217,11 @@ io.on('connection', (socket) => {
             if (userSockets.get(socket.username).size === 0) {
                 userSockets.delete(socket.username);
             }
-            console.log(`用户 ${socket.username} 断开WebSocket连接: ${socket.id}`);
         }
     });
 });
 
-// 发送用户通知的辅助函数
-function notifyUser(username, notification) {
+function emitUserNotificationLocal(username, notification) {
     if (userSockets.has(username)) {
         const socketIds = userSockets.get(username);
         for (const socketId of socketIds) {
@@ -236,19 +230,12 @@ function notifyUser(username, notification) {
                 socket.emit('notification', notification);
             }
         }
-        console.log(`发送通知给用户 ${username}: ${notification.message}`);
     }
 }
 
-// 发送安全警告的辅助函数
-function notifySecurityEvent(username, event, excludeSessionId = null) {
-    console.log(`🔔 尝试发送安全警告给用户 ${username}: ${event.type}`);
-    
+function emitSecurityEventLocal(username, event, excludeSessionId = null) {
     if (userSockets.has(username)) {
         const socketIds = userSockets.get(username);
-        console.log(`📡 用户 ${username} 有 ${socketIds.size} 个WebSocket连接`);
-        
-        let sentCount = 0;
         for (const socketId of socketIds) {
             const socket = io.sockets.sockets.get(socketId);
             if (socket) {
@@ -256,16 +243,12 @@ function notifySecurityEvent(username, event, excludeSessionId = null) {
                     continue;
                 }
                 socket.emit('security-alert', event);
-                sentCount++;
             }
         }
-        console.log(`✅ 成功发送安全警告给用户 ${username}: ${event.type} (${sentCount}/${socketIds.size})`);
-    } else {
-        console.log(`⚠️ 用户 ${username} 没有活跃的WebSocket连接`);
     }
 }
 
-function disconnectUserSockets(username, sessionIds = null) {
+function disconnectUserSocketsLocal(username, sessionIds = null) {
     const allowedSessionIds = sessionIds ? new Set(sessionIds) : null;
     const socketIds = [...(userSockets.get(username) || [])];
     for (const socketId of socketIds) {
@@ -278,224 +261,131 @@ function disconnectUserSockets(username, sessionIds = null) {
     }
 }
 
+function validSocketUsername(value) {
+    return typeof value === 'string' && value.length >= 1 && value.length <= 50;
+}
+
+function handleSocketBusEvent(type, payload) {
+    const username = payload?.username;
+    if (type === 'danmaku') {
+        danmaku.acceptRemoteMessage(payload?.message);
+        return;
+    }
+    if (!validSocketUsername(username)) return;
+    if (type === 'user_notification') {
+        emitUserNotificationLocal(username, payload.notification);
+    } else if (type === 'security_event') {
+        emitSecurityEventLocal(username, payload.event, payload.excludeSessionId || null);
+    } else if (type === 'disconnect_user') {
+        const sessionIds = Array.isArray(payload.sessionIds)
+            ? payload.sessionIds.filter((id) => typeof id === 'string' && id.length <= 200)
+            : null;
+        disconnectUserSocketsLocal(username, sessionIds);
+    }
+}
+
+const socketEventBus = new PostgresEventBus(pool, handleSocketBusEvent);
+
+function publishSocketEvent(type, payload) {
+    try {
+        return Promise.resolve(socketEventBus.publish(type, payload)).catch(() => {
+            console.error('WebSocket跨实例事件发布失败');
+            return false;
+        });
+    } catch {
+        console.error('WebSocket跨实例事件发布失败');
+        return Promise.resolve(false);
+    }
+}
+
+// 发送用户通知的辅助函数
+function notifyUser(username, notification) {
+    try {
+        emitUserNotificationLocal(username, notification);
+    } catch {
+        console.error('本实例用户通知发送失败');
+    }
+    return publishSocketEvent('user_notification', { username, notification });
+}
+
+// 发送安全警告的辅助函数
+function notifySecurityEvent(username, event, excludeSessionId = null) {
+    try {
+        emitSecurityEventLocal(username, event, excludeSessionId);
+    } catch {
+        console.error('本实例安全通知发送失败');
+    }
+    return publishSocketEvent('security_event', { username, event, excludeSessionId });
+}
+
+function disconnectUserSockets(username, sessionIds = null) {
+    try {
+        disconnectUserSocketsLocal(username, sessionIds);
+    } catch {
+        console.error('本实例会话断开失败');
+    }
+    return publishSocketEvent('disconnect_user', { username, sessionIds });
+}
+
+let socketSessionValidationRunning = false;
+async function revalidateConnectedSockets() {
+    if (socketSessionValidationRunning || io.sockets.sockets.size === 0) return;
+    socketSessionValidationRunning = true;
+    try {
+        const connected = [...io.sockets.sockets.values()]
+            .map((socket) => ({
+                socket,
+                sessionId: socket.authenticatedUser?.sessionId,
+                username: socket.authenticatedUser?.username
+            }))
+            .filter((entry) => entry.sessionId && entry.username);
+        if (connected.length === 0) return;
+        const sessionIds = [...new Set(connected.map((entry) => entry.sessionId))];
+        const activeResult = await pool.query(`
+            SELECT active.session_id, active.username
+            FROM active_sessions AS active
+            JOIN users AS account ON account.username = active.username
+            JOIN user_sessions AS stored ON stored.sid = active.session_id
+            WHERE active.session_id = ANY($1::text[])
+              AND active.is_active = TRUE
+              AND account.authorized = TRUE
+              AND account.deactivated = FALSE
+              AND stored.expire > NOW()
+        `, [sessionIds]);
+        const valid = new Set(activeResult.rows.map(
+            (row) => `${row.session_id}\u0000${row.username}`
+        ));
+        for (const entry of connected) {
+            if (!valid.has(`${entry.sessionId}\u0000${entry.username}`)) {
+                entry.socket.disconnect(true);
+            }
+        }
+    } catch (error) {
+        console.error('WebSocket会话复核失败');
+    } finally {
+        socketSessionValidationRunning = false;
+    }
+}
+
+const socketSessionValidationInterval = setInterval(
+    () => revalidateConnectedSockets().catch(() => {}),
+    60 * 1000
+);
+socketSessionValidationInterval.unref?.();
+
 const PORT = process.env.PORT || 3000;
 
 // 数据库初始化函数
 async function initializeDatabase() {
-    let migrationLockClient;
     try {
-        console.log('🔧 检查数据库结构...');
-        migrationLockClient = await pool.connect();
-        await migrationLockClient.query(
-            "SELECT pg_advisory_lock(hashtext('minimal_games_schema_migration'))"
-        );
-
-        for (const migrationName of [
-            'add_idempotency_key.sql',
-            'add_registration_ip.sql',
-            'create_ux_analytics.sql',
-            'create_wish_tables.sql',
-            'create_idempotency_keys.sql',
-            'create_quiz_runtime_tables.sql',
-            'add_pk_report_id.sql',
-            'strengthen_financial_audit.sql'
-        ]) {
-            const migrationPath = path.join(__dirname, 'migrations', migrationName);
-            await pool.query(fs.readFileSync(migrationPath, 'utf8'));
-        }
-        
-        // 检查quantity字段是否存在
-        const checkQuantity = await pool.query(`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name = 'gift_exchanges' 
-            AND column_name = 'quantity'
-        `);
-        
-        if (checkQuantity.rows.length === 0) {
-            console.log('➕ 添加quantity字段到gift_exchanges表...');
-            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1`);
-            // 更新现有记录
-            await pool.query(`UPDATE gift_exchanges SET quantity = 1 WHERE quantity IS NULL`);
-            console.log('✅ quantity字段添加完成');
-        } else {
-            console.log('✅ quantity字段已存在');
-        }
-
-        const checkFailureReason = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'gift_exchanges'
-            AND column_name = 'failure_reason'
-        `);
-
-        if (checkFailureReason.rows.length === 0) {
-            console.log('➕ 添加failure_reason字段到gift_exchanges表...');
-            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS failure_reason TEXT`);
-            console.log('✅ failure_reason字段添加完成');
-        } else {
-            console.log('✅ failure_reason字段已存在');
-        }
-
-        const checkUpdatedAt = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'gift_exchanges'
-            AND column_name = 'updated_at'
-        `);
-
-        if (checkUpdatedAt.rows.length === 0) {
-            console.log('➕ 添加updated_at字段到gift_exchanges表...');
-            await pool.query(`ALTER TABLE gift_exchanges ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`);
-            await pool.query(`UPDATE gift_exchanges SET updated_at = created_at WHERE updated_at IS NULL`);
-            console.log('✅ updated_at字段添加完成');
-        } else {
-            console.log('✅ updated_at字段已存在');
-        }
-
-        const checkWishFailureReason = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'wish_inventory'
-            AND column_name = 'last_failure_reason'
-        `);
-
-        if (checkWishFailureReason.rows.length === 0) {
-            console.log('➕ 添加last_failure_reason字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS last_failure_reason TEXT`);
-            console.log('✅ last_failure_reason字段添加完成');
-        } else {
-            console.log('✅ last_failure_reason字段已存在');
-        }
-
-        const checkWishSourceType = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'wish_inventory'
-            AND column_name = 'source_type'
-        `);
-
-        if (checkWishSourceType.rows.length === 0) {
-            console.log('➕ 添加source_type字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS source_type TEXT`);
-            console.log('✅ source_type字段添加完成');
-        } else {
-            console.log('✅ source_type字段已存在');
-        }
-
-        const checkWishBatchId = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'wish_inventory'
-            AND column_name = 'source_batch_id'
-        `);
-
-        if (checkWishBatchId.rows.length === 0) {
-            console.log('➕ 添加source_batch_id字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS source_batch_id TEXT`);
-            console.log('✅ source_batch_id字段添加完成');
-        } else {
-            console.log('✅ source_batch_id字段已存在');
-        }
-
-        const checkWishBatchOrder = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'wish_inventory'
-            AND column_name = 'batch_order'
-        `);
-
-        if (checkWishBatchOrder.rows.length === 0) {
-            console.log('➕ 添加batch_order字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS batch_order INTEGER`);
-            console.log('✅ batch_order字段添加完成');
-        } else {
-            console.log('✅ batch_order字段已存在');
-        }
-
-        const checkWishBatchValue = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'wish_inventory'
-            AND column_name = 'batch_value'
-        `);
-
-        if (checkWishBatchValue.rows.length === 0) {
-            console.log('➕ 添加batch_value字段到wish_inventory表...');
-            await pool.query(`ALTER TABLE wish_inventory ADD COLUMN IF NOT EXISTS batch_value INTEGER`);
-            console.log('✅ batch_value字段添加完成');
-        } else {
-            console.log('✅ batch_value字段已存在');
-        }
-
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS pk_gift_logs (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) NOT NULL,
-                room_id VARCHAR(50),
-                gift_ids JSONB NOT NULL,
-                ticket_count INTEGER,
-                script_name VARCHAR(50),
-                success BOOLEAN,
-                reason TEXT,
-                created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
-            )
-        `);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_gift_logs_username ON pk_gift_logs(username, created_at DESC)`);
-
-        const checkPkTicketCount = await pool.query(`
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'pk_gift_logs'
-              AND column_name = 'ticket_count'
-        `);
-        if (checkPkTicketCount.rows.length === 0) {
-            console.log('➕ 添加ticket_count字段到pk_gift_logs表...');
-            await pool.query(`ALTER TABLE pk_gift_logs ADD COLUMN IF NOT EXISTS ticket_count INTEGER`);
-            console.log('✅ ticket_count字段添加完成');
-        } else {
-            console.log('✅ ticket_count字段已存在');
-        }
-
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS pk_tasks (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) NOT NULL,
-                room_id VARCHAR(50),
-                action VARCHAR(20) NOT NULL,
-                status VARCHAR(20) DEFAULT 'pending',
-                error TEXT,
-                created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
-                processed_at TIMESTAMP
-            )
-        `);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_tasks_status ON pk_tasks(status, created_at ASC)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pk_tasks_user ON pk_tasks(username, created_at DESC)`);
-
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS pk_runner_state (
-                username VARCHAR(50) PRIMARY KEY,
-                room_id VARCHAR(50),
-                running BOOLEAN DEFAULT FALSE,
-                pid INTEGER,
-                updated_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai')
-            )
-        `);
+        console.log("Checking database schema");
+        await applyDatabaseMigrations(pool, {
+            onMigration: (filename) => console.log("Applying database migration", { filename })
+        });
         return true;
     } catch (error) {
-        console.error('❌ 数据库初始化失败:', error);
+        console.error("Database initialization failed", { error });
         return false;
-    } finally {
-        if (migrationLockClient) {
-            try {
-                await migrationLockClient.query(
-                    "SELECT pg_advisory_unlock(hashtext('minimal_games_schema_migration'))"
-                );
-            } catch (unlockError) {
-                console.error('❌ 释放数据库迁移锁失败:', unlockError);
-            }
-            migrationLockClient.release();
-        }
     }
 }
 
@@ -505,7 +395,7 @@ async function runDatabaseMaintenance() {
     try {
         client = await pool.connect();
         const lockResult = await client.query(
-            "SELECT pg_try_advisory_lock(hashtext('minimal_games_maintenance')) AS locked"
+            "SELECT pg_try_advisory_lock(hashtextextended('minimal_games_maintenance', 0)) AS locked"
         );
         locked = lockResult.rows[0]?.locked === true;
         if (!locked) return;
@@ -535,6 +425,92 @@ async function runDatabaseMaintenance() {
             )
         `);
         await client.query(`
+            UPDATE idempotency_keys
+            SET status = 'indeterminate',
+                response_status = 409,
+                response_body = '{"success":false,"message":"请求处理结果无法自动确认，请联系管理员核对账务"}'::jsonb,
+                failure_reason = '幂等处理租约超时，业务结果需要核对',
+                updated_at = NOW()
+            WHERE status = 'pending'
+              AND updated_at < NOW() - INTERVAL '10 minutes'
+        `);
+        const stalePkReservations = await client.query(`
+            SELECT authorization_id, username
+            FROM pk_spend_authorizations
+            WHERE status = 'reserved'
+              AND created_at < NOW() - INTERVAL '30 minutes'
+            ORDER BY created_at
+            LIMIT 100
+        `);
+        for (const row of stalePkReservations.rows) {
+            await client.query('BEGIN');
+            try {
+                await client.query(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    [`pk:${row.username}`]
+                );
+                const reservationResult = await client.query(`
+                    SELECT authorization_id, username, ticket_count
+                    FROM pk_spend_authorizations
+                    WHERE authorization_id = $1
+                      AND status = 'reserved'
+                      AND created_at < NOW() - INTERVAL '30 minutes'
+                    FOR UPDATE
+                `, [row.authorization_id]);
+                const reservation = reservationResult.rows[0];
+                if (!reservation) {
+                    await client.query('ROLLBACK');
+                    continue;
+                }
+                const refundAmount = parseMoney(
+                    reservation.ticket_count,
+                    'stale PK reservation amount',
+                    { min: 1, max: 100000000 }
+                );
+                const refund = await BalanceLogger.updateBalance({
+                    username: reservation.username,
+                    amount: refundAmount,
+                    operationType: 'pk_pre_send_timeout_release',
+                    description: `PK发送开始前预授权超时，释放 ${refundAmount} 积分`,
+                    gameData: { authorizationId: reservation.authorization_id },
+                    requestId: `${reservation.authorization_id}:pre-send-timeout`,
+                    requireSufficientBalance: false,
+                    client,
+                    managedTransaction: true
+                });
+                if (!refund.success) throw new Error('Stale PK reservation refund failed');
+                const released = await client.query(`
+                    UPDATE pk_spend_authorizations
+                    SET status = 'released',
+                        outcome_reason = '发送开始前预授权超时，未发生外部副作用',
+                        settled_at = NOW(), updated_at = NOW()
+                    WHERE authorization_id = $1 AND status = 'reserved'
+                    RETURNING authorization_id
+                `, [reservation.authorization_id]);
+                if (released.rowCount !== 1) {
+                    throw new Error('Stale PK reservation state changed concurrently');
+                }
+                await client.query('COMMIT');
+            } catch (error) {
+                await client.query('ROLLBACK').catch(() => {});
+                throw error;
+            }
+        }
+        await client.query(`
+            UPDATE pk_spend_authorizations
+            SET status = 'uncertain',
+                outcome_reason = COALESCE(outcome_reason, '发送已经开始但结算回报超时，需要对账'),
+                settled_at = NOW(), updated_at = NOW()
+            WHERE status = 'sending'
+              AND started_at < NOW() - INTERVAL '30 minutes'
+        `);
+        await client.query(`
+            UPDATE pk_runner_state
+            SET running = FALSE, pid = NULL, updated_at = NOW()
+            WHERE running = TRUE AND lease_expires_at < NOW()
+        `);
+        await queueMissingPkRunners(client);
+        await client.query(`
             DELETE FROM idempotency_keys
             WHERE id IN (
                 SELECT id
@@ -558,10 +534,20 @@ async function runDatabaseMaintenance() {
             DELETE FROM ux_sessions
             WHERE id IN (
                 SELECT id FROM ux_sessions
-                WHERE last_seen_at < NOW() - INTERVAL '365 days'
+                WHERE last_seen_at < NOW() - INTERVAL '180 days'
                 ORDER BY last_seen_at
                 LIMIT 1000
             )
+        `);
+        await client.query(`
+            DELETE FROM worker_heartbeats AS heartbeat
+            WHERE heartbeat.last_seen_at < NOW() - INTERVAL '30 days'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM worker_role_leases AS lease
+                  WHERE lease.worker_id = heartbeat.worker_id
+                    AND lease.lease_expires_at > NOW()
+              )
         `);
     } catch (error) {
         console.error('数据库维护失败:', error);
@@ -569,7 +555,7 @@ async function runDatabaseMaintenance() {
         if (client) {
             if (locked) {
                 await client.query(
-                    "SELECT pg_advisory_unlock(hashtext('minimal_games_maintenance'))"
+                    "SELECT pg_advisory_unlock(hashtextextended('minimal_games_maintenance', 0))"
                 ).catch((error) => console.error('释放数据库维护锁失败:', error));
             }
             client.release();
@@ -583,21 +569,36 @@ app.set('views', path.join(__dirname, 'views'));
 
 // Keep protocol/cookie proxy handling narrow. Client IP resolution is handled
 // separately because Render's ingress contains more than one proxy hop.
-app.set('trust proxy', 1);
+app.set('trust proxy', (address) => isTrustedProxyAddress(address));
 
-// CSP设置 - 完全按照kingboost模式
 app.use((req, res, next) => {
-  res.setHeader("Content-Security-Policy", `
-    default-src 'self';
-    script-src 'self';
-    script-src-elem 'self';
-    style-src 'self' 'unsafe-inline';
-    style-src-elem 'self' 'unsafe-inline';
-    font-src 'self';
-    img-src 'self' data:;
-    connect-src 'self';
-  `.replace(/\n/g, ' '));
-  next();
+    const nonce = crypto.randomBytes(18).toString('base64');
+    res.locals.cspNonce = nonce;
+    const productionDirectives = process.env.NODE_ENV === 'production'
+        ? 'upgrade-insecure-requests;'
+        : '';
+    res.setHeader('Content-Security-Policy', `
+        default-src 'self';
+        script-src 'self';
+        script-src-elem 'self';
+        script-src-attr 'none';
+        style-src 'self';
+        style-src-elem 'self' 'nonce-${nonce}';
+        style-src-attr 'none';
+        font-src 'self';
+        img-src 'self' data:;
+        media-src 'self';
+        connect-src 'self';
+        object-src 'none';
+        base-uri 'self';
+        form-action 'self';
+        frame-src 'none';
+        frame-ancestors 'none';
+        manifest-src 'self';
+        worker-src 'self';
+        ${productionDirectives}
+    `.replace(/\s+/g, ' ').trim());
+    next();
 });
 
 // Helmet 安全头 (简化版)
@@ -628,10 +629,26 @@ app.use(session({
 
 // 基础中间件
 app.use(requestContextMiddleware);
+app.use((req, res, next) => {
+    req.requestId = crypto.randomUUID();
+    setRequestId(req.requestId);
+    res.set('X-Request-ID', req.requestId);
+    next();
+});
+app.use((req, res, next) => {
+    if (req.path.startsWith('/dictation/') || req.path.startsWith('/uploads/dictation/')) {
+        return res.status(404).send('Not found');
+    }
+    return next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/ux/batch', express.text({ type: 'text/plain', limit: '32kb' }));
 app.use(express.json({ limit: '2mb', strict: true }));
 app.use(express.urlencoded({ extended: true, limit: '256kb', parameterLimit: 100 }));
+app.use((req, res, next) => {
+    if (req.body === undefined) req.body = {};
+    next();
+});
 app.use('/api/ux/batch', (error, req, res, next) => {
     // Browsers may terminate an ordinary heartbeat while preserving the
     // pagehide beacon. Telemetry is best-effort, so aborted bodies are ignored.
@@ -640,7 +657,6 @@ app.use('/api/ux/batch', (error, req, res, next) => {
     }
     return next(error);
 });
-app.use(mongoSanitize()); // 防止NoSQL注入
 
 // 国际化中间件
 app.use(i18nMiddleware);
@@ -649,13 +665,14 @@ app.use(i18nMiddleware);
 setupLanguageRoutes(app);
 
 // IP风控中间件
-app.use(async (req, res, next) => {
+app.use((req, res, next) => {
     const clientIP = getClientIp(req);
     const userAgent = req.get('User-Agent') || 'Unknown';
     
     // 记录所有请求的IP活动
     if (req.session && req.session.user) {
-        await IPManager.recordIPActivity(clientIP, req.session.user.username, userAgent, 'request');
+        IPManager.recordIPActivity(clientIP, req.session.user.username, userAgent, 'request')
+            .catch((error) => console.error('IP活动记录失败:', error));
     }
     
     // 将IP信息添加到请求对象
@@ -664,6 +681,12 @@ app.use(async (req, res, next) => {
     
     next();
 });
+
+app.use(createAdminFailureAuditMiddleware(pool));
+app.use(security.checkBlacklist);
+app.use(security.deviceFingerprint);
+app.use(security.behaviorAnalysis);
+app.use(security.dynamicRateLimit);
 
 // ====================
 // 认证系统中间件
@@ -701,7 +724,7 @@ app.use((req, res, next) => {
 
 // 添加CSRF中间件
 const requireCSRF = (req, res, next) => {
-    const providedToken = req.body.csrfToken || req.headers['x-csrf-token'];
+    const providedToken = req.body?.csrfToken || req.body?._csrf || req.headers['x-csrf-token'];
     if (!verifyCSRFToken(req, providedToken)) {
         return res.status(403).json({ success: false, message: 'CSRF token验证失败' });
     }
@@ -710,6 +733,7 @@ const requireCSRF = (req, res, next) => {
 
 // 认证中间件
 const requireLogin = async (req, res, next) => {
+    if (req.sessionValidated === true) return next();
     if (!req.session.user) {
         if (req.path.startsWith('/api/')) {
             return res.status(401).json({ success: false, message: '请先登录' });
@@ -720,12 +744,19 @@ const requireLogin = async (req, res, next) => {
     try {
         const username = req.session.user.username;
         const result = await pool.query(`
-            SELECT u.id, u.username, u.authorized, u.is_admin, u.deactivated,
-                   a.is_active, a.termination_reason
-            FROM users u
-            LEFT JOIN active_sessions a
-              ON a.username = u.username AND a.session_id = $2
-            WHERE u.username = $1
+            UPDATE active_sessions AS active
+            SET last_activity = CASE
+                    WHEN active.last_activity < NOW() - INTERVAL '1 minute' THEN NOW()
+                    ELSE active.last_activity
+                END
+            FROM users AS account
+            WHERE active.username = account.username
+              AND active.username = $1
+              AND active.session_id = $2
+              AND active.is_active = true
+              AND account.deactivated = false
+            RETURNING account.id, account.username, account.authorized, account.is_admin,
+                      account.deactivated, active.is_active, active.termination_reason
         `, [username, req.sessionID]);
         const current = result.rows[0];
 
@@ -749,13 +780,7 @@ const requireLogin = async (req, res, next) => {
             authorized: current.authorized === true,
             is_admin: current.is_admin === true
         };
-        await pool.query(`
-            UPDATE active_sessions
-            SET last_activity = NOW()
-            WHERE session_id = $1
-              AND is_active = true
-              AND last_activity < NOW() - INTERVAL '1 minute'
-        `, [req.sessionID]);
+        req.sessionValidated = true;
         return next();
     } catch (error) {
         console.error('Session validation error:', error);
@@ -785,6 +810,156 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
+const ADMIN_RECENT_AUTH_MS = 10 * 60 * 1000;
+const ADMIN_MFA_WINDOW_MS = 5 * 60 * 1000;
+const getRecentAdminAuthDenial = (req) => {
+    const now = Date.now();
+    const lastAuthenticatedAt = Number(req.session?.lastAuthenticatedAt || 0);
+    const mfaRequired = Boolean(process.env.ADMIN_TOTP_SECRET);
+    const lastMfaVerifiedAt = Number(req.session?.lastMfaVerifiedAt || 0);
+    if (now - lastAuthenticatedAt > ADMIN_RECENT_AUTH_MS
+        || (mfaRequired && now - lastMfaVerifiedAt > ADMIN_MFA_WINDOW_MS)) {
+        return {
+            status: 403,
+            message: mfaRequired ? '此操作需要重新验证管理员密码和动态验证码' : '此操作需要重新验证管理员密码',
+            code: 'RECENT_AUTH_REQUIRED',
+            mfaRequired
+        };
+    }
+    return null;
+};
+const requireRecentAdminAuth = (req, res, next) => {
+    const denial = getRecentAdminAuthDenial(req);
+    if (denial) {
+        const { status, ...body } = denial;
+        return res.status(status).json({ success: false, ...body });
+    }
+    return next();
+};
+
+const idempotentWritePaths = [
+    '/api/change-password',
+    '/api/quiz/start',
+    '/api/quiz/next',
+    '/api/quiz/submit',
+    '/api/dictation/start',
+    '/api/dictation/retry',
+    '/api/dictation/submit',
+    '/api/slot/play',
+    '/api/scratch/play',
+    '/api/stone/add',
+    '/api/stone/fill',
+    '/api/stone/replace',
+    '/api/stone/redeem',
+    '/api/flip/start',
+    '/api/flip/flip',
+    '/api/flip/cashout',
+    '/api/blindbox/open',
+    '/api/duel/play',
+    '/api/spin',
+    '/api/wish/play',
+    '/api/wish-batch',
+    '/api/wish/backpack/send',
+    '/api/gifts/exchange',
+    '/api/pk/start',
+    '/api/pk/stop',
+    '/api/admin/add-electric-coin',
+    '/api/admin/authorize-user',
+    '/api/admin/unauthorize-user',
+    '/api/admin/update-balance',
+    '/api/admin/dictation/mark',
+    '/api/admin/delete-account',
+    '/api/admin/unlock-account',
+    '/api/admin/clear-failures',
+    '/api/admin/change-self-password',
+    '/api/admin/ip/blacklist',
+    '/api/admin/ip/whitelist',
+    '/api/admin/ip/remove-blacklist',
+    '/api/admin/force-logout',
+    '/api/admin/reset-stuck-gift-tasks',
+    '/api/admin/gift-reconciliation',
+    '/api/admin/pk-reconciliation',
+    '/api/admin/test/security-alert',
+    '/admin/security/unblock',
+    '/api/bilibili/room',
+    '/api/bilibili/cookies/refresh'
+];
+
+async function validateExistingIdempotentRequest(req) {
+    const providedToken = req.body?.csrfToken || req.headers['x-csrf-token'];
+    if (!verifyCSRFToken(req, providedToken)) {
+        return { status: 403, message: 'CSRF token验证失败' };
+    }
+
+    const username = req.session?.user?.username;
+    const sessionResult = await pool.query(`
+        SELECT u.authorized, u.is_admin, a.is_active
+        FROM users u
+        LEFT JOIN active_sessions a
+          ON a.username = u.username AND a.session_id = $2
+        WHERE u.username = $1
+    `, [username, req.sessionID]);
+    const current = sessionResult.rows[0];
+    if (!current || current.is_active !== true) {
+        return { status: 401, message: '登录会话已失效' };
+    }
+    if (current.authorized !== true) {
+        return { status: 403, message: '未授权访问' };
+    }
+    const requiresAdmin = req.path.startsWith('/api/admin/')
+        || req.path.startsWith('/api/bilibili/')
+        || req.path.startsWith('/admin/security/');
+    if (requiresAdmin && current.is_admin !== true) {
+        return { status: 403, message: '无权访问管理员后台' };
+    }
+    if (requiresAdmin) {
+        const recentAuthDenial = getRecentAdminAuthDenial(req);
+        if (recentAuthDenial) return recentAuthDenial;
+    }
+    return null;
+}
+
+async function validateTransactionalIdempotentRequest(req, client) {
+    const requiresAdmin = req.path.startsWith('/api/admin/')
+        || req.path.startsWith('/api/bilibili/')
+        || req.path.startsWith('/admin/security/');
+    const result = await client.query(`
+        SELECT 1
+        FROM active_sessions AS active
+        JOIN users AS account ON account.username = active.username
+        WHERE active.session_id = $1
+          AND active.username = $2
+          AND active.is_active = TRUE
+          AND account.authorized = TRUE
+          AND account.deactivated = FALSE
+          AND ($3::boolean = FALSE OR account.is_admin = TRUE)
+        FOR SHARE OF active
+    `, [req.sessionID, req.session?.user?.username, requiresAdmin]);
+    if (result.rowCount !== 1) {
+        return {
+            status: requiresAdmin ? 403 : 401,
+            message: requiresAdmin ? '管理员权限或会话已失效' : '登录会话或授权已失效'
+        };
+    }
+    if (requiresAdmin) {
+        return getRecentAdminAuthDenial(req);
+    }
+    return null;
+}
+
+app.use((req, res, next) => {
+    if (!req.session?.user) return next();
+    return requireLogin(req, res, next);
+});
+
+app.use(createIdempotencyMiddleware({
+    pool,
+    paths: idempotentWritePaths,
+    validateExistingRequest: validateExistingIdempotentRequest,
+    validateTransactionalRequest: validateTransactionalIdempotentRequest,
+    hashSecret: sessionSecret
+}));
+
 // 未授权用户只允许进入首页或退出登录
 app.use((req, res, next) => {
     if (req.session.user && !req.session.user.authorized) {
@@ -809,7 +984,30 @@ const loginLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 10,
     message: "❌ 尝试次数过多，请 10 分钟后再试。",
-    keyGenerator: clientIpRateLimitKey
+    keyGenerator: clientIpRateLimitKey,
+    store: new PostgresRateLimitStore(pool, 'auth:login-ip'),
+    passOnStoreError: false
+});
+
+const loginAccountLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'auth:login-account'),
+    passOnStoreError: false,
+    keyGenerator: (req) => {
+        const username = typeof req.body?.username === 'string'
+            ? req.body.username.normalize('NFKC').trim().toLocaleLowerCase('en-US').slice(0, 32)
+            : 'invalid';
+        return `${clientIpRateLimitKey(req)}:${username}`;
+    },
+    handler: (req, res) => res.status(429).render('login', {
+        title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+        error: uiText(res, '用户名或密码错误，请稍后重试。', 'Invalid credentials. Please try again later.'),
+        csrfToken: generateCSRFToken(req)
+    })
 });
 
 const registerLimiter = rateLimit({
@@ -819,22 +1017,9 @@ const registerLimiter = rateLimit({
     keyGenerator: clientIpRateLimitKey,
     standardHeaders: true,
     legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'auth:register-ip'),
+    passOnStoreError: false,
 });
-
-// 简化安全中间件 - 只保留基础速率限制
-// app.use(security.checkBlacklist);
-// app.use(security.deviceFingerprint);
-// app.use(security.behaviorAnalysis);
-
-// 生成随机用户名
-function generateUsername() {
-    const adjectives = ['快乐', '幸运', '聪明', '勇敢', '神秘', '酷炫', '超级', '无敌'];
-    const nouns = ['玩家', '高手', '大师', '英雄', '冠军', '传奇', '战士', '天才'];
-    const adj = adjectives[crypto.randomInt(0, adjectives.length)];
-    const noun = nouns[crypto.randomInt(0, nouns.length)];
-    const num = crypto.randomInt(0, 10000);
-    return `${adj}${noun}${num}`;
-}
 
 // 飘屏系统
 class DanmakuSystem {
@@ -843,6 +1028,14 @@ class DanmakuSystem {
         this.maxMessages = 50;    // 最多存储50条
     }
     
+    rememberAndBroadcast(message) {
+        this.recentMessages.unshift(message);
+        if (this.recentMessages.length > this.maxMessages) {
+            this.recentMessages = this.recentMessages.slice(0, this.maxMessages);
+        }
+        io.emit('new_danmaku', message);
+    }
+
     addMessage(username, type, isWin) {
         // 固定成功祝福消息
         const content = `🎉 恭喜 ${username} 祈愿成功！`;
@@ -855,16 +1048,25 @@ class DanmakuSystem {
             timestamp: Date.now()
         };
         
-        // 添加到内存
-        this.recentMessages.unshift(message);
-        if (this.recentMessages.length > this.maxMessages) {
-            this.recentMessages = this.recentMessages.slice(0, this.maxMessages);
-        }
-        
-        // 广播给所有在线用户
-        io.emit('new_danmaku', message);
-        
+        this.rememberAndBroadcast(message);
+        publishSocketEvent('danmaku', { message });
         return message;
+    }
+
+    acceptRemoteMessage(message) {
+        if (!message || !validSocketUsername(message.username)
+            || !['success', 'fail'].includes(message.type)
+            || typeof message.content !== 'string'
+            || message.content.length > 200
+            || !Number.isFinite(Number(message.timestamp))) {
+            return;
+        }
+        this.rememberAndBroadcast({
+            username: message.username,
+            type: message.type,
+            content: message.content,
+            timestamp: Number(message.timestamp)
+        });
     }
     
     getRecentMessages(limit = 20) {
@@ -873,24 +1075,6 @@ class DanmakuSystem {
 }
 
 const danmaku = new DanmakuSystem();
-
-// WebSocket连接管理
-const connectedUsers = new Set();
-
-io.on('connection', (socket) => {
-    console.log('用户连接:', socket.id);
-    connectedUsers.add(socket.id);
-    
-    // 发送最近的飘屏消息给新连接的用户
-    const recentMessages = danmaku.getRecentMessages(10);
-    socket.emit('recent_messages', recentMessages);
-    
-    socket.on('disconnect', () => {
-        connectedUsers.delete(socket.id);
-        console.log('用户断开:', socket.id);
-    });
-    
-});
 
 // 全局广播函数
 function broadcastDanmaku(username, type, isWin) {
@@ -902,13 +1086,15 @@ function broadcastDanmaku(username, type, isWin) {
 }
 
 // 创建题目ID索引，提升查找性能
-const questionMap = new Map(questions.map(q => [q.id, q]));
 
 // ====================
 // 认证路由
 // ====================
 const uiText = (res, zh, en) => (res.locals.lang === 'zh' ? zh : en);
 const usernamePattern = /^[\p{L}\p{N}_-]{3,32}$/u;
+const normalizeUsernameInput = (value) => typeof value === 'string'
+    ? value.normalize('NFKC').trim()
+    : '';
 const isStrongPassword = (value) => typeof value === 'string'
     && value.length >= 12
     && value.length <= 128
@@ -927,6 +1113,194 @@ app.get('/login', (req, res) => {
         error: req.query.error,
         req
     });
+});
+
+app.get('/reset-password', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.set('Referrer-Policy', 'no-referrer');
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    let valid = false;
+    if (/^[A-Za-z0-9_-]{40,100}$/.test(token)) {
+        try {
+            const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+            const result = await pool.query(`
+                SELECT t.password_fingerprint, u.password_hash
+                FROM password_reset_tokens t
+                JOIN users u ON u.username = t.username
+                WHERE t.token_hash = $1
+                  AND t.used_at IS NULL
+                  AND t.revoked_at IS NULL
+                  AND t.expires_at > NOW()
+                  AND u.deactivated = false
+            `, [tokenHash]);
+            valid = result.rows.length === 1
+                && crypto.createHash('sha256')
+                    .update(result.rows[0].password_hash)
+                    .digest('hex') === result.rows[0].password_fingerprint;
+        } catch (error) {
+            console.error('密码重置令牌检查失败:', error);
+            return res.status(503).render('reset-password', {
+                title: uiText(res, '重置密码 - Minimal Games', 'Reset Password - Minimal Games'),
+                csrfToken: generateCSRFToken(req),
+                token: '',
+                error: uiText(res, '重置服务暂不可用，请稍后重试', 'Reset service is temporarily unavailable.'),
+                success: false
+            });
+        }
+    }
+
+    return res.status(valid ? 200 : 410).render('reset-password', {
+        title: uiText(res, '重置密码 - Minimal Games', 'Reset Password - Minimal Games'),
+        csrfToken: generateCSRFToken(req),
+        token: valid ? token : '',
+        error: valid ? null : uiText(res, '重置链接无效、已使用或已过期', 'This reset link is invalid, used, or expired.'),
+        success: false
+    });
+});
+
+app.post('/reset-password', loginLimiter, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.set('Referrer-Policy', 'no-referrer');
+    const token = typeof req.body?.token === 'string' ? req.body.token : '';
+    const newPassword = req.body?.newPassword;
+    const confirmPassword = req.body?.confirmPassword;
+    const renderFailure = (status, message) => res.status(status).render('reset-password', {
+        title: uiText(res, '重置密码 - Minimal Games', 'Reset Password - Minimal Games'),
+        csrfToken: generateCSRFToken(req),
+        token: /^[A-Za-z0-9_-]{40,100}$/.test(token) ? token : '',
+        error: message,
+        success: false
+    });
+
+    if (!verifyCSRFToken(req, req.body?._csrf)) {
+        return renderFailure(403, uiText(res, '请求验证失败，请重新打开重置链接', 'Request verification failed. Reopen the reset link.'));
+    }
+    if (!/^[A-Za-z0-9_-]{40,100}$/.test(token)) {
+        return renderFailure(410, uiText(res, '重置链接无效、已使用或已过期', 'This reset link is invalid, used, or expired.'));
+    }
+    if (newPassword !== confirmPassword || !isStrongPassword(newPassword)) {
+        return renderFailure(400, uiText(
+            res,
+            '两次密码必须一致，且新密码须为12-128位并包含字母和数字',
+            'Passwords must match and contain 12-128 characters with letters and numbers.'
+        ));
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    let preliminary;
+    try {
+        preliminary = await pool.query(`
+            SELECT t.username, t.password_fingerprint, u.password_hash
+            FROM password_reset_tokens t
+            JOIN users u ON u.username = t.username
+            WHERE t.token_hash = $1
+              AND t.used_at IS NULL
+              AND t.revoked_at IS NULL
+              AND t.expires_at > NOW()
+              AND u.deactivated = false
+        `, [tokenHash]);
+    } catch (error) {
+        console.error('密码重置令牌读取失败:', error);
+        return renderFailure(503, uiText(res, '重置服务暂不可用，请稍后重试', 'Reset service is temporarily unavailable.'));
+    }
+    if (preliminary.rows.length !== 1) {
+        return renderFailure(410, uiText(res, '重置链接无效、已使用或已过期', 'This reset link is invalid, used, or expired.'));
+    }
+
+    const preliminaryRow = preliminary.rows[0];
+    const currentFingerprint = crypto.createHash('sha256').update(preliminaryRow.password_hash).digest('hex');
+    if (currentFingerprint !== preliminaryRow.password_fingerprint) {
+        return renderFailure(410, uiText(res, '密码已发生变化，此重置链接已失效', 'The password changed, so this reset link is no longer valid.'));
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+    let client;
+    let sessionIds = [];
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+        const lockedToken = await client.query(`
+            SELECT t.id, t.username, t.password_fingerprint, u.password_hash
+            FROM password_reset_tokens t
+            JOIN users u ON u.username = t.username
+            WHERE t.token_hash = $1
+              AND t.used_at IS NULL
+              AND t.revoked_at IS NULL
+              AND t.expires_at > NOW()
+              AND u.deactivated = false
+            FOR UPDATE OF t, u
+        `, [tokenHash]);
+        if (lockedToken.rows.length !== 1) {
+            await client.query('ROLLBACK');
+            return renderFailure(410, uiText(res, '重置链接无效、已使用或已过期', 'This reset link is invalid, used, or expired.'));
+        }
+
+        const locked = lockedToken.rows[0];
+        const lockedFingerprint = crypto.createHash('sha256').update(locked.password_hash).digest('hex');
+        if (lockedFingerprint !== locked.password_fingerprint) {
+            await client.query('ROLLBACK');
+            return renderFailure(410, uiText(res, '密码已发生变化，此重置链接已失效', 'The password changed, so this reset link is no longer valid.'));
+        }
+
+        const updatedUser = await client.query(`
+            UPDATE users
+            SET password_hash = $1,
+                login_failures = 0,
+                last_failure_time = NULL,
+                locked_until = NULL
+            WHERE username = $2 AND password_hash = $3 AND deactivated = false
+            RETURNING username
+        `, [newPasswordHash, locked.username, locked.password_hash]);
+        if (updatedUser.rowCount !== 1) {
+            throw new Error('Password reset user state changed concurrently');
+        }
+        const usedToken = await client.query(`
+            UPDATE password_reset_tokens
+            SET used_at = NOW()
+            WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL
+            RETURNING id
+        `, [locked.id]);
+        if (usedToken.rowCount !== 1) {
+            throw new Error('Password reset token state changed concurrently');
+        }
+        await client.query(`
+            UPDATE password_reset_tokens
+            SET revoked_at = NOW()
+            WHERE username = $1 AND id != $2 AND used_at IS NULL AND revoked_at IS NULL
+        `, [locked.username, locked.id]);
+        const sessions = await client.query(
+            'SELECT session_id FROM active_sessions WHERE username = $1 AND is_active = true FOR UPDATE',
+            [locked.username]
+        );
+        sessionIds = sessions.rows.map((row) => row.session_id);
+        await client.query(`
+            UPDATE active_sessions
+            SET is_active = false, terminated_at = NOW(), termination_reason = 'password_reset_completed'
+            WHERE username = $1 AND is_active = true
+        `, [locked.username]);
+        if (sessionIds.length > 0) {
+            await client.query('DELETE FROM user_sessions WHERE sid = ANY($1::text[])', [sessionIds]);
+        }
+        await client.query(`
+            INSERT INTO security_events (event_type, username, ip_address, description, severity)
+            VALUES ('password_reset_completed', $1, $2, '一次性密码重置令牌已使用', 'high')
+        `, [locked.username, req.clientIP]);
+        await client.query('COMMIT');
+        disconnectUserSockets(locked.username, sessionIds);
+        return res.render('reset-password', {
+            title: uiText(res, '重置密码 - Minimal Games', 'Reset Password - Minimal Games'),
+            csrfToken: '',
+            token: '',
+            error: null,
+            success: true
+        });
+    } catch (error) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
+        console.error('完成密码重置失败:', error);
+        return renderFailure(503, uiText(res, '重置服务暂不可用，请稍后重试', 'Reset service is temporarily unavailable.'));
+    } finally {
+        client?.release();
+    }
 });
 
 // 注册页面
@@ -967,7 +1341,7 @@ app.get('/profile', requireLogin, (req, res, next) => {
         // 获取游戏记录统计
         const gameStats = await Promise.all([
             pool.query('SELECT COUNT(*) as count, MAX(score) as best_score FROM submissions WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN won != \'lost\' THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
+            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(payout_amount, 0) > 0 THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username]),
             pool.query('SELECT COUNT(*) as count FROM blindbox_logs WHERE username = $1', [username]),
@@ -1023,7 +1397,8 @@ app.get('/profile', requireLogin, (req, res, next) => {
 
 // 注册处理
 app.post('/register', registerLimiter, async (req, res) => {
-    const { username, password, _csrf } = req.body;
+    const { password, _csrf } = req.body || {};
+    const username = normalizeUsernameInput(req.body?.username);
     
     // CSRF 验证
     if (!verifyCSRFToken(req, _csrf)) {
@@ -1050,15 +1425,24 @@ app.post('/register', registerLimiter, async (req, res) => {
 
     try {
         const hashed = await bcrypt.hash(password, 12);
-        const result = await pool.query(
-            `INSERT INTO users (username, password_hash, created_at, registration_ip)
-             VALUES ($1, $2, NOW(), $3)
-             RETURNING id`,
-            [username, hashed, req.clientIP]
-        );
-        await IPManager.recordIPActivity(req.clientIP, username, req.userAgent, 'register');
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query(
+                `INSERT INTO users (username, password_hash, created_at, registration_ip)
+                 VALUES ($1, $2, NOW(), $3)`,
+                [username, hashed, req.clientIP]
+            );
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw error;
+        } finally {
+            client.release();
+        }
+        IPManager.recordIPActivity(req.clientIP, username, req.userAgent, 'register')
+            .catch(() => console.error('注册IP遥测写入失败'));
         
-        console.log(`[注册成功] 用户ID: ${result.rows[0].id}, 用户名: ${username}`);
         res.redirect('/login?registered=true');
     } catch (err) {
         if (err.code === '23505') {
@@ -1068,7 +1452,7 @@ app.post('/register', registerLimiter, async (req, res) => {
                 csrfToken: generateCSRFToken(req)
             });
         } else {
-            console.error(err);
+            console.error('注册写入失败');
             res.render('register', {
                 title: uiText(res, '注册 - Minimal Games', 'Register - Minimal Games'),
                 error: uiText(res, '❌ 注册失败，请稍后重试。', '❌ Registration failed, please try again.'),
@@ -1079,8 +1463,9 @@ app.post('/register', registerLimiter, async (req, res) => {
 });
 
 // 登录处理 - 集成IP风控和单设备登录
-app.post('/login', loginLimiter, async (req, res) => {
-    const { username, password, _csrf } = req.body;
+app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
+    const { password, _csrf } = req.body || {};
+    const username = normalizeUsernameInput(req.body?.username);
     const clientIP = req.clientIP;
     const userAgent = req.userAgent;
     
@@ -1088,7 +1473,11 @@ app.post('/login', loginLimiter, async (req, res) => {
         return res.status(403).send(uiText(res, '⚠️ CSRF token 校验失败', '⚠️ CSRF token validation failed'));
     }
 
-    if (!username || !password) {
+    if (!usernamePattern.test(String(username || ''))
+        || typeof password !== 'string'
+        || password.length < 1
+        || password.length > 128
+        || Buffer.byteLength(password, 'utf8') > 72) {
         return res.status(400).render('login', {
             title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
             error: uiText(res, '用户名或密码不能为空！', 'Username and password cannot be empty!'),
@@ -1099,7 +1488,6 @@ app.post('/login', loginLimiter, async (req, res) => {
     try {
         // 1. IP风险评估
         const riskData = await IPManager.getIPRiskScore(clientIP, username);
-        console.log(`登录风险评估 - IP: ${clientIP}, 用户: ${username}, 风险分: ${riskData.score}, 等级: ${riskData.level}`);
 
         // 2. 高风险IP直接阻断
         if (IPManager.shouldBlock(riskData)) {
@@ -1119,11 +1507,14 @@ app.post('/login', loginLimiter, async (req, res) => {
 
         // 3. 检查用户是否存在
         const result = await pool.query(
-            'SELECT * FROM users WHERE username = $1', 
+            `SELECT username, password_hash, balance, is_admin, authorized,
+                    login_failures, locked_until, deactivated
+             FROM users WHERE username = $1`,
             [username]
         );
         
         if (result.rows.length === 0) {
+            await bcrypt.compare(password, dummyPasswordHash);
             await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
             return res.status(401).render('login', {
                 title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
@@ -1134,6 +1525,10 @@ app.post('/login', loginLimiter, async (req, res) => {
 
         const user = result.rows[0];
         const now = new Date();
+        const accountLocked = user.locked_until && new Date(user.locked_until) > now;
+
+        // Verify the password before revealing whether this account is locked.
+        const isMatch = await bcrypt.compare(password, user.password_hash);
 
         if (user.deactivated === true) {
             await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_deactivated');
@@ -1144,8 +1539,51 @@ app.post('/login', loginLimiter, async (req, res) => {
             });
         }
         
-        // 4. 账户锁定检查
-        if (user.locked_until && new Date(user.locked_until) > now) {
+        if (!isMatch) {
+            if (accountLocked) {
+                await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
+                return res.status(401).render('login', {
+                    title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                    error: uiText(res, '用户名或密码错误！', 'Invalid username or password!'),
+                    csrfToken: generateCSRFToken(req)
+                });
+            }
+            await pool.query(`
+                WITH failure_state AS (
+                    SELECT username,
+                           LEAST(100000, CASE
+                               WHEN last_failure_time IS NULL
+                                 OR last_failure_time < NOW() - INTERVAL '15 minutes'
+                               THEN 1
+                               ELSE COALESCE(login_failures, 0) + 1
+                           END) AS next_failures
+                    FROM users
+                    WHERE username = $1
+                    FOR UPDATE
+                )
+                UPDATE users AS account
+                SET login_failures = failure_state.next_failures,
+                    last_failure_time = NOW(),
+                    locked_until = CASE
+                        WHEN account.locked_until > NOW() THEN account.locked_until
+                        ELSE NULL
+                    END
+                FROM failure_state
+                WHERE account.username = failure_state.username
+                RETURNING account.login_failures, account.locked_until
+            `, [username]);
+            await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
+
+            return res.status(401).render('login', {
+                title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                error: uiText(res, '用户名或密码错误！', 'Invalid username or password!'),
+                csrfToken: generateCSRFToken(req)
+            });
+        }
+
+        // Only a caller who proved knowledge of the password learns that an
+        // administrator or an earlier policy has locked the account.
+        if (accountLocked) {
             const lockMinutes = Math.ceil((new Date(user.locked_until) - now) / 60000);
             await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_locked');
             return res.status(423).render('login', {
@@ -1155,44 +1593,23 @@ app.post('/login', loginLimiter, async (req, res) => {
             });
         }
 
-        // 5. 验证密码
-        const isMatch = await bcrypt.compare(password, user.password_hash);
-        
-        if (!isMatch) {
-            const failureResult = await pool.query(`
-                UPDATE users
-                SET login_failures = COALESCE(login_failures, 0) + 1,
-                    last_failure_time = NOW(),
-                    locked_until = CASE
-                        WHEN COALESCE(login_failures, 0) + 1 >= 3 THEN
-                            NOW() + make_interval(mins => LEAST(
-                                30,
-                                POWER(2, LEAST(COALESCE(login_failures, 0) - 2, 5))::integer
-                            ))
-                        ELSE NULL
-                    END
-                WHERE username = $1
-                RETURNING login_failures, locked_until
-            `, [username]);
-            const failureState = failureResult.rows[0];
-            await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_failed');
-
-            const errorMsg = failureState?.locked_until
-                ? uiText(res, '用户名或密码错误，账户已被临时锁定', 'Invalid credentials. Account temporarily locked.')
-                : uiText(res, '用户名或密码错误！', 'Invalid username or password!');
-
+        // 5. 登录成功处理
+        const loginStateReset = await pool.query(`
+            UPDATE users
+            SET login_failures = 0, last_failure_time = NULL, locked_until = NULL
+            WHERE username = $1
+              AND password_hash = $2
+              AND deactivated = false
+              AND (locked_until IS NULL OR locked_until <= NOW())
+            RETURNING username
+        `, [username, user.password_hash]);
+        if (loginStateReset.rowCount !== 1) {
             return res.status(401).render('login', {
                 title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
-                error: errorMsg,
+                error: uiText(res, '账号状态已变化，请重新登录', 'Account state changed. Please sign in again.'),
                 csrfToken: generateCSRFToken(req)
             });
         }
-
-        // 6. 登录成功处理
-        await pool.query(
-            'UPDATE users SET login_failures = 0, last_failure_time = NULL, locked_until = NULL WHERE username = $1',
-            [username]
-        );
         
         // 7. 重新生成session ID以提高安全性
         req.session.regenerate(async function (err) {
@@ -1206,11 +1623,6 @@ app.post('/login', loginLimiter, async (req, res) => {
             req.session.initialized = true;
             req.session.createdAt = Date.now();
             generateCSRFToken(req); // 统一使用csrf库
-
-            // 9. 管理员登录日志
-            if (username === 'hokboost') {
-                console.log(`管理员 ${username} 登录 - 允许多设备会话`);
-            }
 
             // 10. 创建单设备会话管理（使用新的session ID，恢复实时通知）
             const sessionResult = await SessionManager.createSingleDeviceSession(
@@ -1227,14 +1639,21 @@ app.post('/login', loginLimiter, async (req, res) => {
                 return req.session.destroy(() => {
                     res.clearCookie('minimal_games_sid');
                     const credentialsChanged = sessionResult.reason === 'credentials_changed';
-                    res.status(credentialsChanged ? 401 : 503).send(credentialsChanged
-                        ? uiText(res, '密码已发生变化，请重新登录', 'Password changed. Please sign in again.')
-                        : uiText(res, '登录会话创建失败，请重试', 'Failed to create login session. Please retry.'));
+                    const accountUnavailable = sessionResult.reason === 'account_unavailable';
+                    res.status(credentialsChanged || accountUnavailable ? 401 : 503).send(
+                        credentialsChanged
+                            ? uiText(res, '密码已发生变化，请重新登录', 'Password changed. Please sign in again.')
+                            : accountUnavailable
+                                ? uiText(res, '用户名或密码错误', 'Invalid username or password.')
+                                : uiText(res, '登录会话创建失败，请重试', 'Failed to create login session. Please retry.')
+                    );
                 });
             }
             disconnectUserSockets(username, sessionResult.terminatedSessionIds);
             req.session.user = sessionResult.user;
             req.session.username = sessionResult.user.username;
+            req.session.lastAuthenticatedAt = Date.now();
+            req.session.lastMfaVerifiedAt = 0;
             await new Promise((resolve, reject) => {
                 req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
             });
@@ -1256,12 +1675,9 @@ app.post('/login', loginLimiter, async (req, res) => {
                     VALUES ('suspicious_login', $1, $2, $3, 'medium')
                 `, [username, clientIP, `中高风险登录: ${riskData.reasons.join(', ')}`]);
                 
-                console.log(`⚠️ 中高风险登录 - 用户: ${username}, IP: ${clientIP}, 风险分: ${riskData.score}`);
             }
-            
+
             // 13. 登录成功，准备重定向
-            
-            console.log(`✅ 用户 ${username} 登录成功，IP: ${clientIP}, 风险分: ${riskData.score}`);
             res.redirect('/');
             } catch (callbackError) {
                 console.error('登录会话初始化失败:', callbackError);
@@ -1277,7 +1693,7 @@ app.post('/login', loginLimiter, async (req, res) => {
         });
 
     } catch (err) {
-        console.error('❌ 登录错误:', err);
+        console.error('登录处理失败');
         await IPManager.recordIPActivity(clientIP, username || 'unknown', userAgent, 'login_error');
         res.status(500).render('login', {
             title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
@@ -1287,18 +1703,23 @@ app.post('/login', loginLimiter, async (req, res) => {
     }
 });
 
-// 登出 - 清理会话管理
-app.get('/logout', async (req, res) => {
+// GET logout never mutates state. It remains as a compatibility redirect for old links.
+app.get('/logout', (req, res) => res.redirect('/'));
+
+app.post('/logout', requireCSRF, async (req, res) => {
     const sessionId = req.sessionID;
     const username = req.session?.user?.username;
-    
-    if (username && sessionId) {
-        // 清理单设备会话管理
-        await SessionManager.terminateSession(sessionId, 'user_logout');
-        console.log(`用户 ${username} 主动登出`);
+
+    try {
+        if (username && sessionId) {
+            await SessionManager.terminateSession(sessionId, 'user_logout');
+        }
+    } catch (error) {
+        console.error('会话登出记录失败:', error);
     }
-    
+
     req.session.destroy(() => {
+        res.clearCookie('minimal_games_sid');
         res.redirect('/');
     });
 });
@@ -1307,12 +1728,21 @@ app.get('/logout', async (req, res) => {
 app.post('/api/change-password', requireLogin, requireCSRF, async (req, res) => {
     let client;
     try {
-        client = await pool.connect();
-        const { currentPassword, newPassword, confirmPassword } = req.body;
+        const { currentPassword, newPassword, confirmPassword } = req.body || {};
         const username = req.session.user.username;
 
-        // 输入验证
-        if (!currentPassword || !newPassword || !confirmPassword) {
+        if (req.session.user.is_admin) {
+            return res.status(403).json({
+                success: false,
+                message: '管理员必须在管理后台完成密码修改和二次验证'
+            });
+        }
+
+        if (typeof currentPassword !== 'string'
+            || typeof newPassword !== 'string'
+            || typeof confirmPassword !== 'string'
+            || !currentPassword || !newPassword || !confirmPassword
+            || Buffer.byteLength(currentPassword, 'utf8') > 72) {
             return res.status(400).json({ success: false, message: '请填写所有字段' });
         }
 
@@ -1324,29 +1754,47 @@ app.post('/api/change-password', requireLogin, requireCSRF, async (req, res) => 
             return res.status(400).json({ success: false, message: '新密码须为12-128位，并同时包含字母和数字' });
         }
 
-        // 验证当前密码
-        await client.query('BEGIN');
-        const userResult = await client.query(
-            'SELECT password_hash FROM users WHERE username = $1 FOR UPDATE',
+        const userResult = await pool.query(
+            `SELECT password_hash
+             FROM users
+             WHERE username = $1 AND is_admin = false AND deactivated = false`,
             [username]
         );
         if (userResult.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ success: false, message: '用户不存在' });
+            return res.status(409).json({ success: false, message: '账号状态已变化，请重新登录' });
         }
 
-        const isValidPassword = await bcrypt.compare(currentPassword, userResult.rows[0].password_hash);
+        const currentPasswordHash = userResult.rows[0].password_hash;
+        const isValidPassword = await bcrypt.compare(currentPassword, currentPasswordHash);
         if (!isValidPassword) {
-            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: '当前密码错误' });
         }
 
-        // 更新密码
         const newPasswordHash = await bcrypt.hash(newPassword, 12);
-        await client.query(
-            'UPDATE users SET password_hash = $1 WHERE username = $2',
-            [newPasswordHash, username]
+        client = await pool.connect();
+        await client.query('BEGIN');
+        const updateResult = await client.query(
+            `UPDATE users
+             SET password_hash = $1,
+                 login_failures = 0,
+                 last_failure_time = NULL,
+                 locked_until = NULL
+             WHERE username = $2
+               AND password_hash = $3
+               AND is_admin = false
+               AND deactivated = false
+             RETURNING username`,
+            [newPasswordHash, username, currentPasswordHash]
         );
+        if (updateResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ success: false, message: '密码已被其他会话修改，请重新登录' });
+        }
+        await client.query(`
+            UPDATE password_reset_tokens
+            SET revoked_at = NOW()
+            WHERE username = $1 AND used_at IS NULL AND revoked_at IS NULL
+        `, [username]);
         const otherSessions = await client.query(
             `SELECT session_id
              FROM active_sessions
@@ -1400,7 +1848,9 @@ app.get('/', async (req, res) => {
                 'SELECT balance FROM users WHERE username = $1',
                 [req.session.user.username]
             );
-            balance = result.rows.length > 0 ? result.rows[0].balance : 0;
+            balance = result.rows.length === 1
+                ? parseMoney(result.rows[0].balance, 'user balance', { min: 0 })
+                : null;
         } catch (dbError) {
             console.error('Database query error:', dbError);
         }
@@ -1410,6 +1860,7 @@ app.get('/', async (req, res) => {
         title: uiText(res, 'Minimal Games 游戏中心', 'Minimal Games Game Center'),
         user: req.session.user || null,
         balance: balance,
+        csrfToken: req.session.csrfToken,
         req: req
     });
 });
@@ -1428,7 +1879,9 @@ app.get('/games', async (req, res) => {
                 'SELECT balance FROM users WHERE username = $1',
                 [req.session.user.username]
             );
-            balance = result.rows.length > 0 ? result.rows[0].balance : 0;
+            balance = result.rows.length === 1
+                ? parseMoney(result.rows[0].balance, 'user balance', { min: 0 })
+                : null;
         } catch (dbError) {
             console.error('Database query error:', dbError);
         }
@@ -1438,6 +1891,7 @@ app.get('/games', async (req, res) => {
         title: uiText(res, '游戏专区', 'Game Zone'),
         user: req.session.user || null,
         balance: balance,
+        csrfToken: req.session.csrfToken,
         req: req
     });
 });
@@ -1509,7 +1963,10 @@ const wishConfigs = {
 };
 
 function getWishConfig(giftType) {
-    return wishConfigs[giftType] || null;
+    if (typeof giftType !== 'string' || !Object.hasOwn(wishConfigs, giftType)) {
+        return null;
+    }
+    return wishConfigs[giftType];
 }
 
 const stoneColors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple'];
@@ -1550,10 +2007,13 @@ const duelRewards = {
 };
 
 function calculateDuelCost(giftType, power) {
+    if (typeof giftType !== 'string' || !Object.hasOwn(duelRewards, giftType)) {
+        return null;
+    }
     if (giftType === 'crown') {
         return Math.round(310 * power + 1);
     }
-    const reward = duelRewards[giftType]?.reward || 0;
+    const reward = duelRewards[giftType].reward;
     const ratio = reward / 30000;
     return Math.round(310 * ratio * power + 1);
 }
@@ -1586,7 +2046,7 @@ async function getFlipState(username, client = pool, { forUpdate = false } = {})
         const flipped = Array(board.length).fill(false);
         await executor(
             `INSERT INTO flip_states (username, board, flipped, good_count, bad_count, ended, created_at, updated_at)
-             VALUES ($1, $2, $3, 0, 0, FALSE, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))
+             VALUES ($1, $2, $3, 0, 0, FALSE, NOW(), NOW())
              ON CONFLICT (username) DO NOTHING`,
             [username, JSON.stringify(board), JSON.stringify(flipped)]
         );
@@ -1644,10 +2104,10 @@ async function getFlipState(username, client = pool, { forUpdate = false } = {})
 
 async function saveFlipState(username, state, client = pool) {
     const executor = client.query ? client.query.bind(client) : client;
-    await executor(
+    const result = await executor(
         `UPDATE flip_states
          SET board = $1, flipped = $2, good_count = $3, bad_count = $4, ended = $5,
-             updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+             updated_at = NOW()
          WHERE username = $6`,
         [
             JSON.stringify(state.board),
@@ -1658,6 +2118,7 @@ async function saveFlipState(username, state, client = pool) {
             username
         ]
     );
+    if (result.rowCount !== 1) throw new Error('Flip state row was not updated');
 }
 
 async function logFlipAction({
@@ -1676,7 +2137,7 @@ async function logFlipAction({
         `INSERT INTO flip_logs (
             username, action_type, cost, reward, card_index, card_type,
             good_count, bad_count, ended, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
         [
             username,
             actionType,
@@ -1725,7 +2186,7 @@ async function getStoneState(username, client = pool, { forUpdate = false } = {}
         const slots = normalizeStoneSlots([]);
         await executor(
             `INSERT INTO stone_states (username, slots, created_at, updated_at)
-             VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Shanghai'), (NOW() AT TIME ZONE 'Asia/Shanghai'))
+             VALUES ($1, $2, NOW(), NOW())
              ON CONFLICT (username) DO NOTHING`,
             [username, JSON.stringify(slots)]
         );
@@ -1740,12 +2201,13 @@ async function getStoneState(username, client = pool, { forUpdate = false } = {}
 
 async function saveStoneState(username, slots, client = pool) {
     const executor = client.query ? client.query.bind(client) : client;
-    await executor(
+    const result = await executor(
         `UPDATE stone_states
-         SET slots = $1, updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+         SET slots = $1, updated_at = NOW()
          WHERE username = $2`,
         [JSON.stringify(slots), username]
     );
+    if (result.rowCount !== 1) throw new Error('Stone state row was not updated');
 }
 
 async function logStoneAction({
@@ -1761,7 +2223,7 @@ async function logStoneAction({
     await executor(
         `INSERT INTO stone_logs (
             username, action_type, cost, reward, slot_index, before_slots, after_slots, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, (NOW() AT TIME ZONE 'Asia/Shanghai'))`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
         [
             username,
             actionType,
@@ -1784,12 +2246,13 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false,
         client = await pool.connect();
         await client.query('BEGIN');
         await client.query(
-            "SELECT pg_advisory_xact_lock(hashtext($1 || ':gift_exchange'))",
+            "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':gift_exchange', 0))",
             [username]
         );
 
         const inventoryResult = await client.query(`
-            SELECT id, username, gift_type, gift_name, bilibili_gift_id, status, expires_at
+            SELECT id, username, gift_type, gift_name, bilibili_gift_id, status, expires_at,
+                   gift_exchange_id
             FROM wish_inventory
             WHERE id = $1 AND username = $2
             FOR UPDATE
@@ -1802,6 +2265,15 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false,
 
         const item = inventoryResult.rows[0];
         if (item.status !== 'stored') {
+            if (item.gift_exchange_id
+                && ['queued', 'sent'].includes(item.status)) {
+                await client.query('COMMIT');
+                return {
+                    success: true,
+                    exchangeId: item.gift_exchange_id,
+                    alreadyQueued: true
+                };
+            }
             await client.query('ROLLBACK');
             return { success: false, message: '该物品已处理' };
         }
@@ -1818,7 +2290,7 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false,
                     UPDATE wish_inventory
                     SET status = 'stored',
                         expires_at = 'infinity'::timestamptz,
-                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                        updated_at = NOW()
                     WHERE id = $1
                 `, [inventoryId]);
                 await client.query('COMMIT');
@@ -1834,7 +2306,7 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false,
             FROM gift_exchanges
             WHERE username = $1
               AND status = 'funds_locked'
-              AND delivery_status IN ('pending', 'processing', 'uncertain')
+              AND delivery_status IN ('pending', 'claimed', 'processing', 'uncertain')
             LIMIT 1
         `, [username]);
         if (activeDelivery.rows.length > 0) {
@@ -1846,7 +2318,7 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false,
             INSERT INTO gift_exchanges (
                 username, gift_type, gift_name, cost, quantity, status, created_at,
                 bilibili_room_id, delivery_status
-            ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', (NOW() AT TIME ZONE 'Asia/Shanghai'), $6, 'pending')
+            ) VALUES ($1, $2, $3, $4, $5, 'funds_locked', NOW(), $6, 'pending')
             RETURNING id
         `, [
             username,
@@ -1857,13 +2329,17 @@ async function enqueueWishInventorySend({ inventoryId, username, isAuto = false,
             bilibiliRoomId
         ]);
 
-        await client.query(`
+        const inventoryUpdated = await client.query(`
             UPDATE wish_inventory
             SET status = 'queued',
                 gift_exchange_id = $1,
-                updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-            WHERE id = $2
-        `, [exchangeResult.rows[0].id, inventoryId]);
+                updated_at = NOW()
+            WHERE id = $2 AND username = $3 AND status = 'stored'
+            RETURNING id
+        `, [exchangeResult.rows[0].id, inventoryId, username]);
+        if (inventoryUpdated.rowCount !== 1) {
+            throw new Error('Wish inventory state changed concurrently');
+        }
 
         const result = { success: true, exchangeId: exchangeResult.rows[0].id };
         const responseBody = { success: true, message: '礼物已加入发送队列', exchangeId: result.exchangeId };
@@ -1890,7 +2366,7 @@ async function autoSendExpiredWishRewards() {
 
     try {
         lockClient = await pool.connect();
-        const lockResult = await lockClient.query("SELECT pg_try_advisory_lock(hashtext('wish_auto_send')) AS locked");
+        const lockResult = await lockClient.query("SELECT pg_try_advisory_lock(hashtextextended('wish_auto_send', 0)) AS locked");
         lockAcquired = lockResult.rows[0].locked === true;
         if (!lockAcquired) return;
 
@@ -1899,7 +2375,7 @@ async function autoSendExpiredWishRewards() {
             FROM wish_inventory wi
             JOIN users u ON u.username = wi.username
             WHERE wi.status = 'stored'
-              AND wi.expires_at <= (NOW() AT TIME ZONE 'Asia/Shanghai')
+              AND wi.expires_at <= NOW()
             ORDER BY wi.expires_at ASC
             LIMIT 20
         `);
@@ -1909,7 +2385,7 @@ async function autoSendExpiredWishRewards() {
                 await lockClient.query(`
                     UPDATE wish_inventory
                     SET expires_at = 'infinity'::timestamptz,
-                        updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+                        updated_at = NOW()
                     WHERE id = $1
                 `, [row.id]);
                 continue;
@@ -1927,7 +2403,7 @@ async function autoSendExpiredWishRewards() {
         if (lockClient) {
             if (lockAcquired) {
                 try {
-                    await lockClient.query("SELECT pg_advisory_unlock(hashtext('wish_auto_send'))");
+                    await lockClient.query("SELECT pg_advisory_unlock(hashtextextended('wish_auto_send', 0))");
                 } catch (e) {
                     console.error('释放 wish_auto_send 锁失败:', e);
                 }
@@ -1938,33 +2414,188 @@ async function autoSendExpiredWishRewards() {
     }
 }
 
-async function autoSendWishInventoryOnBind(username) {
-    try {
-        await pool.query(`
-            UPDATE wish_inventory
-            SET expires_at = (date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai') + interval '1 day' + interval '23 hours 59 minutes 59 seconds'),
-                updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
-            WHERE username = $1
-              AND status = 'stored'
-              AND (expires_at IS NULL OR expires_at = 'infinity'::timestamptz)
-        `, [username]);
-    } catch (error) {
-        console.error('绑定房间号后自动送出失败:', error);
-    }
+async function scheduleWishInventoryDeliveryOnBind(username, client = pool) {
+    const result = await client.query(`
+        UPDATE wish_inventory
+        SET expires_at = ((date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai')
+                + interval '1 day 23 hours 59 minutes 59 seconds') AT TIME ZONE 'Asia/Shanghai'),
+            updated_at = NOW()
+        WHERE username = $1
+          AND status = 'stored'
+          AND (expires_at IS NULL OR expires_at = 'infinity'::timestamptz)
+        RETURNING id
+    `, [username]);
+    return result.rowCount;
 }
 
 const wishAutoSendInterval = setInterval(autoSendExpiredWishRewards, 60 * 1000);
 wishAutoSendInterval.unref?.();
 
-// 健康检查
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        games: ['quiz', 'slot', 'scratch', 'dictation', 'spin', 'wish', 'blindbox', 'stone', 'flip', 'duel'],
-        questions: questions.length
-    });
+app.get('/live', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ status: 'alive', timestamp: new Date().toISOString() });
 });
+
+let readinessCache = null;
+let readinessPromise = null;
+async function checkReadiness() {
+    if (readinessCache && Date.now() - readinessCache.checkedAt < 2000) {
+        return readinessCache.result;
+    }
+    if (readinessPromise) return readinessPromise;
+
+    readinessPromise = (async () => {
+        let client;
+        try {
+            client = await pool.connect();
+            await client.query('BEGIN');
+            await client.query("SET LOCAL statement_timeout = '2000ms'");
+            const schemaResult = await client.query(`
+                SELECT
+                    to_regclass('public.users') IS NOT NULL AS users_table,
+                    to_regclass('public.balance_logs') IS NOT NULL AS balance_logs_table,
+                    to_regclass('public.balance_audit_current') IS NOT NULL AS balance_audit_view,
+                    to_regclass('public.idempotency_keys') IS NOT NULL AS idempotency_table,
+                    to_regclass('public.gift_exchanges') IS NOT NULL AS gift_exchanges_table,
+                    to_regclass('public.worker_heartbeats') IS NOT NULL AS worker_heartbeats_table,
+                    to_regclass('public.worker_role_leases') IS NOT NULL AS worker_role_leases_table,
+                    to_regclass('public.delivery_outbox') IS NOT NULL AS delivery_outbox_table,
+                    to_regclass('public.rate_limit_counters') IS NOT NULL AS rate_limit_table,
+                    to_regclass('public.minimal_games_schema_migrations') IS NOT NULL AS migrations_table,
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM minimal_games_schema_migrations
+                        WHERE status <> 'applied'
+                    ) AS migrations_applied,
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM users AS account
+                        LEFT JOIN balance_audit_baselines AS baseline
+                          ON baseline.username = account.username
+                         AND baseline.version = 'append-only-v1'
+                        WHERE baseline.username IS NULL
+                    ) AS balance_baseline_coverage,
+                    EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'submissions'
+                          AND column_name = 'quiz_session_id'
+                    ) AS quiz_session_link,
+                    EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conrelid = 'public.users'::regclass
+                          AND conname = 'users_balance_invariant_check'
+                          AND convalidated
+                    ) AS balance_constraint,
+                    EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgrelid = 'public.balance_logs'::regclass
+                          AND tgname = 'balance_logs_append_only'
+                          AND NOT tgisinternal
+                    ) AS balance_append_only,
+                    EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgrelid = 'public.balance_logs'::regclass
+                          AND tgname = 'balance_logs_chain_guard'
+                          AND NOT tgisinternal
+                    ) AS balance_chain_guard,
+                    EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgrelid = 'public.users'::regclass
+                          AND tgname = 'users_balance_ledger_guard'
+                          AND NOT tgisinternal
+                    ) AS balance_update_guard,
+                    EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgrelid = 'public.users'::regclass
+                          AND tgname = 'users_establish_balance_audit_baseline'
+                          AND NOT tgisinternal
+                    ) AS balance_baseline_guard
+            `);
+            const workerResult = await client.query(`
+                SELECT COUNT(*) FILTER (
+                           WHERE lease.lease_expires_at > NOW()
+                             AND heartbeat.status = 'online'
+                             AND heartbeat.last_seen_at > NOW() - INTERVAL '90 seconds'
+                       )::INTEGER AS online_workers,
+                       MAX(heartbeat.last_seen_at) AS last_seen_at
+                FROM worker_role_leases AS lease
+                LEFT JOIN worker_heartbeats AS heartbeat
+                  ON heartbeat.worker_id = lease.worker_id
+                 AND heartbeat.worker_type = 'gift-pk'
+                WHERE lease.role = 'gift-pk'
+            `);
+            await client.query('COMMIT');
+
+            const schemaChecks = schemaResult.rows[0] || {};
+            const schemaReady = Object.values(schemaChecks).every((value) => value === true);
+            const configurationReady = process.env.NODE_ENV !== 'production' || (
+                typeof process.env.SESSION_SECRET === 'string'
+                && process.env.SESSION_SECRET.length >= 16
+                && typeof process.env.WINDOWS_API_KEY === 'string'
+                && process.env.WINDOWS_API_KEY.length >= 32
+                && typeof process.env.GIFT_TASKS_HMAC_SECRET === 'string'
+                && process.env.GIFT_TASKS_HMAC_SECRET.length >= 32
+            );
+            const backgroundReady = Boolean(
+                wishAutoSendInterval
+                && databaseMaintenanceInterval
+                && socketEventBus.isReady()
+            );
+            const onlineWorkers = Number(workerResult.rows[0]?.online_workers || 0);
+            const ready = schemaReady && configurationReady && backgroundReady;
+            return {
+                httpStatus: ready ? 200 : 503,
+                body: {
+                    status: ready ? (onlineWorkers > 0 ? 'ok' : 'degraded') : 'unavailable',
+                    ready,
+                    timestamp: new Date().toISOString(),
+                    checks: {
+                        database: true,
+                        schema: schemaReady,
+                        configuration: configurationReady,
+                        backgroundLoops: backgroundReady,
+                        socketEventBus: socketEventBus.isReady(),
+                        giftWorker: {
+                            online: onlineWorkers > 0,
+                            count: onlineWorkers,
+                            lastSeenAt: workerResult.rows[0]?.last_seen_at || null
+                        }
+                    }
+                }
+            };
+        } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
+            return {
+                httpStatus: 503,
+                body: {
+                    status: 'unavailable',
+                    ready: false,
+                    timestamp: new Date().toISOString(),
+                    checks: { database: false }
+                }
+            };
+        } finally {
+            client?.release();
+        }
+    })();
+
+    try {
+        const result = await readinessPromise;
+        readinessCache = { checkedAt: Date.now(), result };
+        return result;
+    } finally {
+        readinessPromise = null;
+    }
+}
+
+const readinessHandler = async (req, res) => {
+    const result = await checkReadiness();
+    res.set('Cache-Control', 'no-store');
+    return res.status(result.httpStatus).json(result.body);
+};
+app.get('/ready', readinessHandler);
+app.get('/health', readinessHandler);
 
 // 🛡️ 安全修复：API密钥验证中间件 - 只允许header传key，禁止query参数
 async function requireApiKey(req, res, next) {
@@ -2014,8 +2645,11 @@ async function requireApiKey(req, res, next) {
     const timestampHeader = req.headers['x-timestamp'];
     const signatureHeader = req.headers['x-signature'];
     const nonceHeader = req.headers['x-nonce'];
+    const signatureVersion = req.headers['x-signature-version'];
+    const workerId = req.headers['x-worker-id'];
 
-    if (!timestampHeader || !signatureHeader || !nonceHeader) {
+    if (!timestampHeader || !signatureHeader || !nonceHeader || signatureVersion !== SIGNATURE_VERSION
+        || typeof workerId !== 'string' || !/^[A-Za-z0-9._:-]{8,100}$/.test(workerId)) {
         return res.status(401).json({
             success: false,
             message: '缺少签名头'
@@ -2074,16 +2708,15 @@ async function requireApiKey(req, res, next) {
         });
     }
 
-    const canonicalBody = stableStringifyBody(req.body);
-    const payload = `${timestampHeader}.${req.method}.${req.path}.${canonicalBody}`;
-    const expectedSignature = crypto
-        .createHmac('sha256', hmacSecret)
-        .update(payload)
-        .digest('hex');
-
-    const signatureBuffer = Buffer.from(String(signatureHeader), 'hex');
-    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
-    if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    const expectedSignature = signRequest(hmacSecret, {
+        timestamp: timestampHeader,
+        nonce: nonceHeader,
+        workerId,
+        method: req.method,
+        path: req.originalUrl,
+        body: req.body
+    });
+    if (!signaturesMatch(String(signatureHeader), expectedSignature)) {
         return res.status(401).json({
             success: false,
             message: '签名不匹配'
@@ -2093,16 +2726,17 @@ async function requireApiKey(req, res, next) {
     try {
         const nonceResult = await pool.query(`
             INSERT INTO api_request_nonces (
-                nonce, request_method, request_path, request_timestamp, created_at
-            ) VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), NOW())
+                nonce, request_method, request_path, request_timestamp, worker_id, created_at
+            ) VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), $5, NOW())
             ON CONFLICT (nonce) DO NOTHING
             RETURNING nonce
-        `, [nonceHeader, req.method, req.path, timestampMs]);
+        `, [nonceHeader, req.method, req.path, timestampMs, workerId]);
         if (nonceResult.rows.length === 0) {
             return res.status(401).json({ success: false, message: '重复请求' });
         }
         nonceCache.set(nonceHeader, timestampMs);
         req.requestNonce = nonceHeader;
+        req.workerId = workerId;
         setRequestId(nonceHeader);
         if (!requireApiKey.lastNonceCleanupAt || now - requireApiKey.lastNonceCleanupAt > 60 * 60 * 1000) {
             requireApiKey.lastNonceCleanupAt = now;
@@ -2116,115 +2750,42 @@ async function requireApiKey(req, res, next) {
     }
 }
 
-function stableStringifyBody(body) {
-    if (!body || typeof body !== 'object' || Array.isArray(body) && body.length === 0) {
-        return '';
+async function requireActiveWorkerLease(req, res, next) {
+    try {
+        const active = await hasActiveWorkerRoleLease(pool, {
+            role: 'gift-pk',
+            workerId: req.workerId
+        });
+        if (!active) {
+            return res.status(409).json({
+                success: false,
+                message: '当前工作器未持有活动租约',
+                code: 'WORKER_LEASE_NOT_HELD'
+            });
+        }
+        return next();
+    } catch (error) {
+        console.error('工作器租约校验失败');
+        return res.status(503).json({
+            success: false,
+            message: '工作器租约服务暂不可用'
+        });
     }
-    const keys = Object.keys(body);
-    if (keys.length === 0) {
-        return '';
-    }
-    return stableStringify(body);
-}
-
-function stableStringify(value) {
-    if (value === undefined || typeof value === 'function') {
-        return 'null';
-    }
-    if (value === null || typeof value !== 'object') {
-        return JSON.stringify(value);
-    }
-    if (Array.isArray(value)) {
-        return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-    }
-    const keys = Object.keys(value).sort();
-    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
 }
 
 // ====================
 // 路由注册
 // ====================
 
-const idempotentWritePaths = [
-    '/api/change-password',
-    '/api/quiz/start',
-    '/api/quiz/next',
-    '/api/quiz/submit',
-    '/api/dictation/start',
-    '/api/dictation/retry',
-    '/api/dictation/submit',
-    '/api/slot/play',
-    '/api/scratch/play',
-    '/api/stone/add',
-    '/api/stone/fill',
-    '/api/stone/replace',
-    '/api/stone/redeem',
-    '/api/flip/start',
-    '/api/flip/flip',
-    '/api/flip/cashout',
-    '/api/blindbox/open',
-    '/api/duel/play',
-    '/api/spin',
-    '/api/wish/play',
-    '/api/wish-batch',
-    '/api/wish/backpack/send',
-    '/api/gifts/exchange',
-    '/api/pk/start',
-    '/api/pk/stop',
-    '/api/admin/add-electric-coin',
-    '/api/admin/authorize-user',
-    '/api/admin/unauthorize-user',
-    '/api/admin/reset-password',
-    '/api/admin/update-balance',
-    '/api/admin/dictation/mark',
-    '/api/admin/delete-account',
-    '/api/admin/unlock-account',
-    '/api/admin/clear-failures',
-    '/api/admin/change-self-password',
-    '/api/bilibili/room',
-    '/api/bilibili/cookies/refresh'
-];
-async function validateExistingIdempotentRequest(req) {
-    const providedToken = req.body?.csrfToken || req.headers['x-csrf-token'];
-    if (!verifyCSRFToken(req, providedToken)) {
-        return { status: 403, message: 'CSRF token验证失败' };
-    }
-
-    const username = req.session?.user?.username;
-    const sessionResult = await pool.query(`
-        SELECT u.authorized, u.is_admin, a.is_active
-        FROM users u
-        LEFT JOIN active_sessions a
-          ON a.username = u.username AND a.session_id = $2
-        WHERE u.username = $1
-    `, [username, req.sessionID]);
-    const current = sessionResult.rows[0];
-    if (!current || current.is_active !== true) {
-        return { status: 401, message: '登录会话已失效' };
-    }
-    if (current.authorized !== true) {
-        return { status: 403, message: '未授权访问' };
-    }
-    const requiresAdmin = req.path.startsWith('/api/admin/')
-        || req.path.startsWith('/api/bilibili/');
-    if (requiresAdmin && current.is_admin !== true) {
-        return { status: 403, message: '无权访问管理员后台' };
-    }
-    return null;
-}
-
-app.use(createIdempotencyMiddleware({
-    pool,
-    paths: idempotentWritePaths,
-    validateExistingRequest: validateExistingIdempotentRequest
-}));
-
 registerAnalyticsRoutes(app, {
     pool,
     rateLimit,
     requireLogin,
     requireAdmin,
-    security
+    security,
+    analyticsTokenSecret: crypto.createHmac('sha256', sessionSecret)
+        .update('ux-analytics-token-v1')
+        .digest()
 });
 
 registerAdminRoutes(app, {
@@ -2234,15 +2795,18 @@ registerAdminRoutes(app, {
     generateCSRFToken,
     requireLogin,
     requireAdmin,
+    requireRecentAdminAuth,
     requireAuthorized,
     requireCSRF,
     security,
-    autoSendWishInventoryOnBind,
+    scheduleWishInventoryDeliveryOnBind,
     IPManager,
     SessionManager,
     notifySecurityEvent,
     disconnectUserSockets,
-    path
+    passwordResetTokenSecret: crypto.createHmac('sha256', sessionSecret)
+        .update('admin-password-reset-token-v1')
+        .digest()
 });
 
 registerGiftRoutes(app, {
@@ -2251,23 +2815,27 @@ registerGiftRoutes(app, {
     BalanceLogger,
     requireLogin,
     requireAuthorized,
+    requireCSRF,
     requireApiKey,
+    requireActiveWorkerLease,
     security,
     generateCSRFToken,
-    enqueueWishInventorySend
+    enqueueWishInventorySend,
+    paidActionConcurrencyGuard
 });
 
 registerWishRoutes(app, {
     pool,
     BalanceLogger,
-    GameLogic,
     getWishConfig,
     requireLogin,
     requireAuthorized,
+    requireCSRF,
     security,
     generateCSRFToken,
     broadcastDanmaku,
-    enqueueWishInventorySend
+    enqueueWishInventorySend,
+    paidActionConcurrencyGuard
 });
 
 registerGameRoutes(app, {
@@ -2276,11 +2844,11 @@ registerGameRoutes(app, {
     GameLogic,
     questions,
     generateCSRFToken,
-    generateUsername,
     requireLogin,
     requireAuthorized,
+    requireCSRF,
+    dictationTokenSecret: crypto.createHmac('sha256', sessionSecret).update('dictation-question-token-v1').digest('hex'),
     security,
-    questionMap,
     randomStoneColor,
     normalizeStoneSlots,
     getMaxSameCount,
@@ -2297,7 +2865,8 @@ registerGameRoutes(app, {
     logFlipAction,
     duelRewards,
     calculateDuelCost,
-    enqueueWishInventorySend
+    paidActionConcurrencyGuard,
+    giftConfig
 });
 
 // 404 处理（必须在所有API路由之后）
@@ -2325,6 +2894,7 @@ async function startServer() {
     if (!databaseReady) {
         throw new Error('数据库初始化失败，拒绝启动服务');
     }
+    await socketEventBus.start();
     await runDatabaseMaintenance();
     databaseMaintenanceInterval = setInterval(runDatabaseMaintenance, 6 * 60 * 60 * 1000);
     databaseMaintenanceInterval.unref?.();
@@ -2349,6 +2919,8 @@ async function shutdown(signal) {
     shutdownStarted = true;
     console.log(`收到${signal}信号，正在关闭服务...`);
     if (databaseMaintenanceInterval) clearInterval(databaseMaintenanceInterval);
+    clearInterval(socketSessionValidationInterval);
+    paidActionConcurrencyGuard.close();
 
     try {
         io.close();
@@ -2361,6 +2933,7 @@ async function shutdown(signal) {
                 resolve();
             });
         });
+        await socketEventBus.close();
         await pool.end();
         console.log('服务器已安全关闭');
         process.exit(0);

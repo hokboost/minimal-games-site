@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 // 祈愿专用测试脚本：
@@ -10,7 +11,7 @@
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
-const base = process.env.TARGET_URL || 'https://www.wuguijiang.com';
+const base = process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER || '尧顺宇';
 const password = process.env.AUTH_PASS || 'yaoshunyu';
 const giftType = process.env.WISH_GIFT || 'bobo';

@@ -32,7 +32,10 @@
             <nav class="analytics-nav" aria-label="<%= lang === 'zh' ? '管理导航' : 'Admin navigation' %>">
                 <a href="/admin"><%= lang === 'zh' ? '管理后台' : 'Admin' %></a>
                 <a href="/"><%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
-                <a href="/logout"><%= lang === 'zh' ? '退出' : 'Log out' %></a>
+                <form method="POST" action="/logout" class="logout-form">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="logout-link-button"><%= lang === 'zh' ? '退出' : 'Log out' %></button>
+                </form>
             </nav>
         </header>
 
@@ -174,7 +177,6 @@
                         <th><%= lang === 'zh' ? '显示' : 'Display' %></th>
                         <th><%= lang === 'zh' ? '语言' : 'Language' %></th>
                         <th><%= lang === 'zh' ? '时区' : 'Timezone' %></th>
-                        <th>IP</th>
                     </tr></thead>
                     <tbody>
                     <% analytics.recent.forEach(row => { %>
@@ -185,10 +187,10 @@
                             <td><%= row.device_type %><%= row.platform ? ` · ${row.platform}` : '' %></td>
                             <td class="nowrap"><%= row.viewport_width && row.viewport_height ? `${row.viewport_width}×${row.viewport_height}` : '-' %><%= row.color_scheme ? ` · ${row.color_scheme}` : '' %><%= row.connection_type ? ` · ${row.connection_type}` : '' %></td>
                             <td><%= row.browser_language || '-' %></td>
-                            <td><%= row.timezone || '-' %></td><td class="nowrap"><%= row.ip_address || '-' %></td>
+                            <td><%= row.timezone || '-' %></td>
                         </tr>
                     <% }) %>
-                    <% if (!analytics.recent.length) { %><tr><td colspan="10" class="empty"><%= lang === 'zh' ? '暂无数据' : 'No data' %></td></tr><% } %>
+                    <% if (!analytics.recent.length) { %><tr><td colspan="9" class="empty"><%= lang === 'zh' ? '暂无数据' : 'No data' %></td></tr><% } %>
                     </tbody>
                 </table>
             </div>

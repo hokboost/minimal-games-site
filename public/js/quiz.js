@@ -2,12 +2,11 @@
     const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
     const t = (zh, en) => (lang === 'zh' ? zh : en);
     const translateServerMessage = window.translateServerMessage || ((message) => message);
-    const escapeHTML = window.escapeHTML || ((value) => String(value ?? ''));
-
     const { username } = document.body.dataset;
     let csrf = document.body.dataset.csrfToken || '';
     let currentQuestions = [];
     let currentAnswers = [];
+    let questionRequests = new Map();
     let questionIndex = 0;
     let timer;
     let submitInFlight = false;
@@ -86,12 +85,13 @@
             return;
         }
 
-        document.getElementById('user-section').style.display = 'none';
-        document.getElementById('quiz').style.display = 'block';
-        document.getElementById('result').style.display = 'none';
+        document.getElementById('user-section').hidden = true;
+        document.getElementById('quiz').hidden = false;
+        document.getElementById('result').hidden = true;
 
         currentQuestions = [];
         currentAnswers = [];
+        questionRequests = new Map();
         questionIndex = 0;
         timeLeft = totalTime;
         submitInFlight = false;
@@ -110,11 +110,53 @@
 
         timerEl.textContent = t('服务器预热中...', 'Warming up server...');
         question.textContent = t('正在准备题目，请稍候...', 'Preparing questions, please wait...');
-        options.innerHTML = '';
+        options.replaceChildren();
 
         setTimeout(() => {
             timerEl.textContent = t('游戏开始！', 'Game start!');
         }, 1000);
+    }
+
+    async function fetchQuestionAt(index) {
+        const existing = currentQuestions.find((item) => item.questionIndex === index);
+        if (existing) return existing;
+        if (questionRequests.has(index)) return questionRequests.get(index);
+
+        const request = (async () => {
+            const response = await window.idempotentFetch('/api/quiz/next', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrf
+                },
+                body: JSON.stringify({
+                    username,
+                    questionIndex: index
+                })
+            });
+
+            const data = await response.json();
+            if (!response.ok || data.success !== true || !data.question || !data.token) {
+                const error = new Error(data.message || `Question request failed (${response.status})`);
+                error.serverMessage = data.message;
+                throw error;
+            }
+
+            const issued = {
+                id: data.question.id,
+                question: data.question,
+                token: data.token,
+                questionIndex: index
+            };
+            currentQuestions.push(issued);
+            return issued;
+        })();
+        questionRequests.set(index, request);
+        try {
+            return await request;
+        } finally {
+            questionRequests.delete(index);
+        }
     }
 
     async function nextQuestion() {
@@ -124,41 +166,18 @@
         }
 
         try {
-            const response = await window.idempotentFetch('/api/quiz/next', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': csrf
-                },
-                body: JSON.stringify({
-                    username,
-                    seen: currentQuestions.map((q) => q.id),
-                    questionIndex
-                })
-            });
-
-            const data = await response.json();
-            if (data.success) {
-                currentQuestions.push({
-                    id: data.question.id,
-                    token: data.token,
-                    signature: data.signature
-                });
-
-                displayQuestion(data.question, data.token);
-                document.getElementById('progress').textContent = t(
-                    `题目 ${questionIndex + 1}/${totalQuestions}`,
-                    `Question ${questionIndex + 1}/${totalQuestions}`
-                );
-            } else {
-                alert(t('获取题目失败: ', 'Failed to get question: ') + translateServerMessage(data.message));
-                if (data.message && data.message.includes('先开始')) {
-                    await startQuiz();
-                }
-            }
+            const issued = await fetchQuestionAt(questionIndex);
+            if (submitInFlight) return;
+            displayQuestion(issued.question, issued.token);
+            document.getElementById('progress').textContent = t(
+                `题目 ${questionIndex + 1}/${totalQuestions}`,
+                `Question ${questionIndex + 1}/${totalQuestions}`
+            );
         } catch (error) {
             console.error('Error:', error);
-            alert(t('网络错误，请稍后重试', 'Network error, please try again'));
+            const message = translateServerMessage(error.serverMessage)
+                || t('网络错误，请稍后重试', 'Network error, please try again');
+            alert(t('获取题目失败: ', 'Failed to get question: ') + message);
         }
     }
 
@@ -167,7 +186,7 @@
         document.getElementById('question').textContent = question.question;
 
         const optionsDiv = document.getElementById('options');
-        optionsDiv.innerHTML = '';
+        optionsDiv.replaceChildren();
 
         question.options.forEach((option, index) => {
             const optionDiv = document.createElement('div');
@@ -187,7 +206,6 @@
         const options = document.querySelectorAll('.option');
         options.forEach((opt) => {
             opt.classList.add('locked');
-            opt.style.pointerEvents = 'none';
             opt.setAttribute('aria-disabled', 'true');
             opt.tabIndex = -1;
         });
@@ -195,7 +213,8 @@
         optionElement.classList.add('selected');
         currentAnswers.push({
             token,
-            answerIndex
+            answerIndex,
+            questionIndex
         });
 
         questionIndex += 1;
@@ -230,6 +249,23 @@
         }
     }
 
+    async function buildSettlementAnswers() {
+        const answersByToken = new Map(currentAnswers.map((answer) => [answer.token, answer]));
+        for (let index = 0; index < totalQuestions; index += 1) {
+            const issued = await fetchQuestionAt(index);
+            if (!answersByToken.has(issued.token)) {
+                answersByToken.set(issued.token, {
+                    token: issued.token,
+                    answerIndex: -1,
+                    questionIndex: index
+                });
+            }
+        }
+        return Array.from(answersByToken.values())
+            .sort((left, right) => left.questionIndex - right.questionIndex)
+            .map(({ token, answerIndex }) => ({ token, answerIndex }));
+    }
+
     async function submitQuiz() {
         if (submitInFlight) {
             return;
@@ -239,12 +275,12 @@
         questionLocked = true;
         document.querySelectorAll('.option').forEach((option) => {
             option.classList.add('locked');
-            option.style.pointerEvents = 'none';
             option.setAttribute('aria-disabled', 'true');
             option.tabIndex = -1;
         });
 
         try {
+            const settlementAnswers = await buildSettlementAnswers();
             const response = await window.idempotentFetch('/api/quiz/submit', {
                 method: 'POST',
                 headers: {
@@ -253,7 +289,7 @@
                 },
                 body: JSON.stringify({
                     username,
-                    answers: currentAnswers
+                    answers: settlementAnswers
                 })
             });
 
@@ -278,6 +314,7 @@
     }
 
     function showSubmissionRecovery(message, canRetry) {
+        resultDiv.hidden = false;
         resultDiv.className = 'result-section show submission-error';
         resultDiv.replaceChildren();
 
@@ -307,7 +344,8 @@
     }
 
     function showResult(score, total, reward, newBalance) {
-        document.getElementById('quiz').style.display = 'none';
+        document.getElementById('quiz').hidden = true;
+        resultDiv.hidden = false;
         resultDiv.className = 'result-section show';
 
         window.lastGameResult = {
@@ -321,69 +359,57 @@
         const endTime = new Date();
         const timeTaken = Math.round((endTime - startTime) / 1000);
 
-        let resultHTML = `
-            <h2>${t('答题完成！', 'Quiz Complete!')}</h2>
-            <div style="font-size: 2rem; margin: 1rem 0; color: #00c853;">
-                ${score}/${total} ${t('分', 'pts')} (${percentage}%)
-            </div>
-            <div style="font-size: 1.5rem; margin: 1rem 0; color: #ffeb3b;">
-                ${t('获得奖励', 'Reward')}: ${reward || 0} ${t('积分', 'points')}
-            </div>
-            <div style="font-size: 1.2rem; margin: 1rem 0; color: #ffeb3b;">
-                ${t('当前余额', 'Balance')}: ${newBalance || 0} ${t('积分', 'points')}
-            </div>
-            <p>${t('用时', 'Time')}: ${timeTaken} ${t('秒', 's')}</p>
-        `;
+        resultDiv.replaceChildren();
+        const title = document.createElement('h2');
+        title.textContent = t('答题完成！', 'Quiz Complete!');
+        const scoreLine = document.createElement('div');
+        scoreLine.className = 'quiz-result-score';
+        scoreLine.textContent = `${score}/${total} ${t('分', 'pts')} (${percentage}%)`;
+        const rewardLine = document.createElement('div');
+        rewardLine.className = 'quiz-result-reward';
+        rewardLine.textContent = `${t('获得奖励', 'Reward')}: ${reward || 0} ${t('积分', 'points')}`;
+        const balanceLine = document.createElement('div');
+        balanceLine.className = 'quiz-result-balance';
+        balanceLine.textContent = `${t('当前余额', 'Balance')}: ${newBalance || 0} ${t('积分', 'points')}`;
+        const timeLine = document.createElement('p');
+        timeLine.textContent = `${t('用时', 'Time')}: ${timeTaken} ${t('秒', 's')}`;
+        resultDiv.append(title, scoreLine, rewardLine, balanceLine, timeLine);
 
         if (newBalance !== undefined) {
             document.getElementById('current-balance').textContent = newBalance;
         }
 
         if (percentage >= 80) {
-            resultHTML += `<p style="color: #4caf50;">${t('优秀！知识渊博！', 'Excellent! Great knowledge!')}</p>`;
+            resultDiv.dataset.grade = 'excellent';
         } else if (percentage >= 60) {
-            resultHTML += `<p style="color: #ff9800;">${t('不错！继续努力！', 'Nice! Keep going!')}</p>`;
+            resultDiv.dataset.grade = 'good';
         } else {
-            resultHTML += `<p style="color: #f44336;">${t('加油！多学习多练习！', 'Keep it up! Practice more!')}</p>`;
+            resultDiv.dataset.grade = 'practice';
         }
-
-        resultHTML += `
-            <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap;">
-                <button class="result-action-btn" data-action="restart" style="
-                    background: #087f73;
-                    color: white;
-                    border: none;
-                    padding: 12px 24px;
-                    font-size: 16px;
-                    border-radius: 25px;
-                    cursor: pointer;
-                ">${t('再来一次 (消耗10积分)', 'Play Again (Cost 10 points)')}</button>
-
-                <button class="result-action-btn" data-action="home" style="
-                    background: #326fad;
-                    color: white;
-                    border: none;
-                    padding: 12px 24px;
-                    font-size: 16px;
-                    border-radius: 25px;
-                    cursor: pointer;
-                ">${t('返回首页', 'Back to Home')}</button>
-            </div>
-        `;
-
-        resultDiv.innerHTML = resultHTML;
-
-        const restartBtn = resultDiv.querySelector('[data-action="restart"]');
-        const homeBtn = resultDiv.querySelector('[data-action="home"]');
-        if (restartBtn) {
-            restartBtn.addEventListener('click', restartQuiz);
-        }
-        if (homeBtn) {
-            homeBtn.addEventListener('click', backToHome);
-        }
+        const gradeLine = document.createElement('p');
+        gradeLine.className = 'quiz-result-grade';
+        gradeLine.textContent = percentage >= 80
+            ? t('优秀！知识渊博！', 'Excellent! Great knowledge!')
+            : percentage >= 60
+                ? t('不错！继续努力！', 'Nice! Keep going!')
+                : t('加油！多学习多练习！', 'Keep it up! Practice more!');
+        const actions = document.createElement('div');
+        actions.className = 'quiz-result-actions';
+        const restartBtn = document.createElement('button');
+        restartBtn.type = 'button';
+        restartBtn.className = 'result-action-btn result-action-restart';
+        restartBtn.textContent = t('再来一次 (消耗10积分)', 'Play Again (Cost 10 points)');
+        restartBtn.addEventListener('click', restartQuiz);
+        const homeBtn = document.createElement('button');
+        homeBtn.type = 'button';
+        homeBtn.className = 'result-action-btn result-action-home';
+        homeBtn.textContent = t('返回首页', 'Back to Home');
+        homeBtn.addEventListener('click', backToHome);
+        actions.append(restartBtn, homeBtn);
+        resultDiv.append(gradeLine, actions);
 
         setTimeout(() => {
-            document.getElementById('current-game-result').style.display = 'block';
+            document.getElementById('current-game-result').hidden = false;
             document.getElementById('current-score').textContent = t(
                 `本局得分：${score}/${total} 分 (${percentage}%)`,
                 `Score: ${score}/${total} pts (${percentage}%)`
@@ -393,16 +419,16 @@
                 `Points Earned: ${reward} points`
             );
 
-            document.getElementById('leaderboard').style.display = 'block';
+            document.getElementById('leaderboard').hidden = false;
             loadLeaderboard();
         }, 1000);
     }
 
     function restartQuiz() {
-        document.getElementById('result').style.display = 'none';
-        document.getElementById('leaderboard').style.display = 'none';
-        document.getElementById('current-game-result').style.display = 'none';
-        document.getElementById('user-section').style.display = 'block';
+        document.getElementById('result').hidden = true;
+        document.getElementById('leaderboard').hidden = true;
+        document.getElementById('current-game-result').hidden = true;
+        document.getElementById('user-section').hidden = false;
         window.lastGameResult = null;
     }
 
@@ -421,14 +447,14 @@
             }
 
             if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
-                tbody.innerHTML = '';
+                tbody.replaceChildren();
                 data.leaderboard.forEach((record, index) => {
                     const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${index + 1}</td>
-                        <td>${escapeHTML(record.username)}</td>
-                        <td>${escapeHTML(record.score)}</td>
-                        <td>${new Date(record.submitted_at).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
+                    const values = [
+                        index + 1,
+                        record.username,
+                        record.score,
+                        new Date(record.submitted_at).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
                             timeZone: 'Asia/Shanghai',
                             year: 'numeric',
                             month: '2-digit',
@@ -437,16 +463,33 @@
                             minute: '2-digit',
                             second: '2-digit',
                             hour12: false
-                        })}</td>
-                    `;
+                        })
+                    ];
+                    for (const value of values) {
+                        const cell = document.createElement('td');
+                        cell.textContent = String(value ?? '');
+                        row.appendChild(cell);
+                    }
                     tbody.appendChild(row);
                 });
             } else {
-                tbody.innerHTML = `<tr><td colspan="4">${t('暂无排行榜数据', 'No leaderboard data')}</td></tr>`;
+                showLeaderboardMessage(tbody, t('暂无排行榜数据', 'No leaderboard data'));
             }
         } catch (error) {
             console.error(t('加载排行榜失败:', 'Failed to load leaderboard:'), error);
-            document.getElementById('leaderboard-body').innerHTML = `<tr><td colspan="4">${t('加载排行榜失败', 'Failed to load leaderboard')}</td></tr>`;
+            showLeaderboardMessage(
+                document.getElementById('leaderboard-body'),
+                t('加载排行榜失败', 'Failed to load leaderboard')
+            );
         }
+    }
+
+    function showLeaderboardMessage(tbody, message) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 4;
+        cell.textContent = message;
+        row.appendChild(cell);
+        tbody.replaceChildren(row);
     }
 })();

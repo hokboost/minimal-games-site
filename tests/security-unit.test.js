@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const test = require('node:test');
+const { EventEmitter } = require('node:events');
 
 const { parseCookies, decodeSignedSessionCookie } = require('../lib/session-auth');
 const {
@@ -10,6 +11,7 @@ const {
 } = require('../lib/client-ip');
 const {
     createIdempotencyMiddleware,
+    bodyForHash,
     hashRequest,
     retryQuery,
     stableStringify
@@ -17,12 +19,88 @@ const {
 const BalanceLogger = require('../balance-logger');
 const { requestContextMiddleware, setRequestId } = require('../lib/request-context');
 const {
+    canonicalRequest,
+    signRequest,
+    signaturesMatch
+} = require('../lib/request-signature');
+const {
     clampInteger,
     normalizeRoute,
     normalizeTimestamp,
     sanitizeMetadata,
     sanitizePreferences
 } = require('../lib/ux-analytics');
+const {
+    computeTicketCount,
+    createSpendHash,
+    normalizeGiftItems
+} = require('../lib/pk-spend');
+const { decodeBase32, generateTotp, verifyTotp } = require('../lib/totp');
+const { createConcurrencyGuard } = require('../lib/concurrency-guard');
+const { multiplyMoney, parseInteger, parseMoney } = require('../lib/integer-money');
+const { randomArrayIndex, randomArrayItem } = require('../lib/random-index');
+const { runWishSimulation } = require('../lib/wish-simulation');
+const { BoundedSemaphore } = require('../lib/bounded-semaphore');
+const { cleanString, sanitizeLogValue } = require('../lib/safe-logger');
+const {
+    createAdminFailureAuditMiddleware,
+    scopedAuditRequestId
+} = require('../lib/admin-audit-failure');
+const GameLogic = require('../data/gameLogic');
+const {
+    WindowsGiftListener,
+    createChildEnvironment,
+    createWorkerInstanceId,
+    isWorkerLeaseError,
+    waitForChildSpawn
+} = require('../windows-gift-listener');
+const {
+    validateServerEnvironment,
+    validateWorkerEnvironment
+} = require('../lib/config-validation');
+const {
+    applyTrackedMigration,
+    migrationTransactionBody
+} = require('../lib/database-migrations');
+
+async function withEnvironment(overrides, callback) {
+    const previous = new Map();
+    for (const [name, value] of Object.entries(overrides)) {
+        previous.set(name, process.env[name]);
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+    }
+    try {
+        return await callback();
+    } finally {
+        for (const [name, value] of previous) {
+            if (value === undefined) delete process.env[name];
+            else process.env[name] = value;
+        }
+    }
+}
+
+test('child process launch waits for an explicit spawn confirmation', async () => {
+    const child = new EventEmitter();
+    const launched = waitForChildSpawn(child, 100);
+    queueMicrotask(() => child.emit('spawn'));
+    await launched;
+});
+
+test('child process launch rejects asynchronous spawn failures', async () => {
+    const child = new EventEmitter();
+    const launched = waitForChildSpawn(child, 100);
+    queueMicrotask(() => child.emit('error', new Error('spawn ENOENT')));
+    await assert.rejects(launched, /spawn ENOENT/);
+});
+
+test('worker instances use distinct lease identities on the same host', () => {
+    const first = createWorkerInstanceId('windows-host', 'ignored', 'a'.repeat(16));
+    const second = createWorkerInstanceId('windows-host', 'ignored', 'b'.repeat(16));
+    assert.equal(first, `windows-host:${'a'.repeat(16)}`);
+    assert.notEqual(first, second);
+    assert.equal(isWorkerLeaseError({ response: { data: { code: 'WORKER_LEASE_HELD' } } }), true);
+});
 
 function signSessionId(sessionId, secret) {
     const signature = crypto.createHmac('sha256', secret)
@@ -31,6 +109,534 @@ function signSessionId(sessionId, secret) {
         .replace(/=+$/, '');
     return `s:${sessionId}.${signature}`;
 }
+
+test('safe logger blocks log injection and redacts secrets and identifiers', () => {
+    const clean = cleanString('line1\nline2 cookie=abc password:xyz Bearer token-value');
+    assert.equal(clean.includes('\n'), false);
+    assert.match(clean, /cookie=\[REDACTED\]/i);
+    assert.match(clean, /password:\[REDACTED\]/i);
+    assert.match(clean, /Bearer \[REDACTED\]/);
+
+    const sanitized = sanitizeLogValue({
+        username: 'private-user',
+        clientIP: '203.0.113.2',
+        cookie: 'private-cookie',
+        nested: { apiKey: 'private-key' }
+    });
+    assert.match(sanitized.username, /^id:[a-f0-9]{12}$/);
+    assert.match(sanitized.clientIP, /^id:[a-f0-9]{12}$/);
+    assert.equal(sanitized.cookie, '[REDACTED]');
+    assert.equal(sanitized.nested.apiKey, '[REDACTED]');
+});
+
+test('failed admin mutations are audited once without request body data', async () => {
+    const queries = [];
+    const pool = { query: async (sql, values) => { queries.push({ sql, values }); } };
+    const middleware = createAdminFailureAuditMiddleware(pool);
+    const req = {
+        method: 'POST',
+        path: '/api/admin/update-balance',
+        requestId: 'request-id',
+        idempotencyKey: 'idempotency-key',
+        clientIP: '203.0.113.2',
+        body: { password: 'must-not-be-audited' },
+        session: { user: { username: 'admin-user' } }
+    };
+    const res = new EventEmitter();
+    res.statusCode = 400;
+    res.writableFinished = true;
+    let nextCalled = false;
+    middleware(req, res, () => { nextCalled = true; });
+    res.emit('finish');
+    res.emit('close');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(nextCalled, true);
+    assert.equal(queries.length, 1);
+    assert.equal(queries[0].values[0], scopedAuditRequestId('admin-user', 'idempotency-key'));
+    assert.equal(queries[0].values.join(' ').includes('must-not-be-audited'), false);
+});
+
+test('paid action concurrency guard caps requests and releases every terminal response once', () => {
+    const pool = {
+        query: async () => ({ rows: [] }),
+        options: { max: 20 },
+        totalCount: 1,
+        idleCount: 1,
+        waitingCount: 0
+    };
+    const guard = createConcurrencyGuard({
+        pool,
+        maxInFlight: 1,
+        maxPerUser: 1,
+        maxPoolWaiters: 0,
+        maxEventLoopLagMs: 5000
+    });
+    const response = () => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        res.headers = {};
+        res.set = (name, value) => {
+            res.headers[name] = value;
+            return res;
+        };
+        res.status = (status) => {
+            res.statusCode = status;
+            return res;
+        };
+        res.json = (body) => {
+            res.body = body;
+            return res;
+        };
+        return res;
+    };
+    const req = { session: { user: { username: 'tester' } } };
+    const first = response();
+    let runs = 0;
+    guard(req, first, () => { runs += 1; });
+    assert.equal(guard.getStats().active, 1);
+
+    const rejected = response();
+    guard(req, rejected, () => { runs += 1; });
+    assert.equal(rejected.statusCode, 503);
+    assert.equal(rejected.headers['Retry-After'], '2');
+    assert.equal(runs, 1);
+
+    first.emit('finish');
+    first.emit('close');
+    assert.equal(guard.getStats().active, 0);
+    const resumed = response();
+    guard(req, resumed, () => { runs += 1; });
+    assert.equal(runs, 2);
+    resumed.emit('close');
+    assert.equal(guard.getStats().active, 0);
+    guard.close();
+});
+
+test('money parsing accepts exact database integers and rejects truncation or overflow', () => {
+    assert.equal(parseMoney('9007199254740991', 'balance'), Number.MAX_SAFE_INTEGER);
+    assert.equal(parseInteger('10', 'count', { min: 1, max: 10 }), 10);
+    assert.equal(multiplyMoney('500', 10, 'batch cost'), 5000);
+    assert.throws(() => parseMoney('1.5', 'balance'), /must be an integer/);
+    assert.throws(() => parseMoney('9007199254740992', 'balance'), /supported integer range/);
+    assert.throws(() => multiplyMoney(Number.MAX_SAFE_INTEGER, 2), /supported integer range/);
+});
+
+test('array random selection uses an exclusive upper bound and can select the final item', () => {
+    const calls = [];
+    const chooseLast = (minimum, maximum) => {
+        calls.push([minimum, maximum]);
+        return maximum - 1;
+    };
+
+    assert.equal(randomArrayIndex(5, chooseLast), 4);
+    assert.equal(randomArrayItem(['first', 'middle', 'last'], chooseLast), 'last');
+    assert.deepEqual(calls, [[0, 5], [0, 3]]);
+    assert.throws(() => randomArrayIndex(0), /positive safe integer/);
+    assert.throws(() => randomArrayItem([]), /empty array/);
+});
+
+test('migration runner owns transaction boundaries and localizes dump settings', () => {
+    const body = migrationTransactionBody(`
+        BEGIN;
+        SET statement_timeout = 0;
+        SET row_security = off;
+        SELECT 1;
+        COMMIT;
+    `);
+    assert.doesNotMatch(body, /BEGIN|COMMIT|SET statement_timeout/);
+    assert.match(body, /SET LOCAL row_security = off/);
+    assert.match(body, /SELECT 1/);
+});
+
+test('migration runner preserves an applied marker after a lost COMMIT response', async () => {
+    let state = null;
+    let failedWrites = 0;
+    const client = {
+        async query(sql) {
+            const normalized = String(sql).trim().replace(/\s+/g, ' ');
+            if (normalized.startsWith('SELECT checksum, status')) return { rows: [] };
+            if (normalized.startsWith('INSERT INTO minimal_games_schema_migrations')) {
+                state = 'running';
+                return { rowCount: 1, rows: [] };
+            }
+            if (normalized.includes("SET status = 'applied'")) {
+                state = 'applied';
+                return { rowCount: 1, rows: [] };
+            }
+            if (normalized === 'COMMIT') {
+                throw new Error('connection lost after commit');
+            }
+            if (normalized.startsWith('SELECT status FROM minimal_games_schema_migrations')) {
+                return { rows: [{ status: state }] };
+            }
+            if (normalized.includes("SET status = 'failed'")) {
+                failedWrites += 1;
+            }
+            return { rowCount: 0, rows: [] };
+        }
+    };
+
+    await applyTrackedMigration(client, 'add_registration_ip.sql', () => {});
+    assert.equal(state, 'applied');
+    assert.equal(failedWrites, 0);
+});
+
+test('wish simulation runs off the main thread and preserves guarantee boundaries', async () => {
+    const result = await runWishSimulation({
+        count: 500,
+        successRate: 0,
+        guaranteeThreshold: 0,
+        timeoutMs: 2000
+    });
+    assert.deepEqual(result, { successCount: 500, consecutiveFails: 0 });
+});
+
+test('bounded semaphore serializes side effects and releases exactly once', async () => {
+    const semaphore = new BoundedSemaphore(1);
+    const releaseFirst = await semaphore.acquire();
+    let secondAcquired = false;
+    const second = semaphore.acquire(1000).then((release) => {
+        secondAcquired = true;
+        return release;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(secondAcquired, false);
+    await assert.rejects(semaphore.acquire(1000), /queue is full/);
+    releaseFirst();
+    releaseFirst();
+    const releaseSecond = await second;
+    assert.equal(secondAcquired, true);
+    releaseSecond();
+    semaphore.close();
+    await assert.rejects(semaphore.acquire(), /closed/);
+});
+
+test('worker child processes receive an allowlist instead of application secrets', async () => {
+    await withEnvironment({
+        PATH: '/safe/bin',
+        LANG: 'zh_CN.UTF-8',
+        DB_PASS: 'database-secret',
+        SESSION_SECRET: 'session-secret',
+        WINDOWS_API_KEY: 'worker-api-secret',
+        GIFT_TASKS_HMAC_SECRET: 'worker-hmac-secret'
+    }, async () => {
+        const environment = createChildEnvironment({ THREESERVER_PORT: '9876' });
+        assert.equal(environment.PATH, '/safe/bin');
+        assert.equal(environment.LANG, 'zh_CN.UTF-8');
+        assert.equal(environment.THREESERVER_PORT, '9876');
+        assert.equal(environment.DB_PASS, undefined);
+        assert.equal(environment.SESSION_SECRET, undefined);
+        assert.equal(environment.WINDOWS_API_KEY, undefined);
+        assert.equal(environment.GIFT_TASKS_HMAC_SECRET, undefined);
+    });
+});
+
+test('PK authorization proxy rejects requests without its capability path', async () => {
+    const listener = Object.create(WindowsGiftListener.prototype);
+    listener.externalSendSemaphore = new BoundedSemaphore(1);
+    listener.activePkReportIds = new Set();
+    const proxy = await listener.startPkAuthorizationProxy({
+        username: 'test-user',
+        roomId: '123',
+        generationId: 'generation',
+        backendUrl: 'http://127.0.0.1:1',
+        proxySecret: 'a'.repeat(48)
+    });
+    try {
+        const response = await fetch(proxy.url.replace(/a{48}$/, 'not-authorized'));
+        assert.equal(response.status, 404);
+        assert.deepEqual(await response.json(), { success: false, error: 'not_found' });
+    } finally {
+        await new Promise((resolve) => proxy.server.close(resolve));
+        listener.externalSendSemaphore.close();
+    }
+});
+
+test('PK authorization proxy prevents automatic retry after a partial upstream result', async () => {
+    const backend = require('node:http').createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            const body = JSON.stringify({
+                success: false,
+                results: [{ id: 'gift-a', success: true }, { id: 'gift-b', success: false }]
+            });
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body)
+            });
+            res.end(body);
+        });
+    });
+    await new Promise((resolve) => backend.listen(0, '127.0.0.1', resolve));
+    const backendAddress = backend.address();
+    const listener = Object.create(WindowsGiftListener.prototype);
+    listener.externalSendSemaphore = new BoundedSemaphore(1);
+    listener.activePkReportIds = new Set();
+    const events = [];
+    listener.spoolPkReport = (payload, phase) => {
+        events.push(`spool:${phase}`);
+        return null;
+    };
+    listener.removeSpooledPkReport = () => {};
+    const reports = [];
+    listener.postSignedWorkerRequest = async (pathname, payload) => {
+        events.push(pathname);
+        if (pathname === '/api/pk/report') reports.push(payload);
+        return { data: { success: true } };
+    };
+    const proxy = await listener.startPkAuthorizationProxy({
+        username: 'test-user',
+        roomId: '123',
+        generationId: 'generation',
+        backendUrl: `http://127.0.0.1:${backendAddress.port}`,
+        proxySecret: 'b'.repeat(48)
+    });
+    try {
+        const response = await fetch(`${proxy.url}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                gifts: ['gift-a', 'gift-b'],
+                operationId: '1'.repeat(64)
+            })
+        });
+        assert.equal(response.status, 409);
+        assert.deepEqual(await response.json(), {
+            success: false,
+            error: 'send_result_uncertain'
+        });
+        assert.equal(reports.length, 1);
+        assert.equal(reports[0].success, false);
+        assert.deepEqual(events.slice(0, 4), [
+            'spool:intent',
+            '/api/pk/authorize',
+            '/api/pk/send-start',
+            'spool:final'
+        ]);
+    } finally {
+        await new Promise((resolve) => proxy.server.close(resolve));
+        await new Promise((resolve) => backend.close(resolve));
+        listener.externalSendSemaphore.close();
+    }
+});
+
+test('PK authorization proxy never resends an operation already known by the server', async () => {
+    let backendRequests = 0;
+    const backend = require('node:http').createServer((req, res) => {
+        backendRequests += 1;
+        req.resume();
+        req.on('end', () => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end('{"success":true}');
+        });
+    });
+    await new Promise((resolve) => backend.listen(0, '127.0.0.1', resolve));
+    const listener = Object.create(WindowsGiftListener.prototype);
+    listener.externalSendSemaphore = new BoundedSemaphore(1);
+    listener.activePkReportIds = new Set();
+    listener.spoolPkReport = () => null;
+    listener.removeSpooledPkReport = () => {};
+    listener.quarantineSpooledPkReport = () => {};
+    const calls = [];
+    listener.postSignedWorkerRequest = async (pathname, payload) => {
+        calls.push({ pathname, payload });
+        if (pathname === '/api/pk/authorize') {
+            return { data: { success: true, replayed: true, status: 'sending' } };
+        }
+        if (pathname === '/api/pk/report') return { data: { success: true } };
+        throw new Error(`Unexpected worker request: ${pathname}`);
+    };
+    const proxy = await listener.startPkAuthorizationProxy({
+        username: 'test-user',
+        roomId: '123',
+        generationId: 'generation',
+        backendUrl: `http://127.0.0.1:${backend.address().port}`,
+        proxySecret: 'c'.repeat(48)
+    });
+    try {
+        const response = await fetch(`${proxy.url}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gifts: ['gift-a'], operationId: '2'.repeat(64) })
+        });
+        assert.equal(response.status, 409);
+        assert.deepEqual(await response.json(), {
+            success: false,
+            error: 'duplicate_send_blocked'
+        });
+        assert.equal(backendRequests, 0);
+        assert.deepEqual(calls.map((call) => call.pathname), [
+            '/api/pk/authorize',
+            '/api/pk/report'
+        ]);
+        assert.match(calls[0].payload.authorizationId, /^[a-f0-9]{40}$/);
+        assert.equal(calls[1].payload.authorizationId, calls[0].payload.authorizationId);
+    } finally {
+        await new Promise((resolve) => proxy.server.close(resolve));
+        await new Promise((resolve) => backend.close(resolve));
+        listener.externalSendSemaphore.close();
+    }
+});
+
+test('PK reports remain on disk until the server acknowledges them', async () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'minimal-games-pk-spool-'));
+    const listener = Object.create(WindowsGiftListener.prototype);
+    listener.pkReportSpoolDirectory = directory;
+    listener.activePkReportIds = new Set();
+    const intentPayload = {
+        authorizationId: 'c'.repeat(40),
+        reportId: 'd'.repeat(40),
+        username: 'test-user',
+        roomId: '123',
+        runnerGeneration: 'generation',
+        giftIds: ['gift-a'],
+        success: false,
+        reason: 'external_send_not_confirmed_started'
+    };
+    const payload = { ...intentPayload, success: true, reason: 'sent' };
+    try {
+        const intentPath = listener.spoolPkReport(intentPayload, 'intent');
+        const spoolPath = listener.spoolPkReport(payload, 'final');
+        assert.equal(fs.existsSync(intentPath), true);
+        assert.equal(fs.existsSync(spoolPath), true);
+        let delivered = null;
+        listener.postSignedWorkerRequest = async (pathname, body) => {
+            delivered = { pathname, body };
+            return { data: { success: true } };
+        };
+        await listener.flushPendingPkReports();
+        assert.equal(fs.existsSync(intentPath), false);
+        assert.equal(fs.existsSync(spoolPath), false);
+        assert.equal(delivered.pathname, '/api/pk/report');
+        assert.deepEqual(delivered.body, payload);
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('spin results always map to configured challenges and normalized angles', () => {
+    assert.equal(GameLogic.spin.challenges.length, GameLogic.spin.weights.length);
+    assert.equal(new Set(GameLogic.spin.challenges).size, GameLogic.spin.challenges.length);
+    for (let index = 0; index < 5000; index += 1) {
+        const result = GameLogic.spin.spin();
+        assert.equal(GameLogic.spin.challenges.includes(result.prize), true);
+        assert.equal(Number.isFinite(result.angle), true);
+        assert.equal(result.angle >= 0 && result.angle < 360, true);
+        assert.equal(result.success, true);
+    }
+});
+
+test('production configuration rejects CSRF bypasses and insecure worker origins', async () => {
+    const validSecrets = {
+        NODE_ENV: 'production',
+        DB_HOST: 'db.example.test',
+        DB_NAME: 'games',
+        DB_USER: 'games',
+        DB_PASS: 'database-password',
+        SESSION_SECRET: 's'.repeat(32),
+        WINDOWS_API_KEY: 'w'.repeat(32),
+        GIFT_TASKS_HMAC_SECRET: 'h'.repeat(32),
+        CSRF_AUTO_FILL: 'true',
+        CSRF_TEST_MODE: undefined,
+        SERVER_URL: 'http://remote.example.test'
+    };
+    await withEnvironment(validSecrets, async () => {
+        assert.throws(validateServerEnvironment, /CSRF bypass flags are forbidden/);
+        assert.throws(validateWorkerEnvironment, /SERVER_URL must be an HTTPS origin/);
+    });
+
+    await withEnvironment({
+        ...validSecrets,
+        CSRF_AUTO_FILL: undefined,
+        SERVER_URL: 'https://worker.example.test',
+        DB_SSL: 'false',
+        DB_SSL_REJECT_UNAUTHORIZED: undefined
+    }, async () => {
+        assert.throws(validateServerEnvironment, /Remote database TLS cannot be disabled/);
+    });
+
+    await withEnvironment({
+        ...validSecrets,
+        CSRF_AUTO_FILL: undefined,
+        SERVER_URL: 'https://worker.example.test',
+        DB_SSL: undefined,
+        DB_SSL_REJECT_UNAUTHORIZED: 'false'
+    }, async () => {
+        assert.throws(validateServerEnvironment, /TLS verification cannot be disabled/);
+    });
+});
+
+test('worker configuration rejects unconfirmed browser-click delivery', async () => {
+    await withEnvironment({
+        WINDOWS_API_KEY: 'w'.repeat(32),
+        GIFT_TASKS_HMAC_SECRET: 'h'.repeat(32),
+        SERVER_URL: 'https://worker.example.test',
+        THREESERVER_BACKEND: 'playwright'
+    }, async () => {
+        assert.throws(
+            validateWorkerEnvironment,
+            /provider-confirmed HTTP delivery/
+        );
+    });
+});
+
+test('TOTP verification follows the RFC test vector and rejects malformed codes', () => {
+    const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+    assert.equal(decodeBase32(secret).toString(), '12345678901234567890');
+    assert.equal(generateTotp(secret, 1), '287082');
+    assert.equal(verifyTotp(secret, '287082', { now: 30_000, window: 0 }), true);
+    assert.equal(verifyTotp(secret, '287083', { now: 30_000, window: 0 }), false);
+    assert.equal(verifyTotp(secret, 'abc', { now: 30_000 }), false);
+});
+
+test('worker request signatures bind the nonce, path, method, timestamp, and body', () => {
+    const secret = 'test-secret-at-least-32-bytes-long';
+    const request = {
+        timestamp: '1786550400000',
+        nonce: 'nonce-12345678',
+        workerId: 'worker-test-01',
+        method: 'post',
+        path: '/api/gift-tasks/42/complete',
+        body: { actual_quantity: 2, success: true }
+    };
+    const signature = signRequest(secret, request);
+
+    assert.equal(signaturesMatch(signature, signRequest(secret, request)), true);
+    assert.equal(signaturesMatch(signature, signRequest(secret, { ...request, nonce: 'nonce-87654321' })), false);
+    assert.equal(signaturesMatch(signature, signRequest(secret, { ...request, workerId: 'worker-test-02' })), false);
+    assert.equal(signaturesMatch(signature, signRequest(secret, { ...request, path: '/api/gift-tasks/43/complete' })), false);
+    assert.equal(signaturesMatch('not-hex', signature), false);
+    assert.match(canonicalRequest(request), /^3\n1786550400000\nnonce-12345678\nworker-test-01\nPOST\n/);
+});
+
+test('PK spend calculation rejects unknown, fractional, and oversized gifts', () => {
+    const config = { '礼物池配置': { a: ['A', 5], b: ['B', 12] } };
+    assert.deepEqual(normalizeGiftItems(['a', { id: 'b', count: 2 }]), [
+        { id: 'a', count: 1 },
+        { id: 'b', count: 2 }
+    ]);
+    assert.equal(computeTicketCount(['a', { id: 'b', count: 2 }], config), 290);
+    assert.equal(computeTicketCount(['missing'], config), null);
+    assert.equal(computeTicketCount(['constructor'], config), null);
+    assert.equal(computeTicketCount(['toString'], config), null);
+    assert.equal(computeTicketCount([{ id: 'a', count: 1.5 }], config), null);
+    assert.equal(computeTicketCount([{ id: 'a', count: 1000001 }], config), null);
+});
+
+test('PK spend hashes bind the runner generation and normalized gift request', () => {
+    const request = {
+        username: 'tester', roomId: '123', runnerGeneration: 'generation-one',
+        giftIds: ['a'], ticketCount: 50
+    };
+    assert.notEqual(
+        createSpendHash(request),
+        createSpendHash({ ...request, runnerGeneration: 'generation-two' })
+    );
+});
 
 test('client IP normalization handles mapped IPv4 and bracketed IPv6', () => {
     assert.equal(normalizeIp('::ffff:203.0.113.9'), '203.0.113.9');
@@ -157,6 +763,24 @@ test('idempotency hashes are stable across object key order', () => {
     assert.notEqual(hashRequest(first), hashRequest({ ...second, body: { mode: 'a', bet: 6 } }));
 });
 
+test('idempotency hashes ignore rotating CSRF tokens and protect sensitive bodies with HMAC', () => {
+    const first = {
+        method: 'POST',
+        path: '/api/change-password',
+        body: { currentPassword: 'old-secret', newPassword: 'new-secret', csrfToken: 'token-one' }
+    };
+    const second = {
+        ...first,
+        body: { ...first.body, csrfToken: 'token-two' }
+    };
+    assert.equal(hashRequest(first, 'hash-secret'), hashRequest(second, 'hash-secret'));
+    assert.notEqual(hashRequest(first, 'hash-secret'), hashRequest(first, 'different-secret'));
+    assert.deepEqual(bodyForHash(first.body), {
+        currentPassword: 'old-secret',
+        newPassword: 'new-secret'
+    });
+});
+
 test('stable stringify retains array order and sorts object keys', () => {
     assert.equal(stableStringify({ z: [2, 1], a: true }), '{"a":true,"z":[2,1]}');
 });
@@ -182,7 +806,7 @@ test('idempotency middleware replays a completed response without rerunning the 
                     response_status: values[2],
                     response_body: JSON.parse(values[3])
                 });
-                return { rows: [] };
+                return { rows: [{ id: 1 }] };
             }
             throw new Error(`Unexpected query: ${statement}`);
         }
@@ -295,6 +919,136 @@ test('idempotency can be finalized by the same transaction as the business write
     ]);
 });
 
+test('transactional session revocation aborts the business response before idempotency completion', async () => {
+    let storedResponse = null;
+    const pool = {
+        async query(sql, values) {
+            const statement = String(sql);
+            if (statement.includes('INSERT INTO idempotency_keys')) return { rows: [{ id: 12 }] };
+            if (statement.includes('UPDATE idempotency_keys')) {
+                storedResponse = {
+                    status: values[2],
+                    body: JSON.parse(values[3])
+                };
+                return { rows: [{ id: 12 }] };
+            }
+            throw new Error(`Unexpected pool query: ${statement}`);
+        }
+    };
+    const transactionClient = {
+        async query() {
+            throw new Error('idempotency completion must not run after session revocation');
+        }
+    };
+    const middleware = createIdempotencyMiddleware({
+        pool,
+        paths: ['/api/slot/play'],
+        validateTransactionalRequest: async () => ({
+            status: 401,
+            message: 'session revoked'
+        })
+    });
+
+    const result = await new Promise((resolve, reject) => {
+        const headers = {};
+        const req = {
+            method: 'POST',
+            path: '/api/slot/play',
+            body: { bet: 5 },
+            session: { user: { username: 'tester' } },
+            get: () => 'revoked-session-key-1234'
+        };
+        const res = {
+            statusCode: 200,
+            headersSent: false,
+            set(name, value) { headers[name] = value; return this; },
+            status(code) { this.statusCode = code; return this; },
+            json(body) { resolve({ body, headers, status: this.statusCode }); return this; }
+        };
+        middleware(req, res, async () => {
+            try {
+                await req.finalizeIdempotency(transactionClient, 200, { success: true });
+                reject(new Error('revoked transaction unexpectedly finalized'));
+            } catch (error) {
+                assert.equal(error.code, 'TRANSACTIONAL_SESSION_INVALID');
+                res.status(500).json({ success: false, message: 'internal fallback' });
+            }
+        }).catch(reject);
+    });
+
+    assert.equal(result.status, 401);
+    assert.deepEqual(result.body, { success: false, message: 'session revoked' });
+    assert.equal(result.headers['Idempotency-Status'], 'created');
+    assert.deepEqual(storedResponse, {
+        status: 401,
+        body: { success: false, message: 'session revoked' }
+    });
+});
+
+test('response finalization never overwrites a transactionally completed record', async () => {
+    let record;
+    const pool = {
+        async query(sql, values) {
+            const statement = String(sql);
+            if (statement.includes('INSERT INTO idempotency_keys')) {
+                record = { status: 'pending', request_hash: values[4] };
+                return { rows: [{ id: 10 }] };
+            }
+            if (statement.includes('UPDATE idempotency_keys')) {
+                assert.match(statement, /status = 'pending'/);
+                return { rows: [] };
+            }
+            if (statement.includes('SELECT status, response_status')) {
+                return { rows: [record] };
+            }
+            throw new Error(`Unexpected pool query: ${statement}`);
+        }
+    };
+    const transactionClient = {
+        async query(sql, values) {
+            assert.match(String(sql), /status = 'completed'/);
+            record = {
+                ...record,
+                status: 'completed',
+                response_status: values[2],
+                response_body: JSON.parse(values[3])
+            };
+            return { rows: [{ id: 10 }] };
+        }
+    };
+    const middleware = createIdempotencyMiddleware({ pool, paths: ['/api/slot/play'] });
+    const result = await new Promise((resolve, reject) => {
+        const headers = {};
+        const req = {
+            method: 'POST',
+            path: '/api/slot/play',
+            body: { bet: 5 },
+            session: { user: { username: 'tester' } },
+            get: () => 'transaction-response-key-1234'
+        };
+        const res = {
+            statusCode: 200,
+            headersSent: false,
+            set(name, value) { headers[name] = value; return this; },
+            status(code) { this.statusCode = code; return this; },
+            json(body) { resolve({ body, headers, status: this.statusCode }); return this; }
+        };
+        middleware(req, res, async () => {
+            try {
+                const body = { success: true, reward: 30 };
+                await req.finalizeIdempotency(transactionClient, 200, body);
+                res.json(body);
+            } catch (error) {
+                reject(error);
+            }
+        }).catch(reject);
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(result.headers['Idempotency-Status'], 'replayed');
+    assert.deepEqual(result.body, { success: true, reward: 30 });
+});
+
 test('an ambiguous commit error replays the transactionally committed response', async () => {
     let record = null;
     const pool = {
@@ -304,14 +1058,19 @@ test('an ambiguous commit error replays the transactionally committed response',
                 record = { status: 'pending', request_hash: values[4] };
                 return { rows: [{ id: 11 }] };
             }
-            if (statement.includes('DELETE FROM idempotency_keys')) {
+            if (statement.includes("SET status = 'indeterminate'")) {
                 if (record?.status === 'pending') {
-                    record = null;
+                    record = {
+                        ...record,
+                        status: 'indeterminate',
+                        response_status: 409,
+                        response_body: JSON.parse(values[2])
+                    };
                     return { rows: [{ id: 11 }] };
                 }
                 return { rows: [] };
             }
-            if (statement.includes('SELECT response_status')) {
+            if (statement.includes('SELECT status, response_status')) {
                 return { rows: record?.status === 'completed' ? [record] : [] };
             }
             throw new Error(`Unexpected pool query: ${statement}`);
@@ -516,6 +1275,17 @@ test('managed balance updates release their savepoint on insufficient funds', as
         'ROLLBACK TO SAVEPOINT balance_update_1',
         'RELEASE SAVEPOINT balance_update_1'
     ]);
+});
+
+test('balance updates reject calls outside a caller-owned business transaction', async () => {
+    const result = await BalanceLogger.updateBalance({
+        username: 'test-user',
+        amount: 10,
+        operationType: 'test'
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.message, /业务事务管理/);
 });
 
 test('a failed ledger insert rolls the balance update back to its savepoint', async () => {

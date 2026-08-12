@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 /**
@@ -7,7 +8,7 @@
  * 测试签名校验和管理员限流是否生效。
  *
  * 用法示例：
- *   ADMIN_PASS=hokboost ADMIN_SIGN_SECRET=... TARGET_URL=https://wuguijiang.com node scripts/security_test_admin_guardrails.js
+ *   ADMIN_PASS=hokboost ADMIN_SIGN_SECRET=... TARGET_URL=http://localhost:3000 node scripts/security_test_admin_guardrails.js
  */
 
 const { URL } = require('url');

@@ -1,10 +1,30 @@
 const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
 const t = (zh, en) => (lang === 'zh' ? zh : en);
 const translateServerMessage = window.translateServerMessage || ((message) => message);
-const escapeHTML = window.escapeHTML || ((value) => String(value ?? ''));
 const csrfToken = document.body.dataset.csrfToken || '';
 
-function adminFetch(url, options = {}) {
+function appendStatusDetail(container, label, value, tone = null) {
+    const row = document.createElement('div');
+    row.className = 'status-detail';
+    if (tone === 'error' || tone === 'success') row.classList.add(`status-detail-${tone}`);
+    row.textContent = `${label}: ${String(value ?? '-')}`;
+    container.appendChild(row);
+}
+
+function setCookieStatus(status, state, message) {
+    status.classList.remove('cookie-status-neutral', 'cookie-status-managed', 'cookie-status-error', 'cookie-status-success');
+    status.classList.add(`cookie-status-${state}`);
+    status.textContent = message;
+}
+
+function showBindingsMessage(container, message, isError = false) {
+    const row = document.createElement('div');
+    row.className = `binding-empty${isError ? ' binding-empty-error' : ''}`;
+    row.textContent = message;
+    container.replaceChildren(row);
+}
+
+async function adminFetch(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     const requestOptions = { ...options };
     if (method !== 'GET') {
@@ -17,7 +37,34 @@ function adminFetch(url, options = {}) {
     if (typeof window.idempotentFetch !== 'function') {
         return Promise.reject(new Error('Request helper did not load'));
     }
-    return window.idempotentFetch(url, requestOptions);
+    const execute = () => window.idempotentFetch(url, requestOptions);
+    let response = await execute();
+    if (response.status !== 403 || url === '/api/admin/reauthenticate') return response;
+
+    const denial = await response.clone().json().catch(() => ({}));
+    if (denial.code !== 'RECENT_AUTH_REQUIRED') return response;
+
+    const password = prompt(t('请输入管理员密码以继续：', 'Enter your admin password to continue:'));
+    if (!password) return response;
+    const totpCode = denial.mfaRequired
+        ? prompt(t('请输入6位动态验证码：', 'Enter the 6-digit authenticator code:'))
+        : '';
+    if (denial.mfaRequired && !totpCode) return response;
+
+    const authResponse = await fetch('/api/admin/reauthenticate', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify({ password, totpCode })
+    });
+    const authResult = await authResponse.json().catch(() => ({}));
+    if (!authResponse.ok || !authResult.success) {
+        alert(translateServerMessage(authResult.message || t('管理员验证失败', 'Admin verification failed')));
+        return response;
+    }
+    return execute();
 }
 
 async function readJsonResponse(response) {
@@ -62,9 +109,6 @@ document.addEventListener('click', (event) => {
     if (event.target.closest('#check-cookie-status')) {
         return checkCookieStatus();
     }
-    if (event.target.closest('#refresh-cookies')) {
-        return refreshCookies();
-    }
     if (event.target.closest('#unbind-room')) {
         return unbindUserRoom();
     }
@@ -85,8 +129,8 @@ document.addEventListener('submit', (event) => {
 
 function addElectricCoin(username, btn) {
         const amount = prompt(t(
-            `为用户 "${username}" 添加积分:\\n\\n请输入要添加的积分数量:`,
-            `Add points for "${username}":\\n\\nEnter point amount:`
+            `为用户 "${username}" 添加积分:\n\n请输入要添加的积分数量:`,
+            `Add points for "${username}":\n\nEnter point amount:`
         ), '100');
         
         if (amount === null) return; 
@@ -133,8 +177,8 @@ function addElectricCoin(username, btn) {
             }
             
             alert(t(
-                `成功为用户 "${username}" 添加 ${coinAmount} 积分！\\n新余额: ${data.newBalance} 积分`,
-                `Added ${coinAmount} points to "${username}".\\nNew balance: ${data.newBalance} points`
+                `成功为用户 "${username}" 添加 ${coinAmount} 积分！\n新余额: ${data.newBalance} 积分`,
+                `Added ${coinAmount} points to "${username}".\nNew balance: ${data.newBalance} points`
             ));
             location.reload(); 
         })
@@ -181,15 +225,15 @@ function addElectricCoin(username, btn) {
 
     function resetPassword(username, btn) {
         const confirmReset = confirm(t(
-            `确定要重置用户 "${username}" 的密码吗？系统会生成一次性临时密码。`,
-            `Reset password for "${username}"? A one-time temporary password will be generated.`
+            `确定要为用户 "${username}" 生成15分钟有效的一次性重置链接吗？`,
+            `Generate a one-time 15-minute reset link for "${username}"?`
         ));
         
         if (!confirmReset) return;
         
         const doubleConfirm = confirm(t(
-            `警告：此操作不可撤销！\\n\\n用户: ${username}\\n\\n确定继续吗？`,
-            `Warning: This cannot be undone!\\n\\nUser: ${username}\\n\\nContinue?`
+            `警告：此操作不可撤销！\n\n用户: ${username}\n\n确定继续吗？`,
+            `Warning: This cannot be undone!\n\nUser: ${username}\n\nContinue?`
         ));
         
         if (!doubleConfirm) return;
@@ -210,8 +254,8 @@ function addElectricCoin(username, btn) {
             }
             
             alert(t(
-                `密码重置成功！\\n\\n用户: ${username}\\n临时密码: ${data.temporaryPassword}\\n\\n该密码只显示一次，请安全交给用户并要求立即修改。`,
-                `Password reset successful!\\n\\nUser: ${username}\\nTemporary password: ${data.temporaryPassword}\\n\\nThis is shown once. Share it securely and require an immediate change.`
+                `重置链接已生成！\n\n用户: ${username}\n链接: ${location.origin}${data.resetPath}\n\n链接15分钟内有效且只能使用一次。`,
+                `Reset link generated.\n\nUser: ${username}\nLink: ${location.origin}${data.resetPath}\n\nThe link expires in 15 minutes and can only be used once.`
             ));
         })
         .catch(err => {
@@ -263,15 +307,15 @@ function addElectricCoin(username, btn) {
 
     function deleteAccount(username, btn) {
         const confirmDelete = confirm(t(
-            `危险操作！\\n\\n确定要永久注销用户 "${username}" 的账号吗？\\n\\n此操作将删除：\\n- 用户账号信息\\n- 所有游戏记录\\n- 无法恢复！`,
-            `Dangerous action!\\n\\nPermanently delete "${username}"?\\n\\nThis will remove:\\n- User account\\n- All game records\\n- Cannot be undone`
+            `危险操作！\n\n确定要停用用户 "${username}" 的账号吗？\n\n用户将无法登录，但资金与安全审计记录会保留。`,
+            `Dangerous action!\n\nDeactivate "${username}"?\n\nLogin will be disabled while financial and security audit records remain.`
         ));
         
         if (!confirmDelete) return;
         
         const typeUsername = prompt(t(
-            `请输入要删除的用户名以确认操作：\\n\\n输入 "${username}" 确认删除`,
-            `Type the username to confirm deletion:\\n\\nType "${username}" to confirm`
+            `请输入要停用的用户名以确认操作：\n\n输入 "${username}" 确认停用`,
+            `Type the username to confirm deactivation:\n\nType "${username}" to confirm`
         ));
         
         if (typeUsername !== username) {
@@ -282,15 +326,14 @@ function addElectricCoin(username, btn) {
         }
         
         const finalConfirm = confirm(t(
-            `最后确认！\\n\\n用户: ${username}\\n操作: 永久删除账号\\n结果: 无法恢复\\n\\n确定执行吗？`,
-            `Final confirmation!\\n\\nUser: ${username}\\nAction: Delete account\\nResult: Irreversible\\n\\nProceed?`
+            `最后确认！\n\n用户: ${username}\n操作: 停用账号并退出全部会话\n\n确定执行吗？`,
+            `Final confirmation!\n\nUser: ${username}\nAction: Deactivate account and sign out all sessions\n\nProceed?`
         ));
         
         if (!finalConfirm) return;
         
         btn.disabled = true;
         btn.textContent = t('删除中...', 'Deleting...');
-        btn.style.background = '#6c757d';
         
         adminFetch('/api/admin/delete-account', {
             method: 'POST',
@@ -306,14 +349,18 @@ function addElectricCoin(username, btn) {
                 return;
             }
             
-            alert(t(
-                `账号注销成功！\\n\\n用户 "${username}" 及其所有数据已永久删除。`,
-                `Account deleted.\\n\\n"${username}" and all data removed.`
-            ));
+            const unresolvedCount = Number(data.unresolvedGiftCount || 0)
+                + Number(data.unresolvedPkCount || 0);
+            const reconciliationNotice = unresolvedCount > 0
+                ? t(
+                    `\n\n仍有 ${unresolvedCount} 笔外部发送结果需要人工对账，未自动退款。`,
+                    `\n\n${unresolvedCount} external sends still require manual reconciliation and were not auto-refunded.`
+                )
+                : '';
+            alert(`${translateServerMessage(data.message)}${reconciliationNotice}`);
             
             const row = btn.closest('tr');
-            row.style.background = '#ffebee';
-            row.style.transition = 'all 0.5s ease';
+            row.classList.add('admin-row-removing');
             
             setTimeout(() => {
                 row.remove();
@@ -326,21 +373,19 @@ function addElectricCoin(username, btn) {
         .finally(() => {
             btn.disabled = false;
             btn.textContent = t('注销账号', 'Delete Account');
-            btn.style.background = '#dc3545';
         });
     }
 
     function unlockAccount(username, btn) {
         const confirmUnlock = confirm(t(
-            `确定要解锁用户 "${username}" 的账号吗？\\n\\n这将清除所有登录失败记录。`,
-            `Unlock account for "${username}"?\\n\\nThis clears all login failure records.`
+            `确定要解锁用户 "${username}" 的账号吗？\n\n这将清除所有登录失败记录。`,
+            `Unlock account for "${username}"?\n\nThis clears all login failure records.`
         ));
         
         if (!confirmUnlock) return;
         
         btn.disabled = true;
         btn.textContent = t('解锁中...', 'Unlocking...');
-        btn.style.background = '#6c757d';
         
         adminFetch('/api/admin/unlock-account', {
             method: 'POST',
@@ -355,8 +400,8 @@ function addElectricCoin(username, btn) {
             }
             
             alert(t(
-                `账号解锁成功！\\n\\n用户 "${username}" 现在可以正常登录了。`,
-                `Account unlocked.\\n\\n"${username}" can login now.`
+                `账号解锁成功！\n\n用户 "${username}" 现在可以正常登录了。`,
+                `Account unlocked.\n\n"${username}" can login now.`
             ));
             location.reload();
         })
@@ -367,7 +412,6 @@ function addElectricCoin(username, btn) {
         .finally(() => {
             btn.disabled = false;
             btn.textContent = t('解锁', 'Unlock');
-            btn.style.background = '#ffc107';
         });
     }
 
@@ -381,7 +425,6 @@ function addElectricCoin(username, btn) {
         
         btn.disabled = true;
         btn.textContent = t('清除中...', 'Clearing...');
-        btn.style.background = '#6c757d';
         
         adminFetch('/api/admin/clear-failures', {
             method: 'POST',
@@ -396,8 +439,8 @@ function addElectricCoin(username, btn) {
             }
             
             alert(t(
-                `失败记录清除成功！\\n\\n用户 "${username}" 的登录失败计数已重置。`,
-                `Failures cleared.\\n\\n"${username}" failure count reset.`
+                `失败记录清除成功！\n\n用户 "${username}" 的登录失败计数已重置。`,
+                `Failures cleared.\n\n"${username}" failure count reset.`
             ));
             location.reload();
         })
@@ -408,14 +451,13 @@ function addElectricCoin(username, btn) {
         .finally(() => {
             btn.disabled = false;
             btn.textContent = t('清除', 'Clear');
-            btn.style.background = '#17a2b8';
         });
     }
 
     function editBalance(username, currentBalance) {
         const newBalance = prompt(t(
-            `修改用户 "${username}" 的积分余额:\\n\\n当前余额: ${currentBalance} 积分\\n\\n请输入新的积分数量:`,
-            `Update balance for "${username}":\\n\\nCurrent: ${currentBalance} points\\n\\nEnter new balance:`
+            `修改用户 "${username}" 的积分余额:\n\n当前余额: ${currentBalance} 积分\n\n请输入新的积分数量:`,
+            `Update balance for "${username}":\n\nCurrent: ${currentBalance} points\n\nEnter new balance:`
         ), currentBalance);
         
         if (newBalance === null) return; 
@@ -437,8 +479,8 @@ function addElectricCoin(username, btn) {
         }
         
         const confirmChange = confirm(t(
-            `确认修改积分余额？\\n\\n用户: ${username}\\n当前余额: ${currentBalance} 积分\\n新余额: ${balance} 积分`,
-            `Confirm balance update?\\n\\nUser: ${username}\\nCurrent: ${currentBalance} points\\nNew: ${balance} points`
+            `确认修改积分余额？\n\n用户: ${username}\n当前余额: ${currentBalance} 积分\n新余额: ${balance} 积分`,
+            `Confirm balance update?\n\nUser: ${username}\nCurrent: ${currentBalance} points\nNew: ${balance} points`
         ));
         
         if (!confirmChange) return;
@@ -478,8 +520,8 @@ function addElectricCoin(username, btn) {
         }
         
         const newPassword = prompt(t(
-            '请输入新密码:\\n\\n要求: 12-128位，并同时包含字母和数字',
-            'Enter new password:\\n\\nRequired: 12-128 characters with letters and numbers'
+            '请输入新密码:\n\n要求: 12-128位，并同时包含字母和数字',
+            'Enter new password:\n\nRequired: 12-128 characters with letters and numbers'
         ));
         
         if (!newPassword) {
@@ -500,8 +542,8 @@ function addElectricCoin(username, btn) {
         }
         
         const confirmChange = confirm(t(
-            `确认修改密码？\\n\\n旧密码: ${'*'.repeat(oldPassword.length)}\\n新密码: ${'*'.repeat(newPassword.length)}`,
-            `Confirm password change?\\n\\nOld: ${'*'.repeat(oldPassword.length)}\\nNew: ${'*'.repeat(newPassword.length)}`
+            `确认修改密码？\n\n旧密码: ${'*'.repeat(oldPassword.length)}\n新密码: ${'*'.repeat(newPassword.length)}`,
+            `Confirm password change?\n\nOld: ${'*'.repeat(oldPassword.length)}\nNew: ${'*'.repeat(newPassword.length)}`
         ));
         
         if (!confirmChange) return;
@@ -520,10 +562,15 @@ function addElectricCoin(username, btn) {
         .then(data => {
             if (data.success) {
                 alert(t(
-                    '密码修改成功！\\n\\n请使用新密码重新登录。',
-                    'Password changed.\\n\\nPlease login again with the new password.'
+                    '密码修改成功！\n\n请使用新密码重新登录。',
+                    'Password changed.\n\nPlease login again with the new password.'
                 ));
-                window.location.href = '/logout';
+                fetch('/logout', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken }
+                }).finally(() => {
+                    window.location.href = '/login';
+                });
             } else {
                 alert(t('修改失败: ', 'Update failed: ') + translateServerMessage(data.message));
             }
@@ -548,10 +595,18 @@ function addElectricCoin(username, btn) {
             const detailsDiv = document.getElementById('cookieDetails');
             
             if (result.success) {
+                if (result.managedExternally) {
+                    setCookieStatus(statusDiv, 'managed', t('由 Windows 工作器管理', 'Managed by Windows worker'));
+                    detailsDiv.replaceChildren();
+                    appendStatusDetail(
+                        detailsDiv,
+                        t('状态', 'Status'),
+                        t('请在运行工作器的电脑上检查 Cookie', 'Check the cookie on the worker host')
+                    );
+                    return;
+                }
                 if (result.expired) {
-                    statusDiv.style.background = 'rgba(244, 67, 54, 0.8)';
-                    statusDiv.style.color = 'white';
-                    statusDiv.innerHTML = t('Cookie已过期', 'Cookie expired');
+                    setCookieStatus(statusDiv, 'error', t('Cookie已过期', 'Cookie expired'));
                     
                     let reasonText = '';
                     switch(result.reason) {
@@ -561,31 +616,34 @@ function addElectricCoin(username, btn) {
                         default: reasonText = result.reason || t('未知原因', 'Unknown reason');
                     }
                     
-                    detailsDiv.innerHTML = `
-                        <div style="color: #f44336;">${t('Cookie状态', 'Cookie Status')}: ${t('已过期', 'Expired')}</div>
-                        <div style="margin-top: 0.5rem;">${t('原因', 'Reason')}: ${reasonText}</div>
-                        <div style="margin-top: 0.5rem;">${t('建议', 'Suggestion')}: ${t('点击"刷新Cookie"按钮重新获取', 'Click "Refresh Cookie" to re-login')}</div>
-                    `;
+                    detailsDiv.replaceChildren();
+                    appendStatusDetail(detailsDiv, t('Cookie状态', 'Cookie Status'), t('已过期', 'Expired'), 'error');
+                    appendStatusDetail(detailsDiv, t('原因', 'Reason'), reasonText);
+                    appendStatusDetail(
+                        detailsDiv,
+                        t('建议', 'Suggestion'),
+                        t('点击"刷新Cookie"按钮重新获取', 'Click "Refresh Cookie" to re-login')
+                    );
                 } else {
-                    statusDiv.style.background = 'rgba(76, 175, 80, 0.8)';
-                    statusDiv.style.color = 'white';
-                    statusDiv.innerHTML = t('Cookie有效', 'Cookie valid');
+                    setCookieStatus(statusDiv, 'success', t('Cookie有效', 'Cookie valid'));
                     
                     const lastCheck = new Date(result.lastCheck).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { timeZone: 'Asia/Shanghai' });
                     const nextCheck = new Date(result.nextCheck).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { timeZone: 'Asia/Shanghai' });
                     
-                    detailsDiv.innerHTML = `
-                        <div style="color: #4caf50;">${t('Cookie状态', 'Cookie Status')}: ${t('有效', 'Valid')}</div>
-                        <div style="margin-top: 0.5rem;">${t('上次检查', 'Last check')}: ${result.lastCheck ? lastCheck : t('未检查', 'Never')}</div>
-                        <div style="margin-top: 0.5rem;">${t('下次检查', 'Next check')}: ${nextCheck}</div>
-                        <div style="margin-top: 0.5rem;">${t('检查间隔', 'Interval')}: ${Math.round(result.checkInterval / 60000)} ${t('分钟', 'min')}</div>
-                    `;
+                    detailsDiv.replaceChildren();
+                    appendStatusDetail(detailsDiv, t('Cookie状态', 'Cookie Status'), t('有效', 'Valid'), 'success');
+                    appendStatusDetail(detailsDiv, t('上次检查', 'Last check'), result.lastCheck ? lastCheck : t('未检查', 'Never'));
+                    appendStatusDetail(detailsDiv, t('下次检查', 'Next check'), nextCheck);
+                    appendStatusDetail(
+                        detailsDiv,
+                        t('检查间隔', 'Interval'),
+                        `${Math.round(Number(result.checkInterval) / 60000) || 0} ${t('分钟', 'min')}`
+                    );
                 }
             } else {
-                statusDiv.style.background = 'rgba(244, 67, 54, 0.8)';
-                statusDiv.style.color = 'white';
-                statusDiv.innerHTML = t('检查失败', 'Check failed');
-                detailsDiv.innerHTML = `<div style="color: #f44336;">${t('错误', 'Error')}: ${escapeHTML(translateServerMessage(result.message))}</div>`;
+                setCookieStatus(statusDiv, 'error', t('检查失败', 'Check failed'));
+                detailsDiv.replaceChildren();
+                appendStatusDetail(detailsDiv, t('错误', 'Error'), translateServerMessage(result.message), 'error');
             }
             
         } catch (error) {
@@ -595,46 +653,6 @@ function addElectricCoin(username, btn) {
     }
 
     
-    async function refreshCookies() {
-        try {
-            if (!confirm(t(
-                '确定要刷新B站Cookie吗？\\n\\n这将打开浏览器窗口，请在浏览器中完成登录操作。',
-                'Refresh Bilibili cookie?\\n\\nA browser window will open for login.'
-            ))) {
-                return;
-            }
-            
-            showMessage(t('正在刷新Cookie，请在弹出的浏览器中完成登录...', 'Refreshing cookie, please login in the browser...'), 'info');
-            
-            const statusDiv = document.getElementById('cookieStatus');
-            statusDiv.style.background = 'rgba(255, 193, 7, 0.8)';
-            statusDiv.style.color = 'white';
-            statusDiv.innerHTML = t('正在刷新...', 'Refreshing...');
-            
-            const response = await adminFetch('/api/bilibili/cookies/refresh', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    }
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                showMessage(t('Cookie刷新成功！', 'Cookie refreshed successfully.'), 'success');
-                checkCookieStatus(); 
-            } else {
-                showMessage(t('Cookie刷新失败: ', 'Refresh failed: ') + translateServerMessage(result.message), 'error');
-                statusDiv.style.background = 'rgba(244, 67, 54, 0.8)';
-                statusDiv.innerHTML = t('刷新失败', 'Refresh failed');
-            }
-            
-        } catch (error) {
-            console.error(t('刷新Cookie失败:', 'Refresh cookie failed:'), error);
-            showMessage(t('刷新Cookie失败: ', 'Refresh failed: ') + error.message, 'error');
-        }
-    }
-
     // ==========================================
     
     // ==========================================
@@ -706,15 +724,10 @@ function addElectricCoin(username, btn) {
 
     function setRoomBindStatus(message, type) {
         const status = document.getElementById('roomBindStatus');
-        const colors = {
-            success: ['rgba(35, 131, 90, 0.14)', '#176544'],
-            error: ['rgba(200, 75, 68, 0.14)', '#a23732'],
-            info: ['rgba(50, 111, 173, 0.14)', '#285d91']
-        };
-        const [background, color] = colors[type] || colors.info;
+        const statusType = ['success', 'error', 'info'].includes(type) ? type : 'info';
         status.hidden = false;
-        status.style.background = background;
-        status.style.color = color;
+        status.classList.remove('room-bind-status-success', 'room-bind-status-error', 'room-bind-status-info');
+        status.classList.add(`room-bind-status-${statusType}`);
         status.textContent = message;
     }
 
@@ -729,8 +742,8 @@ function addElectricCoin(username, btn) {
             }
             
             if (!confirm(t(
-                `确定要为用户 "${username}" 解除房间绑定吗？\\n\\n解除后该用户无法自动发送礼物。`,
-                `Unbind room for "${username}"?\\n\\nAuto sending will be disabled.`
+                `确定要为用户 "${username}" 解除房间绑定吗？\n\n解除后该用户无法自动发送礼物。`,
+                `Unbind room for "${username}"?\n\nAuto sending will be disabled.`
             ))) {
                 return;
             }
@@ -771,68 +784,53 @@ function addElectricCoin(username, btn) {
             
             const bindingsDiv = document.getElementById('currentBindings');
             
-            if (result.success && result.isAdminView && result.allBindings) {
+            if (result.success && result.isAdminView && Array.isArray(result.allBindings)) {
                 if (result.allBindings.length > 0) {
-                    bindingsDiv.innerHTML = result.allBindings.map(binding => `
-                        <div style="
-                            display: flex; justify-content: space-between; align-items: center;
-                            padding: 0.8rem; margin-bottom: 0.5rem;
-                            background: rgba(76, 175, 80, 0.1); border-radius: 8px;
-                            border-left: 4px solid #4caf50;
-                        ">
-                            <div>
-                                <strong style="color: #4caf50;">${t('用户', 'User')}: ${escapeHTML(binding.username)}</strong>
-                                <span style="margin: 0 1rem; color: #ccc;">/</span>
-                                <strong style="color: #ff9800;">${t('房间', 'Room')}: ${escapeHTML(binding.roomId)}</strong>
-                            </div>
-                            <div style="font-size: 0.8rem; color: #999;">
-                                ${new Date(binding.bindTime).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { timeZone: 'Asia/Shanghai' })}
-                            </div>
-                        </div>
-                    `).join('');
+                    const fragment = document.createDocumentFragment();
+                    for (const binding of result.allBindings) {
+                        const row = document.createElement('div');
+                        row.className = 'binding-row';
+                        const identity = document.createElement('div');
+                        const username = document.createElement('strong');
+                        username.className = 'binding-username';
+                        username.textContent = `${t('用户', 'User')}: ${String(binding.username || '')}`;
+                        const separator = document.createElement('span');
+                        separator.className = 'binding-separator';
+                        separator.textContent = '/';
+                        const room = document.createElement('strong');
+                        room.className = 'binding-room';
+                        room.textContent = `${t('房间', 'Room')}: ${String(binding.roomId || '')}`;
+                        identity.append(username, separator, room);
+
+                        const boundAt = document.createElement('div');
+                        boundAt.className = 'binding-time';
+                        const date = new Date(binding.bindTime);
+                        boundAt.textContent = Number.isFinite(date.getTime())
+                            ? date.toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { timeZone: 'Asia/Shanghai' })
+                            : '-';
+                        row.append(identity, boundAt);
+                        fragment.appendChild(row);
+                    }
+                    bindingsDiv.replaceChildren(fragment);
                 } else {
-                    bindingsDiv.innerHTML = `
-                        <div style="text-align: center; color: #999; padding: 2rem;">
-                            ${t('暂无用户绑定直播间', 'No bindings found')}
-                        </div>
-                    `;
+                    showBindingsMessage(bindingsDiv, t('暂无用户绑定直播间', 'No bindings found'));
                 }
             } else {
-                bindingsDiv.innerHTML = `
-                    <div style="text-align: center; color: #f44336; padding: 2rem;">
-                        ${t('加载绑定信息失败', 'Failed to load bindings')}
-                    </div>
-                `;
+                showBindingsMessage(bindingsDiv, t('加载绑定信息失败', 'Failed to load bindings'), true);
             }
             
         } catch (error) {
             console.error(t('加载房间绑定失败:', 'Failed to load bindings:'), error);
             const bindingsDiv = document.getElementById('currentBindings');
-            bindingsDiv.innerHTML = `
-                <div style="text-align: center; color: #f44336; padding: 2rem;">
-                    ${t('网络错误，无法加载绑定信息', 'Network error, unable to load bindings')}
-                </div>
-            `;
+            showBindingsMessage(bindingsDiv, t('网络错误，无法加载绑定信息', 'Network error, unable to load bindings'), true);
         }
     }
 
     
     function showMessage(message, type = 'info') {
         const messageDiv = document.createElement('div');
-        messageDiv.className = 'admin-toast';
-        messageDiv.style.cssText = `
-            position: fixed; top: 20px; right: 20px; padding: 1rem 1.5rem;
-            border-radius: 8px; color: white; font-weight: bold; z-index: 1001;
-            animation: slideIn 0.3s ease; max-width: 400px;
-        `;
-        
-        const colors = {
-            success: '#23835a',
-            error: '#c84b44',
-            info: '#326fad'
-        };
-        
-        messageDiv.style.background = colors[type] || colors.info;
+        const toastType = ['success', 'error', 'info'].includes(type) ? type : 'info';
+        messageDiv.className = `admin-toast admin-toast-${toastType}`;
         messageDiv.textContent = message;
         
         document.body.appendChild(messageDiv);

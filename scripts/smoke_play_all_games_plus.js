@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 /**
@@ -15,14 +16,14 @@
  * - Duel：1 次（iron 档，功力10）
  *
  * 环境变量：
- *   TARGET_URL (默认 https://www.wuguijiang.com)
+ *   TARGET_URL (默认 http://localhost:3000)
  *   AUTH_USER / AUTH_PASS 必填
  */
 
 const { URL } = require('url');
 const fetch = require('node-fetch');
 
-const baseUrl = process.env.TARGET_URL || 'https://www.wuguijiang.com';
+const baseUrl = process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER;
 const password = process.env.AUTH_PASS;
 

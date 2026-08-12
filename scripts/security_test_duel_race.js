@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
 
 /**
@@ -9,7 +10,7 @@
  * - 同时测试各种篡改：无效礼物、负功力、超范围功力、字符串功力、空礼物
  *
  * 环境变量：
- *   TARGET_URL  (默认 https://www.wuguijiang.com)
+ *   TARGET_URL  (默认 http://localhost:3000)
  *   AUTH_USER   登录用户名
  *   AUTH_PASS   登录密码
  *   CONCURRENCY 并发数（默认 10）
@@ -18,7 +19,7 @@
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
-const baseUrl = process.env.TARGET_URL || 'https://www.wuguijiang.com';
+const baseUrl = process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER;
 const password = process.env.AUTH_PASS;
 const concurrency = Number(process.env.CONCURRENCY || 10);

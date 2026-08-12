@@ -5,7 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= lang === 'zh' ? '幸运祈愿' : 'Lucky Wish' %></title>
     <link rel="stylesheet" href="/styles.css">
-    <style>
+    <style nonce="<%= cspNonce %>">
+        .wish-modal-reward-name {
+            margin: 15px 0;
+            font-size: 2rem;
+        }
+
+        .wish-modal-reward-value {
+            color: #f39c12;
+            font-size: 1.5rem;
+        }
+
+        .wish-modal-reward-note {
+            margin-top: 8px;
+            color: #ccc;
+            font-size: 1rem;
+        }
+
+        .wish-modal-guaranteed {
+            margin-top: 10px;
+            color: #e74c3c;
+            font-size: 1rem;
+        }
         .container {
             max-width: 900px;
             margin: 0 auto;
@@ -84,10 +105,36 @@
         }
 
         .gift-progress-bar {
+            width: 100%;
             height: 100%;
-            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
-            transition: width 0.3s ease;
+            appearance: none;
+            border: 0;
+            background: transparent;
+            color: #eb655c;
+            transition: color 0.3s ease;
             border-radius: 10px 0 0 10px;
+        }
+
+        .gift-progress-bar::-webkit-progress-bar {
+            background: transparent;
+        }
+
+        .gift-progress-bar::-webkit-progress-value {
+            background: #eb655c;
+            transition: width 0.3s ease, background 0.3s ease;
+        }
+
+        .gift-progress-bar::-moz-progress-bar {
+            background: #eb655c;
+            transition: width 0.3s ease, background 0.3s ease;
+        }
+
+        .gift-progress-bar.is-near-guarantee::-webkit-progress-value {
+            background: #c98708;
+        }
+
+        .gift-progress-bar.is-near-guarantee::-moz-progress-bar {
+            background: #c98708;
         }
 
         .gift-progress-text {
@@ -150,7 +197,7 @@
             width: 100vw;
             height: 100vh;
             background: rgba(0,0,0,0.9);
-            display: none;
+            display: flex;
             justify-content: center;
             align-items: center;
             z-index: 10000;
@@ -213,6 +260,27 @@
             pointer-events: none;
             backdrop-filter: blur(2px);
         }
+
+        .danmaku-lane-0 { top: 100px; }
+        .danmaku-lane-1 { top: 150px; }
+        .danmaku-lane-2 { top: 200px; }
+        .danmaku-lane-3 { top: 250px; }
+        .danmaku-lane-4 { top: 300px; }
+        .danmaku-lane-5 { top: 350px; }
+        .danmaku-lane-6 { top: 400px; }
+        .danmaku-lane-7 { top: 450px; }
+        .danmaku-lane-8 { top: 500px; }
+        .danmaku-lane-9 { top: 550px; }
+        .danmaku-lane-10 { top: 600px; }
+        .danmaku-lane-11 { top: 650px; }
+        .danmaku-lane-12 { top: 700px; }
+        .danmaku-lane-13 { top: 750px; }
+        .danmaku-lane-14 { top: 800px; }
+        .danmaku-lane-15 { top: 850px; }
+        .danmaku-lane-16 { top: 900px; }
+        .danmaku-lane-17 { top: 950px; }
+        .danmaku-lane-18 { top: 1000px; }
+        .danmaku-lane-19 { top: 1050px; }
 
 
         @keyframes danmaku-slide {
@@ -331,6 +399,45 @@
             cursor: not-allowed;
         }
 
+        .wish-intro {
+            color: #ccc;
+        }
+
+        .probability-actions {
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        .wish-disclaimer {
+            max-width: 760px;
+            margin: 2rem auto 0;
+            padding: 1rem;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #ccc;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        .probability-modal-content {
+            max-width: 680px;
+            font-size: 1.2rem;
+        }
+
+        .probability-modal-title {
+            margin-bottom: 1rem;
+            font-size: 1.6rem;
+        }
+
+        .probability-list {
+            text-align: left;
+        }
+
+        .probability-modal-actions {
+            margin-top: 1rem;
+        }
+
         @media (max-width: 768px) {
             .wish-gift-grid {
                 grid-template-columns: 1fr;
@@ -360,7 +467,7 @@
                 <h3><%= lang === 'zh' ? '当前积分' : 'Current Points' %> <span id="current-balance"><%= balance || 0 %></span></h3>
             </div>
             <div class="wish-container">
-                <p style="color: #ccc;">
+                <p class="wish-intro">
                     <%= lang === 'zh'
                         ? '请选择礼物档位进行祈愿，成功后礼物进入背包。'
                         : 'Select a gift tier to make a wish. Successful gifts will enter your backpack.'
@@ -377,10 +484,10 @@
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="deepsea_singer" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="deepsea_singer" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="deepsea_singer" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="deepsea_singer" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
                     </div>
                     <div class="gift-progress">
-                        <div class="gift-progress-bar" data-progress-bar="deepsea_singer"></div>
+                        <progress class="gift-progress-bar" data-progress-bar="deepsea_singer" max="100" value="0"></progress>
                         <div class="gift-progress-text" data-progress-text="deepsea_singer">0 / 148</div>
                     </div>
                 </div>
@@ -391,10 +498,10 @@
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="sky_throne" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="sky_throne" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="sky_throne" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="sky_throne" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
                     </div>
                     <div class="gift-progress">
-                        <div class="gift-progress-bar" data-progress-bar="sky_throne"></div>
+                        <progress class="gift-progress-bar" data-progress-bar="sky_throne" max="100" value="0"></progress>
                         <div class="gift-progress-text" data-progress-text="sky_throne">0 / 83</div>
                     </div>
                 </div>
@@ -405,10 +512,10 @@
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="proposal" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="proposal" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="proposal" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="proposal" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
                     </div>
                     <div class="gift-progress">
-                        <div class="gift-progress-bar" data-progress-bar="proposal"></div>
+                        <progress class="gift-progress-bar" data-progress-bar="proposal" max="100" value="0"></progress>
                         <div class="gift-progress-text" data-progress-text="proposal">0 / 52</div>
                     </div>
                 </div>
@@ -419,10 +526,10 @@
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="wonderland" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="wonderland" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="wonderland" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="wonderland" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
                     </div>
                     <div class="gift-progress">
-                        <div class="gift-progress-bar" data-progress-bar="wonderland"></div>
+                        <progress class="gift-progress-bar" data-progress-bar="wonderland" max="100" value="0"></progress>
                         <div class="gift-progress-text" data-progress-text="wonderland">0 / 41</div>
                     </div>
                 </div>
@@ -434,10 +541,10 @@
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="white_bride" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="white_bride" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="white_bride" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="white_bride" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
                     </div>
                     <div class="gift-progress">
-                        <div class="gift-progress-bar" data-progress-bar="white_bride"></div>
+                        <progress class="gift-progress-bar" data-progress-bar="white_bride" max="100" value="0"></progress>
                         <div class="gift-progress-text" data-progress-text="white_bride">0 / 34</div>
                     </div>
                 </div>
@@ -448,10 +555,10 @@
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="crystal_ball" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="crystal_ball" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="crystal_ball" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="crystal_ball" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
                     </div>
                     <div class="gift-progress">
-                        <div class="gift-progress-bar" data-progress-bar="crystal_ball"></div>
+                        <progress class="gift-progress-bar" data-progress-bar="crystal_ball" max="100" value="0"></progress>
                         <div class="gift-progress-text" data-progress-text="crystal_ball">0 / 32</div>
                     </div>
                 </div>
@@ -462,33 +569,23 @@
                     <div class="gift-actions">
                         <button class="gift-action-btn" data-gift="bobo" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
                         <button class="gift-action-btn secondary" data-gift="bobo" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="bobo" style="display: none;"><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        <button class="gift-action-btn test admin-test-btn" data-gift="bobo" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
                     </div>
                     <div class="gift-progress">
-                        <div class="gift-progress-bar" data-progress-bar="bobo"></div>
+                        <progress class="gift-progress-bar" data-progress-bar="bobo" max="100" value="0"></progress>
                         <div class="gift-progress-text" data-progress-text="bobo">0 / 16</div>
                     </div>
                 </div>
             </div>
             
-            <div style="text-align: center; margin: 1rem 0;">
+            <div class="probability-actions">
                 <button class="probability-button" id="open-probability">
                     <%= lang === 'zh' ? '概率公示' : 'Odds Disclosure' %>
                 </button>
             </div>
 
 
-            <div style="
-                max-width: 760px;
-                margin: 2rem auto 0;
-                padding: 1rem;
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 8px;
-                font-size: 0.85rem;
-                color: #ccc;
-                line-height: 1.5;
-                text-align: center;
-            ">
+            <div class="wish-disclaimer">
                 <% if (lang === 'zh') { %>
                     <strong>免责声明：</strong>本许愿功能仅供娱乐消遣，祈愿结果为随机娱乐内容，不涉及任何迷信或超自然因素。平台内所有积分、进度均为虚拟娱乐道具，无法兑换真实货币或有价物品。参与完全免费，符合相关法律法规。严禁未满18周岁用户使用，请理性娱乐。
                 <% } else { %>
@@ -502,18 +599,18 @@
     <div id="danmaku-container" class="danmaku-container"></div>
 
     
-    <div id="fullscreenModal" class="fullscreen-modal">
+    <div id="fullscreenModal" class="fullscreen-modal" hidden>
         <div id="modalContent" class="modal-content"></div>
     </div>
 
     
-    <div id="probabilityModal" class="fullscreen-modal">
-        <div class="modal-content" style="font-size: 1.2rem; max-width: 680px;">
-            <div style="font-size: 1.6rem; margin-bottom: 1rem;">
+    <div id="probabilityModal" class="fullscreen-modal" hidden>
+        <div class="modal-content probability-modal-content">
+            <div class="probability-modal-title">
                 <%= lang === 'zh' ? '概率公示' : 'Odds Disclosure' %>
             </div>
-            <div id="probabilityList" style="text-align: left;"></div>
-            <div style="margin-top: 1rem;">
+            <div id="probabilityList" class="probability-list"></div>
+            <div class="probability-modal-actions">
                 <button class="probability-button" id="close-probability">
                     <%= lang === 'zh' ? '关闭' : 'Close' %>
                 </button>

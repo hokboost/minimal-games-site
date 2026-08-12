@@ -1,3 +1,4 @@
+require("./guard-test-target").enforceSafeTestTarget();
 // 并发礼物兑换测试脚本
 // 用法（示例）：BASE_URL=http://localhost:3000 SESSION_COOKIE="minimal_games_sid=xxx" CSRF_TOKEN=yourtoken node scripts/test_concurrency_gifts.js
 // 可选：GIFT_TYPE=heartbox GIFT_COST=150 GIFT_QTY=1 REQUESTS=5

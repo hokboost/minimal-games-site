@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASS: postgres
+      DB_PORT: 5432
+      DB_SSL: "false"
+      SESSION_SECRET: ci-session-secret-at-least-32-bytes
+      LOG_HASH_SECRET: ci-log-secret-at-least-32-bytes-long
+      WINDOWS_API_KEY: ci-worker-api-key-at-least-32-bytes
+      GIFT_TASKS_HMAC_SECRET: ci-hmac-secret-at-least-32-bytes-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: npm run test:all
+      - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
+      - run: npm audit --audit-level=high
+      - run: python -m compileall -q bilibili_gift_sender.py workers/bilibili
+      - run: npm sbom --sbom-format=cyclonedx > sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json

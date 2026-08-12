@@ -1,11 +1,17 @@
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 const { getClientIp } = require('../lib/client-ip');
+const PostgresRateLimitStore = require('../lib/postgres-rate-limit-store');
+const pool = require('../db');
 
 // 存储用户行为数据
 const userBehavior = new Map();
-const ipBlacklist = new Set();
+let ipBlacklist = new Set();
 const suspiciousPatterns = new Map();
+let blacklistLoadedAt = 0;
+let blacklistRefreshPromise = null;
+const BLACKLIST_REFRESH_MS = 5000;
+const MAX_BEHAVIOR_ENTRIES = 10000;
 
 // 获取真实IP地址
 function getRealIP(req) {
@@ -27,19 +33,39 @@ function generateFingerprint(req) {
     return crypto.createHash('md5').update(components.join('|')).digest('hex');
 }
 
-// IP黑名单检查
-function checkBlacklist(req, res, next) {
+async function refreshBlacklist(force = false) {
+    if (!force && blacklistLoadedAt && Date.now() - blacklistLoadedAt < BLACKLIST_REFRESH_MS) return;
+    if (blacklistRefreshPromise) return blacklistRefreshPromise;
+    blacklistRefreshPromise = pool.query(`
+        SELECT ip_address::text AS ip_address
+        FROM ip_blacklist
+        WHERE is_active = true
+    `).then((result) => {
+        ipBlacklist = new Set(result.rows.map((row) => row.ip_address));
+        blacklistLoadedAt = Date.now();
+    }).finally(() => {
+        blacklistRefreshPromise = null;
+    });
+    return blacklistRefreshPromise;
+}
+
+// The database is authoritative. The short cache only avoids a query per request.
+async function checkBlacklist(req, res, next) {
     const ip = getRealIP(req);
-
-    if (ipBlacklist.has(ip)) {
-        return res.status(403).json({
-            success: false,
-            message: '访问被拒绝',
-            code: 'BLACKLISTED'
-        });
+    try {
+        await refreshBlacklist();
+        if (ipBlacklist.has(ip)) {
+            return res.status(403).json({
+                success: false,
+                message: '访问被拒绝',
+                code: 'BLACKLISTED'
+            });
+        }
+        return next();
+    } catch (error) {
+        console.error('IP黑名单检查失败:', error);
+        return res.status(503).json({ success: false, message: '访问控制服务暂不可用' });
     }
-
-    next();
 }
 
 // 设备指纹验证
@@ -51,18 +77,12 @@ function deviceFingerprint(req, res, next) {
     // 检查指纹变化频率（放宽标准）
     const fpHistory = suspiciousPatterns.get(realIP) || { fingerprints: new Set(), lastChange: 0 };
     fpHistory.fingerprints.add(fingerprint);
-
-    // 大幅放宽指纹检查 - 允许更多变化
-    if (fpHistory.fingerprints.size > 10 && Date.now() - fpHistory.lastChange < 600000) { // 10分钟内超过10个指纹
-        ipBlacklist.add(realIP);
-        return res.status(403).json({
-            success: false,
-            message: '异常行为检测',
-            code: 'SUSPICIOUS_ACTIVITY'
-        });
-    }
+    if (fpHistory.fingerprints.size > 20) fpHistory.fingerprints.clear();
 
     fpHistory.lastChange = Date.now();
+    if (!suspiciousPatterns.has(realIP) && suspiciousPatterns.size >= MAX_BEHAVIOR_ENTRIES) {
+        suspiciousPatterns.delete(suspiciousPatterns.keys().next().value);
+    }
     suspiciousPatterns.set(realIP, fpHistory);
 
     next();
@@ -86,6 +106,8 @@ function behaviorAnalysis(req, res, next) {
             consistency: 0
         }
     };
+
+    const previousRequestTime = behavior.lastRequestTime || 0;
 
     // 记录请求时间
     behavior.requests.push(now);
@@ -127,7 +149,7 @@ function behaviorAnalysis(req, res, next) {
         }
 
         // 平均间隔太短 - 放宽条件
-        if (avgInterval < 500 && behavior.requests.length > 100) { // 平均小于0.5秒且100+次
+        if (avgInterval < 500 && behavior.requests.length >= 100) { // 平均小于0.5秒且100次
             suspicionScore += 15; // 降低评分
         }
 
@@ -138,22 +160,17 @@ function behaviorAnalysis(req, res, next) {
 
         behavior.suspicionScore = suspicionScore;
 
-        // 大幅提高封禁阈值
-        if (suspicionScore >= 90) { // 从70提高到90
-            ipBlacklist.add(ip);
-            return res.status(403).json({
-                success: false,
-                message: '检测到异常访问模式',
-                code: 'ABNORMAL_PATTERN'
-            });
-        }
     }
 
     behavior.lastRequestTime = now;
+    if (!userBehavior.has(ip) && userBehavior.size >= MAX_BEHAVIOR_ENTRIES) {
+        userBehavior.delete(userBehavior.keys().next().value);
+    }
     userBehavior.set(ip, behavior);
 
     // 传递行为数据供后续使用
     req.userBehavior = behavior;
+    req.previousBehaviorRequestTime = previousRequestTime;
 
     next();
 }
@@ -165,6 +182,8 @@ const basicRateLimit = rateLimit({
     message: '请求过于频繁，请稍后再试',
     standardHeaders: true,
     legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'security:basic'),
+    passOnStoreError: false,
     keyGenerator: ipRateLimitKey,
     handler: (req, res) => {
         // 记录过度请求的IP
@@ -188,6 +207,8 @@ const strictRateLimit = rateLimit({
     skipSuccessfulRequests: false,
     standardHeaders: true,
     legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'security:strict'),
+    passOnStoreError: false,
     keyGenerator: ipRateLimitKey
 });
 
@@ -195,7 +216,11 @@ const strictRateLimit = rateLimit({
 const userActionRateLimit = rateLimit({
     windowMs: 60 * 1000, // 1分钟
     max: 40, // 高价值操作默认每分钟40次
-    keyGenerator: (req) => req.session?.user?.username || req.fingerprint || ipRateLimitKey(req),
+    keyGenerator: (req) => req.session?.user?.username
+        ? `user:${req.session.user.username}`
+        : req.fingerprint
+            ? `fingerprint:${req.fingerprint}`
+            : `ip:${ipRateLimitKey(req)}`,
     handler: (req, res) => {
         res.status(429).json({
             success: false,
@@ -203,14 +228,36 @@ const userActionRateLimit = rateLimit({
         });
     },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'security:user-action'),
+    passOnStoreError: false
+});
+
+const readHeavyRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyGenerator: (req) => req.session?.user?.username
+        ? `user:${req.session.user.username}`
+        : ipRateLimitKey(req),
+    handler: (req, res) => {
+        res.status(429).json({
+            success: false,
+            message: '查询过于频繁，请稍后再试'
+        });
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'security:read-heavy'),
+    passOnStoreError: false
 });
 
 // 管理员接口限流（账号/IP 维度更严格）
 const adminRateLimit = rateLimit({
     windowMs: 60 * 1000, // 1分钟
     max: 15,
-    keyGenerator: (req) => req.session?.user?.username || ipRateLimitKey(req),
+    keyGenerator: (req) => req.session?.user?.username
+        ? `user:${req.session.user.username}`
+        : `ip:${ipRateLimitKey(req)}`,
     handler: (req, res) => {
         res.status(429).json({
             success: false,
@@ -218,69 +265,26 @@ const adminRateLimit = rateLimit({
         });
     },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'security:admin'),
+    passOnStoreError: false
 });
 
-// 简单的管理员严格限流（内存计数，叠加 rateLimit，防止 miss）
-const adminStrictLimit = (() => {
-    const windowMs = 60 * 1000;
-    const max = 12;
-    const hits = new Map();
-    return (req, res, next) => {
-        const key = req.session?.user?.username || getRealIP(req);
-        const now = Date.now();
-        const entry = hits.get(key) || { count: 0, start: now };
-        if (now - entry.start > windowMs) {
-            entry.count = 0;
-            entry.start = now;
-        }
-        entry.count += 1;
-        hits.set(key, entry);
-        if (entry.count > max) {
-            return res.status(429).json({
-                success: false,
-                message: '管理员操作过于频繁，请稍后再试'
-            });
-        }
-        return next();
-    };
-})();
-
-// 管理接口签名校验（HMAC-SHA256），默认关闭（ADMIN_SIGN_ENFORCE=true 时开启）
-function verifyAdminSignature(req, res, next) {
-    // 1. 如果已有管理员Session（浏览器访问），直接放行
-    if (req.session && req.session.user && req.session.user.is_admin) {
-        return next();
-    }
-
-    const secret = process.env.ADMIN_SIGN_SECRET;
-    const enforce = process.env.ADMIN_SIGN_ENFORCE === 'true';
-    if (!enforce || !secret) return next();
-
-    const ts = req.headers['x-sig-ts'] || req.headers['x-admin-ts'];
-    const sign = (req.headers['x-signature'] || req.headers['x-sig'] || '').toString().toLowerCase();
-
-    if (!ts || !sign) {
-        return res.status(401).json({ success: false, message: '缺少签名' });
-    }
-
-    const tsNum = Number(ts);
-    if (!Number.isFinite(tsNum) || Math.abs(Date.now() - tsNum) > 5 * 60 * 1000) {
-        return res.status(401).json({ success: false, message: '签名时间无效' });
-    }
-
-    const payload = JSON.stringify(req.body || {});
-    const raw = `${tsNum}:${req.method}:${req.originalUrl}:${payload}`;
-    const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-
-    const expectedBuffer = Buffer.from(expected, 'hex');
-    const signBuffer = Buffer.from(sign, 'hex');
-    if (expectedBuffer.length !== signBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signBuffer)) {
-        return res.status(401).json({ success: false, message: '签名校验失败' });
-    }
-
-    return next();
-}
+const adminStrictLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 12,
+    keyGenerator: (req) => req.session?.user?.username
+        ? `user:${req.session.user.username}`
+        : `ip:${ipRateLimitKey(req)}`,
+    handler: (req, res) => res.status(429).json({
+        success: false,
+        message: '管理员操作过于频繁，请稍后再试'
+    }),
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: new PostgresRateLimitStore(pool, 'security:admin-strict'),
+    passOnStoreError: false
+});
 
 // 动态速率限制（基于用户行为）- 放宽
 function dynamicRateLimit(req, res, next) {
@@ -289,7 +293,7 @@ function dynamicRateLimit(req, res, next) {
     // 根据可疑分数调整限制 - 提高阈值
     if (behavior.suspicionScore > 80) { // 从50提高到80
         // 高度可疑用户，强制冷却
-        const lastRequest = behavior.lastRequestTime || 0;
+        const lastRequest = req.previousBehaviorRequestTime || 0;
         const cooldown = 5000; // 从10秒降低到5秒
 
         if (Date.now() - lastRequest < cooldown) {
@@ -297,55 +301,6 @@ function dynamicRateLimit(req, res, next) {
                 success: false,
                 message: '请求过快，请等待',
                 cooldownRemaining: cooldown - (Date.now() - lastRequest)
-            });
-        }
-    }
-
-    next();
-}
-
-// Session验证（软性检查）
-function requireSession(req, res, next) {
-    // 如果没有session，自动创建一个
-    if (!req.session || !req.session.initialized) {
-        req.session.initialized = true;
-        req.session.createdAt = Date.now();
-        req.session.csrfToken = require('crypto').randomBytes(16).toString('hex');
-    }
-
-    // 检查session年龄
-    const sessionAge = Date.now() - (req.session.createdAt || 0);
-    if (sessionAge > 24 * 60 * 60 * 1000) { // 24小时
-        // 重新初始化而不是销毁
-        req.session.initialized = true;
-        req.session.createdAt = Date.now();
-        req.session.csrfToken = require('crypto').randomBytes(16).toString('hex');
-    }
-
-    next();
-}
-
-// CSRF保护
-function csrfProtection(req, res, next) {
-    // 测试/脚本模式下允许跳过（仅当明确开启）
-    if (process.env.NODE_ENV !== 'production' && process.env.CSRF_TEST_MODE === 'true') {
-        return next();
-    }
-
-    if (req.method === 'POST') {
-        let token = req.headers['x-csrf-token'] || req.body.csrfToken;
-        const sessionToken = req.session?.csrfToken;
-
-        // 脚本/自动模式：若开启 CSRF_AUTO_FILL 且缺少token，则尝试使用会话中的token
-        if (!token && process.env.NODE_ENV !== 'production' && process.env.CSRF_AUTO_FILL === 'true') {
-            token = sessionToken;
-        }
-        
-        if (!token || token !== sessionToken) {
-            return res.status(403).json({
-                success: false,
-                message: '无效的请求',
-                code: 'CSRF_FAILED'
             });
         }
     }
@@ -376,41 +331,13 @@ function cleanupOldData() {
         }
     }
 
-    // 定期清理黑名单 - 每小时清理一次，给被误封的用户机会
-    console.log('清理安全数据，重置黑名单');
-    ipBlacklist.clear();
 }
 
 // 每小时清理一次
 const securityCleanupInterval = setInterval(cleanupOldData, 60 * 60 * 1000);
 securityCleanupInterval.unref?.();
 
-// 启动时立即清理一次，特别清理Cloudflare IP
-function initialCleanup() {
-    // 清理Cloudflare边缘节点IP（这些不应该被封）
-    const cloudflareRanges = [
-        /^172\.69\./,
-        /^172\.70\./,
-        /^108\.162\./,
-        /^104\.23\./,
-        /^104\.24\./,
-        /^104\.25\./,
-        /^104\.26\./,
-        /^104\.27\./,
-        /^104\.28\./
-    ];
-
-    for (const ip of ipBlacklist) {
-        if (cloudflareRanges.some(range => range.test(ip))) {
-            ipBlacklist.delete(ip);
-            console.log(`已解封Cloudflare IP: ${ip}`);
-        }
-    }
-
-    cleanupOldData();
-}
-
-initialCleanup();
+cleanupOldData();
 
 // 导出中间件
 module.exports = {
@@ -419,18 +346,19 @@ module.exports = {
     behaviorAnalysis,
     basicRateLimit,
     strictRateLimit,
+    userActionRateLimit,
+    readHeavyRateLimit,
     dynamicRateLimit,
-    requireSession,
-    csrfProtection,
     generateFingerprint,
-    verifyAdminSignature,
     adminRateLimit,
     adminStrictLimit,
 
     // 工具函数
-    addToBlacklist: (ip) => ipBlacklist.add(ip),
-    removeFromBlacklist: (ip) => ipBlacklist.delete(ip),
+    addToBlacklist: () => refreshBlacklist(true),
+    removeFromBlacklist: () => refreshBlacklist(true),
+    refreshBlacklist,
     getBlacklist: () => Array.from(ipBlacklist),
+    getBehaviorEntries: () => Array.from(userBehavior.entries()),
     getUserBehavior: (ip) => userBehavior.get(ip),
     clearUserBehavior: (ip) => userBehavior.delete(ip)
 };

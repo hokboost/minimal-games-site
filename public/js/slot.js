@@ -53,9 +53,9 @@
                         `You won! Earned ${payout} points`
                     );
                     result.className = 'result-text big';
-                    r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1.4)';
+                    [r1, r2, r3].forEach((reel) => reel.classList.add('slot-reel-pulse'));
                     setTimeout(() => {
-                        r1.style.transform = r2.style.transform = r3.style.transform = 'scale(1)';
+                        [r1, r2, r3].forEach((reel) => reel.classList.remove('slot-reel-pulse'));
                     }, 500);
                 } else if (isClose) {
                     result.textContent = t('差一点点就中了！继续努力', 'So close! Try again');
@@ -111,14 +111,12 @@
                 return;
             }
 
-            document.getElementById('current-balance').textContent = data.newBalance;
-
-            const { outcome, payout, finalBalance } = data;
+            const { outcome, payout, newBalance } = data;
             const reels = Array.isArray(data.reels) && data.reels.length === 3
                 ? data.reels.map((value) => value.toString())
                 : generateReelsForOutcome(outcome, payout);
 
-            animateSpin(reels, payout, () => {
+            await new Promise((resolveAnimation) => animateSpin(reels, payout, () => {
                 let resultMessage;
                 if (outcome === '不亏不赚') {
                     resultMessage = t(
@@ -137,11 +135,12 @@
                     );
                 }
                 result.textContent = t(
-                    `${resultMessage} | 余额: ${finalBalance} 积分`,
-                    `${resultMessage} | Balance: ${finalBalance} points`
+                    `${resultMessage} | 余额: ${newBalance} 积分`,
+                    `${resultMessage} | Balance: ${newBalance} points`
                 );
-                document.getElementById('current-balance').textContent = finalBalance;
-            });
+                document.getElementById('current-balance').textContent = newBalance;
+                resolveAnimation();
+            }));
         } catch (error) {
             console.error('Slot play error:', error);
             result.textContent = t('网络错误，请稍后重试', 'Network error, please try again');

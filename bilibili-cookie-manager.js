@@ -1,10 +1,16 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 class BilibiliCookieManager {
-    constructor(cookiePath = '/mnt/c/Users/user/Desktop/jiaobenbili/cookie.txt') {
-        this.cookiePath = cookiePath;
+    constructor(cookiePath = process.env.BILI_COOKIE_PATH) {
+        const privateDataDir = path.join(
+            process.env.LOCALAPPDATA || path.join(os.homedir(), '.local', 'share'),
+            'MinimalGames'
+        );
+        this.cookiePath = path.resolve(cookiePath || path.join(privateDataDir, 'bilibili-cookie.txt'));
         this.browser = null;
         this.page = null;
         this.currentCookies = null;
@@ -41,7 +47,7 @@ class BilibiliCookieManager {
             return { expired: false, cookies: cookies };
 
         } catch (error) {
-            console.error('❌ 检查cookie过期状态失败:', error);
+            console.error('检查 Cookie 状态失败');
             return { expired: true, reason: 'check_error' };
         }
     }
@@ -66,13 +72,12 @@ class BilibiliCookieManager {
             });
             
             // 检查响应内容
-            const content = await page.content();
             const response = JSON.parse(await page.locator('pre').textContent());
 
             await browser.close();
 
             if (response.code === 0 && response.data && response.data.isLogin) {
-                console.log(`✅ Cookie有效，用户: ${response.data.uname}`);
+                console.log('Cookie 有效');
                 return { valid: true, userInfo: response.data };
             } else {
                 console.log('❌ Cookie无效，需要重新登录');
@@ -80,7 +85,7 @@ class BilibiliCookieManager {
             }
 
         } catch (error) {
-            console.error('❌ 测试cookie有效性失败:', error);
+            console.error('测试 Cookie 有效性失败');
             return { valid: false, reason: 'test_error' };
         }
     }
@@ -126,9 +131,7 @@ class BilibiliCookieManager {
                 throw new Error('登录后缺少关键cookie');
             }
 
-            console.log('✅ 获取到新的cookie');
-            console.log(`📋 SESSDATA: ${sessdata.value.substring(0, 20)}...`);
-            console.log(`📋 bili_jct: ${biliJct.value}`);
+            console.log('已获取新 Cookie');
 
             // 保存cookie到文件
             await this.saveCookiesToFile(newCookies);
@@ -141,7 +144,7 @@ class BilibiliCookieManager {
             return { success: true, cookies: newCookies };
 
         } catch (error) {
-            console.error('❌ 自动登录失败:', error);
+            console.error('B 站登录更新 Cookie 失败');
             
             if (this.browser) {
                 await this.browser.close();
@@ -206,6 +209,14 @@ class BilibiliCookieManager {
                 return [];
             }
 
+            const stat = fs.lstatSync(filePath);
+            if (!stat.isFile() || stat.isSymbolicLink()) {
+                throw new Error('Cookie path must be a regular file');
+            }
+            if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) {
+                throw new Error('Cookie file permissions are too broad');
+            }
+
             const cookies = [];
             const content = fs.readFileSync(filePath, 'utf-8');
             
@@ -226,21 +237,16 @@ class BilibiliCookieManager {
             }
             return cookies;
         } catch (error) {
-            console.error('❌ 加载cookie文件失败:', error);
+            console.error('加载 Cookie 文件失败');
             return [];
         }
     }
 
     // 保存cookie到文件
     async saveCookiesToFile(cookies) {
+        let temporaryPath;
+        let descriptor;
         try {
-            // 备份原有cookie文件
-            if (fs.existsSync(this.cookiePath)) {
-                const backupPath = `${this.cookiePath}.backup.${Date.now()}`;
-                fs.copyFileSync(this.cookiePath, backupPath);
-                console.log(`📋 原cookie文件已备份到: ${backupPath}`);
-            }
-
             // 转换为Netscape格式
             const lines = [
                 '# Netscape HTTP Cookie File',
@@ -264,11 +270,40 @@ class BilibiliCookieManager {
                 }
             });
 
-            fs.writeFileSync(this.cookiePath, lines.join('\n'));
-            console.log(`✅ Cookie已保存到: ${this.cookiePath}`);
+            const directory = path.dirname(this.cookiePath);
+            fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+            try { fs.chmodSync(directory, 0o700); } catch (error) { /* Windows ACLs are managed separately. */ }
+
+            if (fs.existsSync(this.cookiePath)) {
+                const current = fs.lstatSync(this.cookiePath);
+                if (!current.isFile() || current.isSymbolicLink()) {
+                    throw new Error('Cookie destination must be a regular file');
+                }
+            }
+
+            temporaryPath = path.join(
+                directory,
+                `.${path.basename(this.cookiePath)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`
+            );
+            descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
+            fs.writeFileSync(descriptor, lines.join('\n'), { encoding: 'utf8' });
+            fs.fsyncSync(descriptor);
+            fs.closeSync(descriptor);
+            descriptor = null;
+            fs.chmodSync(temporaryPath, 0o600);
+            fs.renameSync(temporaryPath, this.cookiePath);
+            temporaryPath = null;
+            try { fs.chmodSync(this.cookiePath, 0o600); } catch (error) { /* Best effort on Windows. */ }
+            console.log('Cookie 已安全保存');
 
         } catch (error) {
-            console.error('❌ 保存cookie失败:', error);
+            if (descriptor !== undefined && descriptor !== null) {
+                try { fs.closeSync(descriptor); } catch (closeError) { /* ignore */ }
+            }
+            if (temporaryPath) {
+                try { fs.unlinkSync(temporaryPath); } catch (unlinkError) { /* ignore */ }
+            }
+            console.error('保存 Cookie 失败');
             throw error;
         }
     }

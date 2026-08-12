@@ -1,6 +1,7 @@
 // 余额变动日志记录器
 const pool = require('./db');
 const { getRequestId } = require('./lib/request-context');
+const { parseMoney } = require('./lib/integer-money');
 
 class BalanceLogger {
     /**
@@ -26,9 +27,23 @@ class BalanceLogger {
         gameData = null,
         ipAddress = null,
         userAgent = null,
-        requestId = null
+        requestId = null,
+        client = null,
+        managedTransaction = false
     }) {
-        await pool.query(`
+        if (!client || !managedTransaction) {
+            throw new Error('Balance ledger writes require the caller business transaction');
+        }
+        let numericAmount;
+        try {
+            numericAmount = parseMoney(amount, 'ledger amount');
+        } catch (error) {
+            throw new Error('Balance ledger amount must be a non-zero safe integer');
+        }
+        if (numericAmount === 0) {
+            throw new Error('Balance ledger amount must be a non-zero safe integer');
+        }
+        await client.query(`
             INSERT INTO balance_logs (
                 username, operation_type, amount, balance_before, balance_after,
                 description, game_data, ip_address, user_agent, request_id
@@ -36,7 +51,7 @@ class BalanceLogger {
         `, [
             username,
             operationType,
-            amount,
+            numericAmount,
             balanceBefore,
             balanceAfter,
             description,
@@ -74,34 +89,31 @@ class BalanceLogger {
         client: externalClient = null,
         managedTransaction = false
     }) {
-        const numericAmount = Number(amount);
-        if (!username || !Number.isSafeInteger(numericAmount)) {
+        let numericAmount;
+        try {
+            numericAmount = parseMoney(amount, 'balance change');
+        } catch (error) {
+            return { success: false, message: '余额变动参数无效' };
+        }
+        if (!username || numericAmount === 0) {
             return { success: false, message: '余额变动参数无效' };
         }
         if (typeof operationType !== 'string' || !operationType.trim()) {
             return { success: false, message: '余额操作类型无效' };
         }
-        if (externalClient && !managedTransaction) {
-            return { success: false, message: '外部数据库连接必须声明事务管理模式' };
+        if (!externalClient || !managedTransaction) {
+            return { success: false, message: '余额变更必须由调用方业务事务管理' };
         }
 
-        let client = externalClient;
+        const client = externalClient;
         const maxAttempts = 3;
         const lockErrorCodes = new Set(['55P03', '57014', '40P01', '40001']); // lock/stmt timeout, deadlock, serialization
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-        const ownsTransaction = !externalClient;
-        const useSavepoint = Boolean(externalClient && managedTransaction);
 
         try {
-            if (!client) client = await pool.connect();
             for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-                const savepointName = useSavepoint ? `balance_update_${attempt}` : null;
-                if (ownsTransaction) {
-                    await client.query('BEGIN');
-                }
-                if (useSavepoint) {
-                    await client.query(`SAVEPOINT ${savepointName}`);
-                }
+                const savepointName = `balance_update_${attempt}`;
+                await client.query(`SAVEPOINT ${savepointName}`);
                 try {
                     let updateResult;
                     if (requireSufficientBalance && numericAmount < 0) {
@@ -127,16 +139,16 @@ class BalanceLogger {
                     }
 
                     if (updateResult.rows.length === 0) {
-                        if (useSavepoint) {
-                            await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-                            await client.query(`RELEASE SAVEPOINT ${savepointName}`);
-                        }
-                        if (ownsTransaction) await client.query('ROLLBACK');
+                        await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+                        await client.query(`RELEASE SAVEPOINT ${savepointName}`);
                         return { success: false, message: '余额不足' };
                     }
 
-                    const balanceAfter = parseFloat(updateResult.rows[0].balance);
+                    const balanceAfter = parseMoney(updateResult.rows[0].balance, 'database balance', { min: 0 });
                     const balanceBefore = balanceAfter - numericAmount;
+                    if (!Number.isSafeInteger(balanceAfter) || !Number.isSafeInteger(balanceBefore)) {
+                        throw new Error('Database returned an unsafe balance value');
+                    }
 
                     // 记录日志
                     await client.query(`
@@ -157,10 +169,7 @@ class BalanceLogger {
                         requestId || getRequestId()
                     ]);
 
-                    if (useSavepoint) {
-                        await client.query(`RELEASE SAVEPOINT ${savepointName}`);
-                    }
-                    if (ownsTransaction) await client.query('COMMIT');
+                    await client.query(`RELEASE SAVEPOINT ${savepointName}`);
                     return {
                         success: true,
                         balance: balanceAfter,
@@ -168,16 +177,11 @@ class BalanceLogger {
                     };
 
                 } catch (error) {
-                    if (useSavepoint) {
-                        try {
-                            await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-                            await client.query(`RELEASE SAVEPOINT ${savepointName}`);
-                        } catch (rollbackError) {
-                            console.error('回滚余额更新保存点失败:', rollbackError);
-                        }
-                    }
-                    if (ownsTransaction) {
-                        await client.query('ROLLBACK').catch(() => {});
+                    try {
+                        await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+                        await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+                    } catch (rollbackError) {
+                        console.error('回滚余额更新保存点失败:', rollbackError);
                     }
                     const isLockTimeout = lockErrorCodes.has(error.code);
                     if (isLockTimeout && attempt < maxAttempts) {
@@ -187,19 +191,14 @@ class BalanceLogger {
                     console.error('更新余额失败:', error);
                     return {
                         success: false,
-                        message: isLockTimeout ? '系统繁忙，请稍后重试' : (error.message || '系统错误')
+                        message: isLockTimeout ? '系统繁忙，请稍后重试' : '余额更新失败'
                     };
                 }
             }
             return { success: false, message: '系统错误' };
         } catch (error) {
-            if (ownsTransaction && client) {
-                await client.query('ROLLBACK').catch(() => {});
-            }
             console.error('余额更新初始化失败:', error);
             return { success: false, message: '系统繁忙，请稍后重试' };
-        } finally {
-            if (ownsTransaction) client?.release();
         }
     }
 
@@ -211,22 +210,18 @@ class BalanceLogger {
      * @returns {Promise<Array>} 余额变动记录
      */
     static async getUserBalanceLogs(username, limit = 50, offset = 0) {
-        try {
-            const result = await pool.query(`
-                SELECT 
-                    id, operation_type, amount, balance_before, balance_after,
-                    description, game_data, created_at, ip_address
-                FROM balance_logs 
-                WHERE username = $1 
-                ORDER BY created_at DESC 
-                LIMIT $2 OFFSET $3
-            `, [username, limit, offset]);
-            
-            return result.rows;
-        } catch (error) {
-            console.error('查询余额记录失败:', error);
-            return [];
-        }
+        const safeLimit = Math.min(200, Math.max(1, Number.parseInt(limit, 10) || 50));
+        const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+        const result = await pool.query(`
+            SELECT
+                id, operation_type, amount, balance_before, balance_after,
+                description, game_data, created_at, ip_address
+            FROM balance_logs
+            WHERE username = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT $2 OFFSET $3
+        `, [username, safeLimit, safeOffset]);
+        return result.rows;
     }
 
     /**
@@ -237,29 +232,27 @@ class BalanceLogger {
      * @returns {Promise<Array>} 余额变动记录
      */
     static async getAllBalanceLogs(limit = 100, offset = 0, operationType = null) {
-        try {
-            let query = `
-                SELECT 
-                    id, username, operation_type, amount, balance_before, balance_after,
-                    description, game_data, created_at, ip_address
-                FROM balance_logs 
-            `;
-            const params = [];
-            
-            if (operationType) {
-                query += ' WHERE operation_type = $1 ';
-                params.push(operationType);
-            }
-            
-            query += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-            params.push(limit, offset);
-            
-            const result = await pool.query(query, params);
-            return result.rows;
-        } catch (error) {
-            console.error('查询所有余额记录失败:', error);
-            return [];
+        let query = `
+            SELECT
+                id, username, operation_type, amount, balance_before, balance_after,
+                description, game_data, created_at, ip_address
+            FROM balance_logs
+        `;
+        const params = [];
+
+        if (operationType) {
+            query += ' WHERE operation_type = $1 ';
+            params.push(operationType);
         }
+
+        query += ` ORDER BY created_at DESC, id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        params.push(
+            Math.min(200, Math.max(1, Number.parseInt(limit, 10) || 100)),
+            Math.max(0, Number.parseInt(offset, 10) || 0)
+        );
+
+        const result = await pool.query(query, params);
+        return result.rows;
     }
 }
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></title>
     <link rel="stylesheet" href="/styles.css">
-    <style>
+    <style nonce="<%= cspNonce %>">
         .container {
             max-width: 980px;
             margin: 0 auto;
@@ -313,7 +313,7 @@
             <div class="summary" id="summaryText"></div>
         </div>
 
-        <div class="result-panel" id="resultPanel" style="display: none;">
+        <div class="result-panel" id="resultPanel" hidden>
             <h3><%= lang === 'zh' ? '本次开箱结果' : 'Results' %></h3>
             <div class="result-list" id="resultList"></div>
             <div class="notice" id="noticeText"></div>

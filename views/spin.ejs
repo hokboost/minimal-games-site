@@ -5,11 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= lang === 'zh' ? '幸运转盘' : 'Lucky Wheel' %></title>
     <link rel="stylesheet" href="/styles.css">
-    <style>
+    <style nonce="<%= cspNonce %>">
+        .spin-result-prize {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            color: #287f43;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .spin-result-detail {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            background: #d4edda;
+            color: #287f43;
+            font-size: 1.1rem;
+        }
         #container {
             position: relative;
             display: inline-block;
             margin: 20px 0;
+        }
+
+        #wheel {
+            display: block;
+            width: 300px;
+            height: 300px;
         }
         #pointer {
             width: 0;
@@ -62,10 +87,56 @@
                 padding: 0;
             }
             
-            @keyframes blink {
-                0%, 50% { opacity: 1; }
-                51%, 100% { opacity: 0.3; }
-            }
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+
+        .spin-description {
+            color: #666;
+        }
+
+        .spin-result {
+            min-height: 40px;
+            margin-top: 20px;
+            font-size: 1.2rem;
+        }
+
+        .countdown-timer {
+            margin-top: 20px;
+            padding: 15px;
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            background: #fff3cd;
+        }
+
+        .countdown-title {
+            margin: 0 0 10px;
+            color: #856404;
+        }
+
+        .countdown-display {
+            color: #dc3545;
+            font-size: 2rem;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .countdown-display.is-urgent {
+            animation: blink 1s infinite;
+        }
+
+        .rule-details {
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+
+        .rule-negotiable {
+            margin-top: 8px;
+            color: #666;
+            font-style: italic;
         }
         #spinButton {
             padding: 15px 30px;
@@ -167,7 +238,7 @@
     <div class="game-container">
         <h1><%= lang === 'zh' ? '挑战转盘' : 'Challenge Wheel' %></h1>
         <p><%= lang === 'zh' ? '玩家' : 'Player' %>：<%= username %></p>
-        <p style="color: #666;">
+        <p class="spin-description">
             <%= lang === 'zh' ? '转动转盘，接受生存直播挑战！' : 'Spin the wheel and accept survival stream challenges!' %>
         </p>
 
@@ -180,13 +251,13 @@
             <button id="spinButton"><%= lang === 'zh' ? '开始转动' : 'Spin now' %></button>
         </div>
 
-        <div id="result" style="margin-top: 20px; font-size: 1.2rem; min-height: 40px;"></div>
+        <div id="result" class="spin-result"></div>
 
-        <div id="countdown-timer" style="display: none; margin-top: 20px; padding: 15px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px;">
-            <h3 style="color: #856404; margin: 0 0 10px 0;">
+        <div id="countdown-timer" class="countdown-timer" hidden>
+            <h3 class="countdown-title">
                 <%= lang === 'zh' ? '路人任务倒计时' : 'Stranger Task Countdown' %>
             </h3>
-            <div id="countdown-display" style="font-size: 2rem; font-weight: bold; color: #dc3545; text-align: center;"></div>
+            <div id="countdown-display" class="countdown-display"></div>
         </div>
 
         <div class="challenge-rules">
@@ -203,21 +274,21 @@
                 </div>
                 <div class="rule-section">
                     <strong><%= lang === 'zh' ? '挑战任务（老板可指定）' : 'Challenge Tasks (Boss can assign)' %>：</strong>
-                    <div style="margin-top: 10px; font-size: 0.9rem;">
+                    <div class="rule-details">
                         <% if (lang === 'zh') { %>
                             <div>• 3分钟不能说你我他（成功+4积分，失败-4积分）</div>
                             <div>• 20秒吹一瓶可乐（成功+4积分，失败-4积分）</div>
-                            <div style="color: #666; margin-top: 8px; font-style: italic;">老板可以商量指定任何其他挑战</div>
+                            <div class="rule-negotiable">老板可以商量指定任何其他挑战</div>
                         <% } else { %>
                             <div>• Don't say "you/I/he" for 3 minutes (Success +4 points, Failure -4 points)</div>
                             <div>• Chug a bottle of cola in 20 seconds (Success +4 points, Failure -4 points)</div>
-                            <div style="color: #666; margin-top: 8px; font-style: italic;">Boss can negotiate any other challenges</div>
+                            <div class="rule-negotiable">Boss can negotiate any other challenges</div>
                         <% } %>
                     </div>
                 </div>
                 <div class="rule-section">
                     <strong><%= lang === 'zh' ? '游戏任务（有各自奖惩规则）' : 'Game Tasks (Each has own reward rules)' %>：</strong>
-                    <div style="margin-top: 10px; font-size: 0.9rem;">
+                    <div class="rule-details">
                         <% if (lang === 'zh') { %>
                             <div>• Quiz（知识问答）: 0-4分扣2币 | 5-9分扣1币 | 10+分加1币</div>
                             <div>• Slot（老虎机）: -2/-1/0/+1/+2积分</div>
@@ -231,7 +302,7 @@
                 </div>
                 <div class="rule-section">
                     <strong><%= lang === 'zh' ? '纯惩罚任务（不影响资金）' : 'Punishment Tasks (No money effect)' %>：</strong>
-                    <div style="margin-top: 10px; font-size: 0.9rem;">
+                    <div class="rule-details">
                         <% if (lang === 'zh') { %>
                             <div>• 10个深蹲</div>
                             <div>• 热舞1分钟</div>
@@ -253,7 +324,7 @@
                 </div>
                 <div class="rule-section">
                     <strong><%= lang === 'zh' ? '奖励任务' : 'Reward Tasks' %>：</strong>
-                    <div style="margin-top: 10px; font-size: 0.9rem;">
+                    <div class="rule-details">
                         <% if (lang === 'zh') { %>
                             <div>• 2积分买吃的（奖励2积分买食物）</div>
                             <div>• 转盘次数+2（增加转盘次数）</div>

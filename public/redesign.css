@@ -637,7 +637,8 @@ html.music-shell-child .persistent-music-player {
     gap: 7px;
 }
 
-.access-actions a {
+.access-actions a,
+.access-actions button {
     display: inline-flex;
     min-height: 38px;
     align-items: center;
@@ -651,7 +652,8 @@ html.music-shell-child .persistent-music-player {
     text-decoration: none;
 }
 
-.access-actions a.secondary {
+.access-actions a.secondary,
+.access-actions button.secondary {
     background: rgba(255, 255, 255, 0.66);
     color: var(--ink) !important;
 }
@@ -1124,32 +1126,62 @@ html.music-shell-child .persistent-music-player {
     box-shadow: var(--shadow) !important;
 }
 
-/* Internal WebSocket utility */
-.page-test-websocket .test-section {
-    margin: 0 0 12px !important;
-    border: 0 !important;
-    border-radius: 8px;
-    padding: 18px !important;
-    background: var(--surface-strong);
-    box-shadow: var(--shadow-small);
+.app-redesign .notification {
+    position: fixed;
+    z-index: 10000;
+    max-width: min(350px, calc(100vw - 32px));
+    animation: slideIn 0.3s ease;
 }
 
-.page-test-websocket .test-section h3 {
-    margin: 0 0 12px;
+.app-redesign .notification.notification-exit {
+    animation: slideOut 0.3s ease;
 }
 
-.page-test-websocket .test-section button {
-    margin: 4px 6px 4px 0 !important;
+.app-redesign .security-alert {
+    position: fixed;
+    z-index: 10001;
+    max-width: min(400px, calc(100vw - 32px));
+    padding: 15px;
+    animation: slideIn 0.3s ease;
 }
 
-.page-test-websocket :where(.log, .notification, .alert) {
-    border-left: 3px solid var(--blue);
-    border-radius: 4px;
-    background: #eeefeb !important;
+.app-redesign .security-alert-warning { background: #fff3cd !important; color: #856404 !important; }
+.app-redesign .security-alert-danger { background: #f8d7da !important; color: #721c24 !important; }
+.app-redesign .security-alert-notice { background: #d4edda !important; color: #155724 !important; }
+
+.app-redesign :where(.notification-content, .alert-content) { padding: 12px; }
+.app-redesign :where(.notification-header, .alert-header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
-.page-test-websocket .alert {
-    border-left-color: var(--gold);
+.app-redesign :where(.notification-close, .alert-close) {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    opacity: 0.65;
+}
+
+.app-redesign :where(.notification-close, .alert-close):hover { opacity: 1; }
+.app-redesign .alert-details { margin-top: 8px; font-size: 0.9em; opacity: 0.8; }
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideOut {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
 }
 
 @media (max-width: 1040px) {
@@ -1334,7 +1366,8 @@ html.music-shell-child .persistent-music-player {
         width: 100%;
     }
 
-    .access-actions a {
+    .access-actions a,
+    .access-actions button {
         flex: 1;
     }
 
@@ -1510,5 +1543,163 @@ html.music-shell-child .persistent-music-player {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
+    }
+}
+.logout-form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.logout-link-button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.privacy-settings-button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    padding: 4px 6px;
+}
+
+.ux-consent-banner {
+    position: fixed;
+    z-index: 10020;
+    right: 16px;
+    bottom: 16px;
+    left: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 14px 16px;
+    border: 1px solid #495155;
+    border-radius: 6px;
+    background: #171b1d;
+    color: #f3f6f5;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.ux-consent-banner p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.ux-consent-actions,
+.ux-privacy-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 8px;
+}
+
+.ux-privacy-primary,
+.ux-privacy-secondary {
+    min-height: 36px;
+    padding: 7px 12px;
+    border: 1px solid #667176;
+    border-radius: 5px;
+    cursor: pointer;
+    font: inherit;
+    letter-spacing: 0;
+}
+
+.ux-privacy-primary {
+    border-color: #8fd3be;
+    background: #8fd3be;
+    color: #101514;
+}
+
+.ux-privacy-secondary {
+    background: transparent;
+    color: #f3f6f5;
+}
+
+.ux-privacy-overlay {
+    position: fixed;
+    z-index: 10030;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, 0.72);
+}
+
+.ux-privacy-dialog {
+    width: min(100%, 560px);
+    max-height: min(720px, calc(100vh - 36px));
+    overflow: auto;
+    padding: 22px;
+    border: 1px solid #495155;
+    border-radius: 7px;
+    background: #171b1d;
+    color: #f3f6f5;
+}
+
+.ux-privacy-dialog h2 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    letter-spacing: 0;
+}
+
+.ux-privacy-description {
+    margin: 0 0 18px;
+    color: #bec7c9;
+    line-height: 1.55;
+}
+
+.ux-privacy-options {
+    display: grid;
+    gap: 10px;
+}
+
+.ux-privacy-option {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 12px;
+    border: 1px solid #3f474a;
+    border-radius: 5px;
+}
+
+.ux-privacy-option input {
+    width: 18px;
+    height: 18px;
+    margin: 2px 0 0;
+}
+
+.ux-privacy-option strong,
+.ux-privacy-option small {
+    display: block;
+}
+
+.ux-privacy-option small {
+    margin-top: 4px;
+    color: #aeb9bc;
+    line-height: 1.45;
+}
+
+.ux-privacy-actions {
+    justify-content: flex-end;
+    margin-top: 18px;
+}
+
+@media (max-width: 640px) {
+    .ux-consent-banner {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ux-consent-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 }

@@ -35,16 +35,19 @@
     const username = document.body.dataset.username || '';
     const draftKey = username ? `dictationDraft:${username}` : null;
     let words = [];
-    let currentIndex = -1;
     let currentWord = null;
     let currentLevel = 1;
     let currentSetId = null;
+    let currentSessionId = null;
+    let currentQuestionToken = '';
+    let currentBankVersion = '';
     let submitted = false;
     let currentSyllables = [];
     let currentHomophones = [];
     let selectedChars = [];
     let currentCharIndex = 0;
-    let voice = null;
+    let promptAudio = null;
+    let promptAudioKey = '';
     let startInProgress = false;
     const drawState = new Map();
     let isEraser = false;
@@ -54,7 +57,7 @@
     let pendingCheckDone = false;
     let draftSaveTimer = null;
 
-    const dataUrl = '/api/dictation/words';
+    const dataUrl = '/api/dictation/current';
 
     if (startBtn) {
         startBtn.addEventListener('click', startDictation);
@@ -94,25 +97,10 @@
     }
     if (zoomModal) {
         zoomModal.hidden = true;
-        zoomModal.style.display = 'none';
     }
     cells.forEach((cell, index) => {
         setupCanvas(cell, index);
     });
-
-    if ('speechSynthesis' in window) {
-        const updateVoice = () => {
-            const voices = window.speechSynthesis.getVoices();
-            const zhVoices = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('zh'));
-            voice = zhVoices.find((v) => /xiaoxiao|xiaoyi|huihui|hanhan|kangkang|yaoyao/i.test(v.name))
-                || zhVoices.find((v) => v.lang.toLowerCase().includes('zh-cn'))
-                || zhVoices.find((v) => /mandarin|chinese|putonghua/i.test(v.name))
-                || zhVoices[0]
-                || null;
-        };
-        updateVoice();
-        window.speechSynthesis.addEventListener('voiceschanged', updateVoice);
-    }
 
     document.addEventListener('DOMContentLoaded', () => {
         checkPendingStatus();
@@ -125,13 +113,8 @@
             return;
         }
         statusEl.textContent = message || '';
-        if (type === 'error') {
-            statusEl.style.color = '#ff7675';
-        } else if (type === 'success') {
-            statusEl.style.color = '#1de9b6';
-        } else {
-            statusEl.style.color = '#ffeb3b';
-        }
+        statusEl.classList.remove('dictation-status-error', 'dictation-status-success', 'dictation-status-info');
+        statusEl.classList.add(`dictation-status-${type === 'error' || type === 'success' ? type : 'info'}`);
     }
 
     async function refreshCsrf() {
@@ -161,18 +144,22 @@
             throw new Error('Failed to load dictation words');
         }
         const payload = await resp.json();
-        const data = Array.isArray(payload) ? payload : payload.words;
-        if (!Array.isArray(data) || data.length === 0) {
-            throw new Error('No dictation words found');
+        if (!payload?.success || !payload.question || !payload.questionToken) {
+            throw new Error('No current dictation question found');
         }
-        words = data.map((item, index) => ({
-            id: String(item.id || index + 1),
+        const item = payload.question;
+        words = [{
+            id: String(item.id || ''),
             set_id: Number(item.set_id || 1),
-            word: typeof item.word === 'string' ? item.word.trim() : '',
             pronunciation: typeof item.pronunciation === 'string' ? item.pronunciation.trim() : '',
             definition: typeof item.definition === 'string' ? item.definition.trim() : '',
-            homophones: Array.isArray(item.homophones) ? item.homophones : []
-        }));
+            homophones: Array.isArray(item.homophones) ? item.homophones : [],
+            audioUrl: typeof item.audioUrl === 'string' ? item.audioUrl : ''
+        }];
+        currentSetId = Number(payload.setId) || currentSetId;
+        currentSessionId = payload.sessionId || currentSessionId;
+        currentQuestionToken = String(payload.questionToken);
+        currentBankVersion = String(payload.bankVersion || '');
     }
 
     function toggleConfirm(show) {
@@ -180,7 +167,6 @@
             return;
         }
         confirmModal.hidden = !show;
-        confirmModal.style.display = show ? 'flex' : 'none';
     }
 
     function startDictation() {
@@ -213,7 +199,7 @@
                 return;
             }
             currentSetId = Number(data.setId) || null;
-            await startRound(Number(data.level) || 1);
+            await startRound(Number(data.level) || 1, data);
         } catch (error) {
             console.error('Dictation start error:', error);
             setStatus(t('网络错误，请稍后重试', 'Network error, please try again.'), 'error');
@@ -310,6 +296,11 @@
     }
 
     function applyDraft(draft) {
+        if ((draft.sessionId && String(draft.sessionId) !== String(currentSessionId))
+            || (draft.bankVersion && draft.bankVersion !== currentBankVersion)) {
+            clearDraft();
+            return;
+        }
         currentSetId = Number(draft.setId) || currentSetId;
         currentLevel = Math.min(Math.max(Number(draft.level) || 1, 1), 3);
         const word = findWordById(draft.wordId);
@@ -331,18 +322,30 @@
         return words.find((item) => String(item.id) === String(wordId)) || null;
     }
 
-    async function startRound(level) {
+    async function startRound(level, payload = null) {
         try {
-            if (!words.length) {
+            if (payload?.question && payload.questionToken) {
+                const item = payload.question;
+                words = [{
+                    id: String(item.id || ''),
+                    set_id: Number(item.set_id || payload.setId || 1),
+                    pronunciation: typeof item.pronunciation === 'string' ? item.pronunciation.trim() : '',
+                    definition: typeof item.definition === 'string' ? item.definition.trim() : '',
+                    homophones: Array.isArray(item.homophones) ? item.homophones : [],
+                    audioUrl: typeof item.audioUrl === 'string' ? item.audioUrl : ''
+                }];
+                currentSetId = Number(payload.setId) || currentSetId;
+                currentSessionId = payload.sessionId || currentSessionId;
+                currentQuestionToken = String(payload.questionToken);
+                currentBankVersion = String(payload.bankVersion || '');
+            } else {
                 await loadWords();
             }
             currentLevel = Math.min(Math.max(level, 1), 3);
-            const picked = pickWordByLevel(currentLevel);
-            if (!picked) {
+            if (!words[0]) {
                 throw new Error('No dictation word found for level');
             }
-            currentWord = picked.word;
-            currentIndex = picked.index;
+            currentWord = words[0];
             updateWord();
             saveDraftMeta();
             setStatus(t('已开始听写，请选择答案并提交', 'Dictation started. Please choose your answer.'));
@@ -350,25 +353,6 @@
             console.error('Load dictation words error:', error);
             setStatus(t('加载听写词语失败，请检查词库文件', 'Failed to load dictation words.'), 'error');
         }
-    }
-
-    function pickWordByLevel(level) {
-        if (!words.length) {
-            return null;
-        }
-        if (currentSetId === null) {
-            return null;
-        }
-        const setWords = words.filter((item) => Number(item.set_id) === Number(currentSetId));
-        const index = level - 1;
-        if (setWords[index]) {
-            const globalIndex = words.findIndex((item) => item.id === setWords[index].id);
-            return { word: setWords[index], index: globalIndex };
-        }
-        const fallbackIndex = Math.floor(Math.random() * setWords.length);
-        const fallback = setWords[fallbackIndex];
-        const globalIndex = words.findIndex((item) => item.id === fallback.id);
-        return { word: fallback, index: globalIndex };
     }
 
     function updateWord() {
@@ -398,7 +382,7 @@
         }
         const pinyin = (currentWord?.pronunciation || '').trim();
         const parts = pinyin ? pinyin.split(/\s+/) : [];
-        pinyinRow.innerHTML = '';
+        pinyinRow.replaceChildren();
         const slots = Math.max(dictationSlotCount, parts.length);
         for (let index = 0; index < slots; index += 1) {
             const part = parts[index];
@@ -450,7 +434,7 @@
         if (!phraseEl) {
             return;
         }
-        phraseEl.innerHTML = '';
+        phraseEl.replaceChildren();
         const slots = Math.max(dictationSlotCount, currentSyllables.length);
         for (let index = 0; index < slots; index += 1) {
             const cell = document.createElement('div');
@@ -472,7 +456,7 @@
             return;
         }
         if (currentSyllables.length === 0) {
-            homophoneListEl.innerHTML = '';
+            homophoneListEl.replaceChildren();
             if (homophoneTitleEl) {
                 homophoneTitleEl.textContent = t('暂无可选音节', 'No syllables available');
             }
@@ -486,7 +470,7 @@
                 `Pick char ${currentCharIndex + 1} (${syllable || '-'})`
             );
         }
-        homophoneListEl.innerHTML = '';
+        homophoneListEl.replaceChildren();
         if (!list.length) {
             const empty = document.createElement('div');
             empty.className = 'dictation-homophone-empty';
@@ -623,7 +607,6 @@
         };
         resize();
         window.addEventListener('resize', resize);
-        canvas.style.touchAction = 'none';
 
         const pointerDown = (event) => {
             event.preventDefault();
@@ -661,7 +644,7 @@
             event.preventDefault();
             state.drawing = false;
             state.justDrew = state.moved;
-            if (event.pointerId !== undefined) {
+            if (event.pointerId !== undefined && canvas.hasPointerCapture?.(event.pointerId)) {
                 canvas.releasePointerCapture(event.pointerId);
             }
             const tapDuration = state.downAt ? Date.now() - state.downAt : 0;
@@ -714,6 +697,8 @@
         }
     }
 
+    let zoomCanvasInitialized = false;
+
     function setupZoomCanvas() {
         if (!zoomCanvas) {
             return;
@@ -740,8 +725,11 @@
             }
         };
         resize();
+        if (zoomCanvasInitialized) {
+            return;
+        }
+        zoomCanvasInitialized = true;
         window.addEventListener('resize', resize);
-        zoomCanvas.style.touchAction = 'none';
 
         const pointerDown = (event) => {
             event.preventDefault();
@@ -772,7 +760,7 @@
             if (!zoomState) return;
             event.preventDefault();
             zoomState.drawing = false;
-            if (event.pointerId !== undefined) {
+            if (event.pointerId !== undefined && zoomCanvas.hasPointerCapture?.(event.pointerId)) {
                 zoomCanvas.releasePointerCapture(event.pointerId);
             }
         };
@@ -797,8 +785,8 @@
         }
         lastZoomAt = now;
         activeCellIndex = index;
+        zoomState = null;
         zoomModal.hidden = false;
-        zoomModal.style.display = 'flex';
         requestAnimationFrame(() => {
             setupZoomCanvas();
             requestAnimationFrame(() => {
@@ -810,6 +798,9 @@
                 ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
                 if (cell) {
                     ctx.drawImage(cell, 0, 0, zoomCanvas.width, zoomCanvas.height);
+                    if (zoomState) {
+                        zoomState.hasInk = Boolean(drawState.get(cell)?.hasInk);
+                    }
                 }
             });
         });
@@ -828,12 +819,11 @@
                 ctx.drawImage(zoomCanvas, 0, 0, cell.width, cell.height);
                 const state = drawState.get(cell);
                 if (state) {
-                    state.hasInk = true;
+                    state.hasInk = Boolean(zoomState?.hasInk);
                 }
             }
         }
         zoomModal.hidden = true;
-        zoomModal.style.display = 'none';
         activeCellIndex = null;
         if (save) {
             scheduleDraftSave();
@@ -846,6 +836,7 @@
         }
         const ctx = zoomCanvas.getContext('2d');
         ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+        if (zoomState) zoomState.hasInk = false;
     }
 
     function toggleEraser(fromZoom = false) {
@@ -938,6 +929,8 @@
             setId: currentSetId,
             level: currentLevel,
             wordId: currentWord.id,
+            sessionId: currentSessionId,
+            bankVersion: currentBankVersion,
             selection: selectedChars.slice(),
             updatedAt: Date.now()
         };
@@ -964,6 +957,8 @@
             setId: currentSetId,
             level: currentLevel,
             wordId: currentWord.id,
+            sessionId: currentSessionId,
+            bankVersion: currentBankVersion,
             selection: selectedChars.slice(),
             updatedAt: Date.now()
         };
@@ -976,63 +971,35 @@
         }
     }
 
-    function speakCurrent(force = false) {
+    async function speakCurrent(force = false) {
         if (!currentWord) {
             return;
         }
-        if (!('speechSynthesis' in window)) {
-            setStatus(t('当前浏览器不支持语音朗读', 'Speech synthesis not supported.'), 'error');
+        if (!currentWord.audioUrl || !currentQuestionToken) {
+            setStatus(t('当前题目音频不可用', 'Prompt audio is unavailable.'), 'error');
             return;
         }
-        const textParts = [];
-        if (currentWord.word) {
-            textParts.push(currentWord.word);
-        } else if (currentWord.pronunciation) {
-            textParts.push(currentWord.pronunciation);
+
+        const key = `${currentWord.audioUrl}?token=${encodeURIComponent(currentQuestionToken)}`;
+        if (!promptAudio || promptAudioKey !== key) {
+            if (promptAudio) promptAudio.pause();
+            promptAudio = new Audio(key);
+            promptAudio.preload = 'auto';
+            promptAudioKey = key;
+            promptAudio.addEventListener('play', () => setStatus(t('正在朗读...', 'Playing prompt...')));
+            promptAudio.addEventListener('ended', () => setStatus(''));
         }
-        if (currentWord.definition) {
-            textParts.push(currentWord.definition);
+        if (force || promptAudio.ended) promptAudio.currentTime = 0;
+        try {
+            await promptAudio.play();
+        } catch (error) {
+            setStatus(
+                force
+                    ? t('音频播放失败，请重试', 'Audio playback failed. Please retry.')
+                    : t('音频已就绪，请点击播放', 'Audio is ready. Tap play.'),
+                force ? 'error' : 'info'
+            );
         }
-        const text = textParts.join('。');
-        if (!text) {
-            setStatus(t('当前词条没有读音信息', 'No pronunciation available.'), 'error');
-            return;
-        }
-        const doSpeak = () => {
-            if (force) {
-                window.speechSynthesis.cancel();
-            }
-            if (window.speechSynthesis.paused) {
-                window.speechSynthesis.resume();
-            }
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'zh-CN';
-            utterance.rate = 0.7;
-            utterance.pitch = 1;
-            if (voice) {
-                utterance.voice = voice;
-            }
-            utterance.onstart = () => setStatus(t('正在朗读...', 'Speaking...'));
-            utterance.onend = () => setStatus('');
-            utterance.onerror = () => setStatus(t('朗读失败，请重试', 'Speech failed, please retry.'), 'error');
-            window.speechSynthesis.speak(utterance);
-        };
-        const voices = window.speechSynthesis.getVoices();
-        if (!voices || voices.length === 0) {
-            setStatus(t('加载语音中...', 'Loading voice...'));
-            const handleVoices = () => {
-                window.speechSynthesis.removeEventListener('voiceschanged', handleVoices);
-                doSpeak();
-            };
-            window.speechSynthesis.addEventListener('voiceschanged', handleVoices, { once: true });
-            setTimeout(() => {
-                if (window.speechSynthesis.getVoices().length === 0) {
-                    doSpeak();
-                }
-            }, 800);
-            return;
-        }
-        doSpeak();
     }
 
     async function submitAnswer() {
@@ -1057,12 +1024,9 @@
                 },
                 body: JSON.stringify({
                     wordId: currentWord.id,
-                    word: currentWord.word,
-                    pronunciation: currentWord.pronunciation,
-                    definition: currentWord.definition,
-                    setId: currentSetId,
-                    level: currentLevel,
-                    input
+                    questionToken: currentQuestionToken,
+                    input,
+                    imageData: hasAnyInk() ? buildCompositeImage() : null
                 })
             });
 
@@ -1074,11 +1038,13 @@
             }
 
             submitted = true;
-            setStatus(t('提交成功，自动审核中', 'Submitted successfully, auto-reviewing.'), 'success');
             setInputsDisabled(true);
             updateControls();
             clearDraft();
-            startReviewPolling();
+            await handleReviewStatus({
+                ...data,
+                word: data.answer || null
+            });
         } catch (error) {
             console.error('Dictation submit error:', error);
             submitBtn.disabled = false;
@@ -1105,47 +1071,55 @@
             if (!data.success || !data.status) {
                 return;
             }
-            const reportedLevel = Number(data.level) || currentLevel;
-            if (data.status === 'correct') {
-                stopReviewPolling();
-                const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
-                if (reportedLevel >= 3 && currentLevel >= 3) {
-                    setStatus(
-                        t(`恭喜通关！${answerText}`, `Congratulations, cleared all levels. ${answerText}`),
-                        'success'
-                    );
-                } else {
-                    setStatus(
-                        t(`审核通过，进入下一关。${answerText}`, `Approved. Moving to next level. ${answerText}`),
-                        'success'
-                    );
-                    await advanceFromProgress();
-                }
-            } else if (data.status === 'wrong') {
-                stopReviewPolling();
-                currentWord = null;
-                submitted = false;
-                setInputsDisabled(true);
-                updateControls();
-                const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
-                const adminNote = data.adminMessage
-                    ? `\n${t('管理员留言：', 'Admin note: ')}${data.adminMessage}`
-                    : '';
-                setStatus(
-                    t(`闯关失败。${answerText}${adminNote}`, `Challenge failed. ${answerText}${adminNote}`),
-                    'error'
-                );
-            } else if (data.status === 'rewrite') {
-                stopReviewPolling();
-                const adminNote = data.adminMessage
-                    ? `\n${t('管理员留言：', 'Admin note: ')}${data.adminMessage}`
-                    : '';
-                const baseMessage = t(`请重新书写${adminNote}`, `Please rewrite.${adminNote}`);
-                await showRewriteCountdown(baseMessage, 5);
-                await retryLevel();
-            }
+            await handleReviewStatus(data);
         } catch (error) {
             console.error('Review status error:', error);
+        }
+    }
+
+    async function handleReviewStatus(data) {
+        const reportedLevel = Number(data.level) || currentLevel;
+        if (data.status === 'correct') {
+            stopReviewPolling();
+            const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
+            if (reportedLevel >= 3 && currentLevel >= 3) {
+                setStatus(
+                    t(`恭喜通关！${answerText}`, `Congratulations, cleared all levels. ${answerText}`),
+                    'success'
+                );
+                return;
+            }
+            if (data.nextQuestion?.question && data.nextQuestion?.questionToken) {
+                await startRound(Number(data.nextQuestion.level) || reportedLevel + 1, data.nextQuestion);
+                return;
+            }
+            await advanceFromProgress();
+            return;
+        }
+        if (data.status === 'wrong') {
+            stopReviewPolling();
+            currentWord = null;
+            submitted = false;
+            setInputsDisabled(true);
+            updateControls();
+            const answerText = data.word ? t(`正确答案：${data.word}`, `Correct: ${data.word}`) : '';
+            const adminNote = data.adminMessage
+                ? `\n${t('管理员留言：', 'Admin note: ')}${data.adminMessage}`
+                : '';
+            setStatus(
+                t(`闯关失败。${answerText}${adminNote}`, `Challenge failed. ${answerText}${adminNote}`),
+                'error'
+            );
+            return;
+        }
+        if (data.status === 'rewrite') {
+            stopReviewPolling();
+            const adminNote = data.adminMessage
+                ? `\n${t('管理员留言：', 'Admin note: ')}${data.adminMessage}`
+                : '';
+            const baseMessage = t(`请重新书写${adminNote}`, `Please rewrite.${adminNote}`);
+            await showRewriteCountdown(baseMessage, 5);
+            await retryLevel();
         }
     }
 
@@ -1180,7 +1154,7 @@
             return;
         }
         currentSetId = Number(data.setId) || currentSetId;
-        await startRound(Number(data.level) || 1);
+        await startRound(Number(data.level) || 1, data);
     }
 
     async function retryLevel() {
@@ -1197,7 +1171,8 @@
             setStatus(t('开始失败：', 'Start failed: ') + translateServerMessage(data.message), 'error');
             return;
         }
-        await startRound(Number(data.level) || 1);
+        currentSetId = Number(data.setId) || currentSetId;
+        await startRound(Number(data.level) || 1, data);
     }
 
     async function showRewriteCountdown(message, seconds) {

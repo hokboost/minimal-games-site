@@ -1300,9 +1300,25 @@ body.app-redesign.page-admin :is(.cookie-management, .room-management) h2 {
     font-weight: 760;
 }
 
-body.app-redesign.page-admin .cookie-management > div:first-of-type {
+body.app-redesign.page-admin .admin-cookie-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
     gap: 8px !important;
 }
+
+body.app-redesign.page-admin .cookie-details {
+    margin-top: 1rem;
+    color: var(--account-muted);
+    font-size: 0.9rem;
+}
+
+body.app-redesign.page-admin .status-detail + .status-detail {
+    margin-top: 0.5rem;
+}
+
+body.app-redesign.page-admin .status-detail-error { color: var(--account-danger); }
+body.app-redesign.page-admin .status-detail-success { color: var(--account-success); }
 
 body.app-redesign.page-admin .room-management > div:not(:last-child) {
     padding: 13px !important;
@@ -1311,8 +1327,57 @@ body.app-redesign.page-admin .room-management > div:not(:last-child) {
     background: var(--account-surface-soft) !important;
 }
 
-body.app-redesign.page-admin .room-management > div > :is(div, form)[style*="grid-template-columns"] {
+body.app-redesign.page-admin .admin-room-grid {
+    display: grid;
+    align-items: end;
     gap: 10px !important;
+}
+
+body.app-redesign.page-admin .admin-room-grid-bind {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+body.app-redesign.page-admin .admin-room-grid-unbind {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+body.app-redesign.page-admin .admin-section-heading {
+    margin: 0 0 0.8rem;
+    color: var(--account-teal) !important;
+    font-size: 1.1rem;
+}
+
+body.app-redesign.page-admin .admin-section-heading-danger,
+body.app-redesign.page-admin .admin-field-label-danger {
+    color: var(--account-danger) !important;
+}
+
+body.app-redesign.page-admin .admin-field-label {
+    display: block;
+    margin-bottom: 0.3rem;
+    color: var(--account-teal) !important;
+    font-size: 0.9rem;
+}
+
+body.app-redesign.page-admin .room-bind-status {
+    margin-top: 0.8rem;
+    padding: 0.7rem 0.8rem;
+    border-radius: 6px;
+}
+
+body.app-redesign.page-admin .room-bind-status-success {
+    background: rgba(35, 131, 90, 0.14);
+    color: #176544;
+}
+
+body.app-redesign.page-admin .room-bind-status-error {
+    background: rgba(200, 75, 68, 0.14);
+    color: #a23732;
+}
+
+body.app-redesign.page-admin .room-bind-status-info {
+    background: rgba(50, 111, 173, 0.14);
+    color: #285d91;
 }
 
 body.app-redesign.page-admin :is(#bindUsername, #bindRoomId, #unbindUsername) {
@@ -1338,7 +1403,6 @@ body.app-redesign.page-admin :is(#bindUsername, #bindRoomId, #unbindUsername):fo
 
 body.app-redesign.page-admin :is(
     #check-cookie-status,
-    #refresh-cookies,
     #bind-room,
     #unbind-room,
     #load-room-bindings
@@ -1359,11 +1423,6 @@ body.app-redesign.page-admin :is(#check-cookie-status, #load-room-bindings) {
     background: var(--account-blue) !important;
 }
 
-body.app-redesign.page-admin #refresh-cookies {
-    border-color: var(--account-gold) !important;
-    background: var(--account-gold) !important;
-}
-
 body.app-redesign.page-admin #bind-room {
     border-color: var(--account-teal) !important;
     background: var(--account-teal) !important;
@@ -1376,7 +1435,6 @@ body.app-redesign.page-admin #unbind-room {
 
 body.app-redesign.page-admin :is(
     #check-cookie-status,
-    #refresh-cookies,
     #bind-room,
     #unbind-room,
     #load-room-bindings
@@ -1394,6 +1452,21 @@ body.app-redesign.page-admin #cookieStatus {
     color: var(--account-muted) !important;
 }
 
+body.app-redesign.page-admin #cookieStatus.cookie-status-managed {
+    background: rgba(33, 150, 243, 0.16) !important;
+    color: #285d91 !important;
+}
+
+body.app-redesign.page-admin #cookieStatus.cookie-status-error {
+    background: rgba(200, 75, 68, 0.14) !important;
+    color: var(--account-danger) !important;
+}
+
+body.app-redesign.page-admin #cookieStatus.cookie-status-success {
+    background: rgba(35, 131, 90, 0.14) !important;
+    color: var(--account-success) !important;
+}
+
 body.app-redesign.page-admin #cookieDetails {
     color: var(--account-muted) !important;
 }
@@ -1407,17 +1480,70 @@ body.app-redesign.page-admin #currentBindings {
     color: var(--account-ink) !important;
 }
 
+body.app-redesign.page-admin #load-room-bindings {
+    margin-top: 0.8rem;
+}
+
 body.app-redesign.page-admin #currentBindings * {
     color: var(--account-ink) !important;
 }
 
-body.app-redesign.page-admin #currentBindings > div[style*="display: flex"] {
+body.app-redesign.page-admin #currentBindings > .binding-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
     padding: 9px 10px !important;
     border: 0 !important;
     border-left: 3px solid var(--account-teal) !important;
     border-radius: 0 6px 6px 0 !important;
     background: var(--account-surface) !important;
 }
+
+body.app-redesign.page-admin .binding-username { color: var(--account-teal) !important; }
+body.app-redesign.page-admin .binding-separator { margin: 0 12px; color: var(--account-muted) !important; }
+body.app-redesign.page-admin .binding-room { color: #9a5a09 !important; }
+body.app-redesign.page-admin .binding-time { color: var(--account-muted) !important; font-size: 0.8rem; }
+body.app-redesign.page-admin .binding-empty { padding: 32px; text-align: center; color: var(--account-muted) !important; }
+body.app-redesign.page-admin .binding-empty-error { color: var(--account-danger) !important; }
+
+body.app-redesign.page-admin .dictation-thumbnail {
+    width: 64px;
+    height: 64px;
+    border: 1px solid var(--account-line);
+    border-radius: 6px;
+    background: #0b151b;
+    object-fit: contain;
+}
+
+body.app-redesign.page-admin .table-empty {
+    color: var(--account-muted);
+    text-align: center;
+}
+
+body.app-redesign.page-admin tr.admin-row-removing {
+    background: var(--account-danger-soft) !important;
+    opacity: 0;
+    transition: opacity 0.5s ease, background 0.5s ease;
+}
+
+body.app-redesign.page-admin > .admin-toast {
+    position: fixed;
+    z-index: 1001;
+    top: 20px;
+    right: 20px;
+    max-width: min(400px, calc(100vw - 40px));
+    padding: 16px 24px;
+    border-radius: 8px;
+    color: #fff;
+    font-weight: 700;
+    animation: slideIn 0.3s ease;
+}
+
+body.app-redesign.page-admin > .admin-toast-success { background: #23835a; }
+body.app-redesign.page-admin > .admin-toast-error { background: #c84b44; }
+body.app-redesign.page-admin > .admin-toast-info { background: #326fad; }
 
 body.app-redesign.page-admin :is(.users-table, .recent-records, .dictation-records, .dictation-latest) {
     grid-column: 1 / -1;
@@ -1834,7 +1960,7 @@ body.app-redesign.page-coming-soon .action-btn:hover {
         min-height: 0;
     }
 
-    body.app-redesign.page-admin .room-management > div > :is(div, form)[style*="grid-template-columns"] {
+    body.app-redesign.page-admin .admin-room-grid {
         grid-template-columns: 1fr !important;
     }
 
@@ -2033,12 +2159,12 @@ body.app-redesign.page-coming-soon .action-btn:hover {
         grid-template-columns: minmax(0, 1fr) 76px;
     }
 
-    body.app-redesign.page-admin .cookie-management > div:first-of-type {
+    body.app-redesign.page-admin .admin-cookie-toolbar {
         align-items: stretch !important;
         flex-direction: column !important;
     }
 
-    body.app-redesign.page-admin :is(#check-cookie-status, #refresh-cookies, #load-room-bindings) {
+    body.app-redesign.page-admin :is(#check-cookie-status, #load-room-bindings) {
         width: 100% !important;
     }
 

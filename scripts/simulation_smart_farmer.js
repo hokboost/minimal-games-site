@@ -1,3 +1,4 @@
+require("./guard-test-target").enforceSafeTestTarget();
 const axios = require('axios');
 const crypto = require('crypto');
 

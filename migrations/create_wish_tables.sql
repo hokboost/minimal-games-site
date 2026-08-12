@@ -7,11 +7,14 @@ CREATE TABLE IF NOT EXISTS wish_results (
     success BOOLEAN NOT NULL DEFAULT FALSE,
     reward VARCHAR(100),
     reward_value INTEGER,
-    balance_before INTEGER,
-    balance_after INTEGER,
+    balance_before BIGINT,
+    balance_after BIGINT,
     wishes_count INTEGER DEFAULT 1, -- 当前是第几次祈愿
     is_guaranteed BOOLEAN DEFAULT FALSE, -- 是否是保底出货
     game_details JSONB,
+    wish_session_id INTEGER,
+    batch_position INTEGER,
+    result_trace VARCHAR(128),
     created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Shanghai'),
     
     FOREIGN KEY (username) REFERENCES users(username)
@@ -135,6 +138,10 @@ ALTER TABLE wish_results ADD COLUMN IF NOT EXISTS gift_type VARCHAR(50) DEFAULT 
 ALTER TABLE wish_progress ADD COLUMN IF NOT EXISTS gift_type VARCHAR(50) NOT NULL DEFAULT 'deepsea_singer';
 ALTER TABLE wish_sessions ADD COLUMN IF NOT EXISTS gift_type VARCHAR(50) NOT NULL DEFAULT 'deepsea_singer';
 ALTER TABLE wish_sessions ADD COLUMN IF NOT EXISTS gift_name VARCHAR(100) NOT NULL DEFAULT '深海歌姬';
+ALTER TABLE wish_results
+    ADD COLUMN IF NOT EXISTS wish_session_id INTEGER,
+    ADD COLUMN IF NOT EXISTS batch_position INTEGER,
+    ADD COLUMN IF NOT EXISTS result_trace VARCHAR(128);
 
 ALTER TABLE wish_progress DROP CONSTRAINT IF EXISTS wish_progress_username_key;
 ALTER TABLE wish_progress DROP CONSTRAINT IF EXISTS wish_progress_user_type_unique;

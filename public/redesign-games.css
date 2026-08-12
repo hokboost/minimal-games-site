@@ -485,6 +485,59 @@ html body.game-page.page-quiz .result-section {
     text-align: left !important;
 }
 
+html body.game-page.page-quiz .quiz-result-score {
+    margin: 16px 0;
+    color: var(--game-green);
+    font-size: 2rem;
+    font-weight: 800;
+}
+
+html body.game-page.page-quiz .quiz-result-reward,
+html body.game-page.page-quiz .quiz-result-balance {
+    margin: 12px 0;
+    color: var(--game-gold);
+    font-size: 1.25rem;
+    font-weight: 750;
+}
+
+html body.game-page.page-quiz .result-section[data-grade="excellent"] .quiz-result-grade {
+    color: var(--game-green);
+}
+
+html body.game-page.page-quiz .result-section[data-grade="good"] .quiz-result-grade {
+    color: var(--game-gold);
+}
+
+html body.game-page.page-quiz .result-section[data-grade="practice"] .quiz-result-grade {
+    color: var(--game-danger);
+}
+
+html body.game-page.page-quiz .quiz-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+html body.game-page.page-quiz .result-action-btn {
+    min-height: 42px;
+    padding: 10px 16px;
+    border: 0;
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 750;
+}
+
+html body.game-page.page-quiz .result-action-restart {
+    background: var(--game-teal);
+}
+
+html body.game-page.page-quiz .result-action-home {
+    background: var(--game-blue);
+}
+
 html body.game-page.page-quiz .submission-records-link {
     display: inline-flex;
     min-height: 42px;
@@ -1439,10 +1492,25 @@ html body.game-page.page-wish .gift-progress {
 }
 
 html body.game-page.page-wish .gift-progress-bar {
+    width: 100% !important;
     height: 100% !important;
     border-radius: 0 !important;
-    background: var(--game-coral) !important;
+    background: transparent !important;
     background-image: none !important;
+}
+
+html body.game-page.page-wish .gift-progress-bar::-webkit-progress-bar {
+    background: transparent !important;
+}
+
+html body.game-page.page-wish .gift-progress-bar::-webkit-progress-value,
+html body.game-page.page-wish .gift-progress-bar::-moz-progress-bar {
+    background: var(--game-coral) !important;
+}
+
+html body.game-page.page-wish .gift-progress-bar.is-near-guarantee::-webkit-progress-value,
+html body.game-page.page-wish .gift-progress-bar.is-near-guarantee::-moz-progress-bar {
+    background: var(--game-gold) !important;
 }
 
 html body.game-page.page-wish .gift-progress-text {

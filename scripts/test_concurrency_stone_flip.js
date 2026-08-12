@@ -1,3 +1,4 @@
+require("./guard-test-target").enforceSafeTestTarget();
 // 并发测试：石头 add + 翻牌 start/flip
 // 用法：BASE_URL=http://localhost:3000 SESSION_COOKIE="minimal_games_sid=xxx" CSRF_TOKEN=yourtoken node scripts/test_concurrency_stone_flip.js
 // 可选：STONE_REQUESTS=5 FLIP_REQUESTS=5

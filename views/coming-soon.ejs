@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= lang === 'zh' ? '请登录或注册' : 'Please Login or Register' %></title>
     <link rel="stylesheet" href="/styles.css">
-    <style>
+    <style nonce="<%= cspNonce %>">
         .container {
             max-width: 720px;
             margin: 0 auto;
@@ -59,9 +59,12 @@
                 %>
             </p>
             <% if (typeof user !== 'undefined' && user) { %>
-                <a class="action-btn" href="/logout">
+                <form method="POST" action="/logout" class="logout-form">
+                    <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+                    <button type="submit" class="action-btn">
                     <%= lang === 'zh' ? '退出登录' : 'Logout' %>
-                </a>
+                    </button>
+                </form>
             <% } else { %>
                 <a class="action-btn secondary" href="/login">
                     <%= lang === 'zh' ? '登录' : 'Login' %>

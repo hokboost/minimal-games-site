@@ -128,25 +128,44 @@
                 
                 checkStatusChanges(result.history);
                 
-                historyDiv.innerHTML = result.history.map(item => `
-                    <div class="history-item">
-                        <div class="history-gift">
-                            <span>${getGiftIcon(item.gift_type)}</span>
-                            <span>${getGiftName(item.gift_type)} ${item.quantity > 1 ? 'x' + item.quantity : ''}</span>
-                            <span style="color: #ff9800;">(-${item.cost} ${t('积分', 'points')})</span>
-                            ${getDeliveryStatusBadge(item)}
-                        </div>
-                        <div class="history-time">${formatTime(item.created_at)}</div>
-                    </div>
-                `).join('');
+                const rows = result.history.map((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'history-item';
+                    const gift = document.createElement('div');
+                    gift.className = 'history-gift';
+                    const icon = document.createElement('span');
+                    icon.textContent = getGiftIcon(item.gift_type);
+                    const name = document.createElement('span');
+                    const quantity = Number(item.quantity);
+                    name.textContent = `${getGiftName(item.gift_type)}${quantity > 1 ? ` x${quantity}` : ''}`;
+                    const cost = document.createElement('span');
+                    cost.className = 'history-cost';
+                    cost.textContent = `(-${String(item.cost ?? '')} ${t('积分', 'points')})`;
+                    const time = document.createElement('div');
+                    time.className = 'history-time';
+                    time.textContent = formatTime(item.created_at);
+                    gift.append(icon, name, cost, getDeliveryStatusBadge(item));
+                    row.append(gift, time);
+                    return row;
+                });
+                historyDiv.replaceChildren(...rows);
             } else {
-                historyDiv.innerHTML = `<div class="loading">${t('暂无兑换记录', 'No exchange history')}</div>`;
+                showHistoryMessage(historyDiv, t('暂无兑换记录', 'No exchange history'));
             }
         } catch (error) {
             console.error('加载兑换记录失败:', error);
-            document.getElementById('exchangeHistory').innerHTML = 
-                `<div class="loading">${t('加载失败，请刷新重试', 'Load failed, please refresh and retry')}</div>`;
+            showHistoryMessage(
+                document.getElementById('exchangeHistory'),
+                t('加载失败，请刷新重试', 'Load failed, please refresh and retry')
+            );
         }
+    }
+
+    function showHistoryMessage(container, message) {
+        const loading = document.createElement('div');
+        loading.className = 'loading';
+        loading.textContent = message;
+        container.replaceChildren(loading);
     }
 
     
@@ -206,17 +225,6 @@
     
     function getDeliveryStatusBadge(item) {
         const status = item.delivery_status;
-        const statusColors = {
-            'pending': '#ff9800',      
-            'processing': '#2196f3',   
-            'success': '#4caf50',      
-            'partial_success': '#ff5722', 
-            'failed': '#f44336',       
-            'timeout': '#f44336',
-            'uncertain': '#795548',
-            'no_room': '#9e9e9e'       
-        };
-        
         const statusTexts = {
             'pending': t('等待发送', 'Pending'),
             'processing': t('发送中', 'Sending'),
@@ -228,10 +236,12 @@
             'no_room': t('无房间号', 'No Room')
         };
         
-        const color = statusColors[status] || '#9e9e9e';
         const text = statusTexts[status] || t('未知状态', 'Unknown');
-        
-        return `<span style="color: ${color}; font-size: 0.8rem; margin-left: 8px;">${text}</span>`;
+        const allowedStatus = Object.prototype.hasOwnProperty.call(statusTexts, status) ? status : 'unknown';
+        const badge = document.createElement('span');
+        badge.className = `delivery-status delivery-status-${allowedStatus}`;
+        badge.textContent = text;
+        return badge;
     }
 
     
@@ -293,19 +303,8 @@
     
     function showMessage(message, type = 'info') {
         const messageDiv = document.createElement('div');
-        messageDiv.style.cssText = `
-            position: fixed; top: 20px; right: 20px; padding: 1rem 1.5rem;
-            border-radius: 8px; color: white; font-weight: bold; z-index: 1001;
-            animation: slideIn 0.3s ease;
-        `;
-        
-        const colors = {
-            success: '#23835a',
-            error: '#c84b44',
-            info: '#326fad'
-        };
-        
-        messageDiv.style.background = colors[type] || colors.info;
+        const allowedType = ['success', 'error', 'info'].includes(type) ? type : 'info';
+        messageDiv.className = `gift-toast gift-toast-${allowedType}`;
         messageDiv.textContent = message;
         
         document.body.appendChild(messageDiv);
@@ -357,7 +356,11 @@
         function renderPkStatus(state) {
             if (!pkToggleBtn) return;
             const transitioning = state.transition === 'start' || state.transition === 'stop';
-            const desiredRunning = transitioning ? state.transition === 'start' : !!state.running;
+            const desiredRunning = transitioning
+                ? state.transition === 'start'
+                : typeof state.desiredRunning === 'boolean'
+                    ? state.desiredRunning
+                    : !!state.running;
             pkState = {
                 running: !!state.running,
                 desiredRunning,
