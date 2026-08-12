@@ -872,17 +872,17 @@ module.exports = function registerGameRoutes(app, deps) {
     // Quiz 排行榜 API
     app.get('/api/quiz/leaderboard', requireLogin, requireAuthorized, async (req, res) => {
         try {
-            // 修改为只显示每个账号的最高分
+            // Show each account's best score for the current Shanghai calendar day.
             const result = await pool.query(`
                 SELECT username, score, submitted_at
                 FROM (
                     SELECT DISTINCT ON (s.username)
-                           s.username, s.score, s.submitted_at
+                           s.username, s.score, s.submitted_at::timestamptz AS submitted_at
                     FROM submissions s
                     JOIN users u ON u.username = s.username
-                    WHERE DATE(s.submitted_at) = CURRENT_DATE
-                      AND u.is_admin = FALSE
-                    ORDER BY s.username, s.score DESC, s.submitted_at ASC
+                    WHERE s.submitted_at::timestamptz >= date_trunc('day', NOW())
+                      AND s.submitted_at::timestamptz < date_trunc('day', NOW()) + INTERVAL '1 day'
+                    ORDER BY s.username, s.score DESC, s.submitted_at::timestamptz ASC
                 ) ranked
                 ORDER BY score DESC, submitted_at ASC
                 LIMIT 20

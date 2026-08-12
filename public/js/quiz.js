@@ -416,7 +416,11 @@
             const data = await response.json();
             const tbody = document.getElementById('leaderboard-body');
 
-            if (data.success && Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
+            if (!response.ok || data.success !== true) {
+                throw new Error(data.message || `Leaderboard request failed (${response.status})`);
+            }
+
+            if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
                 tbody.innerHTML = '';
                 data.leaderboard.forEach((record, index) => {
                     const row = document.createElement('tr');

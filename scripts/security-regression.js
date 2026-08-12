@@ -60,6 +60,7 @@ check('registration stores its client IP', server.includes('username, password_h
 check('migration runner contains no embedded database URL', migrationRunner.includes("require('../db')") && !migrationRunner.includes('postgres://'));
 check('quiz next is protected against duplicate token issuance', server.includes("'/api/quiz/next'") && quizClient.includes("idempotentFetch('/api/quiz/next'"));
 check('quiz advances without an artificial answer delay', quizClient.includes('questionIndex += 1;\n        nextQuestion();') && !/setTimeout\(\(\) => \{\s*questionIndex \+= 1;\s*nextQuestion\(\);/m.test(quizClient));
+check('quiz leaderboard includes valid administrator scores and uses explicit day boundaries', !games.includes('u.is_admin = FALSE') && games.includes("s.submitted_at::timestamptz >= date_trunc('day', NOW())") && quizClient.includes('if (!response.ok || data.success !== true)'));
 check('password changes replay success after response loss', server.includes("'/api/change-password'") && profileClient.includes("idempotentFetch('/api/change-password'"));
 check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, options)'));
 check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 3') && idempotency.includes('retryQuery(pool'));
