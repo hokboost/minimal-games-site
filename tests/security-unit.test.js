@@ -295,6 +295,72 @@ test('idempotency can be finalized by the same transaction as the business write
     ]);
 });
 
+test('an ambiguous commit error replays the transactionally committed response', async () => {
+    let record = null;
+    const pool = {
+        async query(sql, values) {
+            const statement = String(sql);
+            if (statement.includes('INSERT INTO idempotency_keys')) {
+                record = { status: 'pending', request_hash: values[4] };
+                return { rows: [{ id: 11 }] };
+            }
+            if (statement.includes('DELETE FROM idempotency_keys')) {
+                if (record?.status === 'pending') {
+                    record = null;
+                    return { rows: [{ id: 11 }] };
+                }
+                return { rows: [] };
+            }
+            if (statement.includes('SELECT response_status')) {
+                return { rows: record?.status === 'completed' ? [record] : [] };
+            }
+            throw new Error(`Unexpected pool query: ${statement}`);
+        }
+    };
+    const transactionClient = {
+        async query(sql, values) {
+            assert.match(String(sql), /status = 'completed'/);
+            record = {
+                ...record,
+                status: 'completed',
+                response_status: values[2],
+                response_body: JSON.parse(values[3])
+            };
+            return { rows: [{ id: 11 }] };
+        }
+    };
+    const middleware = createIdempotencyMiddleware({ pool, paths: ['/api/duel/play'] });
+    const result = await new Promise((resolve, reject) => {
+        const headers = {};
+        const req = {
+            method: 'POST',
+            path: '/api/duel/play',
+            body: { power: 10 },
+            session: { user: { username: 'tester' } },
+            get: () => 'ambiguous-commit-key-1234'
+        };
+        const res = {
+            statusCode: 200,
+            headersSent: false,
+            set(name, value) { headers[name] = value; return this; },
+            status(code) { this.statusCode = code; return this; },
+            json(body) { resolve({ body, headers, status: this.statusCode }); return this; }
+        };
+        middleware(req, res, async () => {
+            try {
+                await req.finalizeIdempotency(transactionClient, 200, { success: true, reward: 50 });
+                res.status(500).json({ success: false, message: 'commit acknowledgement lost' });
+            } catch (error) {
+                reject(error);
+            }
+        }).catch(reject);
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(result.headers['Idempotency-Status'], 'replayed');
+    assert.deepEqual(result.body, { success: true, reward: 50 });
+});
+
 test('indeterminate idempotency records are never executed again', async () => {
     const req = {
         method: 'POST',

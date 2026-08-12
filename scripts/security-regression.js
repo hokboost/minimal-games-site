@@ -68,6 +68,8 @@ check('password changes replay success after response loss', server.includes("'/
 check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, requestOptions)'));
 check('admin room binding submits reliably and accepts short Bilibili room IDs', adminView.includes('id="bind-room-form" novalidate') && adminView.includes('data-ux-event="admin.bind_room"') && adminClient.includes("document.addEventListener('submit'") && !adminClient.includes('Bind room "${roomId}" for') && adminClient.includes('/^\\d{1,12}$/') && admin.includes('/^\\d{1,12}$/'));
 check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 5') && idempotency.includes('retryQuery(pool'));
+check('pending request keys survive page reloads', read('public/js/i18n-helpers.js').includes('sessionStorage.setItem') && read('public/js/i18n-helpers.js').includes('IDEMPOTENCY_MAX_AGE_MS'));
+check('ambiguous commits replay durable success instead of returning a retryable failure', idempotency.includes('SELECT response_status, response_body') && idempotency.includes("res.set('Idempotency-Status', 'replayed')"));
 check('financial responses finalize inside business transactions', games.includes('req.finalizeIdempotency?.(client, 200, responseBody)') && wish.includes('req.finalizeIdempotency?.(client, 200, responseBody)'));
 check('balance ledger is append-only and validates new arithmetic', financialAuditMigration.includes('balance_logs_append_only') && financialAuditMigration.includes('balance_logs_amount_matches_check'));
 check('account deactivation preserves financial audit history', admin.includes('账户已停用，审计记录已保留') && !admin.includes("DELETE FROM balance_logs"));
