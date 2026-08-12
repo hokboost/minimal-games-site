@@ -418,7 +418,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                     amount: amount,
                     type: 'manual_recharge'
                 },
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 requireSufficientBalance: false
             });

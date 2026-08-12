@@ -79,6 +79,7 @@ const developmentSessionSecret = crypto.randomBytes(32).toString('hex');
 const sessionSecret = process.env.SESSION_SECRET || developmentSessionSecret;
 const { parseCookies, decodeSignedSessionCookie } = require('./lib/session-auth');
 const { createIdempotencyMiddleware } = require('./lib/idempotency');
+const { getClientIp } = require('./lib/client-ip');
 
 let giftConfig = {};
 try {
@@ -289,6 +290,7 @@ async function initializeDatabase() {
 
         for (const migrationName of [
             'add_idempotency_key.sql',
+            'add_registration_ip.sql',
             'create_wish_tables.sql',
             'create_idempotency_keys.sql',
             'create_quiz_runtime_tables.sql',
@@ -557,7 +559,8 @@ async function runDatabaseMaintenance() {
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// 信任代理（Render等平台需要）
+// Keep protocol/cookie proxy handling narrow. Client IP resolution is handled
+// separately because Render's ingress contains more than one proxy hop.
 app.set('trust proxy', 1);
 
 // CSP设置 - 完全按照kingboost模式
@@ -615,7 +618,7 @@ setupLanguageRoutes(app);
 
 // IP风控中间件
 app.use(async (req, res, next) => {
-    const clientIP = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for']?.split(',')[0];
+    const clientIP = getClientIp(req);
     const userAgent = req.get('User-Agent') || 'Unknown';
     
     // 记录所有请求的IP活动
@@ -766,16 +769,22 @@ app.use((req, res, next) => {
 });
 
 // 限流配置
+const clientIpRateLimitKey = (req) => rateLimit.ipKeyGenerator(
+    req.clientIP || getClientIp(req) || req.ip || 'unknown'
+);
+
 const loginLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 10,
-    message: "❌ 尝试次数过多，请 10 分钟后再试。"
+    message: "❌ 尝试次数过多，请 10 分钟后再试。",
+    keyGenerator: clientIpRateLimitKey
 });
 
 const registerLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 5,
     message: "⚠️ 注册太频繁，请稍后再试。",
+    keyGenerator: clientIpRateLimitKey,
     standardHeaders: true,
     legacyHeaders: false,
 });
@@ -1010,9 +1019,12 @@ app.post('/register', registerLimiter, async (req, res) => {
     try {
         const hashed = await bcrypt.hash(password, 12);
         const result = await pool.query(
-            'INSERT INTO users (username, password_hash, created_at) VALUES ($1, $2, NOW()) RETURNING id',
-            [username, hashed]
+            `INSERT INTO users (username, password_hash, created_at, registration_ip)
+             VALUES ($1, $2, NOW(), $3)
+             RETURNING id`,
+            [username, hashed, req.clientIP]
         );
+        await IPManager.recordIPActivity(req.clientIP, username, req.userAgent, 'register');
         
         console.log(`[注册成功] 用户ID: ${result.rows[0].id}, 用户名: ${username}`);
         res.redirect('/login?registered=true');
@@ -1915,8 +1927,7 @@ async function requireApiKey(req, res, next) {
     const ipWhitelist = process.env.GIFT_TASKS_IP_WHITELIST || '';
     const hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || '';
     const MAX_NONCE_CACHE_SIZE = 10000;
-    const clientIpRaw = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for']?.split(',')[0] || '';
-    const clientIp = clientIpRaw.startsWith('::ffff:') ? clientIpRaw.slice(7) : clientIpRaw;
+    const clientIp = req.clientIP || getClientIp(req);
     
     // 生产环境不允许默认密钥
     if (process.env.NODE_ENV === 'production' && validApiKey === 'INVALID_DEFAULT_KEY') {

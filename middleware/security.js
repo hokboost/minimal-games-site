@@ -1,5 +1,6 @@
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
+const { getClientIp } = require('../lib/client-ip');
 
 // 存储用户行为数据
 const userBehavior = new Map();
@@ -8,8 +9,10 @@ const suspiciousPatterns = new Map();
 
 // 获取真实IP地址
 function getRealIP(req) {
-    return req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
+    return req.clientIP || getClientIp(req) || '';
 }
+
+const ipRateLimitKey = (req) => rateLimit.ipKeyGenerator(getRealIP(req) || 'unknown');
 
 // 生成设备指纹
 function generateFingerprint(req) {
@@ -162,9 +165,10 @@ const basicRateLimit = rateLimit({
     message: '请求过于频繁，请稍后再试',
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: ipRateLimitKey,
     handler: (req, res) => {
         // 记录过度请求的IP
-        const ip = req.ip || req.connection.remoteAddress;
+        const ip = getRealIP(req);
         const behavior = userBehavior.get(ip) || {};
         behavior.suspicionScore = (behavior.suspicionScore || 0) + 5; // 降低惩罚
         userBehavior.set(ip, behavior);
@@ -183,14 +187,15 @@ const strictRateLimit = rateLimit({
     max: 500, // 从100增加到500次
     skipSuccessfulRequests: false,
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    keyGenerator: ipRateLimitKey
 });
 
 // 针对已登录用户的细粒度限流（以用户为key，fallback为指纹/IP）
 const userActionRateLimit = rateLimit({
     windowMs: 60 * 1000, // 1分钟
     max: 40, // 高价值操作默认每分钟40次
-    keyGenerator: (req) => req.session?.user?.username || req.fingerprint || getRealIP(req),
+    keyGenerator: (req) => req.session?.user?.username || req.fingerprint || ipRateLimitKey(req),
     handler: (req, res) => {
         res.status(429).json({
             success: false,
@@ -205,7 +210,7 @@ const userActionRateLimit = rateLimit({
 const adminRateLimit = rateLimit({
     windowMs: 60 * 1000, // 1分钟
     max: 15,
-    keyGenerator: (req) => req.session?.user?.username || getRealIP(req),
+    keyGenerator: (req) => req.session?.user?.username || ipRateLimitKey(req),
     handler: (req, res) => {
         res.status(429).json({
             success: false,

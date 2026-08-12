@@ -498,7 +498,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                         amount: -resolvedTicketCount,
                         operationType: 'pk_ticket',
                         description: `PK自动上票扣费：${resolvedTicketCount} 积分`,
-                        ipAddress: req.ip,
+                        ipAddress: req.clientIP,
                         userAgent: req.get('User-Agent'),
                         requireSufficientBalance: false,
                         client,

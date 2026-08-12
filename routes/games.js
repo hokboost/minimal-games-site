@@ -321,7 +321,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -10,
                 operationType: 'quiz_start',
                 description: '开始答题游戏',
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -821,7 +821,7 @@ module.exports = function registerGameRoutes(app, deps) {
                         total: normalizedAnswers.length,
                         reward
                     },
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
                     client,
@@ -1381,7 +1381,7 @@ module.exports = function registerGameRoutes(app, deps) {
                         Number.isFinite(setId) ? setId : null,
                         sessionId || null,
                         imagePath,
-                        req.ip,
+                        req.clientIP,
                         req.get('User-Agent')
                     ]
                 );
@@ -1466,7 +1466,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -betValue,
                 operationType: 'slot_bet',
                 description: `老虎机投注：${betValue} 积分`,
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -1516,7 +1516,7 @@ module.exports = function registerGameRoutes(app, deps) {
                         multiplier: outcome.multiplier,
                         payout: payout
                     },
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
                     client,
@@ -1610,7 +1610,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -tier,
                 operationType: 'scratch_bet',
                 description: `刮刮乐投注：${tier} 积分 (${selectedTier.winCount}中奖+${selectedTier.userCount}我的)`,
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -1654,7 +1654,7 @@ module.exports = function registerGameRoutes(app, deps) {
                         payout: payout,
                         tier_config: selectedTier
                     },
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
                     client,
@@ -1805,7 +1805,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -30,
                 operationType: 'stone_add',
                 description: '合石头：放入一颗石头',
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -1868,7 +1868,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -cost,
                 operationType: 'stone_fill',
                 description: '合石头：一键填满',
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -1941,7 +1941,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -replaceCost,
                 operationType: 'stone_replace',
                 description: `合石头：更换第${index + 1}颗石头`,
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -2030,7 +2030,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     amount: reward,
                     operationType: 'stone_reward',
                     description: `合石头兑换奖励 ${reward} 积分`,
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
                     client,
@@ -2132,7 +2132,7 @@ module.exports = function registerGameRoutes(app, deps) {
                         amount: previousReward,
                         operationType: 'flip_cashout',
                         description: `翻卡牌开始新一轮自动结算 ${previousReward} 积分`,
-                        ipAddress: req.ip,
+                        ipAddress: req.clientIP,
                         userAgent: req.get('User-Agent'),
                         requireSufficientBalance: false,
                         client,
@@ -2215,7 +2215,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -cost,
                 operationType: 'flip_card',
                 description: `翻卡牌：翻开第${flips + 1}张`,
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -2286,7 +2286,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     amount: reward,
                     operationType: 'flip_reward',
                     description: `翻卡牌奖励 ${reward} 积分`,
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
                     client,
@@ -2366,7 +2366,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: reward,
                 operationType: 'flip_cashout',
                 description: `翻卡牌退出奖励 ${reward} 积分`,
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 requireSufficientBalance: false,
                 client,
@@ -2480,7 +2480,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -totalCost,
                 operationType: 'blindbox_open',
                 description: `惊喜盲盒：${tier.nameZh} x${countNum}`,
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -2617,7 +2617,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 amount: -cost,
                 operationType: 'duel_bet',
                 description: `决斗挑战：功力${power}%`,
-                ipAddress: req.ip,
+                ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
                 managedTransaction: true
@@ -2639,7 +2639,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     amount: reward,
                     operationType: 'duel_win',
                     description: `决斗挑战获胜：${duelRewards[giftType].name} ${reward} 积分`,
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     requireSufficientBalance: false,
                     client,

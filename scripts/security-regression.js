@@ -21,6 +21,7 @@ const giftSender = read('bilibili_gift_sender.py');
 const ipManager = read('ip-manager.js');
 const migrationRunner = read('scripts/run_idempotency_migration.js');
 const idempotency = read('lib/idempotency.js');
+const clientIp = read('lib/client-ip.js');
 const idempotencyMigration = read('migrations/create_idempotency_keys.sql');
 const wishMigration = read('migrations/create_wish_tables.sql');
 const musicPlayer = read('public/js/music-player.js');
@@ -49,6 +50,9 @@ check('uncertain gift outcomes are never auto-refunded', listener.includes('mark
 check('uncertain gift tasks require confirmed failure before refund', gifts.includes("delivery_status === 'uncertain' && req.body.confirmedFailure !== true"));
 check('gift balance checks require explicit insufficient text', !giftSender.includes('"text=\'余额\'"') && giftSender.includes('"余额不足", "B币不足", "电池不足"'));
 check('routine IP activity writes are throttled', ipManager.includes("if (action === 'request')") && ipManager.includes('now - lastWrite < 60 * 1000'));
+check('Render client IP uses validated forwarded address', server.includes("app.set('trust proxy', 1)") && clientIp.includes("headers?.['x-forwarded-for']") && clientIp.includes('isTrustedProxyAddress(socketAddress)'));
+check('IP rate limits use the resolved client address', server.includes('keyGenerator: clientIpRateLimitKey') && security.includes('keyGenerator: ipRateLimitKey'));
+check('registration stores its client IP', server.includes('username, password_hash, created_at, registration_ip') && server.includes("'register'"));
 check('migration runner contains no embedded database URL', migrationRunner.includes("require('../db')") && !migrationRunner.includes('postgres://'));
 check('quiz next is protected against duplicate token issuance', server.includes("'/api/quiz/next'") && quizClient.includes("idempotentFetch('/api/quiz/next'"));
 check('quiz advances without an artificial answer delay', quizClient.includes('questionIndex += 1;\n        nextQuestion();') && !/setTimeout\(\(\) => \{\s*questionIndex \+= 1;\s*nextQuestion\(\);/m.test(quizClient));

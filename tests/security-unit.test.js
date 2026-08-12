@@ -4,6 +4,11 @@ const test = require('node:test');
 
 const { parseCookies, decodeSignedSessionCookie } = require('../lib/session-auth');
 const {
+    getClientIp,
+    isTrustedProxyAddress,
+    normalizeIp
+} = require('../lib/client-ip');
+const {
     createIdempotencyMiddleware,
     hashRequest,
     retryQuery,
@@ -18,6 +23,46 @@ function signSessionId(sessionId, secret) {
         .replace(/=+$/, '');
     return `s:${sessionId}.${signature}`;
 }
+
+test('client IP normalization handles mapped IPv4 and bracketed IPv6', () => {
+    assert.equal(normalizeIp('::ffff:203.0.113.9'), '203.0.113.9');
+    assert.equal(normalizeIp('[2001:db8::5]:443'), '2001:db8::5');
+    assert.equal(normalizeIp('not-an-ip'), null);
+});
+
+test('private and loopback ingress addresses are recognized as trusted proxies', () => {
+    assert.equal(isTrustedProxyAddress('10.28.232.2'), true);
+    assert.equal(isTrustedProxyAddress('172.20.1.5'), true);
+    assert.equal(isTrustedProxyAddress('::1'), true);
+    assert.equal(isTrustedProxyAddress('203.0.113.20'), false);
+});
+
+test('Render proxy chain resolves to the first forwarded client IP', () => {
+    const req = {
+        headers: { 'x-forwarded-for': '203.0.113.40, 172.68.1.2, 10.28.232.2' },
+        socket: { remoteAddress: '10.20.30.40' },
+        ip: '10.28.232.2'
+    };
+    assert.equal(getClientIp(req, { trustForwardedHeaders: true }), '203.0.113.40');
+});
+
+test('forwarded client IP is ignored when the direct peer is not a trusted proxy', () => {
+    const req = {
+        headers: { 'x-forwarded-for': '192.0.2.99' },
+        socket: { remoteAddress: '198.51.100.25' },
+        ip: '192.0.2.99'
+    };
+    assert.equal(getClientIp(req, { trustForwardedHeaders: true }), '198.51.100.25');
+});
+
+test('malformed first forwarded value falls back instead of trusting a later value', () => {
+    const req = {
+        headers: { 'x-forwarded-for': 'spoofed, 203.0.113.40' },
+        socket: { remoteAddress: '10.20.30.40' },
+        ip: '10.20.30.40'
+    };
+    assert.equal(getClientIp(req, { trustForwardedHeaders: true }), '10.20.30.40');
+});
 
 test('cookie parsing preserves encoded values containing equals signs', () => {
     assert.deepEqual(parseCookies('a=1; token=abc%3D%3D; broken=%E0%A4%A'), {

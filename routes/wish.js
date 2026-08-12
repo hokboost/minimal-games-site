@@ -115,7 +115,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     amount: -wishCost,
                     operationType: 'wish_bet',
                     description: `幸运祈愿：${wishCost} 积分`,
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     client,
                     managedTransaction: true
@@ -481,7 +481,7 @@ module.exports = function registerWishRoutes(app, deps) {
                     amount: -totalCost,
                     operationType: 'wish_bet_batch',
                     description: `十连祈愿扣费：${totalCost} 积分`,
-                    ipAddress: req.ip,
+                    ipAddress: req.clientIP,
                     userAgent: req.get('User-Agent'),
                     client,
                     managedTransaction: true
