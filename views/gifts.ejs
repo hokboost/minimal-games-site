@@ -342,13 +342,13 @@
                         Perfect for your favorite streamer
                     <% } %>
                 </div>
-                <div class="gift-price">150 <%= lang === 'zh' ? '积分/个' : 'points/each' %></div>
+                <div class="gift-price"><%= giftPrices.heartbox %> <%= lang === 'zh' ? '积分/个' : 'points/each' %></div>
                 <div class="quantity-selector">
                     <label><%= lang === 'zh' ? '数量' : 'Quantity' %>:</label>
                     <input type="number" id="heartbox-quantity" min="1" max="100" value="1">
-                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="heartbox-total">150</span> <%= lang === 'zh' ? '积分' : 'points' %></span>
+                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="heartbox-total"><%= giftPrices.heartbox %></span> <%= lang === 'zh' ? '积分' : 'points' %></span>
                 </div>
-                <button class="gift-button" data-gift="heartbox" data-cost="150">
+                <button class="gift-button" data-gift="heartbox" data-cost="<%= giftPrices.heartbox %>">
                     <%= lang === 'zh' ? '立即兑换' : 'Exchange Now' %>
                 </button>
             </div>
@@ -366,13 +366,13 @@
                         A symbol of true fans
                     <% } %>
                 </div>
-                <div class="gift-price">1 <%= lang === 'zh' ? '积分/个' : 'point/each' %></div>
+                <div class="gift-price"><%= giftPrices.fanlight %> <%= lang === 'zh' ? '积分/个' : 'point/each' %></div>
                 <div class="quantity-selector">
                     <label><%= lang === 'zh' ? '数量' : 'Quantity' %>:</label>
                     <input type="number" id="fanlight-quantity" min="1" max="100" value="1">
-                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="fanlight-total">1</span> <%= lang === 'zh' ? '积分' : 'points' %></span>
+                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="fanlight-total"><%= giftPrices.fanlight %></span> <%= lang === 'zh' ? '积分' : 'points' %></span>
                 </div>
-                <button class="gift-button" data-gift="fanlight" data-cost="1">
+                <button class="gift-button" data-gift="fanlight" data-cost="<%= giftPrices.fanlight %>">
                     <%= lang === 'zh' ? '立即兑换' : 'Exchange Now' %>
                 </button>
             </div>
@@ -389,13 +389,13 @@
                         Boost the room atmosphere
                     <% } %>
                 </div>
-                <div class="gift-price">19980 <%= lang === 'zh' ? '积分/个' : 'points/each' %></div>
+                <div class="gift-price"><%= giftPrices.tiedu_one %> <%= lang === 'zh' ? '积分/个' : 'points/each' %></div>
                 <div class="quantity-selector">
                     <label><%= lang === 'zh' ? '数量' : 'Quantity' %>:</label>
                     <input type="number" id="tiedu_one-quantity" min="1" max="100" value="1">
-                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="tiedu_one-total">19980</span> <%= lang === 'zh' ? '积分' : 'points' %></span>
+                    <span><%= lang === 'zh' ? '总价' : 'Total' %>: <span id="tiedu_one-total"><%= giftPrices.tiedu_one %></span> <%= lang === 'zh' ? '积分' : 'points' %></span>
                 </div>
-                <button class="gift-button" data-gift="tiedu_one" data-cost="19980">
+                <button class="gift-button" data-gift="tiedu_one" data-cost="<%= giftPrices.tiedu_one %>">
                     <%= lang === 'zh' ? '立即兑换' : 'Exchange Now' %>
                 </button>
             </div>

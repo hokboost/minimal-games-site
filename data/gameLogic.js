@@ -1,24 +1,10 @@
 'use strict';
 
 const crypto = require('crypto');
+const { SPIN_CONFIG } = require('../domain/games/configuration');
 
-const SPIN_CHALLENGES = Object.freeze([
-    '2加币买吃的',
-    'Quiz',
-    'Scratch',
-    'Slot',
-    '10个深蹲',
-    '热舞1分钟',
-    '10个俯卧撑',
-    '转盘次数+2',
-    '反方向走3分钟',
-    '负重前行',
-    '3分钟不能说你我他',
-    '20秒吹一瓶可乐',
-    '浏览器记录',
-    '垃圾清洁工'
-]);
-const SPIN_WEIGHTS = Object.freeze(SPIN_CHALLENGES.map(() => 1));
+const SPIN_CHALLENGES = Object.freeze(SPIN_CONFIG.challenges.map((challenge) => challenge.labelZh));
+const SPIN_WEIGHTS = Object.freeze(SPIN_CONFIG.challenges.map((challenge) => challenge.weight));
 
 class GameLogic {
     static randomInt(min, max) {
@@ -64,6 +50,7 @@ class GameLogic {
             const randomOffset = GameLogic.randomInt(-5, 5)
                 + (GameLogic.randomFloat() * 0.9 - 0.45);
             return {
+                prizeId: SPIN_CONFIG.challenges[challengeIndex].id,
                 prize: this.challenges[challengeIndex],
                 angle: (centerAngle + randomOffset + 360) % 360,
                 success: true

@@ -3,75 +3,22 @@ const t = (zh, en) => (lang === 'zh' ? zh : en);
 const translateServerMessage = window.translateServerMessage || ((message) => message);
 const { username, csrfToken } = document.body.dataset;
 
-        const passerbyTasks = lang === 'zh'
-            ? ['垃圾清洁工']
-            : ['Trash Cleaner'];
-
         let countdownInterval = null;
         let countdownEndTime = null;
 
-        const challengeListZh = [
-            '2积分买吃的', 'Quiz', 'Scratch', 'Slot', '10个深蹲',
-            '热舞1分钟', '10个俯卧撑',
-            '转盘次数+2',
-            '反方向走3分钟', '负重前行', '3分钟不能说你我他', '20秒吹一瓶可乐',
-            '浏览器记录',
-            '垃圾清洁工'
-        ];
-
-        const challengeListEn = [
-            '2 Points for Food', 'Quiz', 'Scratch', 'Slot', '10 Squats',
-            'Dance 1 Minute', '10 Push-ups',
-            'Wheel Spins +2',
-            'Walk Backwards 3 Minutes', 'Carry Weight', 'No “you/me/he” for 3 minutes', 'Chug a Cola in 20s',
-            'Browser History',
-            'Trash Cleaner'
-        ];
-
-        const prizeMap = {
-            '2积分买吃的': '2 Points for Food',
-            'Quiz': 'Quiz',
-            'Scratch': 'Scratch',
-            'Slot': 'Slot',
-            '10个深蹲': '10 Squats',
-            '热舞1分钟': 'Dance 1 Minute',
-            '10个俯卧撑': '10 Push-ups',
-            '转盘次数+2': 'Wheel Spins +2',
-            '反方向走3分钟': 'Walk Backwards 3 Minutes',
-            '负重前行': 'Carry Weight',
-            '3分钟不能说你我他': 'No “you/me/he” for 3 minutes',
-            '20秒吹一瓶可乐': 'Chug a Cola in 20s',
-            '浏览器记录': 'Browser History',
-            '垃圾清洁工': 'Trash Cleaner',
-            '找路人要吃的': 'Ask a stranger for food',
-            '要帅哥微信': 'Ask a handsome guy for WeChat',
-            '美女合照': 'Photo with a beautiful girl',
-            '美女要微信': 'Ask a beautiful girl for WeChat',
-            '夸赞美女30秒': 'Compliment a girl for 30s',
-            '公主抱下蹲': 'Princess carry squats',
-            '俯卧撑': 'Push-ups',
-            '热舞': 'Dance',
-            '深蹲': 'Squats',
-            '大声清唱': 'Sing loudly',
-            '真心话': 'Truth',
-            '和路人帅哥合照': 'Photo with a handsome stranger',
-            '集体反方向走一分钟': 'Group walk backwards 1 minute',
-            '和路人石头剪刀布': 'Rock-paper-scissors with a stranger',
-            '让路人B站关注一个乌龟酱': 'Ask a stranger to follow on Bilibili',
-            '找一名路人猜年龄': 'Ask a stranger to guess your age',
-            '手拉手走一分钟': 'Hold hands and walk 1 minute',
-            '含水对视': 'Water stare challenge',
-            '背起走路': 'Piggyback walk'
-        };
-
-        const challenges = lang === 'zh' ? challengeListZh : challengeListEn;
-
-        const getPrizeText = (prize) => {
-            if (lang === 'zh') {
-                return prize;
-            }
-            return prizeMap[prize] || prize;
-        };
+        let spinConfig = { challenges: [] };
+        try {
+            spinConfig = JSON.parse(decodeURIComponent(document.body.dataset.spinConfig || ''));
+        } catch (error) {
+            console.error('Spin configuration parse error:', error);
+        }
+        const challengeEntries = Array.isArray(spinConfig.challenges)
+            ? spinConfig.challenges
+            : [];
+        const challengeById = new Map(challengeEntries.map((challenge) => [challenge.id, challenge]));
+        const challenges = challengeEntries.map((challenge) => (
+            lang === 'zh' ? challenge.labelZh : challenge.labelEn
+        ));
         const colors = [
             "#f44336", "#4caf50", "#2196f3", "#ff9800", "#9c27b0", "#607d8b",
             "#e91e63", "#795548", "#009688", "#ff5722", "#673ab7", "#3f51b5", 
@@ -199,40 +146,13 @@ const { username, csrfToken } = document.body.dataset;
                     if (t < 1) {
                         requestAnimationFrame(animate);
                     } else {
-                        const displayPrize = getPrizeText(data.prize);
-                        const prizeText = displayPrize;
-                        const details = [];
-                        const addDetail = (condition, zh, en) => {
-                            if (condition) details.push(t(zh, en));
-                        };
-                        
-                        
-                        const basicChallengeTasks = lang === 'zh'
-                            ? ['找路人要吃的', '要帅哥微信', '美女合照', '美女要微信', '夸赞美女30秒']
-                            : ['Ask a stranger for food', 'Ask a handsome guy for WeChat', 'Photo with a beautiful girl', 'Ask a beautiful girl for WeChat', 'Compliment a girl for 30s'];
-                        
-                        addDetail(
-                            basicChallengeTasks.some(task => prizeText.includes(task)),
-                            '该任务为挑战任务',
-                            'This is a challenge task'
-                        );
-                        
-                        
-                        const basicPunishmentTasks = lang === 'zh'
-                            ? ['公主抱下蹲', '俯卧撑', '热舞', '深蹲', '大声清唱', '真心话']
-                            : ['Princess carry squats', 'Push-ups', 'Dance', 'Squats', 'Sing loudly', 'Truth'];
-                        
-                        addDetail(basicPunishmentTasks.some(task => prizeText.includes(task)), '纯惩罚，不加减资金', 'Punishment only, no money change');
-                        addDetail(prizeText.includes(lang === 'zh' ? '和路人帅哥合照' : 'Photo with a handsome stranger'), '用手机合照一张算成功 成功+4失败扣4', 'Take a photo to succeed: +4 success, -4 fail');
-                        addDetail(prizeText.includes(lang === 'zh' ? '集体反方向走一分钟' : 'Group walk backwards 1 minute'), '纯惩罚，不加减资金', 'Punishment only, no money change');
-                        addDetail(prizeText.includes(lang === 'zh' ? '和路人石头剪刀布' : 'Rock-paper-scissors with a stranger'), '三局两胜若获胜加20，输了扣20', 'Best of 3: win +20, lose -20');
-                        addDetail(prizeText.includes(lang === 'zh' ? '让路人B站关注一个乌龟酱' : 'Ask a stranger to follow on Bilibili'), '若路人没有B站，则让路人下载并关注 成功+4失败扣4', 'If they do not have Bilibili, ask them to download and follow: +4 success, -4 fail');
-                        addDetail(prizeText.includes(lang === 'zh' ? '找一名路人猜年龄' : 'Ask a stranger to guess your age'), '找到一名路人 猜测自己年龄 上下三岁及以内算成功 成功+4失败扣4', 'Guess your age within 3 years: +4 success, -4 fail');
-                        addDetail(prizeText.includes(lang === 'zh' ? '浏览器记录' : 'Browser History'), '念出自己最近一条浏览器记录 纯惩罚不加减资金', 'Read your latest browser history: punishment only, no money change');
-                        addDetail(prizeText.includes(lang === 'zh' ? '手拉手走一分钟' : 'Hold hands and walk 1 minute'), '两名男生手拉手走一分钟 纯惩罚 不加减资金', 'Two men hold hands and walk 1 minute: punishment only, no money change');
-                        addDetail(prizeText.includes(lang === 'zh' ? '垃圾清洁工' : 'Trash Cleaner'), '接下来5分钟内 走到路上看到所有垃圾都捡起来了，则挑战成功。成功加20失败扣20', 'Pick up all trash you see in the next 5 minutes: +20 success, -20 fail');
-                        addDetail(prizeText.includes(lang === 'zh' ? '含水对视' : 'Water stare challenge'), '两名男生各含一口矿泉水，对视达到10秒，则视为成功 成功加20失败扣20', 'Two men hold water and stare for 10 seconds: +20 success, -20 fail');
-                        addDetail(prizeText.includes(lang === 'zh' ? '背起走路' : 'Piggyback walk'), '两名男生，一人背起一人，走1步加0.2积分，上限4积分，若小于5步则扣4积分', 'Piggyback: +0.2 points per step, max 4; if <5 steps then -4 points');
+                        const selectedChallenge = challengeById.get(data.prizeId);
+                        const displayPrize = selectedChallenge
+                            ? (lang === 'zh' ? selectedChallenge.labelZh : selectedChallenge.labelEn)
+                            : String(data.prize || '');
+                        const details = selectedChallenge
+                            ? [lang === 'zh' ? selectedChallenge.detailZh : selectedChallenge.detailEn]
+                            : [];
 
                         const prize = document.createElement('div');
                         prize.className = 'spin-result-prize';
@@ -247,10 +167,9 @@ const { username, csrfToken } = document.body.dataset;
                         button.disabled = false;
                         
                         
-                        const isPasserbyTask = passerbyTasks.some(task => prizeText.includes(task));
-                        
-                        if (isPasserbyTask) {
-                            startCountdown();
+                        const countdownSeconds = Number(selectedChallenge?.countdownSeconds);
+                        if (Number.isSafeInteger(countdownSeconds) && countdownSeconds > 0) {
+                            startCountdown(countdownSeconds);
                         }
                     }
                 }
@@ -267,14 +186,14 @@ const { username, csrfToken } = document.body.dataset;
         document.getElementById('spinButton').addEventListener('click', spin);
         
         
-        function startCountdown() {
+        function startCountdown(durationSeconds) {
             const timerDiv = document.getElementById('countdown-timer');
             const displayDiv = document.getElementById('countdown-display');
             
             if (countdownInterval) clearInterval(countdownInterval);
             timerDiv.hidden = false;
             displayDiv.classList.remove('is-urgent');
-            countdownEndTime = Date.now() + 5 * 60 * 1000; 
+            countdownEndTime = Date.now() + durationSeconds * 1000;
             
             countdownInterval = setInterval(() => {
                 const remaining = Math.max(0, countdownEndTime - Date.now());

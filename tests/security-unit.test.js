@@ -35,7 +35,19 @@ const {
     createSpendHash,
     normalizeGiftItems
 } = require('../lib/pk-spend');
-const { decodeBase32, generateTotp, verifyTotp } = require('../lib/totp');
+const { decodeBase32, generateTotp, matchTotpCounter, verifyTotp } = require('../lib/totp');
+const gameRegistry = require('../domain/games');
+const {
+    assertRtp,
+    assertTargetRtp,
+    maximumFlipPolicyEconomics,
+    maximumStonePolicyEconomics,
+    optimalFlipEconomics,
+    weightedRtp,
+    wishRtp
+} = gameRegistry.economics;
+const { parseWorkerCredentials } = require('../lib/worker-credentials');
+const { getAdminTotpSecret, parseAdminTotpSecrets } = require('../lib/admin-mfa');
 const { createConcurrencyGuard } = require('../lib/concurrency-guard');
 const { multiplyMoney, parseInteger, parseMoney } = require('../lib/integer-money');
 const { randomArrayIndex, randomArrayItem } = require('../lib/random-index');
@@ -58,6 +70,8 @@ const {
     validateServerEnvironment,
     validateWorkerEnvironment
 } = require('../lib/config-validation');
+const { reachTestFaultPoint } = require('../lib/test-fault-injection');
+const { BilibiliCookieManager } = require('../bilibili-cookie-manager');
 const {
     applyTrackedMigration,
     migrationTransactionBody
@@ -172,6 +186,8 @@ test('paid action concurrency guard caps requests and releases every terminal re
         maxPoolWaiters: 0,
         maxEventLoopLagMs: 5000
     });
+    assert.equal(guard.start(), true);
+    assert.equal(guard.start(), false);
     const response = () => {
         const res = new EventEmitter();
         res.statusCode = 200;
@@ -210,7 +226,8 @@ test('paid action concurrency guard caps requests and releases every terminal re
     assert.equal(runs, 2);
     resumed.emit('close');
     assert.equal(guard.getStats().active, 0);
-    guard.close();
+    assert.equal(guard.close(), true);
+    assert.equal(guard.close(), false);
 });
 
 test('money parsing accepts exact database integers and rejects truncation or overflow', () => {
@@ -318,8 +335,8 @@ test('worker child processes receive an allowlist instead of application secrets
         LANG: 'zh_CN.UTF-8',
         DB_PASS: 'database-secret',
         SESSION_SECRET: 'session-secret',
-        WINDOWS_API_KEY: 'worker-api-secret',
-        GIFT_TASKS_HMAC_SECRET: 'worker-hmac-secret'
+        WORKER_API_KEY: 'worker-api-secret',
+        WORKER_HMAC_SECRET: 'worker-hmac-secret'
     }, async () => {
         const environment = createChildEnvironment({ THREESERVER_PORT: '9876' });
         assert.equal(environment.PATH, '/safe/bin');
@@ -327,9 +344,233 @@ test('worker child processes receive an allowlist instead of application secrets
         assert.equal(environment.THREESERVER_PORT, '9876');
         assert.equal(environment.DB_PASS, undefined);
         assert.equal(environment.SESSION_SECRET, undefined);
-        assert.equal(environment.WINDOWS_API_KEY, undefined);
-        assert.equal(environment.GIFT_TASKS_HMAC_SECRET, undefined);
+        assert.equal(environment.WORKER_API_KEY, undefined);
+        assert.equal(environment.WORKER_HMAC_SECRET, undefined);
     });
+});
+
+test('external threeserver helpers are checksum-pinned with the entry script', async () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'minimal-games-threeserver-'));
+    const bundledDirectory = path.join(__dirname, '..', 'workers', 'bilibili');
+    const entryPath = path.join(directory, 'threeserver.py');
+    const helperPath = path.join(directory, 'cookie_store.py');
+    fs.copyFileSync(path.join(bundledDirectory, 'threeserver.py'), entryPath);
+    fs.copyFileSync(path.join(bundledDirectory, 'cookie_store.py'), helperPath);
+    const listener = Object.create(WindowsGiftListener.prototype);
+    try {
+        await withEnvironment({ THREESERVER_SCRIPT: entryPath }, async () => {
+            assert.equal(
+                listener.resolveVersionedScript('THREESERVER_SCRIPT', 'threeserver.py', ['cookie_store.py']),
+                entryPath
+            );
+            fs.appendFileSync(helperPath, '\n# tampered\n');
+            assert.throws(
+                () => listener.resolveVersionedScript('THREESERVER_SCRIPT', 'threeserver.py', ['cookie_store.py']),
+                /当前发布版本/
+            );
+        });
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('normal gift sender launches a dynamic room-bound HTTP threeserver before use', async () => {
+    const child = new EventEmitter();
+    Object.assign(child, {
+        pid: 43210,
+        exitCode: null,
+        signalCode: null,
+        stdout: { resume() {} },
+        stderr: { resume() {} }
+    });
+    const listener = Object.create(WindowsGiftListener.prototype);
+    Object.assign(listener, {
+        allowedGiftIds: ['31036', '31122'],
+        shuttingDown: false,
+        threeServerProcess: null,
+        threeServerProcessRoomId: null,
+        threeServerUrl: null,
+        threeServerToken: null,
+        threeServerRoomId: null
+    });
+    listener.getFreePort = async () => 45678;
+    listener.ensureRoomConfig = async (roomId) => {
+        assert.equal(roomId, '123456');
+        return 'C:/private/config.room.json';
+    };
+    let launchOptions;
+    listener.launchGiftThreeServer = (options) => {
+        launchOptions = options;
+        queueMicrotask(() => child.emit('spawn'));
+        return child;
+    };
+    listener.waitForThreeServerRoom = async (roomId, timeoutMs, url, token) => {
+        assert.equal(roomId, '123456');
+        assert.equal(timeoutMs, 20000);
+        assert.equal(url, 'http://127.0.0.1:45678');
+        assert.equal(token, launchOptions.backendToken);
+        return true;
+    };
+    const terminated = [];
+    listener.terminateProcessTree = async (pid) => terminated.push(pid);
+
+    const url = await listener.ensureGiftThreeServer('123456');
+    assert.equal(url, 'http://127.0.0.1:45678');
+    assert.equal(launchOptions.configPath, 'C:/private/config.room.json');
+    assert.equal(launchOptions.backendPort, 45678);
+    assert.match(launchOptions.backendToken, /^[a-f0-9]{64}$/);
+    assert.equal(listener.threeServerProcessRoomId, '123456');
+    assert.equal(listener.threeServerRoomId, '123456');
+
+    await listener.stopThreeServerProcess();
+    assert.deepEqual(terminated, [43210]);
+    assert.equal(listener.threeServerProcess, null);
+    assert.equal(listener.threeServerUrl, null);
+});
+
+test('normal gift sender preflight failure stays refundable and never crosses the send boundary', async () => {
+    const listener = Object.create(WindowsGiftListener.prototype);
+    Object.assign(listener, {
+        activeGiftTask: null,
+        allowedGiftIds: ['31036'],
+        externalSendSemaphore: new BoundedSemaphore(1),
+        shuttingDown: false
+    });
+    const events = [];
+    listener.ensureGiftThreeServer = async () => {
+        events.push('preflight');
+        throw new Error('sender startup failed');
+    };
+    listener.startGiftTask = async () => {
+        events.push('start');
+        return true;
+    };
+    listener.sendToThreeServer = async () => {
+        events.push('send');
+        return { success: true, providerTransactionId: 'must-not-send' };
+    };
+    listener.markTaskFailed = async (...args) => {
+        events.push(`failed:${args[3]}`);
+        assert.equal(listener.activeGiftTask.externalSendStarted, false);
+        return true;
+    };
+    listener.markTaskUncertain = async () => events.push('uncertain');
+
+    await listener.processTask({
+        id: 17,
+        claimToken: 'claim-token-17',
+        claimGeneration: 1,
+        giftId: '31036',
+        quantity: 1,
+        roomId: '123456'
+    });
+    assert.deepEqual(events, ['preflight', 'failed:worker_preflight_failed']);
+    assert.equal(listener.activeGiftTask, null);
+    listener.externalSendSemaphore.close();
+});
+
+test('normal gift sender treats every post-boundary failure as uncertain without fallback', async () => {
+    const listener = Object.create(WindowsGiftListener.prototype);
+    Object.assign(listener, {
+        activeGiftTask: null,
+        allowedGiftIds: ['31036'],
+        externalSendSemaphore: new BoundedSemaphore(1),
+        shuttingDown: false,
+        threeServerToken: 'local-token'
+    });
+    const events = [];
+    listener.ensureGiftThreeServer = async () => {
+        events.push('preflight');
+        return 'http://127.0.0.1:45678';
+    };
+    listener.startGiftTask = async () => {
+        events.push('start');
+        return true;
+    };
+    listener.sendToThreeServer = async () => {
+        assert.equal(listener.activeGiftTask.externalSendStarted, true);
+        events.push('send');
+        return { success: false, error: 'transport_error' };
+    };
+    listener.markTaskComplete = async () => events.push('complete');
+    listener.markTaskFailed = async () => events.push('failed');
+    listener.markTaskUncertain = async (...args) => {
+        events.push(`uncertain:${args[3]}`);
+        return true;
+    };
+
+    await listener.processTask({
+        id: 18,
+        claimToken: 'claim-token-18',
+        claimGeneration: 2,
+        giftId: '31036',
+        quantity: 1,
+        roomId: '123456'
+    });
+    assert.deepEqual(events, [
+        'preflight',
+        'start',
+        'send',
+        'uncertain:threeserver_result_uncertain'
+    ]);
+    listener.externalSendSemaphore.close();
+});
+
+test('normal gift sender accepts success only with exactly one provider receipt', async () => {
+    let providerReceipts = [];
+    const sender = require('node:http').createServer((req, res) => {
+        assert.equal(req.headers['x-local-sender-token'], 'test-local-token');
+        const chunks = [];
+        req.on('data', (chunk) => chunks.push(chunk));
+        req.on('end', () => {
+            assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')), {
+                gifts: [{ id: '31036', count: 1 }],
+                wait: true,
+                confirm: 'api'
+            });
+            const body = JSON.stringify({
+                success: true,
+                status: 'ok',
+                results: providerReceipts.map((providerTransactionId) => ({
+                    provider_transaction_id: providerTransactionId
+                }))
+            });
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body)
+            });
+            res.end(body);
+        });
+    });
+    await new Promise((resolve) => sender.listen(0, '127.0.0.1', resolve));
+    const address = sender.address();
+    const listener = Object.create(WindowsGiftListener.prototype);
+    try {
+        const missing = await listener.sendToThreeServer(
+            '31036', 1, `http://127.0.0.1:${address.port}`, 'test-local-token'
+        );
+        assert.equal(missing.success, false);
+        assert.equal(missing.error, 'provider_receipt_missing');
+
+        providerReceipts = ['provider-tx-1', 'provider-tx-2'];
+        const ambiguous = await listener.sendToThreeServer(
+            '31036', 1, `http://127.0.0.1:${address.port}`, 'test-local-token'
+        );
+        assert.equal(ambiguous.success, false);
+        assert.equal(ambiguous.error, 'provider_receipt_ambiguous');
+
+        providerReceipts = ['provider-tx-1'];
+        const confirmed = await listener.sendToThreeServer(
+            '31036', 1, `http://127.0.0.1:${address.port}`, 'test-local-token'
+        );
+        assert.equal(confirmed.success, true);
+        assert.equal(confirmed.providerTransactionId, 'provider-tx-1');
+    } finally {
+        await new Promise((resolve) => sender.close(resolve));
+    }
 });
 
 test('PK authorization proxy rejects requests without its capability path', async () => {
@@ -521,9 +762,11 @@ test('PK reports remain on disk until the server acknowledges them', async () =>
 test('spin results always map to configured challenges and normalized angles', () => {
     assert.equal(GameLogic.spin.challenges.length, GameLogic.spin.weights.length);
     assert.equal(new Set(GameLogic.spin.challenges).size, GameLogic.spin.challenges.length);
+    const configuredIds = new Set(gameRegistry.SPIN_CONFIG.challenges.map((challenge) => challenge.id));
     for (let index = 0; index < 5000; index += 1) {
         const result = GameLogic.spin.spin();
         assert.equal(GameLogic.spin.challenges.includes(result.prize), true);
+        assert.equal(configuredIds.has(result.prizeId), true);
         assert.equal(Number.isFinite(result.angle), true);
         assert.equal(result.angle >= 0 && result.angle < 360, true);
         assert.equal(result.success, true);
@@ -538,8 +781,19 @@ test('production configuration rejects CSRF bypasses and insecure worker origins
         DB_USER: 'games',
         DB_PASS: 'database-password',
         SESSION_SECRET: 's'.repeat(32),
-        WINDOWS_API_KEY: 'w'.repeat(32),
-        GIFT_TASKS_HMAC_SECRET: 'h'.repeat(32),
+        IDEMPOTENCY_HMAC_SECRET: 'i'.repeat(32),
+        RESET_TOKEN_SECRET: 'r'.repeat(32),
+        ANALYTICS_TOKEN_SECRET: 'a'.repeat(32),
+        DICTATION_TOKEN_SECRET: 'd'.repeat(32),
+        LOG_HASH_SECRET: 'l'.repeat(32),
+        WORKER_CREDENTIALS_JSON: JSON.stringify({
+            'worker-test-01': { apiKey: 'w'.repeat(32), hmacSecret: 'h'.repeat(32) }
+        }),
+        WORKER_CREDENTIAL_ID: 'worker-test-01',
+        WORKER_API_KEY: 'w'.repeat(32),
+        WORKER_HMAC_SECRET: 'h'.repeat(32),
+        ADMIN_TOTP_SECRETS_JSON: JSON.stringify({ admin: 'JBSWY3DPEHPK3PXP' }),
+        READINESS_TOKEN: 'q'.repeat(32),
         CSRF_AUTO_FILL: 'true',
         CSRF_TEST_MODE: undefined,
         SERVER_URL: 'http://remote.example.test'
@@ -570,10 +824,126 @@ test('production configuration rejects CSRF bypasses and insecure worker origins
     });
 });
 
+test('test fault injection is isolated to an explicitly configured test process', async () => {
+    const productionEnvironment = {
+        NODE_ENV: 'production',
+        DB_HOST: 'localhost',
+        DB_NAME: 'games',
+        DB_USER: 'games',
+        DB_PASS: 'database-password',
+        SESSION_SECRET: 's'.repeat(32),
+        WORKER_CREDENTIAL_ID: 'worker-test-01',
+        WORKER_API_KEY: 'w'.repeat(32),
+        WORKER_HMAC_SECRET: 'h'.repeat(32),
+        ENABLE_TEST_FAULT_INJECTION: undefined,
+        TEST_FAULT_TOKEN: 't'.repeat(32),
+        TEST_FAULT_PAUSE_MS: undefined,
+        CSRF_AUTO_FILL: undefined,
+        CSRF_TEST_MODE: undefined
+    };
+    await withEnvironment(productionEnvironment, async () => {
+        assert.throws(validateServerEnvironment, /forbidden in production/);
+    });
+
+    await withEnvironment({
+        NODE_ENV: 'development',
+        ENABLE_TEST_FAULT_INJECTION: 'true',
+        TEST_FAULT_TOKEN: 't'.repeat(32)
+    }, async () => {
+        assert.throws(validateServerEnvironment, /requires NODE_ENV=test/);
+    });
+
+    await withEnvironment({
+        NODE_ENV: 'test',
+        ENABLE_TEST_FAULT_INJECTION: 'true',
+        TEST_FAULT_TOKEN: 'short',
+        TEST_FAULT_PAUSE_MS: '1500'
+    }, async () => {
+        assert.throws(validateServerEnvironment, /TEST_FAULT_TOKEN/);
+    });
+
+    await withEnvironment({
+        NODE_ENV: 'test',
+        ENABLE_TEST_FAULT_INJECTION: 'true',
+        TEST_FAULT_TOKEN: 'é'.repeat(32),
+        TEST_FAULT_PAUSE_MS: '1500'
+    }, async () => {
+        assert.doesNotThrow(validateServerEnvironment);
+        const headers = {
+            'x-test-fault-token': 'a'.repeat(32),
+            'x-test-fault-point': 'slot.before_commit',
+            'x-test-fault-action': 'pause'
+        };
+        assert.equal(await reachTestFaultPoint({ get: (name) => headers[name] }, 'slot.before_commit'), false);
+    });
+});
+
+test('Windows workers require a DPAPI cookie path unless plaintext is explicitly enabled', async () => {
+    const workerEnvironment = {
+        WORKER_CREDENTIAL_ID: 'worker-test-01',
+        WORKER_API_KEY: 'w'.repeat(32),
+        WORKER_HMAC_SECRET: 'h'.repeat(32),
+        SERVER_URL: 'https://worker.example.test',
+        THREESERVER_BACKEND: 'http',
+        BILI_COOKIE_PATH: 'C:/private/cookie.txt',
+        ALLOW_PLAINTEXT_BILI_COOKIE: undefined
+    };
+    await withEnvironment(workerEnvironment, async () => {
+        assert.throws(
+            () => validateWorkerEnvironment({ platform: 'win32' }),
+            /DPAPI-protected file/
+        );
+    });
+    await withEnvironment({
+        ...workerEnvironment,
+        ALLOW_PLAINTEXT_BILI_COOKIE: 'TRUE'
+    }, async () => {
+        assert.throws(
+            () => validateWorkerEnvironment({ platform: 'win32' }),
+            /must be true or false/
+        );
+    });
+    await withEnvironment({
+        ...workerEnvironment,
+        ALLOW_PLAINTEXT_BILI_COOKIE: 'true'
+    }, async () => {
+        assert.doesNotThrow(() => validateWorkerEnvironment({ platform: 'win32' }));
+    });
+    await withEnvironment({
+        ...workerEnvironment,
+        BILI_COOKIE_PATH: 'C:/private/bilibili-cookie.dpapi'
+    }, async () => {
+        assert.doesNotThrow(() => validateWorkerEnvironment({ platform: 'win32' }));
+    });
+});
+
+test('Bilibili cookie parsing preserves Netscape HttpOnly cookie records', async () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'minimal-games-cookie-'));
+    const cookiePath = path.join(directory, 'cookie.txt');
+    fs.writeFileSync(cookiePath, [
+        '# Netscape HTTP Cookie File',
+        '#HttpOnly_.bilibili.com\tTRUE\t/\tTRUE\t0\tSESSDATA\tsession-value',
+        '.bilibili.com\tTRUE\t/\tTRUE\t0\tbili_jct\tcsrf-value'
+    ].join('\n'), { mode: 0o600 });
+    try {
+        await withEnvironment({ ALLOW_PLAINTEXT_BILI_COOKIE: 'true' }, async () => {
+            const cookies = new BilibiliCookieManager(cookiePath).loadCookiesFromTxt(cookiePath);
+            assert.equal(cookies.find((cookie) => cookie.name === 'SESSDATA')?.value, 'session-value');
+            assert.equal(cookies.find((cookie) => cookie.name === 'bili_jct')?.value, 'csrf-value');
+        });
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('worker configuration rejects unconfirmed browser-click delivery', async () => {
     await withEnvironment({
-        WINDOWS_API_KEY: 'w'.repeat(32),
-        GIFT_TASKS_HMAC_SECRET: 'h'.repeat(32),
+        WORKER_CREDENTIAL_ID: 'worker-test-01',
+        WORKER_API_KEY: 'w'.repeat(32),
+        WORKER_HMAC_SECRET: 'h'.repeat(32),
         SERVER_URL: 'https://worker.example.test',
         THREESERVER_BACKEND: 'playwright'
     }, async () => {
@@ -591,6 +961,84 @@ test('TOTP verification follows the RFC test vector and rejects malformed codes'
     assert.equal(verifyTotp(secret, '287082', { now: 30_000, window: 0 }), true);
     assert.equal(verifyTotp(secret, '287083', { now: 30_000, window: 0 }), false);
     assert.equal(verifyTotp(secret, 'abc', { now: 30_000 }), false);
+    assert.equal(matchTotpCounter(secret, '287082', { now: 30_000, window: 0 }), 1);
+});
+
+test('worker credentials bind independent secrets to an immutable worker id', () => {
+    const credentials = parseWorkerCredentials(JSON.stringify({
+        'worker-prod-01': { apiKey: 'a'.repeat(32), hmacSecret: 'b'.repeat(32) },
+        'worker-prod-02': { apiKey: 'c'.repeat(32), hmacSecret: 'd'.repeat(32) }
+    }));
+    assert.equal(credentials.get('worker-prod-01').apiKey, 'a'.repeat(32));
+    assert.notEqual(
+        credentials.get('worker-prod-01').hmacSecret,
+        credentials.get('worker-prod-02').hmacSecret
+    );
+    assert.throws(() => parseWorkerCredentials('{invalid'), /valid JSON/);
+});
+
+test('administrator MFA secrets are isolated per account', () => {
+    const raw = JSON.stringify({
+        admin_one: 'JBSWY3DPEHPK3PXP',
+        admin_two: 'GEZDGNBVGY3TQOJQ'
+    });
+    const secrets = parseAdminTotpSecrets(raw);
+    assert.notEqual(secrets.get('admin_one'), secrets.get('admin_two'));
+    assert.equal(getAdminTotpSecret('admin_two', { ADMIN_TOTP_SECRETS_JSON: raw }), 'GEZDGNBVGY3TQOJQ');
+});
+
+test('redeemable game economics enforce the 98%-99% policy and unsafe boundaries', () => {
+    const { RTP_POLICY } = gameRegistry;
+    assert.deepEqual(RTP_POLICY, { targetMinimum: 0.98, target: 0.985, maximum: 0.99 });
+    assert.throws(() => assertTargetRtp('below-target', 0.979999), /below target/);
+    assert.throws(() => assertRtp('above-maximum', 0.990001), /exceeds policy/);
+
+    for (const [giftType, config] of Object.entries(gameRegistry.WISH_CONFIGS)) {
+        assertTargetRtp(`wish:${giftType}`, wishRtp(config));
+    }
+    assertTargetRtp('slot', gameRegistry.ECONOMICS_REPORT.slot);
+    assertTargetRtp('scratch', gameRegistry.ECONOMICS_REPORT.scratch);
+    assertTargetRtp('flip:profit-optimal', gameRegistry.ECONOMICS_REPORT.flip.profitOptimal);
+    assertTargetRtp('flip:maximum-policy', gameRegistry.ECONOMICS_REPORT.flip.maximumPolicy);
+    assertTargetRtp('stone:profit-optimal', gameRegistry.ECONOMICS_REPORT.stone.profitOptimal);
+    assertTargetRtp('stone:maximum-policy', gameRegistry.ECONOMICS_REPORT.stone.maximumPolicy);
+    for (const [giftType, report] of Object.entries(gameRegistry.ECONOMICS_REPORT.duel)) {
+        assertTargetRtp(`duel:${giftType}:maximum`, report.maximumRtp);
+    }
+
+    const blindbox = gameRegistry.createBlindboxRuntime(require('../gift-codes.json'));
+    for (const [tier, rtp] of Object.entries(blindbox.rtp)) {
+        assertTargetRtp(`blindbox:${tier}`, rtp);
+    }
+
+    const unsafeFlipCosts = [...gameRegistry.FLIP_CONFIG.costs];
+    unsafeFlipCosts[2] = 184;
+    const unsafeFlip = maximumFlipPolicyEconomics(
+        unsafeFlipCosts,
+        gameRegistry.FLIP_CONFIG.cashoutRewards
+    );
+    assert.ok(unsafeFlip.rtp > RTP_POLICY.maximum);
+    assert.throws(() => assertRtp('flip:unsafe-184', unsafeFlip.rtp), /exceeds policy/);
+
+    const unsafeStone = maximumStonePolicyEconomics({
+        initialCost: gameRegistry.STONE_CONFIG.initialCost,
+        rewards: gameRegistry.STONE_CONFIG.rewards,
+        replaceCosts: { ...gameRegistry.STONE_CONFIG.replaceCosts, 4: 353 },
+        slotCount: gameRegistry.STONE_CONFIG.slotCount,
+        colorCount: gameRegistry.STONE_CONFIG.colors.length
+    });
+    assert.ok(unsafeStone.rtp > RTP_POLICY.maximum);
+    assert.throws(() => assertRtp('stone:unsafe-353', unsafeStone.rtp), /exceeds policy/);
+
+    const flip = optimalFlipEconomics(
+        gameRegistry.FLIP_CONFIG.costs,
+        gameRegistry.FLIP_CONFIG.cashoutRewards
+    );
+    assert.equal(flip.rtp, gameRegistry.ECONOMICS_REPORT.flip.profitOptimal);
+    assert.equal(weightedRtp(100, [
+        { value: 50, weight: 0.5 },
+        { value: 150, weight: 0.5 }
+    ]), 1);
 });
 
 test('worker request signatures bind the nonce, path, method, timestamp, and body', () => {
@@ -644,10 +1092,12 @@ test('client IP normalization handles mapped IPv4 and bracketed IPv6', () => {
     assert.equal(normalizeIp('not-an-ip'), null);
 });
 
-test('private and loopback ingress addresses are recognized as trusted proxies', () => {
-    assert.equal(isTrustedProxyAddress('10.28.232.2'), true);
-    assert.equal(isTrustedProxyAddress('172.20.1.5'), true);
+test('only explicitly configured and loopback ingress addresses are trusted proxies', () => {
+    const env = { TRUSTED_PROXY_ADDRESSES: '10.28.232.2,172.20.1.5' };
+    assert.equal(isTrustedProxyAddress('10.28.232.2', env), true);
+    assert.equal(isTrustedProxyAddress('172.20.1.5', env), true);
     assert.equal(isTrustedProxyAddress('::1'), true);
+    assert.equal(isTrustedProxyAddress('10.20.30.40'), false);
     assert.equal(isTrustedProxyAddress('203.0.113.20'), false);
 });
 
@@ -657,7 +1107,10 @@ test('Render proxy chain resolves to the first forwarded client IP', () => {
         socket: { remoteAddress: '10.20.30.40' },
         ip: '10.28.232.2'
     };
-    assert.equal(getClientIp(req, { trustForwardedHeaders: true }), '203.0.113.40');
+    assert.equal(getClientIp(req, {
+        trustForwardedHeaders: true,
+        env: { TRUSTED_PROXY_ADDRESSES: '10.20.30.40' }
+    }), '203.0.113.40');
 });
 
 test('forwarded client IP is ignored when the direct peer is not a trusted proxy', () => {

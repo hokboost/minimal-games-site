@@ -13,6 +13,7 @@ cookie.txt
 cookie*.txt
 *.cookie
 *.cookies
+*.dpapi
 *.har
 auth.json
 storage-state*.json

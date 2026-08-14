@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
+const baseUrl = require('./guard-test-target').enforceSafeTestTarget();
 
 /**
  * 管理接口防护自测脚本
@@ -14,7 +14,6 @@ require("./guard-test-target").enforceSafeTestTarget();
 const { URL } = require('url');
 const crypto = require('crypto');
 
-const baseUrl = process.env.TARGET_URL || process.argv[2] || 'http://localhost:3000';
 const adminUser = process.env.ADMIN_USER || 'hokboost';
 const adminPass = process.env.ADMIN_PASS || 'hokboost';
 const signSecret = process.env.ADMIN_SIGN_SECRET || '';

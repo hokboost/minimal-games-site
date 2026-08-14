@@ -2,12 +2,12 @@
 'use strict';
 
 require('dotenv').config();
-const { validateServerEnvironment } = require('../lib/config-validation');
+const { validateMigrationEnvironment } = require('../lib/config-validation');
 const { applyDatabaseMigrations } = require('../lib/database-migrations');
 const pool = require('../db');
 
 async function main() {
-    validateServerEnvironment();
+    validateMigrationEnvironment();
     await applyDatabaseMigrations(pool, {
         onMigration: (filename) => console.log(`Applying ${filename}`)
     });

@@ -4,26 +4,26 @@
         let csrfToken = document.body.dataset.csrfToken || '';
         let wishProgress = { total_wishes: 0, consecutive_fails: 0, total_spent: 0, total_rewards_value: 0 };
         const canWishTest = document.body.dataset.canTest === 'true';
+        const wishesInFlight = new Set();
 
-        const giftNames = {
-            deepsea_singer: { zh: '梦幻游乐园', en: 'Dreamland Park' },
-            sky_throne: { zh: '飞天转椅', en: 'Sky Throne' },
-            proposal: { zh: '原地求婚', en: 'On-the-Spot Proposal' },
-            wonderland: { zh: '梦游仙境', en: 'Wonderland Dream' },
-            white_bride: { zh: '纯白花嫁', en: 'Pure White Bride' },
-            crystal_ball: { zh: '水晶球', en: 'Crystal Ball' },
-            bobo: { zh: '啵啵', en: 'Bubbles' }
-        };
-
-        const giftConfigs = {
-            deepsea_singer: { name: giftNames.deepsea_singer[lang], cost: 500, overallRateText: '1.6%', guaranteeCount: 148, rewardValue: 30000 },
-            sky_throne: { name: giftNames.sky_throne[lang], cost: 250, overallRateText: '2.49%', guaranteeCount: 83, rewardValue: 10000 },
-            proposal: { name: giftNames.proposal[lang], cost: 208, overallRateText: '3.98%', guaranteeCount: 52, rewardValue: 5200 },
-            wonderland: { name: giftNames.wonderland[lang], cost: 150, overallRateText: '4.97%', guaranteeCount: 41, rewardValue: 3000 },
-            white_bride: { name: giftNames.white_bride[lang], cost: 75, overallRateText: '5.7%', guaranteeCount: 34, rewardValue: 1314 },
-            crystal_ball: { name: giftNames.crystal_ball[lang], cost: 66, overallRateText: '6.58%', guaranteeCount: 32, rewardValue: 1000 },
-            bobo: { name: giftNames.bobo[lang], cost: 50, overallRateText: '12.45%', guaranteeCount: 16, rewardValue: 399 }
-        };
+        let publicConfigs = {};
+        try {
+            publicConfigs = JSON.parse(decodeURIComponent(document.body.dataset.wishConfigs || '%7B%7D'));
+        } catch (error) {
+            console.error('Invalid wish configuration payload', error);
+        }
+        const giftNames = Object.fromEntries(Object.entries(publicConfigs).map(([giftType, config]) => [
+            giftType,
+            { zh: config.nameZh, en: config.nameEn }
+        ]));
+        const giftConfigs = Object.fromEntries(Object.entries(publicConfigs).map(([giftType, config]) => [
+            giftType,
+            {
+                ...config,
+                name: lang === 'zh' ? config.nameZh : config.nameEn,
+                overallRateText: `${(Number(config.overallRate) * 100).toFixed(2)}%`
+            }
+        ]));
 
         let currentGiftType = 'deepsea_singer';
         let modalHideTimer = null;
@@ -105,6 +105,7 @@
         }
 
         async function makeWish(giftType, count) {
+            if (wishesInFlight.has(giftType)) return;
             setCurrentGift(giftType);
             const config = giftConfigs[giftType];
             const totalCost = config.cost * count;
@@ -119,6 +120,7 @@
             }
 
             const buttons = document.querySelectorAll(`.gift-card[data-gift="${giftType}"] .gift-action-btn`);
+            wishesInFlight.add(giftType);
             buttons.forEach(btn => btn.disabled = true);
             
             try {
@@ -177,6 +179,7 @@
                 console.error('Error:', error);
                 alert(t('网络错误，请重试', 'Network error, please try again'));
             } finally {
+                wishesInFlight.delete(giftType);
                 buttons.forEach(btn => btn.disabled = false);
             }
         }

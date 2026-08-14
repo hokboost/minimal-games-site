@@ -6,7 +6,8 @@
     <title><%= lang === 'zh' ? '幸运老虎机' : 'Lucky Slot Machine' %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="app-redesign game-page page-slot" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+<% const defaultBet = Math.min(slotConfig.maximumBet, Math.max(slotConfig.minimumBet, 10)); %>
+<body class="app-redesign game-page page-slot" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>" data-minimum-bet="<%= slotConfig.minimumBet %>" data-maximum-bet="<%= slotConfig.maximumBet %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
@@ -25,7 +26,7 @@
             </div>
             <div class="betting-section">
                 <label for="bet-amount"><%= lang === 'zh' ? '投注金额' : 'Bet Amount' %></label>
-                <input type="number" id="bet-amount" min="1" max="1000" value="10" placeholder="<%= lang === 'zh' ? '输入投注金额 (1-1000)' : 'Enter bet amount (1-1000)' %>">
+                <input type="number" id="bet-amount" min="<%= slotConfig.minimumBet %>" max="<%= slotConfig.maximumBet %>" value="<%= defaultBet %>" placeholder="<%= lang === 'zh' ? `输入投注金额 (${slotConfig.minimumBet}-${slotConfig.maximumBet})` : `Enter bet amount (${slotConfig.minimumBet}-${slotConfig.maximumBet})` %>">
                 <span class="bet-info"><%= lang === 'zh' ? '积分' : 'points' %></span>
             </div>
         </div>

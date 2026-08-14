@@ -231,7 +231,7 @@
         }
     </style>
 </head>
-<body class="app-redesign game-page page-spin" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign game-page page-spin" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>" data-spin-config="<%= encodeURIComponent(JSON.stringify(spinConfig || { challenges: [] })) %>">
     <%- include('partials/language-switcher') %>
 
     <a href="/" class="back-button">← <%= lang === 'zh' ? '返回' : 'Back' %></a>
@@ -264,74 +264,22 @@
             <h3><%= lang === 'zh' ? '挑战规则' : 'Challenge rules' %></h3>
             <div class="rules-container">
                 <div class="rule-section">
-                    <strong><%= lang === 'zh' ? '通用规则' : 'General Rules' %>：</strong>
-                    <span>
-                        <%= lang === 'zh' ? '所有挑战成功' : 'All challenges success' %>
-                        <span class="success">+4<%= lang === 'zh' ? '积分' : ' points' %></span> |
-                        <%= lang === 'zh' ? '失败' : 'failure' %>
-                        <span class="fail">-4<%= lang === 'zh' ? '积分' : ' points' %></span>
-                    </span>
-                </div>
-                <div class="rule-section">
-                    <strong><%= lang === 'zh' ? '挑战任务（老板可指定）' : 'Challenge Tasks (Boss can assign)' %>：</strong>
+                    <strong><%= lang === 'zh' ? '结算说明' : 'Settlement notice' %>：</strong>
                     <div class="rule-details">
-                        <% if (lang === 'zh') { %>
-                            <div>• 3分钟不能说你我他（成功+4积分，失败-4积分）</div>
-                            <div>• 20秒吹一瓶可乐（成功+4积分，失败-4积分）</div>
-                            <div class="rule-negotiable">老板可以商量指定任何其他挑战</div>
-                        <% } else { %>
-                            <div>• Don't say "you/I/he" for 3 minutes (Success +4 points, Failure -4 points)</div>
-                            <div>• Chug a bottle of cola in 20 seconds (Success +4 points, Failure -4 points)</div>
-                            <div class="rule-negotiable">Boss can negotiate any other challenges</div>
-                        <% } %>
+                        <%= lang === 'zh'
+                            ? '转盘本身免费，只选择挑战，不自动增减账户积分。Quiz、Scratch 和 Slot 仅按各自游戏接口结算。'
+                            : 'The wheel is free and only selects a challenge. It never changes account points; Quiz, Scratch, and Slot settle only through their own game APIs.' %>
                     </div>
                 </div>
                 <div class="rule-section">
-                    <strong><%= lang === 'zh' ? '游戏任务（有各自奖惩规则）' : 'Game Tasks (Each has own reward rules)' %>：</strong>
+                    <strong><%= lang === 'zh' ? '当前任务' : 'Current challenges' %>：</strong>
                     <div class="rule-details">
-                        <% if (lang === 'zh') { %>
-                            <div>• Quiz（知识问答）: 0-4分扣2币 | 5-9分扣1币 | 10+分加1币</div>
-                            <div>• Slot（老虎机）: -2/-1/0/+1/+2积分</div>
-                            <div>• Scratch（刮刮卡）: 0/+1/+2积分</div>
-                        <% } else { %>
-                            <div>• Quiz: 0-4 pts -2 points | 5-9 pts -1 point | 10+ pts +1 point</div>
-                            <div>• Slot Machine: -2/-1/0/+1/+2 points</div>
-                            <div>• Scratch Card: 0/+1/+2 points</div>
-                        <% } %>
-                    </div>
-                </div>
-                <div class="rule-section">
-                    <strong><%= lang === 'zh' ? '纯惩罚任务（不影响资金）' : 'Punishment Tasks (No money effect)' %>：</strong>
-                    <div class="rule-details">
-                        <% if (lang === 'zh') { %>
-                            <div>• 10个深蹲</div>
-                            <div>• 热舞1分钟</div>
-                            <div>• 10个俯卧撑</div>
-                            <div>• 反方向走3分钟</div>
-                            <div>• 负重前行（买瓶水放包里背着）</div>
-                            <div>• 垃圾清洁工</div>
-                            <div>• 浏览器记录</div>
-                        <% } else { %>
-                            <div>• 10 squats</div>
-                            <div>• Dance for 1 minute</div>
-                            <div>• 10 push-ups</div>
-                            <div>• Walk backwards for 3 minutes</div>
-                            <div>• Carry weight (buy a bottle of water and carry it)</div>
-                            <div>• Trash cleaner</div>
-                            <div>• Browser history</div>
-                        <% } %>
-                    </div>
-                </div>
-                <div class="rule-section">
-                    <strong><%= lang === 'zh' ? '奖励任务' : 'Reward Tasks' %>：</strong>
-                    <div class="rule-details">
-                        <% if (lang === 'zh') { %>
-                            <div>• 2积分买吃的（奖励2积分买食物）</div>
-                            <div>• 转盘次数+2（增加转盘次数）</div>
-                        <% } else { %>
-                            <div>• 2 points for food (Reward 2 points to buy food)</div>
-                            <div>• Wheel spins +2 (Increase wheel spin count)</div>
-                        <% } %>
+                        <% (spinConfig?.challenges || []).forEach((challenge) => { %>
+                            <div>
+                                • <%= lang === 'zh' ? challenge.labelZh : challenge.labelEn %>
+                                — <%= lang === 'zh' ? challenge.detailZh : challenge.detailEn %>
+                            </div>
+                        <% }); %>
                     </div>
                 </div>
             </div>

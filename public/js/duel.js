@@ -11,24 +11,19 @@
     const duelBtn = document.getElementById('duelBtn');
     const resultBox = document.getElementById('resultBox');
     const balanceEl = document.getElementById('current-balance');
-
-    const rewardNames = {
-        crown: { zh: '至尊奖', en: 'Crown Prize' },
-        dragon: { zh: '龙魂奖', en: 'Dragon Prize' },
-        phoenix: { zh: '凤羽奖', en: 'Phoenix Prize' },
-        jade: { zh: '玉阶奖', en: 'Jade Prize' },
-        bronze: { zh: '青铜奖', en: 'Bronze Prize' },
-        iron: { zh: '铁心奖', en: 'Iron Prize' }
-    };
-
-    const rewards = [
-        { key: 'crown', name: rewardNames.crown[lang], reward: 30000 },
-        { key: 'dragon', name: rewardNames.dragon[lang], reward: 13140 },
-        { key: 'phoenix', name: rewardNames.phoenix[lang], reward: 5000 },
-        { key: 'jade', name: rewardNames.jade[lang], reward: 1000 },
-        { key: 'bronze', name: rewardNames.bronze[lang], reward: 500 },
-        { key: 'iron', name: rewardNames.iron[lang], reward: 200 }
-    ];
+    let duelConfig;
+    try {
+        duelConfig = JSON.parse(decodeURIComponent(document.body.dataset.duelConfig || ''));
+    } catch (error) {
+        console.error('Invalid duel configuration payload', error);
+        return;
+    }
+    const rewards = Object.entries(duelConfig.rewards || {}).map(([key, reward]) => ({
+        key,
+        ...reward,
+        name: lang === 'zh' ? reward.nameZh : reward.nameEn
+    }));
+    if (rewards.length === 0) return;
 
     let activeReward = rewards[0];
     let duelInFlight = false;
@@ -41,7 +36,7 @@
             const name = document.createElement('span');
             name.textContent = reward.name;
             const value = document.createElement('strong');
-            value.textContent = `${reward.reward} ${t('积分', 'points')}`;
+            value.textContent = `${reward.reward} ${t('积分', 'points')} · ${t('最低功力', 'min power')} ${reward.minimumPower}%`;
             item.append(name, value);
             item.addEventListener('click', () => {
                 if (duelInFlight) return;
@@ -66,7 +61,13 @@
     }
 
     function updatePower(value) {
-        const power = Math.min(80, Math.max(1, Number(value)));
+        const minimum = Number(activeReward.minimumPower) || 1;
+        const maximum = Number(duelConfig.maximumPower) || 80;
+        const power = Math.min(maximum, Math.max(minimum, Number(value)));
+        powerRange.min = minimum;
+        powerInput.min = minimum;
+        powerRange.max = maximum;
+        powerInput.max = maximum;
         powerRange.value = power;
         powerInput.value = power;
         document.getElementById('powerValue').textContent = `${power}%`;
@@ -74,11 +75,8 @@
     }
 
     function calculateCost(power) {
-        if (activeReward.key === 'crown') {
-            return Math.round(310 * power + 1);
-        }
-        const ratio = activeReward.reward / 30000;
-        return Math.round(310 * ratio * power + 1);
+        const cost = Number(activeReward.costs?.[power]);
+        return Number.isSafeInteger(cost) && cost > 0 ? cost : null;
     }
 
     powerRange.addEventListener('input', (event) => updatePower(event.target.value));
@@ -97,6 +95,10 @@
         const selectedReward = activeReward;
         const power = Number(powerInput.value);
         const cost = calculateCost(power);
+        if (!Number.isSafeInteger(cost)) {
+            resultBox.textContent = t('请选择该奖品允许的功力', 'Choose a power allowed for this tier');
+            return;
+        }
         const currentBalance = parseBalance(balanceEl.textContent);
         if (currentBalance !== null && currentBalance < cost) {
             resultBox.textContent = t('积分不足，无法挑战', 'Insufficient points');

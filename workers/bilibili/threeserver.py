@@ -9,6 +9,8 @@ import io
 from datetime import datetime
 import threading
 import random
+import hmac
+from collections import deque
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
@@ -37,10 +39,67 @@ def force_utf8_stdio():
 force_utf8_stdio()
 
 app = Flask(__name__)
-gift_queue = []
+gift_queue = deque()
+gift_queue_lock = threading.Lock()
 balance_lock = threading.Lock()
 request_lock = threading.Lock()
 request_status = {}  # request_id -> {status, results, created_ts, updated_ts}
+
+LOCAL_TOKEN = (os.getenv("THREESERVER_LOCAL_TOKEN") or "").strip()
+if len(LOCAL_TOKEN.encode("utf-8")) < 32:
+    raise RuntimeError("THREESERVER_LOCAL_TOKEN must contain at least 32 bytes")
+ALLOWED_GIFT_IDS = {
+    value.strip()
+    for value in (os.getenv("THREESERVER_ALLOWED_GIFT_IDS") or "").split(",")
+    if value.strip().isdigit()
+}
+if not ALLOWED_GIFT_IDS:
+    raise RuntimeError("THREESERVER_ALLOWED_GIFT_IDS must not be empty")
+MAX_QUEUE_DEPTH = 100
+MAX_REQUEST_STATUS = 5000
+REQUEST_STATUS_TTL_SECONDS = 3600
+MAX_GIFTS_PER_REQUEST = 100
+MAX_GIFT_COUNT_PER_ITEM = 100
+MAX_TOTAL_GIFT_COUNT = 1000
+
+
+@app.before_request
+def require_local_capability():
+    supplied = request.headers.get("X-Local-Sender-Token", "")
+    if not hmac.compare_digest(supplied.encode("utf-8"), LOCAL_TOKEN.encode("utf-8")):
+        return jsonify({"success": False, "error": "unauthorized"}), 401
+    return None
+
+
+def enqueue_item(item):
+    with gift_queue_lock:
+        if len(gift_queue) >= MAX_QUEUE_DEPTH:
+            return False
+        gift_queue.append(item)
+        return True
+
+
+def drain_queue():
+    items = []
+    with gift_queue_lock:
+        while gift_queue:
+            items.append(gift_queue.popleft())
+    return items
+
+
+def cleanup_request_status(now=None):
+    current = now or time.time()
+    with request_lock:
+        expired = [
+            request_id for request_id, state in request_status.items()
+            if current - float(state.get("updated_ts") or state.get("created_ts") or current)
+            > REQUEST_STATUS_TTL_SECONDS
+        ]
+        for request_id in expired:
+            request_status.pop(request_id, None)
+        if len(request_status) >= MAX_REQUEST_STATUS:
+            return False
+    return True
 
 # Only the HTTP backend receives an explicit provider response code. The
 # Playwright backend remains available for diagnostics but cannot assert that a
@@ -93,14 +152,15 @@ def request_balance_check(timeout=5):
         request_id = str(time.time())
         result_event = threading.Event()
         result_storage = {"balance": None, "success": False}
-        gift_queue.append(
+        if not enqueue_item(
             {
                 "check_balance": True,
                 "request_id": request_id,
                 "result_event": result_event,
                 "result_storage": result_storage,
             }
-        )
+        ):
+            return None
         if not result_event.wait(timeout=timeout):
             return None
         if result_storage.get("success"):
@@ -198,7 +258,7 @@ if room_override_env:
     ROOM_ID = room_override_env
 if len(sys.argv) > 1 and sys.argv[1].strip():
     ROOM_ID = sys.argv[1].strip()
-COOKIE_FILE = config.get("登录配置", {}).get("Cookie文件路径", "cookie.txt")
+COOKIE_FILE = os.getenv("BILI_COOKIE_PATH") or config.get("登录配置", {}).get("Cookie文件路径", "cookie.txt")
 def resolve_cookie_path(cookie_path):
     if os.path.isabs(cookie_path):
         return cookie_path
@@ -232,49 +292,15 @@ def load_cookies_from_txt(file_path):
     - TSV导出/简化格式: name\tvalue\t(domain)\t(path)\t(expires)
     返回 Playwright context.add_cookies 所需的 cookie dict 列表。
     """
-    cookies = []
-    with open(file_path, "r", encoding="utf-8") as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split("\t")
-            if len(parts) >= 7 and parts[1] in ("TRUE", "FALSE") and parts[3] in ("TRUE", "FALSE"):
-                domain, _flag, path, _secure, _expiry, name, value = parts[:7]
-                cookies.append({"name": name, "value": value, "domain": domain, "path": path or "/"})
-                continue
-            if len(parts) >= 2:
-                name = parts[0]
-                value = parts[1]
-                domain = parts[2] if len(parts) >= 3 and parts[2] else ".bilibili.com"
-                path = parts[3] if len(parts) >= 4 and parts[3] else "/"
-                cookies.append({"name": name, "value": value, "domain": domain, "path": path})
-    return cookies
+    from cookie_store import load_playwright_cookies
+    return load_playwright_cookies(file_path)
 
 def load_cookie_kv_from_txt(file_path: str) -> Dict[str, str]:
     """
     从 cookie.txt / Netscape cookies.txt 读取 Cookie 键值对（给 requests 用）。
     """
-    cookie_kv: Dict[str, str] = {}
-    with open(file_path, "r", encoding="utf-8") as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split("\t")
-            # Netscape: domain\tTRUE/FALSE\tpath\tTRUE/FALSE\texpiry\tname\tvalue
-            if len(parts) >= 7 and parts[1] in ("TRUE", "FALSE") and parts[3] in ("TRUE", "FALSE"):
-                _domain, _flag, _path, _secure, _expiry, name, value = parts[:7]
-                if name:
-                    cookie_kv[name] = value
-                continue
-            # TSV 导出/简化: name\tvalue\t(domain)\t(path)\t(expires)
-            if len(parts) >= 2:
-                name = parts[0]
-                value = parts[1]
-                if name:
-                    cookie_kv[name] = value
-    return cookie_kv
+    from cookie_store import load_cookie_values
+    return load_cookie_values(file_path)
 
 def _make_requests_session(cookie_file: str) -> Tuple[requests.Session, Dict[str, str]]:
     cookie_kv = load_cookie_kv_from_txt(cookie_file)
@@ -401,6 +427,18 @@ def _send_gift_http(
     remaining = int(count)
     results: List[Dict[str, Any]] = []
 
+    def _provider_transaction_id(body: Dict[str, Any]) -> Optional[str]:
+        data = body.get("data") if isinstance(body, dict) else None
+        candidates = [body, data] if isinstance(data, dict) else [body]
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            for key in ("transaction_id", "transactionId", "order_id", "orderId", "tid"):
+                value = candidate.get(key)
+                if isinstance(value, (str, int)) and 1 <= len(str(value)) <= 200:
+                    return str(value)
+        return None
+
     def _post_sendgift(payload: Dict[str, Any]) -> Tuple[bool, int, Dict[str, Any], bool]:
         endpoint = "https://api.live.bilibili.com/xlive/revenue/v1/gift/sendGift"
         try:
@@ -444,7 +482,8 @@ def _send_gift_http(
                 ok, status_code, raw, outcome_uncertain = _post_sendgift(payload)
                 results.append({
                     "id": str(gift_id), "count": n, "success": ok,
-                    "status_code": status_code, "mode": "bag", "raw": raw,
+                    "status_code": status_code, "mode": "bag",
+                    "provider_transaction_id": _provider_transaction_id(raw),
                     "outcome_uncertain": outcome_uncertain,
                 })
                 if ok:
@@ -478,7 +517,8 @@ def _send_gift_http(
         ok, status_code, raw, outcome_uncertain = _post_sendgift(payload)
         results.append({
             "id": str(gift_id), "count": remaining, "success": ok,
-            "status_code": status_code, "mode": "direct", "raw": raw,
+            "status_code": status_code, "mode": "direct",
+            "provider_transaction_id": _provider_transaction_id(raw),
             "outcome_uncertain": outcome_uncertain,
         })
 
@@ -491,6 +531,10 @@ def _send_gift_http(
         "success": all(r.get("success") for r in results),
         "outcome_uncertain": any(r.get("outcome_uncertain") for r in results),
         "mode": "split",
+        "provider_transaction_ids": [
+            r.get("provider_transaction_id") for r in results
+            if r.get("provider_transaction_id")
+        ],
         "parts": results,
     }
 
@@ -530,8 +574,7 @@ def run_http_worker():
             special_items: List[Any] = []
             batch_requests: List[Dict[str, Any]] = []
 
-            while gift_queue:
-                item = gift_queue.pop(0)
+            for item in drain_queue():
                 if isinstance(item, dict):
                     if "gifts" in item:
                         batch_requests.append(item)
@@ -798,8 +841,31 @@ def send_gifts():
     wait = bool(data.get("wait", True))
     fast = bool(data.get("fast", False) or (not wait))
     confirm = str(data.get("confirm") or data.get("wait_mode") or "click").strip().lower()
-    if not gifts:
-        return jsonify({"error": "No gifts"}), 400
+    if not isinstance(gifts, list) or not 1 <= len(gifts) <= MAX_GIFTS_PER_REQUEST:
+        return jsonify({"error": "invalid_gifts"}), 400
+
+    normalized_gifts = []
+    total_count = 0
+    for item in gifts:
+        if isinstance(item, dict):
+            gift_id = str(item.get("id") or item.get("gift_id") or "")
+            count = item.get("count", 1)
+        else:
+            gift_id = str(item)
+            count = 1
+        if (not gift_id.isdigit() or gift_id not in ALLOWED_GIFT_IDS
+                or isinstance(count, bool) or not isinstance(count, int)
+                or count < 1 or count > MAX_GIFT_COUNT_PER_ITEM):
+            return jsonify({"error": "gift_not_allowed"}), 400
+        total_count += count
+        if total_count > MAX_TOTAL_GIFT_COUNT:
+            return jsonify({"error": "gift_limit_exceeded"}), 400
+        normalized_gifts.append({"id": gift_id, "count": count})
+    gifts = normalized_gifts
+    if confirm not in ("click", "api"):
+        return jsonify({"error": "invalid_confirmation_mode"}), 400
+    if not cleanup_request_status():
+        return jsonify({"error": "request_status_capacity_reached"}), 503
 
     # 简化：直接添加到队列，不考虑房间ID（硬送：不做余额/不足检查）
 
@@ -807,15 +873,6 @@ def send_gifts():
     request_id = str(uuid.uuid4())
     result_event = threading.Event()
     # total 兼容：既支持 ["33988","33988"] 也支持 [{"id":"33988","count":100}]
-    total_count = 0
-    try:
-        for item in gifts:
-            if isinstance(item, dict):
-                total_count += int(item.get("count") or 1)
-            else:
-                total_count += 1
-    except Exception:
-        total_count = len(gifts)
     result_storage = {
         "request_id": request_id,
         "total": total_count,
@@ -836,14 +893,17 @@ def send_gifts():
             "backend": THREESERVER_BACKEND,
             "confirm": confirm,
         }
-    gift_queue.append({
+    if not enqueue_item({
         "gifts": gifts,
         "request_id": request_id,
         "fast": fast,
         "confirm": confirm,
         "result_event": result_event if wait else None,
         "result_storage": result_storage
-    })
+    }):
+        with request_lock:
+            request_status.pop(request_id, None)
+        return jsonify({"error": "sender_queue_full"}), 503
 
     from datetime import datetime
     receive_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -877,11 +937,20 @@ def send_gifts():
                 "done_ts": st.get("done_ts"),
             }
         if all_success:
+            transaction_ids = []
+            for item in results_list:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("provider_transaction_id"):
+                    transaction_ids.append(str(item["provider_transaction_id"]))
+                transaction_ids.extend(str(value) for value in item.get("provider_transaction_ids", []) if value)
             return jsonify({
                 "success": True,
                 "status": "ok",
                 "request_id": request_id,
                 "results": result_storage["results"],
+                "provider_transaction_ids": list(dict.fromkeys(transaction_ids)),
+                "provider_transaction_id": transaction_ids[0] if len(transaction_ids) == 1 else None,
                 "timing": timing,
             })
         # Keep the provider result in JSON. Callers must not automatically
@@ -922,7 +991,8 @@ def send_danmaku():
     if not text:
         return jsonify({"error": "Empty text"}), 400
 
-    gift_queue.append({"danmaku": text})
+    if len(text) > 100 or not enqueue_item({"danmaku": text}):
+        return jsonify({"error": "sender_queue_full_or_invalid"}), 503
     print(f"收到弹幕请求: {text}")
     return jsonify({"status": "ok", "text": text})
 
@@ -963,12 +1033,13 @@ def get_current_balance_api():
         balance_result = {"balance": None, "success": False}
 
         # 请求浏览器线程查询余额
-        gift_queue.append({
+        if not enqueue_item({
             "check_balance": True,
             "request_id": request_id,
             "result_event": result_event,
             "result_storage": balance_result
-        })
+        }):
+            return jsonify({"success": False, "error": "sender_queue_full"}), 503
 
         # 等待结果（最多等待5秒）
         if result_event.wait(timeout=5):
@@ -1522,8 +1593,7 @@ def run_browser():
                 batch_requests = []
 
                 # 一次性处理队列中的所有项目
-                while gift_queue:
-                    item = gift_queue.pop(0)
+                for item in drain_queue():
 
                     # 分类处理
                     if isinstance(item, dict):

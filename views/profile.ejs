@@ -6,7 +6,7 @@
     <title><%= title %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="app-redesign page-profile" data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign page-profile" data-csrf-token="<%= csrfToken %>" data-game-catalog="<%= encodeURIComponent(JSON.stringify((gameCatalog || []).filter((game) => game.recordView))) %>" data-record-views="<%= encodeURIComponent(JSON.stringify(gameRecordViews || {})) %>" data-wish-configs="<%= encodeURIComponent(JSON.stringify(gamePublicWishConfigs || {})) %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
@@ -48,101 +48,25 @@
         <div class="profile-section">
             <h2><%= lang === 'zh' ? '游戏记录' : 'Game records' %></h2>
             <div class="game-stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon">01</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '知识问答' : 'Quiz Game' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.quiz.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '最高分' : 'Best Score' %>: <%= gameStats.quiz.bestScore %></span>
+                <% (gameCatalog || []).filter((game) => game.recordView && gameStats[game.id]).forEach((game) => { const stats = gameStats[game.id]; %>
+                    <div class="stat-card">
+                        <div class="stat-icon"><%= game.index %></div>
+                        <div class="stat-content">
+                            <h3><%= lang === 'zh' ? game.titleZh : game.titleEn %></h3>
+                            <div class="stat-numbers">
+                                <span class="stat-main"><%= lang === 'zh' ? '记录数' : 'Records' %>: <%= stats.total %></span>
+                                <% if (typeof stats.bestScore !== 'undefined') { %>
+                                    <span class="stat-sub"><%= lang === 'zh' ? '最高分' : 'Best Score' %>: <%= stats.bestScore %></span>
+                                <% } else if (typeof stats.wins !== 'undefined') { %>
+                                    <span class="stat-sub"><%= lang === 'zh' ? '成功' : 'Wins' %>: <%= stats.wins %></span>
+                                <% } else { %>
+                                    <span class="stat-sub"><%= lang === 'zh' ? '查看详细记录' : 'View detailed history' %></span>
+                                <% } %>
+                            </div>
+                            <button class="view-records-btn" data-records="<%= game.id %>"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                         </div>
-                        <button class="view-records-btn" data-records="quiz"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
                     </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">03</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '幸运老虎机' : 'Slot Machine' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.slot.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '中奖' : 'Wins' %>: <%= gameStats.slot.wins %> <%= lang === 'zh' ? '次' : 'times' %></span>
-                        </div>
-                        <button class="view-records-btn" data-records="slot"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">04</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '刮刮乐' : 'Scratch Card' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.scratch.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '中奖' : 'Wins' %>: <%= gameStats.scratch.wins %> <%= lang === 'zh' ? '次' : 'times' %></span>
-                        </div>
-                        <button class="view-records-btn" data-records="scratch"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">05</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '幸运祈愿' : 'Lucky Wish' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.wish.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '成功' : 'Success' %>: <%= gameStats.wish.wins %> <%= lang === 'zh' ? '次' : 'times' %></span>
-                        </div>
-                        <button class="view-records-btn" data-records="wish"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">06</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '惊喜盲盒' : 'Surprise Blind Box' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '总场次' : 'Total Rounds' %>: <%= gameStats.blindbox.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '记录以抽取为准' : 'Records by openings' %></span>
-                        </div>
-                        <button class="view-records-btn" data-records="blindbox"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">07</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '合石头' : 'Stone Match' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '记录数' : 'Records' %>: <%= gameStats.stone.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '最新操作以记录为准' : 'Latest operations on record' %></span>
-                        </div>
-                        <button class="view-records-btn" data-records="stone"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">08</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '翻卡牌' : 'Card Flip' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '记录数' : 'Records' %>: <%= gameStats.flip.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '翻牌与结算日志' : 'Flip & settlement logs' %></span>
-                        </div>
-                        <button class="view-records-btn" data-records="flip"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
-                    </div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">09</div>
-                    <div class="stat-content">
-                        <h3><%= lang === 'zh' ? '决斗挑战' : 'Duel Challenge' %></h3>
-                        <div class="stat-numbers">
-                            <span class="stat-main"><%= lang === 'zh' ? '记录数' : 'Records' %>: <%= gameStats.duel.total %></span>
-                            <span class="stat-sub"><%= lang === 'zh' ? '挑战记录' : 'Challenge records' %></span>
-                        </div>
-                        <button class="view-records-btn" data-records="duel"><%= lang === 'zh' ? '查看记录' : 'View Records' %></button>
-                    </div>
-                </div>
+                <% }); %>
             </div>
         </div>
 

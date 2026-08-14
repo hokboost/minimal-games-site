@@ -3,10 +3,8 @@
     if (!body) return;
 
     const route = window.location.pathname.replace(/^\/+|\/+$/g, '') || 'home';
-    const gameRoutes = new Set(['quiz', 'slot', 'scratch', 'dictation', 'spin', 'wish', 'blindbox', 'stone', 'flip', 'duel']);
 
     body.classList.add('app-redesign', `page-${route.replace(/[^a-z0-9-]/gi, '-')}`);
-    if (gameRoutes.has(route)) body.classList.add('game-page');
 
     document.addEventListener('click', (event) => {
         const disabledLink = event.target.closest('a[aria-disabled="true"]');

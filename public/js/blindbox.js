@@ -19,6 +19,7 @@
     let selectedTier = tierGrid.querySelector('.tier-card')?.dataset.tier || '';
     let selectedCost = Number(tierGrid.querySelector('.tier-card')?.dataset.cost || 0);
     let selectedCount = Number(countGroup.querySelector('.count-btn.active')?.dataset.count || 1);
+    let openInFlight = false;
 
     function updateSummary() {
         const totalCost = selectedCost * selectedCount;
@@ -61,6 +62,7 @@
     });
 
     openBtn.addEventListener('click', async () => {
+        if (openInFlight) return;
         if (!selectedTier || !selectedCost || !selectedCount) {
             return;
         }
@@ -72,6 +74,7 @@
             return;
         }
 
+        openInFlight = true;
         openBtn.disabled = true;
         summaryText.textContent = t('开启中...', 'Opening...');
 
@@ -135,6 +138,7 @@
             console.error('Blindbox error:', error);
             summaryText.textContent = t('开启失败，请稍后重试', 'Open failed, try later');
         } finally {
+            openInFlight = false;
             openBtn.disabled = false;
         }
     });
@@ -187,7 +191,7 @@
             for (const item of tier.items) {
                 const row = document.createElement('tr');
                 const name = document.createElement('td');
-                name.textContent = String(item?.name || item?.giftId || '');
+                name.textContent = String(item?.name || '');
                 const rate = document.createElement('td');
                 rate.textContent = formatPercent(item?.weight);
                 row.append(name, rate);

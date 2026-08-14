@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
+const baseUrl = require('./guard-test-target').enforceSafeTestTarget();
 
 /**
  * HMAC签名绕过测试
@@ -16,7 +16,6 @@ require("./guard-test-target").enforceSafeTestTarget();
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const baseUrl = process.argv[2] || process.env.TARGET_URL || 'http://localhost:3000';
 const apiKey = process.env.WINDOWS_API_KEY;
 const hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET;
 

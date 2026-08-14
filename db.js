@@ -15,6 +15,7 @@ const dbConfig = {
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000, // 快速失败，避免堆积
   statement_timeout: Math.min(60000, Math.max(1000, Number.parseInt(process.env.DATABASE_STATEMENT_TIMEOUT_MS, 10) || 12000)),
+  application_name: process.env.DB_APPLICATION_NAME || 'minimal-games-site',
   options: '-c timezone=UTC',
 };
 

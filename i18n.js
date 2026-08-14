@@ -583,7 +583,12 @@ function i18nMiddleware(req, res, next) {
     const validLang = ['zh', 'en'].includes(lang) ? lang : 'zh';
 
     // 设置cookie（7天过期）
-    res.cookie('lang', validLang, { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true });
+    res.cookie('lang', validLang, {
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production'
+    });
 
     // 提供翻译函数
     res.locals.lang = validLang;
@@ -605,11 +610,28 @@ function setupLanguageRoutes(app) {
     app.get('/set-language/:lang', (req, res) => {
         const { lang } = req.params;
         const validLang = ['zh', 'en'].includes(lang) ? lang : 'zh';
-        res.cookie('lang', validLang, { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true });
+        res.cookie('lang', validLang, {
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production'
+        });
 
-        // 重定向回referer或首页
-        const referer = req.get('referer') || '/';
-        res.redirect(referer);
+        let target = '/';
+        const referer = req.get('referer');
+        if (referer) {
+            try {
+                const origin = `${req.protocol}://${req.get('host')}`;
+                const parsed = new URL(referer, origin);
+                if (parsed.origin === origin && parsed.pathname.startsWith('/')
+                    && !parsed.pathname.startsWith('//')) {
+                    target = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+                }
+            } catch {
+                target = '/';
+            }
+        }
+        res.redirect(target);
     });
 }
 

@@ -1,167 +1,60 @@
-# 幸运祈愿功能开发总结
+# Wish Feature Reference
 
-## 🎯 功能概述
+This file describes the current implementation. The authoritative private
+runtime configuration is `domain/games/configuration.js`. Routes, templates,
+browser code, preview tooling, economics tests, and profile presentation consume
+the registry or its sanitized public projection; they must not copy prices or
+probabilities.
 
-新开发的幸运祈愿功能是一个类似抽卡/概率游戏的系统，让用户通过消费电币来祈愿获得稀有奖励"深海歌姬"。
+## Current configurations
 
-## 📊 核心参数
+| Type | Display name | Cost | Base success rate | Guarantee draw | Reward value |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `deepsea_singer` | 梦幻游乐园 | 487 | 1.40% | 148 | 30000 |
+| `sky_throne` | 飞天转椅 | 251 | 2.02% | 83 | 10000 |
+| `proposal` | 原地求婚 | 209 | 3.25% | 52 | 5200 |
+| `wonderland` | 梦游仙境 | 151 | 4.05% | 41 | 3000 |
+| `white_bride` | 纯白花嫁 | 77 | 4.60% | 34 | 1314 |
+| `crystal_ball` | 水晶球 | 67 | 5.50% | 32 | 1000 |
+| `bobo` | 啵啵 | 51 | 10.40% | 16 | 399 |
 
-- **祈愿价格**: 500电币/次
-- **成功率**: 1.4% 
-- **保底机制**: 147次失败后第148次必出
-- **奖励**: 深海歌姬 (价值30000电币)
+The UI may also show a guarantee-adjusted long-run rate. That number is not the
+base random probability for an individual non-guaranteed draw.
+Startup rejects any configured redeemable wish tier outside the 98%–99% RTP
+policy interval. The current tier values are approximately 98.15%–98.60%.
 
-## 🏗️ 数据库设计
+## Settlement rules
 
-### 1. 祈愿结果表 (wish_results)
-```sql
-- id: 主键
-- username: 用户名
-- cost: 祈愿花费 (固定500)
-- success: 是否成功 (boolean)
-- reward: 奖励名称
-- reward_value: 奖励价值
-- balance_before/after: 祈愿前后余额
-- wishes_count: 当前是第几次祈愿
-- is_guaranteed: 是否保底出货
-- game_details: 游戏详情(JSON)
-- created_at: 创建时间
-```
+- Progress is independent per user and gift type.
+- A normal draw succeeds with the configured base rate. The configured
+  guarantee draw succeeds regardless of the random result.
+- Success resets consecutive failures; failure increments them.
+- Single and ten-draw requests lock the user's balance and progress in one
+  PostgreSQL transaction. Cost, ledger entries, results, inventory, progress,
+  session summary, and HTTP idempotency snapshot commit together.
+- Rewards are stored in `wish_inventory`. Delivery is a separate durable task;
+  missing or ambiguous Bilibili confirmation never causes an automatic refund.
+- Client-supplied user names, costs, rates, rewards, balances, and results are
+  not trusted.
 
-### 2. 祈愿进度表 (wish_progress) 
-```sql
-- username: 用户名 (唯一)
-- total_wishes: 总祈愿次数
-- consecutive_fails: 连续失败次数
-- last_success_at: 最后成功时间
-- total_spent: 总花费
-- total_rewards_value: 总奖励价值
-- created_at/updated_at: 时间戳
-```
+## Interfaces
 
-## 🔌 API接口
+- `POST /api/wish/play`: one draw.
+- `POST /api/wish-batch`: exactly ten draws.
+- `GET /api/wish/progress`: progress for one configured gift type.
+- `GET /api/wish/history`: paginated settled history.
+- `GET /api/wish/backpack`: stored and delivery-pending rewards.
+- `POST /api/wish/backpack/send`: enqueue one stored reward.
+- `POST /api/wish/simulate`: administrator-only statistical simulation; it
+  does not settle money or rewards.
 
-### 1. POST `/api/wish/play` - 执行祈愿
-**请求**: 无需参数 (从session获取用户)
-**响应**:
-```json
-{
-  "success": true,
-  "wishSuccess": false,
-  "reward": null,
-  "rewardValue": 0,
-  "newBalance": 4500,
-  "progress": {
-    "total_wishes": 1,
-    "consecutive_fails": 1,
-    "progress_percentage": "0.7",
-    "wishes_until_guarantee": 147
-  },
-  "isGuaranteed": false
-}
-```
+All write interfaces require login, authorization, CSRF validation,
+`Idempotency-Key`, shared PostgreSQL rate limits, and paid-action concurrency
+protection where money is involved.
 
-### 2. GET `/api/wish/progress` - 获取祈愿进度
-**响应**:
-```json
-{
-  "success": true,
-  "progress": {
-    "total_wishes": 10,
-    "consecutive_fails": 10,
-    "total_spent": 5000,
-    "total_rewards_value": 0,
-    "progress_percentage": "6.8",
-    "wishes_until_guarantee": 138,
-    "next_is_guaranteed": false
-  }
-}
-```
+## Database and deployment
 
-### 3. GET `/api/wish/history` - 获取祈愿历史
-支持分页，返回祈愿记录列表
-
-## 🎮 前端功能
-
-### 1. 祈愿界面更新
-- 显示"深海歌姬 30000电币"目标
-- 进度条显示保底进度 (0/148)
-- 即将保底时进度条变为金色
-
-### 2. 祈愿按钮
-- 单次祈愿: 500电币
-- 保留了原有的多次祈愿按钮 (可选择保留或删除)
-
-### 3. 结果展示
-- 成功: 显示获得的奖励和价值
-- 失败: 鼓励继续尝试
-- 保底成功时特别标注"保底出货"
-
-## 🔧 核心逻辑
-
-### 1. 祈愿成功判定
-```javascript
-const isGuaranteed = consecutive_fails >= 147;
-const randomSuccess = Math.random() < 0.014; // 1.4%
-const success = isGuaranteed || randomSuccess;
-```
-
-### 2. 进度更新
-- 成功时: `consecutive_fails = 0`
-- 失败时: `consecutive_fails += 1`
-- 记录总祈愿次数和花费
-
-### 3. 余额处理
-- 使用 BalanceLogger 确保资金安全
-- 先扣除500电币
-- 成功时发放30000电币奖励
-
-## 📁 相关文件
-
-### 后端文件
-- `server.js`: 添加了祈愿API接口 (2527行-2763行)
-- `migrations/create_wish_tables.sql`: 数据库表创建脚本
-- `setup-wish-tables.js`: 数据库初始化脚本
-
-### 前端文件  
-- `views/wish.ejs`: 祈愿页面更新
-  - 新增深海歌姬展示
-  - 更新进度条逻辑
-  - 重写JavaScript API调用
-
-## 🚀 部署步骤
-
-1. **创建数据库表**:
-   ```bash
-   node setup-wish-tables.js
-   ```
-
-2. **重启服务器**:
-   ```bash
-   npm restart
-   ```
-
-3. **测试功能**:
-   - 访问 `/wish` 页面
-   - 确保有足够电币余额 (500+)
-   - 点击祈愿按钮测试
-
-## ✅ 功能特点
-
-1. **简化设计**: 删除了复杂的概率控制，只有固定1.4%成功率
-2. **保底机制**: 确保用户最多花费74500电币 (148×500) 必定获得30000电币奖励
-3. **完整记录**: 保存每次祈愿的详细记录
-4. **用户友好**: 清晰的进度显示和结果反馈
-5. **资金安全**: 使用现有的余额系统和日志记录
-
-## 🎉 开发完成
-
-幸运祈愿功能已完全开发完成，包括:
-- ✅ 数据库表设计和创建
-- ✅ 后端API接口开发  
-- ✅ 前端页面更新
-- ✅ 1.4%成功率和保底机制
-- ✅ 完整的祈愿记录系统
-- ✅ 深海歌姬奖励展示
-
-功能已准备就绪，可以投入使用！
+Schema changes are applied only through tracked files in `migrations/` and
+`npm run migrate`. Do not restore the removed one-off `setup-wish-tables.js`
+workflow. Fresh-schema, historical-upgrade, idempotency, browser, concurrency,
+and process-failure tests are part of the repository test suite.

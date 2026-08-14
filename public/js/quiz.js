@@ -3,16 +3,18 @@
     const t = (zh, en) => (lang === 'zh' ? zh : en);
     const translateServerMessage = window.translateServerMessage || ((message) => message);
     const { username } = document.body.dataset;
+    const roundCost = Number(document.body.dataset.roundCost) || 10;
     let csrf = document.body.dataset.csrfToken || '';
     let currentQuestions = [];
     let currentAnswers = [];
     let questionRequests = new Map();
     let questionIndex = 0;
     let timer;
+    let startInFlight = false;
     let submitInFlight = false;
     let questionLocked = false;
     let startTime;
-    const totalQuestions = 15;
+    const totalQuestions = Number(document.body.dataset.questionCount) || 15;
     const totalTime = 30;
     let timeLeft = totalTime;
 
@@ -53,15 +55,18 @@
     }
 
     async function startQuiz() {
+        if (startInFlight) return;
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
-        if (currentBalance < 10) {
+        if (currentBalance < roundCost) {
             alert(t(
-                '积分不足！需要10积分才能开始答题。仅供娱乐，虚拟积分不可兑换真实货币。',
-                'Insufficient points! You need 10 points to start. For entertainment only, virtual points cannot be exchanged for real money.'
+                `积分不足！需要${roundCost}积分才能开始答题。仅供娱乐，虚拟积分不可兑换真实货币。`,
+                `Insufficient points! You need ${roundCost} points to start. For entertainment only, virtual points cannot be exchanged for real money.`
             ));
             return;
         }
 
+        startInFlight = true;
+        startBtn.disabled = true;
         try {
             const response = await window.idempotentFetch('/api/quiz/start', {
                 method: 'POST',
@@ -83,6 +88,9 @@
             console.error('Start quiz error:', error);
             alert(t('网络错误，请稍后重试', 'Network error, please try again'));
             return;
+        } finally {
+            startInFlight = false;
+            startBtn.disabled = false;
         }
 
         document.getElementById('user-section').hidden = true;
@@ -398,7 +406,7 @@
         const restartBtn = document.createElement('button');
         restartBtn.type = 'button';
         restartBtn.className = 'result-action-btn result-action-restart';
-        restartBtn.textContent = t('再来一次 (消耗10积分)', 'Play Again (Cost 10 points)');
+        restartBtn.textContent = t(`再来一次 (消耗${roundCost}积分)`, `Play Again (Cost ${roundCost} points)`);
         restartBtn.addEventListener('click', restartQuiz);
         const homeBtn = document.createElement('button');
         homeBtn.type = 'button';

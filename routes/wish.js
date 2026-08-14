@@ -5,7 +5,7 @@ module.exports = function registerWishRoutes(app, deps) {
     const {
         pool,
         BalanceLogger,
-        getWishConfig,
+        gameRegistry,
         requireLogin,
         requireAuthorized,
         requireCSRF,
@@ -15,6 +15,10 @@ module.exports = function registerWishRoutes(app, deps) {
         enqueueWishInventorySend,
         paidActionConcurrencyGuard
     } = deps;
+    if (!gameRegistry || typeof gameRegistry.getWishConfig !== 'function') {
+        throw new TypeError('Wish routes require the game registry');
+    }
+    const { getWishConfig } = gameRegistry;
     const userActionRateLimit = requireFunction(security, 'userActionRateLimit', 'security middleware');
     const basicRateLimit = requireFunction(security, 'basicRateLimit', 'security middleware');
     const readHeavyRateLimit = requireFunction(security, 'readHeavyRateLimit', 'security middleware');
@@ -52,7 +56,8 @@ module.exports = function registerWishRoutes(app, deps) {
                 username,
                 balance: parseMoney(result.rows[0].balance, 'user balance', { min: 0 }),
                 csrfToken: req.session.csrfToken,
-                canWishTest: req.session.user.is_admin === true
+                canWishTest: req.session.user.is_admin === true,
+                wishConfigs: gameRegistry.getPublicWishConfigs()
             });
         } catch (dbError) {
             console.error('Database query error:', dbError);

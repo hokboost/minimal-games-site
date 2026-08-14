@@ -8,7 +8,7 @@ Express/EJS 小游戏站点，使用 PostgreSQL 保存账户、整数余额、�
 - PostgreSQL 14+
 - Windows 礼物工作器另需 Python 3.10+ 和 `workers/bilibili/requirements.txt`
 
-复制 `.env.example` 中的变量到部署平台或本机未跟踪的 `.env`。生产环境必须提供数据库凭据、`SESSION_SECRET`、`WINDOWS_API_KEY` 和 `GIFT_TASKS_HMAC_SECRET`；建议另外配置 `LOG_HASH_SECRET` 与 `ADMIN_TOTP_SECRET`。密钥至少使用 32 字节随机值，不能提交到 Git。
+复制 `.env.example` 中的变量到部署平台或本机未跟踪的 `.env`。生产环境必须提供数据库凭据、各用途独立密钥、强制管理员 TOTP、readiness token，以及 `WORKER_CREDENTIALS_JSON` 中逐 worker 的独立凭证。Windows worker 只配置自己的 `WORKER_CREDENTIAL_ID`、`WORKER_API_KEY` 和 `WORKER_HMAC_SECRET`。所有密钥至少使用 32 字节随机值，不能提交到 Git。
 
 ```bash
 npm ci
@@ -16,7 +16,26 @@ npm run migrate
 npm start
 ```
 
-服务就绪检查为 `GET /ready`。本机默认地址是 `http://localhost:3000`。
+`npm run migrate` 必须在一次性迁移任务中使用 schema owner/migrator 身份执行；Web 服务随后改用无 DDL 权限的 runtime 身份启动，且 Web 环境中不得保留 migrator 凭证。生产 Web 启动只核对迁移文件及 SHA-256，不会自动改 schema。角色授权示例见 `docs/DATABASE_ROLES.md`。
+
+公开就绪检查为 `GET /ready`，仅返回通用状态；带 `X-Readiness-Token` 的 `GET /internal/ready` 才返回内部诊断。本机默认地址是 `http://localhost:3000`。
+
+## 扩展游戏与架构
+
+游戏参数、目录信息、RTP 校验、随机抽取、个人记录适配器已经集中到
+`domain/games/`。可兑换随机玩法的政策区间是 **98%–99%**，规划目标为
+98.5%；注册表在启动阶段执行精确经济模型校验，超出区间时拒绝启动。
+Flip 与 Stone 还会校验所有玩家策略中的最高 RTP，而不只校验“期望利润
+最优”的策略。
+
+新增游戏时不要在路由、EJS、浏览器脚本和测试中复制成本或概率；添加一份
+不可变私有配置、一个目录描述符、纯经济模型/引擎和可选记录适配器，再通过
+服务器公开经过裁剪的前端配置。后台周期任务统一由应用生命周期管理器启动和
+停止，模块加载不得隐式创建 timer。
+
+完整边界、扩展步骤、事务规则和渐进迁移计划见
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)；当前参数、精确结果和边界
+测试说明见 [`docs/GAME_ECONOMICS.md`](docs/GAME_ECONOMICS.md)。
 
 ## 资金与状态
 
@@ -39,7 +58,9 @@ node windows-gift-listener.js
 
 Cookie、Bilibili 配置和浏览器状态必须放在仓库外。默认使用仓库内已版本化并校验 SHA-256 的 Python 脚本；配置外部脚本路径时，内容必须与当前版本完全一致。PK 回报默认保存在 `private/worker-spool/pk-reports`，也可用 `PK_REPORT_SPOOL_DIR` 指向受限目录。
 
-工作器强制使用 `THREESERVER_BACKEND=http`，只有收到 Bilibili API 的明确成功码才会结算成功。第三方超时、无效响应或仅完成页面点击一律进入 `uncertain`，不得自动重试或退款。
+工作器强制使用 `THREESERVER_BACKEND=http`。普通礼物在任务仍为 `claimed` 时按目标房间启动并确认本地 sender，确认失败可安全退款；发起 `/send` 后只有同时收到 Bilibili 明确成功码和唯一 provider transaction ID 才会结算成功。第三方超时、无效响应、缺少可核对回执或仅完成页面点击一律进入 `uncertain`，不得切换到浏览器 sender 自动重试或退款。
+
+本机 `threeserver.py` 还要求每次进程启动使用新的 `THREESERVER_LOCAL_TOKEN`，并通过 `THREESERVER_ALLOWED_GIFT_IDS` 指定允许的数字礼物 ID。由 Windows listener 启动的普通礼物及 PK sender 都会使用动态本地端口，并自动生成 token 和允许列表。所有 endpoint（包括状态接口）均要求 `X-Local-Sender-Token`。
 
 更多协议和恢复说明见 `workers/bilibili/README.md`。
 
@@ -47,6 +68,7 @@ Cookie、Bilibili 配置和浏览器状态必须放在仓库外。默认使用�
 
 ```bash
 npm run test:all
+node scripts/build-release.js
 ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
 npm audit --audit-level=high
 python -m compileall -q bilibili_gift_sender.py workers/bilibili
@@ -58,7 +80,7 @@ python -m compileall -q bilibili_gift_sender.py workers/bilibili
 
 1. 停止 Windows 工作器，确认 `/api/workers/drain` 成功。
 2. 使用 `pg_dump` 创建可恢复备份，并在隔离数据库演练恢复。
-3. 运行 `npm run migrate`，检查迁移输出及资金/状态不变量。
+3. 在不向 Web 暴露 migrator 凭证的一次性任务中运行 `npm run migrate`，检查迁移输出及资金/状态不变量。
 4. 部署 Web 服务，等待 `/ready` 返回 `ready: true`。
 5. 重启工作器，确认 `worker_heartbeats` 的协议版本、版本号和时间持续更新。
 6. 检查管理员礼物和 PK 对账队列，不得批量自动释放不确定资金。

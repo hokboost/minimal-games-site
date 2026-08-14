@@ -22,6 +22,12 @@
                 <input type="password" name="password" placeholder="<%= t.auth.password %>" required />
             </div>
 
+            <div class="form-group">
+                <input type="text" name="totpCode" inputmode="numeric" pattern="[0-9]{6}"
+                       autocomplete="one-time-code"
+                       placeholder="<%= lang === 'zh' ? '管理员动态验证码（普通用户留空）' : 'Admin authenticator code (users leave blank)' %>" />
+            </div>
+
             <button type="submit" class="btn-primary"><%= t.auth.loginButton %></button>
         </form>
 

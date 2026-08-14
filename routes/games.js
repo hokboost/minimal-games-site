@@ -17,19 +17,35 @@ module.exports = function registerGameRoutes(app, deps) {
         getStoneState,
         saveStoneState,
         logStoneAction,
-        stoneRewards,
-        stoneReplaceCosts,
-        flipCosts,
-        flipCashoutRewards,
+        gameRegistry,
         createFlipBoard,
         getFlipState,
         saveFlipState,
         logFlipAction,
-        duelRewards,
-        calculateDuelCost,
         paidActionConcurrencyGuard,
         giftConfig
     } = deps;
+    if (!gameRegistry?.random || typeof gameRegistry.createBlindboxRuntime !== 'function') {
+        throw new TypeError('Game routes require the game registry');
+    }
+    const {
+        DUEL_CONFIG,
+        FLIP_CONFIG,
+        QUIZ_CONFIG,
+        SCRATCH_CONFIG,
+        SLOT_CONFIG,
+        STONE_CONFIG,
+        calculateDuelCost,
+        createBlindboxRuntime,
+        duelMinimumPower,
+        projectBlindboxRewards
+    } = gameRegistry;
+    const stoneRewards = STONE_CONFIG.rewards;
+    const stoneReplaceCosts = STONE_CONFIG.replaceCosts;
+    const stoneInitialCost = STONE_CONFIG.initialCost;
+    const flipCosts = FLIP_CONFIG.costs;
+    const flipCashoutRewards = FLIP_CONFIG.cashoutRewards;
+    const duelRewards = DUEL_CONFIG.rewards;
     const userActionRateLimit = requireFunction(security, 'userActionRateLimit', 'security middleware');
     const basicRateLimit = requireFunction(security, 'basicRateLimit', 'security middleware');
     const readHeavyRateLimit = requireFunction(security, 'readHeavyRateLimit', 'security middleware');
@@ -45,10 +61,13 @@ module.exports = function registerGameRoutes(app, deps) {
     const { createHash, randomInt, randomBytes } = require('crypto');
     const { parseMoney } = require('../lib/integer-money');
     const { randomArrayIndex, randomArrayItem } = require('../lib/random-index');
+    const { pickWeightedOutcome, stochasticRoundMoney } = gameRegistry.random;
+    const { reachTestFaultPoint } = require('../lib/test-fault-injection');
     const fs = require('fs');
     const path = require('path');
     const { pinyin } = require('pinyin');
-    const { PNG } = require('pngjs');
+    const slotOutcomes = SLOT_CONFIG.outcomes;
+    const { normalizePng } = require('../lib/png-normalizer');
     const randomFloat = () => randomInt(0, 1000000) / 1000000;
     const loadUserBalance = async (username) => {
         const result = await pool.query(
@@ -60,7 +79,7 @@ module.exports = function registerGameRoutes(app, deps) {
         }
         return parseMoney(result.rows[0].balance, 'user balance', { min: 0 });
     };
-    const QUIZ_QUESTION_COUNT = 15;
+    const QUIZ_QUESTION_COUNT = QUIZ_CONFIG.questionCount;
     const quizBankVersion = createHash('sha256')
         .update(JSON.stringify(questions))
         .digest('hex');
@@ -317,130 +336,11 @@ module.exports = function registerGameRoutes(app, deps) {
         return { level, setId, question, questionToken, bankVersion };
     };
 
-    const blindboxTiers = [
-        { key: 'starmoon', nameZh: '星月盲盒', nameEn: 'Star Moon Box', cost: 50 },
-        { key: 'heart', nameZh: '心动盲盒', nameEn: 'Heart Box', cost: 150 },
-        { key: 'supreme', nameZh: '至尊盲盒', nameEn: 'Supreme Box', cost: 1000 }
-    ];
-    const blindboxCounts = [1, 10, 50];
-    const blindboxConfigs = {
-        starmoon: {
-            cost: 50,
-            items: [
-                { giftId: '34999', name: '原地求婚', weight: 0.0002 },
-                { giftId: '31122', name: '水晶球', weight: 0.0005 },
-                { giftId: '33668', name: '啵啵', weight: 0.003 },
-                { giftId: '31053', name: '告白花束', weight: 0.005 },
-                { giftId: '34315', name: '喜欢你', weight: 0.0664 },
-                { giftId: '31044', name: '情书', weight: 0.7249 },
-                { giftId: '34500', name: '你真好看', weight: 0.2 }
-            ]
-        },
-        heart: {
-            cost: 150,
-            items: [
-                { giftId: '31028', name: '探索者启航', weight: 0.0004 },
-                { giftId: '31122', name: '水晶球', weight: 0.02 },
-                { giftId: '33668', name: '啵啵', weight: 0.05 },
-                { giftId: '31053', name: '告白花束', weight: 0.184876 },
-                { giftId: '34315', name: '喜欢你', weight: 0.544724 },
-                { giftId: '31044', name: '情书', weight: 0.2 }
-            ]
-        },
-        supreme: {
-            cost: 1000,
-            items: [
-                { giftId: '34998', name: '小电视飞船', weight: 0.003 },
-                { giftId: '34381', name: '飞屋环游', weight: 0.085 },
-                { giftId: '31122', name: '水晶球', weight: 0.3 },
-                { giftId: '33668', name: '啵啵', weight: 0.3162 },
-                { giftId: '31053', name: '告白花束', weight: 0.2958 }
-            ]
-        }
-    };
-
-    const loadBlindboxGiftMap = () => {
-        const poolConfig = giftConfig?.礼物池配置 || {};
-        return Object.entries(poolConfig).reduce((acc, [giftId, info]) => {
-            const name = Array.isArray(info) ? info[0] : info?.name;
-            const value = Array.isArray(info) ? info[1] : info?.value;
-            const numericValue = Number(value);
-            if (!/^\d+$/.test(String(giftId))
-                || typeof name !== 'string'
-                || !name.trim()
-                || !Number.isSafeInteger(numericValue)
-                || numericValue < 0) {
-                throw new Error(`Invalid blindbox gift configuration: ${giftId}`);
-            }
-            acc[giftId] = {
-                name: name.trim(),
-                value: numericValue
-            };
-            return acc;
-        }, Object.create(null));
-    };
-
-    const blindboxGiftMap = loadBlindboxGiftMap();
-    if (Object.keys(blindboxGiftMap).length === 0) {
-        throw new Error('Blindbox gift pool configuration is empty');
-    }
-
-    const buildBlindboxPool = (tierConfig) => {
-        if (!tierConfig || !Number.isSafeInteger(tierConfig.cost) || tierConfig.cost <= 0
-            || !Array.isArray(tierConfig.items) || tierConfig.items.length === 0) {
-            throw new Error('Invalid blindbox tier configuration');
-        }
-
-        const seenGiftIds = new Set();
-        return tierConfig.items.map((item) => {
-            const giftId = String(item?.giftId || '');
-            const gift = blindboxGiftMap[giftId];
-            const weight = Number(item?.weight);
-            if (!/^\d+$/.test(giftId) || !gift) {
-                throw new Error(`Blindbox reward is missing from gift pool configuration: ${giftId}`);
-            }
-            if (seenGiftIds.has(giftId)) {
-                throw new Error(`Duplicate blindbox reward in tier: ${giftId}`);
-            }
-            if (!Number.isFinite(weight) || weight <= 0) {
-                throw new Error(`Invalid blindbox reward weight: ${giftId}`);
-            }
-            const weightUnits = Math.round(weight * 1_000_000);
-            if (!Number.isSafeInteger(weightUnits) || weightUnits < 1
-                || Math.abs(weight - (weightUnits / 1_000_000)) > Number.EPSILON) {
-                throw new Error(`Blindbox reward weight requires more than six decimals: ${giftId}`);
-            }
-            seenGiftIds.add(giftId);
-            return {
-                giftId,
-                name: item.name || gift.name,
-                value: gift.value,
-                weight,
-                weightUnits
-            };
-        });
-    };
-
-    const pickBlindboxReward = (pool) => {
-        const totalWeight = pool.reduce((sum, item) => sum + item.weightUnits, 0);
-        if (totalWeight !== 1_000_000) return null;
-        const roll = randomInt(0, totalWeight);
-        let acc = 0;
-        for (const item of pool) {
-            acc += item.weightUnits;
-            if (roll < acc) return item;
-        }
-        throw new Error('Blindbox random draw exceeded configured weight');
-    };
-
-    const blindboxPools = new Map(Object.entries(blindboxConfigs).map(([key, config]) => {
-        const configuredPool = buildBlindboxPool(config);
-        const totalWeight = configuredPool.reduce((sum, item) => sum + item.weightUnits, 0);
-        if (configuredPool.length === 0 || totalWeight !== 1_000_000) {
-            throw new Error(`Blindbox tier ${key} weights must total 1`);
-        }
-        return [key, configuredPool];
-    }));
+    const blindboxRuntime = createBlindboxRuntime(giftConfig);
+    const blindboxTiers = blindboxRuntime.tiers;
+    const blindboxCounts = blindboxRuntime.counts;
+    const blindboxConfigs = blindboxRuntime.configs;
+    const blindboxPools = blindboxRuntime.pools;
 
     app.get('/quiz', requireLogin, requireAuthorized, basicRateLimit, async (req, res) => {
         try {
@@ -454,7 +354,8 @@ module.exports = function registerGameRoutes(app, deps) {
             return res.render('quiz', {
                 username,
                 balance,
-                csrfToken: req.session.csrfToken
+                csrfToken: req.session.csrfToken,
+                quizConfig: gameRegistry.getPublicQuizConfig()
             });
         } catch (error) {
             console.error('Quiz page balance load failed:', error);
@@ -522,9 +423,9 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const balanceResult = await BalanceLogger.updateBalance({
                 username,
-                amount: -10,
+                amount: -QUIZ_CONFIG.roundCost,
                 operationType: 'quiz_start',
-                description: '开始答题游戏',
+                description: `开始答题游戏：${QUIZ_CONFIG.roundCost} 积分`,
                 ipAddress: req.clientIP,
                 userAgent: req.get('User-Agent'),
                 client,
@@ -565,7 +466,7 @@ module.exports = function registerGameRoutes(app, deps) {
             ]);
             const responseBody = {
                 success: true,
-                message: '游戏开始，已扣除10积分',
+                message: `游戏开始，已扣除${QUIZ_CONFIG.roundCost}积分`,
                 newBalance: balanceResult.balance,
                 quizSessionId: sessionId,
                 expectedQuestionCount: QUIZ_QUESTION_COUNT,
@@ -602,7 +503,8 @@ module.exports = function registerGameRoutes(app, deps) {
             res.render('slot', {
                 username,
                 balance,
-                csrfToken: req.session.csrfToken
+                csrfToken: req.session.csrfToken,
+                slotConfig: gameRegistry.getPublicSlotConfig()
             });
         } catch (error) {
             console.error('Slot page error:', error);
@@ -627,7 +529,8 @@ module.exports = function registerGameRoutes(app, deps) {
             res.render('scratch', {
                 username,
                 balance,
-                csrfToken: req.session.csrfToken
+                csrfToken: req.session.csrfToken,
+                scratchConfig: gameRegistry.getPublicScratchConfig()
             });
         } catch (error) {
             console.error('Scratch page error:', error);
@@ -677,7 +580,8 @@ module.exports = function registerGameRoutes(app, deps) {
         const username = req.session.user.username;
         res.render('spin', {
             username,
-            csrfToken: req.session.csrfToken
+            csrfToken: req.session.csrfToken,
+            spinConfig: gameRegistry.getPublicSpinConfig()
         });
     });
 
@@ -695,7 +599,8 @@ module.exports = function registerGameRoutes(app, deps) {
             res.render('stone', {
                 username,
                 balance,
-                csrfToken: req.session.csrfToken
+                csrfToken: req.session.csrfToken,
+                stoneConfig: gameRegistry.getPublicStoneConfig()
             });
         } catch (error) {
             console.error('Stone page error:', error);
@@ -739,7 +644,8 @@ module.exports = function registerGameRoutes(app, deps) {
             res.render('duel', {
                 username,
                 balance,
-                csrfToken: req.session.csrfToken
+                csrfToken: req.session.csrfToken,
+                duelConfig: gameRegistry.getPublicDuelConfig()
             });
         } catch (error) {
             console.error('Duel page error:', error);
@@ -1031,7 +937,20 @@ module.exports = function registerGameRoutes(app, deps) {
                 );
             }
 
-            const reward = correctCount * 2;
+            const dailyRewardCap = QUIZ_CONFIG.dailyRewardCap;
+            const rewardedToday = await client.query(`
+                SELECT COALESCE(SUM(amount), 0)::BIGINT AS total
+                FROM balance_logs
+                WHERE username = $1
+                  AND operation_type = 'quiz_reward'
+                  AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai')
+                      AT TIME ZONE 'Asia/Shanghai'
+            `, [username]);
+            const rewardAlreadyGranted = Math.max(0, Number(rewardedToday.rows[0]?.total || 0));
+            const reward = Math.min(
+                correctCount * QUIZ_CONFIG.rewardPerCorrect,
+                Math.max(0, dailyRewardCap - rewardAlreadyGranted)
+            );
             let newBalance;
 
             if (reward > 0) {
@@ -1039,7 +958,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username,
                     amount: reward,
                     operationType: 'quiz_reward',
-                    description: `答题奖励：${correctCount}题正确 × 2积分`,
+                    description: `答题奖励（每日最多${dailyRewardCap}积分）：本次 ${reward} 积分`,
                     gameData: {
                         score: correctCount,
                         total: normalizedAnswers.length,
@@ -1700,21 +1619,21 @@ module.exports = function registerGameRoutes(app, deps) {
                     return res.status(400).json({ success: false, message: '图片尺寸无效或过大' });
                 }
                 try {
-                    const decoded = PNG.sync.read(imageBuffer, { checkCRC: true });
-                    if (decoded.width !== headerWidth || decoded.height !== headerHeight) {
-                        throw new Error('PNG dimensions changed while decoding');
-                    }
-                    const reencoded = PNG.sync.write(decoded, { colorType: 6 });
-                    if (reencoded.length > 1.5 * 1024 * 1024) {
-                        return res.status(400).json({ success: false, message: '处理后的图片超过 1.5MB' });
-                    }
+                    const normalized = await normalizePng(imageBuffer, {
+                        expectedWidth: headerWidth,
+                        expectedHeight: headerHeight
+                    });
+                    const reencoded = normalized.buffer;
                     validatedImage = {
                         buffer: reencoded,
-                        width: decoded.width,
-                        height: decoded.height,
+                        width: normalized.width,
+                        height: normalized.height,
                         sha256: createHash('sha256').update(reencoded).digest('hex')
                     };
                 } catch (error) {
+                    if (error.code === 'PNG_QUEUE_FULL') {
+                        return res.status(503).json({ success: false, message: '图片处理繁忙，请稍后重试' });
+                    }
                     return res.status(400).json({ success: false, message: 'PNG 图片无法解码' });
                 }
             } else if (imageData !== undefined && imageData !== null && imageData !== '') {
@@ -1969,9 +1888,13 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
-            if (!Number.isFinite(betValue) || !Number.isInteger(betValue) || betValue < 1 || betValue > 1000) {
+            if (!Number.isFinite(betValue) || !Number.isInteger(betValue)
+                || betValue < SLOT_CONFIG.minimumBet || betValue > SLOT_CONFIG.maximumBet) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ success: false, message: '投注金额必须在1-1000积分之间' });
+                return res.status(400).json({
+                    success: false,
+                    message: `投注金额必须在${SLOT_CONFIG.minimumBet}-${SLOT_CONFIG.maximumBet}积分之间`
+                });
             }
 
             const betResult = await BalanceLogger.updateBalance({
@@ -1992,17 +1915,8 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const currentBalance = betResult.balance;
 
-            const outcomes = [
-                { type: '不亏不赚', multiplier: 1.0 },
-                { type: '×2', multiplier: 2.0 },
-                { type: '归零', multiplier: 0.0 },
-                { type: '×1.5', multiplier: 1.5 },
-                { type: '×0.5', multiplier: 0.5 }
-            ];
-
-            const outcome = randomArrayItem(outcomes);
-
-            const payout = Math.floor(betValue * outcome.multiplier);
+            const outcome = pickWeightedOutcome(slotOutcomes, randomInt);
+            const payout = stochasticRoundMoney(betValue * outcome.multiplier, randomInt);
 
             const baseAmounts = [50, 100, 150, 200];
             const amounts = baseAmounts.map((num) => Math.max(1, Math.round(num * betValue / 100)));
@@ -2077,7 +1991,10 @@ module.exports = function registerGameRoutes(app, deps) {
                 resultTrace
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
+            await reachTestFaultPoint(req, 'slot.before_commit');
             await client.query('COMMIT');
+
+            if (await reachTestFaultPoint(req, 'slot.after_commit')) return;
 
             res.json(responseBody);
 
@@ -2104,11 +2021,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 return res.status(403).json({ success: false, message: '用户名不匹配' });
             }
 
-            const validTiers = [
-                { cost: 5, winCount: 5, userCount: 5 },
-                { cost: 10, winCount: 5, userCount: 10 },
-                { cost: 100, winCount: 5, userCount: 20 }
-            ];
+            const validTiers = SCRATCH_CONFIG.tiers;
 
             const selectedTier = validTiers.find(t => t.cost === tier);
             if (!selectedTier) {
@@ -2134,23 +2047,11 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const currentBalance = betResult.balance;
 
-            const random = randomInt(0, 10000);
-            let payout = 0;
-            let outcomeType = '';
-
-            if (random < 5000) {
-                payout = tier;
-                outcomeType = `中奖 ${tier} 积分`;
-            } else if (random < 7000) {
-                payout = tier * 2;
-                outcomeType = `大奖 ${payout} 积分`;
-            } else if (random < 7100) {
-                payout = tier * 4;
-                outcomeType = `超级大奖 ${payout} 积分`;
-            } else {
-                payout = 0;
-                outcomeType = '未中奖';
-            }
+            const scratchOutcome = pickWeightedOutcome(SCRATCH_CONFIG.outcomes, randomInt);
+            const payout = tier * scratchOutcome.multiplier;
+            const outcomeType = payout > 0
+                ? `${scratchOutcome.label} ${payout} 积分`
+                : scratchOutcome.label;
 
             let finalBalance = currentBalance;
             if (payout > 0) {
@@ -2190,14 +2091,7 @@ module.exports = function registerGameRoutes(app, deps) {
             const userSlots = [];
             let matchedCount = 0;
 
-            // 定义奖励金额梯度
-            const rewardAmounts = {
-                5: [5, 10, 15, 20, 25, 30, 50],     // 5积分档位奖励
-                10: [10, 20, 30, 40, 50, 80, 100],  // 10积分档位奖励
-                100: [100, 200, 300, 500, 800, 1000, 1500] // 100积分档位奖励
-            };
-
-            const tierRewards = rewardAmounts[tier] || [tier, tier * 2, tier * 3, tier * 4, tier * 5, tier * 8, tier * 10];
+            const tierRewards = selectedTier.displayRewards;
 
             for (let i = 0; i < selectedTier.userCount; i++) {
                 let num;
@@ -2250,7 +2144,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     JSON.stringify(selectedTier),
                     betResult.balanceBefore,
                     finalBalance,
-                    JSON.stringify({ outcome: outcomeType, randomBucket: Math.floor(random / 100) })
+                    JSON.stringify({ outcome: outcomeType, outcomeId: scratchOutcome.id })
                 ]
             );
 
@@ -2328,7 +2222,7 @@ module.exports = function registerGameRoutes(app, deps) {
 
             const balanceResult = await BalanceLogger.updateBalance({
                 username,
-                amount: -30,
+                amount: -stoneInitialCost,
                 operationType: 'stone_add',
                 description: '合石头：放入一颗石头',
                 ipAddress: req.clientIP,
@@ -2347,7 +2241,7 @@ module.exports = function registerGameRoutes(app, deps) {
             await logStoneAction({
                 username,
                 actionType: 'add',
-                cost: 30,
+                cost: stoneInitialCost,
                 beforeSlots,
                 afterSlots: slots
             }, client);
@@ -2389,7 +2283,7 @@ module.exports = function registerGameRoutes(app, deps) {
             }
 
             const emptyCount = slots.filter((slot) => !slot).length;
-            const cost = emptyCount * 30;
+            const cost = emptyCount * stoneInitialCost;
 
             const balanceResult = await BalanceLogger.updateBalance({
                 username,
@@ -2655,42 +2549,13 @@ module.exports = function registerGameRoutes(app, deps) {
             const username = req.session.user.username;
             const previousState = await getFlipState(username, client, { forUpdate: true });
             const flips = previousState.good_count + previousState.bad_count;
-            let previousReward = 0;
-            let newBalance = null;
-
-            if (!previousState.ended && flips > 0 && previousState.good_count > 0) {
-                previousReward = flipCashoutRewards[previousState.good_count] || 0;
-                previousState.ended = true;
-                await saveFlipState(username, previousState, client);
-
-                if (previousReward > 0) {
-                    const rewardResult = await BalanceLogger.updateBalance({
-                        username,
-                        amount: previousReward,
-                        operationType: 'flip_cashout',
-                        description: `翻卡牌开始新一轮自动结算 ${previousReward} 积分`,
-                        ipAddress: req.clientIP,
-                        userAgent: req.get('User-Agent'),
-                        requireSufficientBalance: false,
-                        client,
-                        managedTransaction: true
-                    });
-
-                    if (!rewardResult.success) {
-                        await client.query('ROLLBACK');
-                        return res.status(400).json({ success: false, message: rewardResult.message });
-                    }
-                    newBalance = rewardResult.balance;
-                }
-
-                await logFlipAction({
-                    username,
-                    actionType: 'end',
-                    reward: previousReward,
-                    goodCount: previousState.good_count,
-                    badCount: previousState.bad_count,
-                    ended: true
-                }, client);
+            if (!previousState.ended && flips > 0) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({
+                    success: false,
+                    code: 'ACTIVE_FLIP_ROUND',
+                    message: '当前轮次尚未结束，请先继续翻牌或显式退出'
+                });
             }
 
             const board = Array(9).fill(null);
@@ -2706,10 +2571,10 @@ module.exports = function registerGameRoutes(app, deps) {
             const responseBody = {
                 success: true,
                 nextCost: flipCosts[0],
-                previousReward,
+                previousReward: 0,
                 previousGood: previousState.good_count,
                 previousBad: previousState.bad_count,
-                newBalance
+                newBalance: null
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -2977,6 +2842,7 @@ module.exports = function registerGameRoutes(app, deps) {
 
         const totalCost = tier.cost * countNum;
         let rewards = [];
+        let publicRewards = [];
         let sortedRewards = [];
 
         let client;
@@ -3015,7 +2881,7 @@ module.exports = function registerGameRoutes(app, deps) {
             balanceAfter = betResult.balance;
 
             for (let i = 0; i < countNum; i += 1) {
-                const reward = pickBlindboxReward(blindboxPool);
+                const reward = blindboxRuntime.pick(tierKey, randomInt);
                 if (!reward) throw new Error('Blindbox reward selection failed');
                 rewards.push({
                     giftId: String(reward.giftId),
@@ -3029,6 +2895,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     if (b.value !== a.value) return b.value - a.value;
                     return a.originalIndex - b.originalIndex;
                 });
+            publicRewards = projectBlindboxRewards(rewards);
             const totalRewardValue = sortedRewards.reduce(
                 (sum, item) => sum + (Number(item.value) || 0),
                 0
@@ -3119,7 +2986,7 @@ module.exports = function registerGameRoutes(app, deps) {
                 success: true,
                 balanceAfter,
                 batchId,
-                rewards,
+                rewards: publicRewards,
                 queued: Boolean(bilibiliRoomId && firstInventoryId),
                 enqueueMessage: bilibiliRoomId ? '礼物已加入可恢复发送队列' : null
             };
@@ -3137,7 +3004,7 @@ module.exports = function registerGameRoutes(app, deps) {
             success: true,
             balanceAfter,
             batchId,
-            rewards,
+            rewards: publicRewards,
             queued: Boolean(bilibiliRoomId && firstInventoryId),
             enqueueMessage: bilibiliRoomId ? '礼物已加入可恢复发送队列' : null
         });
@@ -3161,12 +3028,21 @@ module.exports = function registerGameRoutes(app, deps) {
             }
             const duelReward = duelRewards[giftType];
 
-            if (!Number.isInteger(power) || power < 1 || power > 80) {
+            const minimumPower = duelMinimumPower(giftType);
+            if (!Number.isInteger(power) || minimumPower === null
+                || power < minimumPower || power > DUEL_CONFIG.maximumPower) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ success: false, message: '功力范围为1-80' });
+                return res.status(400).json({
+                    success: false,
+                    message: `该奖品功力范围为${minimumPower || 1}-${DUEL_CONFIG.maximumPower}`
+                });
             }
 
             const cost = calculateDuelCost(giftType, power);
+            if (!Number.isSafeInteger(cost) || cost < 1) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: '该功力暂无符合返还率策略的成本' });
+            }
             const successRate = power / 100;
 
             const balanceResult = await BalanceLogger.updateBalance({
@@ -3262,6 +3138,7 @@ module.exports = function registerGameRoutes(app, deps) {
             const result = GameLogic.spin.spin();
             res.json({
                 success: true,
+                prizeId: result.prizeId,
                 prize: result.prize,
                 angle: result.angle
             });
@@ -3280,170 +3157,23 @@ module.exports = function registerGameRoutes(app, deps) {
             const username = req.session.user.username;
             const offset = (page - 1) * limit;
 
-            let query, params, countQuery, countParams;
-
-            switch (gameType) {
-                case 'quiz':
-                    query = `
-                        SELECT id,
-                               score,
-                               to_char(submitted_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM submissions 
-                        WHERE username = $1 
-                        ORDER BY submitted_at DESC 
-                        LIMIT $2 OFFSET $3
-                    `;
-                    params = [username, limit, offset];
-                    countQuery = 'SELECT COUNT(*) FROM submissions WHERE username = $1';
-                    countParams = [username];
-                    break;
-
-                case 'slot':
-                    query = `
-                        SELECT id,
-                               won as result,
-                               COALESCE(payout_amount, 0) as payout,
-                               game_details->>'amounts' as amounts,
-                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM slot_results 
-                        WHERE username = $1 
-                        ORDER BY created_at DESC 
-                        LIMIT $2 OFFSET $3
-                    `;
-
-                    params = [username, limit, offset];
-                    countQuery = 'SELECT COUNT(*) FROM slot_results WHERE username = $1';
-                    countParams = [username];
-                    break;
-
-                case 'scratch':
-                    query = `
-                        SELECT id, reward as result, COALESCE(matches_count, 0) as matches_count, 
-                               COALESCE(tier_cost, 5) as tier_cost, 
-                               winning_numbers, slots,
-                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM scratch_results 
-                        WHERE username = $1 
-                        ORDER BY created_at DESC 
-                        LIMIT $2 OFFSET $3
-                    `;
-                    params = [username, limit, offset];
-                    countQuery = 'SELECT COUNT(*) FROM scratch_results WHERE username = $1';
-                    countParams = [username];
-                    break;
-
-                case 'wish':
-                    query = `
-                        SELECT id,
-                               batch_count,
-                               total_cost,
-                               success_count,
-                               total_reward_value,
-                               gift_name,
-                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM wish_sessions
-                        WHERE username = $1
-                        ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
-                    `;
-                    params = [username, limit, offset];
-                    countQuery = 'SELECT COUNT(*) FROM wish_sessions WHERE username = $1';
-                    countParams = [username];
-                    break;
-
-                case 'blindbox':
-                    query = `
-                        SELECT id,
-                               tier_name,
-                               box_count,
-                               total_cost,
-                               total_reward_value,
-                               rewards,
-                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM blindbox_logs
-                        WHERE username = $1
-                        ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
-                    `;
-                    params = [username, limit, offset];
-                    countQuery = 'SELECT COUNT(*) FROM blindbox_logs WHERE username = $1';
-                    countParams = [username];
-                    break;
-
-                case 'stone':
-                    query = `
-                        SELECT id,
-                               action_type,
-                               cost,
-                               reward,
-                               slot_index,
-                               before_slots,
-                               after_slots,
-                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM stone_logs
-                        WHERE username = $1
-                        ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
-                    `;
-                    params = [username, limit, offset];
-                    countQuery = 'SELECT COUNT(*) FROM stone_logs WHERE username = $1';
-                    countParams = [username];
-                    break;
-
-                case 'flip':
-                    query = `
-                        SELECT id,
-                               action_type,
-                               reward,
-                               good_count,
-                               bad_count,
-                               ended,
-                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM flip_logs
-                        WHERE username = $1 AND action_type = 'end'
-                        ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
-                    `;
-                    params = [username, limit, offset];
-                    countQuery = "SELECT COUNT(*) FROM flip_logs WHERE username = $1 AND action_type = 'end'";
-                    countParams = [username];
-                    break;
-
-                case 'duel':
-                    query = `
-                        SELECT id,
-                               gift_type,
-                               reward,
-                               power,
-                               cost,
-                               success,
-                               to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                        FROM duel_logs
-                        WHERE username = $1
-                        ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
-                    `;
-                    params = [username, limit, offset];
-                    countQuery = 'SELECT COUNT(*) FROM duel_logs WHERE username = $1';
-                    countParams = [username];
-                    break;
-
-                default:
-                    return res.status(400).json({ success: false, message: '不支持的游戏类型' });
+            const result = await gameRegistry.records.loadGameRecords(pool, {
+                gameType,
+                username,
+                limit,
+                offset
+            });
+            if (!result) {
+                return res.status(400).json({ success: false, message: '不支持的游戏类型' });
             }
-
-            const [records, countResult] = await Promise.all([
-                pool.query(query, params),
-                pool.query(countQuery, countParams)
-            ]);
-
-            const total = parseInt(countResult.rows[0].count);
+            const total = result.total;
             const totalPages = Math.ceil(total / limit);
 
             res.json({
                 success: true,
                 gameType,
-                records: records.rows,
+                records: result.records,
+                recordRows: result.recordRows,
                 pagination: {
                     current: parseInt(page),
                     total: totalPages,

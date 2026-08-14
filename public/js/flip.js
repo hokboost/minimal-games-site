@@ -56,7 +56,8 @@
         nextCostEl.textContent = data.nextCost ? `${data.nextCost} ${t('积分', 'points')}` : '--';
         goodCountEl.textContent = data.goodCount || 0;
         cashoutRewardEl.textContent = `${data.cashoutReward || 0} ${t('积分', 'points')}`;
-        startBtn.disabled = actionInFlight;
+        const activeRound = !data.ended && ((data.goodCount || 0) + (data.badCount || 0) > 0);
+        startBtn.disabled = actionInFlight || activeRound;
         cashoutBtn.disabled = actionInFlight || data.ended || data.goodCount === 0;
     }
 
@@ -126,17 +127,11 @@
     }
 
     startBtn.addEventListener('click', async () => {
-        const result = await postFlipAction(
+        await postFlipAction(
             '/api/flip/start',
             undefined,
             t('开始失败', 'Start failed')
         );
-        if (result?.previousReward > 0) {
-            alert(t(
-                `上一轮自动结算：获得 ${result.previousReward} 积分`,
-                `Previous round auto-settled: earned ${result.previousReward} points`
-            ));
-        }
     });
 
     cashoutBtn.addEventListener('click', async () => {

@@ -12,6 +12,7 @@
 const path = require('path');
 const express = require('express');
 const { i18nMiddleware, setupLanguageRoutes } = require('../i18n');
+const gameRegistry = require('../domain/games');
 
 if (process.env.NODE_ENV === 'production') {
     console.error('[preview-ui] Refusing to run with NODE_ENV=production.');
@@ -21,6 +22,10 @@ if (process.env.NODE_ENV === 'production') {
 const projectRoot = path.resolve(__dirname, '..');
 const app = express();
 app.locals.cspNonce = 'preview-only';
+app.locals.gameCatalog = gameRegistry.GAME_DEFINITIONS;
+app.locals.gameCatalogGroups = gameRegistry.GAME_GROUPS;
+app.locals.gameRecordViews = gameRegistry.presentation.RECORD_VIEWS;
+app.locals.gamePublicWishConfigs = gameRegistry.getPublicWishConfigs();
 const previewBalance = 12880;
 const csrfToken = 'preview-only-not-a-real-csrf-token';
 const previewUser = Object.freeze({
@@ -36,60 +41,23 @@ const previewAdmin = Object.freeze({
     balance: 999999
 });
 
-const blindboxTiers = Object.freeze([
-    { key: 'starmoon', nameZh: '星月盲盒', nameEn: 'Star Moon Box', cost: 50 },
-    { key: 'heart', nameZh: '心动盲盒', nameEn: 'Heart Box', cost: 150 },
-    { key: 'supreme', nameZh: '至尊盲盒', nameEn: 'Supreme Box', cost: 1000 }
-]);
-const blindboxCounts = Object.freeze([1, 10, 50]);
-const blindboxConfigs = Object.freeze({
-    starmoon: {
-        cost: 50,
-        items: [
-            { giftId: '34999', name: '原地求婚', weight: 0.0002 },
-            { giftId: '31122', name: '水晶球', weight: 0.0005 },
-            { giftId: '33668', name: '啵啵', weight: 0.003 },
-            { giftId: '31053', name: '告白花束', weight: 0.005 },
-            { giftId: '34315', name: '喜欢你', weight: 0.0664 },
-            { giftId: '31044', name: '情书', weight: 0.7249 },
-            { giftId: '34500', name: '你真好看', weight: 0.2 }
-        ]
-    },
-    heart: {
-        cost: 150,
-        items: [
-            { giftId: '31028', name: '探索者启航', weight: 0.0004 },
-            { giftId: '31122', name: '水晶球', weight: 0.02 },
-            { giftId: '33668', name: '啵啵', weight: 0.05 },
-            { giftId: '31053', name: '告白花束', weight: 0.184876 },
-            { giftId: '34315', name: '喜欢你', weight: 0.544724 },
-            { giftId: '31044', name: '情书', weight: 0.2 }
-        ]
-    },
-    supreme: {
-        cost: 1000,
-        items: [
-            { giftId: '34998', name: '小电视飞船', weight: 0.003 },
-            { giftId: '34381', name: '飞屋环游', weight: 0.085 },
-            { giftId: '31122', name: '水晶球', weight: 0.3 },
-            { giftId: '33668', name: '啵啵', weight: 0.3162 },
-            { giftId: '31053', name: '告白花束', weight: 0.2958 }
-        ]
-    }
-});
+const previewGiftConfig = require('../gift-codes.json');
+const previewBlindbox = gameRegistry.createBlindboxRuntime(previewGiftConfig);
+const blindboxTiers = previewBlindbox.tiers;
+const blindboxCounts = previewBlindbox.counts;
+const blindboxConfigs = previewBlindbox.configs;
+const adminRecordGames = gameRegistry.records.resolveRecordGames(gameRegistry.GAME_DEFINITIONS);
+const previewGiftPrices = Object.freeze(Object.fromEntries(
+    ['heartbox', 'fanlight', 'tiedu_one'].map((giftType) => [
+        giftType,
+        previewGiftConfig.礼物映射[giftType].电币成本
+    ])
+));
 
-const gamePages = Object.freeze({
-    '/quiz': { view: 'quiz', titleZh: '知识问答', titleEn: 'Quiz Sprint' },
-    '/slot': { view: 'slot', titleZh: '幸运老虎机', titleEn: 'Lucky Reels' },
-    '/scratch': { view: 'scratch', titleZh: '刮刮乐', titleEn: 'Scratch Card' },
-    '/dictation': { view: 'dictation', titleZh: '汉字听写', titleEn: 'Chinese Dictation' },
-    '/spin': { view: 'spin', titleZh: '挑战转盘', titleEn: 'Challenge Wheel' },
-    '/stone': { view: 'stone', titleZh: '合石头', titleEn: 'Stone Match' },
-    '/flip': { view: 'flip', titleZh: '翻卡牌', titleEn: 'Card Flip' },
-    '/duel': { view: 'duel', titleZh: '决斗挑战', titleEn: 'Duel Challenge' },
-    '/blindbox': { view: 'blindbox', titleZh: '惊喜盲盒', titleEn: 'Surprise Boxes' },
-    '/wish': { view: 'wish', titleZh: '幸运祈愿', titleEn: 'Lucky Wish' }
-});
+const gamePages = Object.freeze(Object.fromEntries(gameRegistry.GAME_DEFINITIONS.map((game) => [
+    game.href,
+    { view: game.id, titleZh: game.titleZh, titleEn: game.titleEn }
+])));
 const profileStats = Object.freeze({
     quiz: { total: 26, bestScore: 15 },
     slot: { total: 42, wins: 16 },
@@ -142,20 +110,20 @@ const adminLatestRecords = Object.freeze({
         slot: '2026-07-11 18:43:00 | 120积分',
         scratch: '2026-07-11 17:20:00 | 50积分',
         wish: '2026-07-11 16:06:00 | 梦幻游乐园',
+        blindbox: '2026-07-11 15:42:00 | 星月盲盒 | 680积分',
         stone: '2026-07-11 15:11:00 | redeem | 300积分',
         flip: '2026-07-11 14:39:00 | 好3坏0 | 500积分',
-        duel: '2026-07-11 13:22:00 | crown | 成功 | 30000积分',
-        spin: '未记录'
+        duel: '2026-07-11 13:22:00 | crown | 成功 | 30000积分'
     },
     preview_player: {
         quiz: '2026-07-11 18:55:00 | 分数 12',
         slot: '2026-07-11 18:30:00 | 60积分',
         scratch: '2026-07-11 17:02:00 | 20积分',
         wish: '2026-07-11 15:46:00 | 未中奖',
-        stone: '2026-07-11 14:52:00 | fill | 0积分',
+        blindbox: '2026-07-11 15:02:00 | 星月盲盒 | 680积分',
+        stone: `2026-07-11 14:52:00 | fill | ${gameRegistry.STONE_CONFIG.initialCost * 4}积分`,
         flip: '2026-07-11 14:09:00 | 好2坏0 | 200积分',
-        duel: '2026-07-11 12:40:00 | jade | 失败 | 0积分',
-        spin: '未记录'
+        duel: '2026-07-11 12:40:00 | jade | 失败 | 0积分'
     },
     preview_pending: {},
     preview_locked: {}
@@ -179,15 +147,23 @@ const previewRecords = Object.freeze({
     wish: [{
         played_at: '2026-07-11 15:46:00',
         gift_type: 'crystal_ball',
-        cost: 66,
+        cost: gameRegistry.WISH_CONFIGS.crystal_ball.cost,
         success: true,
         reward: '水晶球',
         wishes_count: 1
     }],
+    blindbox: [{
+        played_at: '2026-07-11 15:02:00',
+        tier_key: 'starmoon',
+        tier_name: '星月盲盒',
+        box_count: 10,
+        total_cost: gameRegistry.BLINDBOX_CONFIG.tiers.starmoon.cost * 10,
+        total_reward_value: 680
+    }],
     stone: [{
         played_at: '2026-07-11 14:52:00',
         action_type: 'fill',
-        cost: 180,
+        cost: gameRegistry.STONE_CONFIG.initialCost * 4,
         reward: 0,
         slot_index: null,
         before_slots: '["red", "red", null, null, null, null]',
@@ -208,11 +184,14 @@ const previewRecords = Object.freeze({
         played_at: '2026-07-11 12:40:00',
         gift_type: 'jade',
         power: 42,
-        cost: 435,
+        cost: gameRegistry.calculateDuelCost('jade', 42),
         success: true,
         reward: 1000
     }]
 });
+const previewRecordSections = Object.freeze(adminRecordGames.map((game) => (
+    gameRegistry.records.buildAdminRecordSection(game, previewRecords[game.recordView] || [])
+)));
 const profileRecordSamples = Object.freeze({
     quiz: previewRecords.quiz,
     slot: previewRecords.slot,
@@ -220,16 +199,17 @@ const profileRecordSamples = Object.freeze({
     wish: [{
         played_at: '2026-07-11 15:46:00',
         batch_count: 1,
-        total_cost: 66,
+        total_cost: gameRegistry.WISH_CONFIGS.crystal_ball.cost,
         success_count: 1,
         gift_type: 'crystal_ball',
         gift_name: '水晶球'
     }],
     blindbox: [{
         played_at: '2026-07-11 15:02:00',
+        tier_key: 'starmoon',
         tier_name: '星月盲盒',
         box_count: 10,
-        total_cost: 500,
+        total_cost: gameRegistry.BLINDBOX_CONFIG.tiers.starmoon.cost * 10,
         total_reward_value: 680
     }],
     stone: previewRecords.stone,
@@ -330,6 +310,7 @@ app.get('/gifts', (req, res) => {
         title: pageTitle(res, '礼物兑换 - Minimal Games', 'Gift Exchange - Minimal Games'),
         user: previewUser,
         balance: previewBalance,
+        giftPrices: previewGiftPrices,
         csrfToken
     });
 });
@@ -340,6 +321,8 @@ app.get('/admin', (req, res) => {
         user: previewAdmin,
         userLoggedIn: previewAdmin.username,
         users: adminUsers,
+        nextUsersCursor: null,
+        recordGames: adminRecordGames,
         latestRecords: adminLatestRecords,
         dictationSubmissions: [{
             id: 1001,
@@ -362,6 +345,7 @@ app.get('/admin', (req, res) => {
             started_at: '2026-07-11 19:01:00',
             ended_at: '2026-07-11 19:08:00'
         }],
+        adminMfaConfigured: false,
         csrfToken
     });
 });
@@ -372,7 +356,8 @@ app.get('/admin/users/:username/records', (req, res) => {
         title: pageTitle(res, `用户记录 - ${targetUsername}`, `User Records - ${targetUsername}`),
         user: previewAdmin,
         targetUsername,
-        records: previewRecords
+        csrfToken,
+        recordSections: previewRecordSections
     });
 });
 
@@ -397,6 +382,15 @@ for (const [route, page] of Object.entries(gamePages)) {
             locals.tiers = blindboxTiers;
             locals.counts = blindboxCounts;
             locals.blindboxConfigs = blindboxConfigs;
+        }
+        if (page.view === 'wish') locals.wishConfigs = gameRegistry.getPublicWishConfigs();
+        if (page.view === 'quiz') locals.quizConfig = gameRegistry.getPublicQuizConfig();
+        if (page.view === 'slot') locals.slotConfig = gameRegistry.getPublicSlotConfig();
+        if (page.view === 'scratch') locals.scratchConfig = gameRegistry.getPublicScratchConfig();
+        if (page.view === 'stone') locals.stoneConfig = gameRegistry.getPublicStoneConfig();
+        if (page.view === 'spin') locals.spinConfig = gameRegistry.getPublicSpinConfig();
+        if (page.view === 'duel') {
+            locals.duelConfig = gameRegistry.getPublicDuelConfig();
         }
         res.render(page.view, locals);
     });
@@ -441,9 +435,9 @@ app.get('/api/flip/state', (req, res) => previewApi(res, {
     ended: false,
     goodCount: 1,
     badCount: 0,
-    nextCost: 112,
+    nextCost: gameRegistry.FLIP_CONFIG.costs[1],
     canFlip: true,
-    cashoutReward: 50,
+    cashoutReward: gameRegistry.FLIP_CONFIG.cashoutRewards[1],
     board: Array.from({ length: 9 }, (_, index) => ({
         type: index === 0 ? 'good' : 'unknown',
         flipped: index === 0
@@ -495,6 +489,9 @@ app.get('/api/game-records/:gameType', (req, res) => {
     const records = profileRecordSamples[gameType] || [];
     return previewApi(res, {
         records,
+        recordRows: gameRegistry.records.getRecordProvider(gameType)
+            ? gameRegistry.records.buildProfileRecordRows(gameType, records)
+            : [],
         pagination: {
             current: 1,
             total: 1,

@@ -15,13 +15,20 @@ const csrf = require('csrf');
 // 数据库连接
 const pool = require('./db');
 const pgSession = require('connect-pg-simple')(session);
-const { applyDatabaseMigrations } = require('./lib/database-migrations');
+const {
+    applyDatabaseMigrations,
+    assertDatabaseSchemaCurrent
+} = require('./lib/database-migrations');
 
 // 导入本地游戏数据和逻辑
 const questions = require('./data/questions');
 const GameLogic = require('./data/gameLogic');
 const BalanceLogger = require('./balance-logger');
 const { parseMoney } = require('./lib/integer-money');
+const gameRegistry = require('./domain/games');
+const { parseWorkerCredentials } = require('./lib/worker-credentials');
+const { matchTotpCounter } = require('./lib/totp');
+const { getAdminTotpSecret } = require('./lib/admin-mfa');
 
 // 礼物配置
 const fs = require('fs');
@@ -29,15 +36,25 @@ const axios = require('axios');
 const crypto = require('crypto');
 const developmentSessionSecret = crypto.randomBytes(32).toString('hex');
 const sessionSecret = process.env.SESSION_SECRET || developmentSessionSecret;
+const purposeSecret = (name) => Buffer.from(
+    process.env[name] || crypto.randomBytes(32).toString('hex'),
+    'utf8'
+);
+const idempotencyHashSecret = purposeSecret('IDEMPOTENCY_HMAC_SECRET');
+const resetTokenSecret = purposeSecret('RESET_TOKEN_SECRET');
+const analyticsTokenSecret = purposeSecret('ANALYTICS_TOKEN_SECRET');
+const dictationTokenSecret = purposeSecret('DICTATION_TOKEN_SECRET');
 const dummyPasswordHash = bcrypt.hashSync('invalid-login-password-A1', 12);
 const { parseCookies, decodeSignedSessionCookie } = require('./lib/session-auth');
 const { createIdempotencyMiddleware } = require('./lib/idempotency');
 const { createAdminFailureAuditMiddleware } = require('./lib/admin-audit-failure');
+const { IDEMPOTENT_WRITE_PATHS } = require('./routes/manifest');
 const { getClientIp, isTrustedProxyAddress } = require('./lib/client-ip');
 const { requestContextMiddleware, setRequestId } = require('./lib/request-context');
 const PostgresRateLimitStore = require('./lib/postgres-rate-limit-store');
 const { createConcurrencyGuard } = require('./lib/concurrency-guard');
 const { PostgresEventBus } = require('./lib/postgres-event-bus');
+const { ApplicationLifecycle } = require('./app/application-lifecycle');
 const { queueMissingPkRunners } = require('./lib/pk-runner-recovery');
 const { hasActiveWorkerRoleLease } = require('./lib/worker-role-lease');
 const {
@@ -61,6 +78,7 @@ try {
             throw new Error(`Required gift configuration is invalid: ${giftType}`);
         }
     }
+    gameRegistry.validateGiftBackedConfiguration(giftConfig);
 } catch (error) {
     throw new Error('礼物配置缺失或无效，拒绝启动服务', { cause: error });
 }
@@ -90,8 +108,17 @@ const paidActionConcurrencyGuard = createConcurrencyGuard({
     maxPoolWaiters: process.env.PAID_ACTION_MAX_POOL_WAITERS,
     maxEventLoopLagMs: process.env.PAID_ACTION_MAX_EVENT_LOOP_LAG_MS
 });
+const applicationLifecycle = new ApplicationLifecycle({
+    onJobError(error, { name, runNumber }) {
+        console.error('后台任务执行失败', { job: name, runNumber, error });
+    }
+});
 
 const app = express();
+app.locals.gameCatalog = gameRegistry.GAME_DEFINITIONS;
+app.locals.gameCatalogGroups = gameRegistry.GAME_GROUPS;
+app.locals.gameRecordViews = gameRegistry.presentation.RECORD_VIEWS;
+app.locals.gamePublicWishConfigs = gameRegistry.getPublicWishConfigs();
 const server = http.createServer(app);
 
 // WebSocket session认证中间件
@@ -367,25 +394,45 @@ async function revalidateConnectedSockets() {
     }
 }
 
-const socketSessionValidationInterval = setInterval(
-    () => revalidateConnectedSockets().catch(() => {}),
-    60 * 1000
-);
-socketSessionValidationInterval.unref?.();
-
 const PORT = process.env.PORT || 3000;
 
 // 数据库初始化函数
 async function initializeDatabase() {
     try {
         console.log("Checking database schema");
-        await applyDatabaseMigrations(pool, {
-            onMigration: (filename) => console.log("Applying database migration", { filename })
-        });
+        if (process.env.NODE_ENV === 'production') {
+            await assertDatabaseSchemaCurrent(pool);
+        } else {
+            await applyDatabaseMigrations(pool, {
+                onMigration: (filename) => console.log("Applying database migration", { filename })
+            });
+        }
         return true;
     } catch (error) {
         console.error("Database initialization failed", { error });
         return false;
+    }
+}
+
+let idempotencyRecoveryRunning = false;
+async function recoverStaleIdempotencyKeys() {
+    if (idempotencyRecoveryRunning) return;
+    idempotencyRecoveryRunning = true;
+    try {
+        await pool.query(`
+            UPDATE idempotency_keys
+            SET status = 'indeterminate',
+                response_status = 409,
+                response_body = '{"success":false,"message":"请求处理结果无法自动确认，请联系管理员核对账务"}'::jsonb,
+                failure_reason = '幂等处理租约超时，业务结果需要核对',
+                updated_at = NOW()
+            WHERE status = 'pending'
+              AND updated_at < NOW() - INTERVAL '10 minutes'
+        `);
+    } catch (error) {
+        console.error('幂等恢复任务失败:', error);
+    } finally {
+        idempotencyRecoveryRunning = false;
     }
 }
 
@@ -423,16 +470,6 @@ async function runDatabaseMaintenance() {
                 ORDER BY created_at
                 LIMIT 1000
             )
-        `);
-        await client.query(`
-            UPDATE idempotency_keys
-            SET status = 'indeterminate',
-                response_status = 409,
-                response_body = '{"success":false,"message":"请求处理结果无法自动确认，请联系管理员核对账务"}'::jsonb,
-                failure_reason = '幂等处理租约超时，业务结果需要核对',
-                updated_at = NOW()
-            WHERE status = 'pending'
-              AND updated_at < NOW() - INTERVAL '10 minutes'
         `);
         const stalePkReservations = await client.query(`
             SELECT authorization_id, username
@@ -520,6 +557,38 @@ async function runDatabaseMaintenance() {
                 ORDER BY updated_at
                 LIMIT 5000
             )
+        `);
+        await client.query(`
+            DELETE FROM rate_limit_counters
+            WHERE (namespace, key_hash) IN (
+                SELECT namespace, key_hash
+                FROM rate_limit_counters
+                WHERE reset_time < NOW() - INTERVAL '1 day'
+                ORDER BY reset_time
+                LIMIT 5000
+            )
+        `);
+        await client.query(`
+            WITH archived AS (
+                DELETE FROM delivery_outbox
+                WHERE id IN (
+                    SELECT id FROM delivery_outbox
+                    WHERE status IN ('completed', 'dead_letter')
+                      AND COALESCE(completed_at, created_at) < NOW() - INTERVAL '30 days'
+                    ORDER BY id
+                    LIMIT 1000
+                )
+                RETURNING id, event_type, aggregate_id, payload, status,
+                          attempt_count, last_error, created_at, completed_at
+            )
+            INSERT INTO delivery_outbox_archive (
+                id, event_type, aggregate_id, payload, status,
+                attempt_count, last_error, created_at, completed_at
+            )
+            SELECT id, event_type, aggregate_id, payload, status,
+                   attempt_count, last_error, created_at, completed_at
+            FROM archived
+            ON CONFLICT (id) DO NOTHING
         `);
         await client.query(`
             DELETE FROM ux_events
@@ -641,7 +710,7 @@ app.use((req, res, next) => {
     }
     return next();
 });
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { redirect: false }));
 app.use('/api/ux/batch', express.text({ type: 'text/plain', limit: '32kb' }));
 app.use(express.json({ limit: '2mb', strict: true }));
 app.use(express.urlencoded({ extended: true, limit: '256kb', parameterLimit: 100 }));
@@ -743,6 +812,22 @@ const requireLogin = async (req, res, next) => {
 
     try {
         const username = req.session.user.username;
+        const sessionCreatedAt = Number(req.session.createdAt || 0);
+        const absoluteLifetimeMs = req.session.user.is_admin
+            ? 8 * 60 * 60 * 1000
+            : 24 * 60 * 60 * 1000;
+        if (!Number.isFinite(sessionCreatedAt)
+            || sessionCreatedAt <= 0
+            || Date.now() - sessionCreatedAt > absoluteLifetimeMs) {
+            await SessionManager.terminateSession(req.sessionID, 'absolute_lifetime_expired');
+            return req.session.destroy(() => {
+                res.clearCookie('minimal_games_sid');
+                if (req.path.startsWith('/api/')) {
+                    return res.status(401).json({ success: false, message: '登录会话已过期' });
+                }
+                return res.redirect('/login?expired=true');
+            });
+        }
         const result = await pool.query(`
             UPDATE active_sessions AS active
             SET last_activity = CASE
@@ -815,7 +900,7 @@ const ADMIN_MFA_WINDOW_MS = 5 * 60 * 1000;
 const getRecentAdminAuthDenial = (req) => {
     const now = Date.now();
     const lastAuthenticatedAt = Number(req.session?.lastAuthenticatedAt || 0);
-    const mfaRequired = Boolean(process.env.ADMIN_TOTP_SECRET);
+    const mfaRequired = req.session?.user?.is_admin === true;
     const lastMfaVerifiedAt = Number(req.session?.lastMfaVerifiedAt || 0);
     if (now - lastAuthenticatedAt > ADMIN_RECENT_AUTH_MS
         || (mfaRequired && now - lastMfaVerifiedAt > ADMIN_MFA_WINDOW_MS)) {
@@ -837,53 +922,7 @@ const requireRecentAdminAuth = (req, res, next) => {
     return next();
 };
 
-const idempotentWritePaths = [
-    '/api/change-password',
-    '/api/quiz/start',
-    '/api/quiz/next',
-    '/api/quiz/submit',
-    '/api/dictation/start',
-    '/api/dictation/retry',
-    '/api/dictation/submit',
-    '/api/slot/play',
-    '/api/scratch/play',
-    '/api/stone/add',
-    '/api/stone/fill',
-    '/api/stone/replace',
-    '/api/stone/redeem',
-    '/api/flip/start',
-    '/api/flip/flip',
-    '/api/flip/cashout',
-    '/api/blindbox/open',
-    '/api/duel/play',
-    '/api/spin',
-    '/api/wish/play',
-    '/api/wish-batch',
-    '/api/wish/backpack/send',
-    '/api/gifts/exchange',
-    '/api/pk/start',
-    '/api/pk/stop',
-    '/api/admin/add-electric-coin',
-    '/api/admin/authorize-user',
-    '/api/admin/unauthorize-user',
-    '/api/admin/update-balance',
-    '/api/admin/dictation/mark',
-    '/api/admin/delete-account',
-    '/api/admin/unlock-account',
-    '/api/admin/clear-failures',
-    '/api/admin/change-self-password',
-    '/api/admin/ip/blacklist',
-    '/api/admin/ip/whitelist',
-    '/api/admin/ip/remove-blacklist',
-    '/api/admin/force-logout',
-    '/api/admin/reset-stuck-gift-tasks',
-    '/api/admin/gift-reconciliation',
-    '/api/admin/pk-reconciliation',
-    '/api/admin/test/security-alert',
-    '/admin/security/unblock',
-    '/api/bilibili/room',
-    '/api/bilibili/cookies/refresh'
-];
+const idempotentWritePaths = IDEMPOTENT_WRITE_PATHS;
 
 async function validateExistingIdempotentRequest(req) {
     const providedToken = req.body?.csrfToken || req.headers['x-csrf-token'];
@@ -957,7 +996,7 @@ app.use(createIdempotencyMiddleware({
     paths: idempotentWritePaths,
     validateExistingRequest: validateExistingIdempotentRequest,
     validateTransactionalRequest: validateTransactionalIdempotentRequest,
-    hashSecret: sessionSecret
+    hashSecret: idempotencyHashSecret
 }));
 
 // 未授权用户只允许进入首页或退出登录
@@ -1001,7 +1040,7 @@ const loginAccountLimiter = rateLimit({
         const username = typeof req.body?.username === 'string'
             ? req.body.username.normalize('NFKC').trim().toLocaleLowerCase('en-US').slice(0, 32)
             : 'invalid';
-        return `${clientIpRateLimitKey(req)}:${username}`;
+        return username;
     },
     handler: (req, res) => res.status(429).render('login', {
         title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
@@ -1338,48 +1377,7 @@ app.get('/profile', requireLogin, (req, res, next) => {
             return res.status(404).send(uiText(res, '用户不存在', 'User not found'));
         }
         
-        // 获取游戏记录统计
-        const gameStats = await Promise.all([
-            pool.query('SELECT COUNT(*) as count, MAX(score) as best_score FROM submissions WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(payout_amount, 0) > 0 THEN 1 ELSE 0 END) as wins FROM slot_results WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count, SUM(CASE WHEN COALESCE(matches_count, 0) > 0 THEN 1 ELSE 0 END) as wins FROM scratch_results WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count, COALESCE(SUM(success_count), 0) as wins FROM wish_sessions WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count FROM blindbox_logs WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count FROM stone_logs WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count FROM flip_logs WHERE username = $1', [username]),
-            pool.query('SELECT COUNT(*) as count FROM duel_logs WHERE username = $1', [username])
-        ]);
-        
-        const stats = {
-            quiz: {
-                total: parseInt(gameStats[0].rows[0].count) || 0,
-                bestScore: gameStats[0].rows[0].best_score || 0
-            },
-            slot: {
-                total: parseInt(gameStats[1].rows[0].count) || 0,
-                wins: parseInt(gameStats[1].rows[0].wins) || 0
-            },
-            scratch: {
-                total: parseInt(gameStats[2].rows[0].count) || 0,
-                wins: parseInt(gameStats[2].rows[0].wins) || 0
-            },
-            wish: {
-                total: parseInt(gameStats[3].rows[0].count) || 0,
-                wins: parseInt(gameStats[3].rows[0].wins) || 0
-            },
-            blindbox: {
-                total: parseInt(gameStats[4].rows[0].count) || 0
-            },
-            stone: {
-                total: parseInt(gameStats[5].rows[0].count) || 0
-            },
-            flip: {
-                total: parseInt(gameStats[6].rows[0].count) || 0
-            },
-            duel: {
-                total: parseInt(gameStats[7].rows[0].count) || 0
-            }
-        };
+        const stats = await gameRegistry.records.loadProfileStats(pool, username);
         
         const user = userResult.rows[0];
         
@@ -1429,10 +1427,27 @@ app.post('/register', registerLimiter, async (req, res) => {
         try {
             await client.query('BEGIN');
             await client.query(
-                `INSERT INTO users (username, password_hash, created_at, registration_ip)
-                 VALUES ($1, $2, NOW(), $3)`,
+                `INSERT INTO users (username, password_hash, balance, created_at, registration_ip)
+                 VALUES ($1, $2, 0, NOW(), $3)`,
                 [username, hashed, req.clientIP]
             );
+            const signupBonus = await BalanceLogger.updateBalance({
+                username,
+                amount: 100,
+                operationType: 'signup_promotion',
+                description: '注册推广金库发放 100 积分',
+                gameData: {
+                    fundingSource: 'promotion_treasury',
+                    assetClass: 'legacy_unsegregated_promotion'
+                },
+                ipAddress: req.clientIP,
+                userAgent: req.userAgent,
+                requestId: `signup:${username}`,
+                requireSufficientBalance: false,
+                client,
+                managedTransaction: true
+            });
+            if (!signupBonus.success) throw new Error('Signup promotion posting failed');
             await client.query('COMMIT');
         } catch (error) {
             await client.query('ROLLBACK').catch(() => {});
@@ -1464,7 +1479,7 @@ app.post('/register', registerLimiter, async (req, res) => {
 
 // 登录处理 - 集成IP风控和单设备登录
 app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
-    const { password, _csrf } = req.body || {};
+    const { password, _csrf, totpCode } = req.body || {};
     const username = normalizeUsernameInput(req.body?.username);
     const clientIP = req.clientIP;
     const userAgent = req.userAgent;
@@ -1508,7 +1523,7 @@ app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
         // 3. 检查用户是否存在
         const result = await pool.query(
             `SELECT username, password_hash, balance, is_admin, authorized,
-                    login_failures, locked_until, deactivated
+                    login_failures, locked_until, deactivated, last_admin_totp_counter
              FROM users WHERE username = $1`,
             [username]
         );
@@ -1593,16 +1608,33 @@ app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
             });
         }
 
+        let adminTotpCounter = null;
+        if (user.is_admin === true) {
+            adminTotpCounter = matchTotpCounter(getAdminTotpSecret(username), totpCode);
+            if (adminTotpCounter === null
+                || (user.last_admin_totp_counter !== null
+                    && adminTotpCounter <= Number(user.last_admin_totp_counter))) {
+                await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_mfa_failed');
+                return res.status(401).render('login', {
+                    title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
+                    error: uiText(res, '用户名、密码或动态验证码错误！', 'Invalid username, password, or authenticator code!'),
+                    csrfToken: generateCSRFToken(req)
+                });
+            }
+        }
+
         // 5. 登录成功处理
         const loginStateReset = await pool.query(`
             UPDATE users
-            SET login_failures = 0, last_failure_time = NULL, locked_until = NULL
+            SET login_failures = 0, last_failure_time = NULL, locked_until = NULL,
+                last_admin_totp_counter = CASE WHEN is_admin THEN $3 ELSE last_admin_totp_counter END
             WHERE username = $1
               AND password_hash = $2
               AND deactivated = false
               AND (locked_until IS NULL OR locked_until <= NOW())
+              AND (is_admin = false OR last_admin_totp_counter IS NULL OR last_admin_totp_counter < $3)
             RETURNING username
-        `, [username, user.password_hash]);
+        `, [username, user.password_hash, adminTotpCounter]);
         if (loginStateReset.rowCount !== 1) {
             return res.status(401).render('login', {
                 title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
@@ -1653,7 +1685,7 @@ app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
             req.session.user = sessionResult.user;
             req.session.username = sessionResult.user.username;
             req.session.lastAuthenticatedAt = Date.now();
-            req.session.lastMfaVerifiedAt = 0;
+            req.session.lastMfaVerifiedAt = sessionResult.user.is_admin ? Date.now() : 0;
             await new Promise((resolve, reject) => {
                 req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
             });
@@ -1896,127 +1928,7 @@ app.get('/games', async (req, res) => {
     });
 });
 
-const wishConfigs = {
-    deepsea_singer: {
-        giftType: 'deepsea_singer',
-        name: '梦幻游乐园',
-        bilibiliGiftId: '34383',
-        cost: 500,
-        successRate: 0.014,
-        guaranteeCount: 148,
-        rewardValue: 30000
-    },
-    sky_throne: {
-        giftType: 'sky_throne',
-        name: '飞天转椅',
-        bilibiliGiftId: '34382',
-        cost: 250,
-        successRate: 0.0202,
-        guaranteeCount: 83,
-        rewardValue: 10000
-    },
-    proposal: {
-        giftType: 'proposal',
-        name: '原地求婚',
-        bilibiliGiftId: '34999',
-        cost: 208,
-        successRate: 0.0325,
-        guaranteeCount: 52,
-        rewardValue: 5200
-    },
-    wonderland: {
-        giftType: 'wonderland',
-        name: '梦游仙境',
-        bilibiliGiftId: '31932',
-        cost: 150,
-        successRate: 0.0405,
-        guaranteeCount: 41,
-        rewardValue: 3000
-    },
-    white_bride: {
-        giftType: 'white_bride',
-        name: '纯白花嫁',
-        bilibiliGiftId: '34428',
-        cost: 75,
-        successRate: 0.046,
-        guaranteeCount: 34,
-        rewardValue: 1314
-    },
-    crystal_ball: {
-        giftType: 'crystal_ball',
-        name: '水晶球',
-        bilibiliGiftId: '31122',
-        cost: 66,
-        successRate: 0.055,
-        guaranteeCount: 32,
-        rewardValue: 1000
-    },
-    bobo: {
-        giftType: 'bobo',
-        name: '啵啵',
-        bilibiliGiftId: '33668',
-        cost: 50,
-        successRate: 0.104,
-        guaranteeCount: 16,
-        rewardValue: 399
-    }
-};
-
-function getWishConfig(giftType) {
-    if (typeof giftType !== 'string' || !Object.hasOwn(wishConfigs, giftType)) {
-        return null;
-    }
-    return wishConfigs[giftType];
-}
-
-const stoneColors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple'];
-const stoneReplaceCosts = {
-    1: 28,
-    2: 28,
-    3: 78,
-    4: 315,
-    5: 3860
-};
-const stoneRewards = {
-    1: 50,
-    2: 120,
-    3: 250,
-    4: 800,
-    5: 3000,
-    6: 30000
-};
-
-const flipCosts = [50, 112, 172, 316, 620, 1025, 2033];
-const flipCashoutRewards = {
-    1: 50,
-    2: 200,
-    3: 500,
-    4: 1200,
-    5: 3000,
-    6: 8000,
-    7: 30000
-};
-
-const duelRewards = {
-    crown: { name: '至尊奖', reward: 30000 },
-    dragon: { name: '龙魂奖', reward: 13140 },
-    phoenix: { name: '凤羽奖', reward: 5000 },
-    jade: { name: '玉阶奖', reward: 1000 },
-    bronze: { name: '青铜奖', reward: 500 },
-    iron: { name: '铁心奖', reward: 200 }
-};
-
-function calculateDuelCost(giftType, power) {
-    if (typeof giftType !== 'string' || !Object.hasOwn(duelRewards, giftType)) {
-        return null;
-    }
-    if (giftType === 'crown') {
-        return Math.round(310 * power + 1);
-    }
-    const reward = duelRewards[giftType].reward;
-    const ratio = reward / 30000;
-    return Math.round(310 * ratio * power + 1);
-}
+const stoneColors = gameRegistry.STONE_CONFIG.colors;
 
 function shuffleArray(list) {
     const arr = list.slice();
@@ -2428,12 +2340,73 @@ async function scheduleWishInventoryDeliveryOnBind(username, client = pool) {
     return result.rowCount;
 }
 
-const wishAutoSendInterval = setInterval(autoSendExpiredWishRewards, 60 * 1000);
-wishAutoSendInterval.unref?.();
+function registerRuntimeLifecycle() {
+    applicationLifecycle.registerComponent('database-pool', {
+        async start() {},
+        async stop() { await pool.end(); }
+    });
+    applicationLifecycle.registerComponent('session-store', {
+        async start() {},
+        async stop() { await sessionStore.close(); }
+    });
+    applicationLifecycle.registerComponent('paid-action-concurrency-guard', {
+        async start() { paidActionConcurrencyGuard.start(); },
+        async stop() { paidActionConcurrencyGuard.close(); }
+    });
+    applicationLifecycle.registerComponent('database-schema', {
+        async start() {
+            const databaseReady = await initializeDatabase();
+            if (!databaseReady) {
+                throw new Error('数据库初始化失败，拒绝启动服务');
+            }
+        },
+        async stop() {}
+    });
+    applicationLifecycle.registerComponent('socket-event-bus', {
+        start: () => socketEventBus.start(),
+        stop: () => socketEventBus.close()
+    });
+    applicationLifecycle.registerComponent('session-cleanup', {
+        async start() { SessionManager.startCleanup(); },
+        stop: () => SessionManager.stopCleanup()
+    });
+    applicationLifecycle.registerComponent('ip-cleanup', {
+        async start() { IPManager.startCleanup(); },
+        stop: () => IPManager.stopCleanup()
+    });
+    applicationLifecycle.registerComponent('security-cleanup', {
+        async start() { security.startCleanup(); },
+        async stop() { security.stopCleanup(); }
+    });
+    applicationLifecycle.registerRecurringJob('socket-session-revalidation', {
+        run: revalidateConnectedSockets,
+        intervalMs: 60 * 1000,
+        unref: true
+    });
+    applicationLifecycle.registerRecurringJob('wish-auto-send', {
+        run: autoSendExpiredWishRewards,
+        intervalMs: 60 * 1000,
+        unref: true
+    });
+    applicationLifecycle.registerRecurringJob('idempotency-recovery', {
+        run: recoverStaleIdempotencyKeys,
+        intervalMs: 60 * 1000,
+        runOnStart: true,
+        unref: true
+    });
+    applicationLifecycle.registerRecurringJob('database-maintenance', {
+        run: runDatabaseMaintenance,
+        intervalMs: 6 * 60 * 60 * 1000,
+        runOnStart: true,
+        unref: true
+    });
+}
+
+registerRuntimeLifecycle();
 
 app.get('/live', (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json({ status: 'alive', timestamp: new Date().toISOString() });
+    res.json({ status: 'alive' });
 });
 
 let readinessCache = null;
@@ -2529,17 +2502,22 @@ async function checkReadiness() {
 
             const schemaChecks = schemaResult.rows[0] || {};
             const schemaReady = Object.values(schemaChecks).every((value) => value === true);
+            let workerCredentialsReady = process.env.NODE_ENV !== 'production';
+            try {
+                workerCredentialsReady = parseWorkerCredentials(
+                    process.env.WORKER_CREDENTIALS_JSON
+                ).size > 0;
+            } catch {
+                workerCredentialsReady = false;
+            }
             const configurationReady = process.env.NODE_ENV !== 'production' || (
                 typeof process.env.SESSION_SECRET === 'string'
-                && process.env.SESSION_SECRET.length >= 16
-                && typeof process.env.WINDOWS_API_KEY === 'string'
-                && process.env.WINDOWS_API_KEY.length >= 32
-                && typeof process.env.GIFT_TASKS_HMAC_SECRET === 'string'
-                && process.env.GIFT_TASKS_HMAC_SECRET.length >= 32
+                && process.env.SESSION_SECRET.length >= 32
+                && workerCredentialsReady
+                && Boolean(process.env.ADMIN_TOTP_SECRETS_JSON)
             );
             const backgroundReady = Boolean(
-                wishAutoSendInterval
-                && databaseMaintenanceInterval
+                applicationLifecycle.state === 'running'
                 && socketEventBus.isReady()
             );
             const onlineWorkers = Number(workerResult.rows[0]?.online_workers || 0);
@@ -2554,6 +2532,9 @@ async function checkReadiness() {
                         database: true,
                         schema: schemaReady,
                         configuration: configurationReady,
+                        adminMfa: {
+                            configured: Boolean(process.env.ADMIN_TOTP_SECRETS_JSON)
+                        },
                         backgroundLoops: backgroundReady,
                         socketEventBus: socketEventBus.isReady(),
                         giftWorker: {
@@ -2592,29 +2573,50 @@ async function checkReadiness() {
 const readinessHandler = async (req, res) => {
     const result = await checkReadiness();
     res.set('Cache-Control', 'no-store');
+    return res.status(result.httpStatus).json({
+        status: result.body.ready ? 'ready' : 'unavailable',
+        ready: result.body.ready
+    });
+};
+const diagnosticReadinessHandler = async (req, res) => {
+    const token = req.get('X-Readiness-Token');
+    const expectedToken = process.env.READINESS_TOKEN;
+    const tokenBuffer = Buffer.from(String(token || ''), 'utf8');
+    const expectedTokenBuffer = Buffer.from(String(expectedToken || ''), 'utf8');
+    const tokenValid = tokenBuffer.length > 0
+        && tokenBuffer.length === expectedTokenBuffer.length
+        && crypto.timingSafeEqual(tokenBuffer, expectedTokenBuffer);
+    if (!tokenValid) return res.status(404).json({ status: 'not_found' });
+    const result = await checkReadiness();
+    res.set('Cache-Control', 'no-store');
     return res.status(result.httpStatus).json(result.body);
 };
 app.get('/ready', readinessHandler);
-app.get('/health', readinessHandler);
+app.get('/internal/ready', diagnosticReadinessHandler);
+app.get('/health', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ status: 'alive' });
+});
 
 // 🛡️ 安全修复：API密钥验证中间件 - 只允许header传key，禁止query参数
 async function requireApiKey(req, res, next) {
     const apiKey = req.headers['x-api-key']; // 仅从header获取，不再支持query参数
-    const validApiKey = process.env.WINDOWS_API_KEY || 'INVALID_DEFAULT_KEY';
     const ipWhitelist = process.env.GIFT_TASKS_IP_WHITELIST || '';
-    const hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || '';
     const MAX_NONCE_CACHE_SIZE = 10000;
     const clientIp = req.clientIP || getClientIp(req);
     
-    // 生产环境不允许默认密钥
-    if (process.env.NODE_ENV === 'production' && validApiKey === 'INVALID_DEFAULT_KEY') {
-        console.error('🚨 生产环境错误: WINDOWS_API_KEY 环境变量未设置');
-        return res.status(500).json({ 
-            success: false, 
-            message: '服务配置错误' 
-        });
+    const workerId = req.headers['x-worker-id'];
+    let credential;
+    try {
+        credential = parseWorkerCredentials(process.env.WORKER_CREDENTIALS_JSON).get(workerId);
+    } catch {
+        return res.status(500).json({ success: false, message: '服务配置错误' });
     }
-    
+    if (!credential) {
+        return res.status(401).json({ success: false, message: '未知工作器身份' });
+    }
+    const validApiKey = credential.apiKey;
+    const hmacSecret = credential.hmacSecret;
     const apiKeyBuffer = Buffer.from(String(apiKey || ''), 'utf8');
     const validApiKeyBuffer = Buffer.from(String(validApiKey || ''), 'utf8');
     if (!apiKey || !validApiKey || apiKeyBuffer.length !== validApiKeyBuffer.length
@@ -2622,13 +2624,6 @@ async function requireApiKey(req, res, next) {
         return res.status(401).json({ 
             success: false, 
             message: '无效的API密钥' 
-        });
-    }
-
-    if (!hmacSecret) {
-        return res.status(500).json({
-            success: false,
-            message: '服务配置错误'
         });
     }
 
@@ -2646,8 +2641,6 @@ async function requireApiKey(req, res, next) {
     const signatureHeader = req.headers['x-signature'];
     const nonceHeader = req.headers['x-nonce'];
     const signatureVersion = req.headers['x-signature-version'];
-    const workerId = req.headers['x-worker-id'];
-
     if (!timestampHeader || !signatureHeader || !nonceHeader || signatureVersion !== SIGNATURE_VERSION
         || typeof workerId !== 'string' || !/^[A-Za-z0-9._:-]{8,100}$/.test(workerId)) {
         return res.status(401).json({
@@ -2783,15 +2776,14 @@ registerAnalyticsRoutes(app, {
     requireLogin,
     requireAdmin,
     security,
-    analyticsTokenSecret: crypto.createHmac('sha256', sessionSecret)
-        .update('ux-analytics-token-v1')
-        .digest()
+    analyticsTokenSecret
 });
 
 registerAdminRoutes(app, {
     pool,
     bcrypt,
     BalanceLogger,
+    gameRegistry,
     generateCSRFToken,
     requireLogin,
     requireAdmin,
@@ -2804,9 +2796,8 @@ registerAdminRoutes(app, {
     SessionManager,
     notifySecurityEvent,
     disconnectUserSockets,
-    passwordResetTokenSecret: crypto.createHmac('sha256', sessionSecret)
-        .update('admin-password-reset-token-v1')
-        .digest()
+    getAdminTotpSecret,
+    passwordResetTokenSecret: resetTokenSecret
 });
 
 registerGiftRoutes(app, {
@@ -2821,13 +2812,14 @@ registerGiftRoutes(app, {
     security,
     generateCSRFToken,
     enqueueWishInventorySend,
-    paidActionConcurrencyGuard
+    paidActionConcurrencyGuard,
+    applicationLifecycle
 });
 
 registerWishRoutes(app, {
     pool,
     BalanceLogger,
-    getWishConfig,
+    gameRegistry,
     requireLogin,
     requireAuthorized,
     requireCSRF,
@@ -2847,7 +2839,7 @@ registerGameRoutes(app, {
     requireLogin,
     requireAuthorized,
     requireCSRF,
-    dictationTokenSecret: crypto.createHmac('sha256', sessionSecret).update('dictation-question-token-v1').digest('hex'),
+    dictationTokenSecret,
     security,
     randomStoneColor,
     normalizeStoneSlots,
@@ -2855,16 +2847,11 @@ registerGameRoutes(app, {
     getStoneState,
     saveStoneState,
     logStoneAction,
-    stoneRewards,
-    stoneReplaceCosts,
-    flipCosts,
-    flipCashoutRewards,
+    gameRegistry,
     createFlipBoard,
     getFlipState,
     saveFlipState,
     logFlipAction,
-    duelRewards,
-    calculateDuelCost,
     paidActionConcurrencyGuard,
     giftConfig
 });
@@ -2887,61 +2874,93 @@ app.use((err, req, res, next) => {
     return res.status(500).send('服务器错误');
 });
 
-let databaseMaintenanceInterval = null;
-
-async function startServer() {
-    const databaseReady = await initializeDatabase();
-    if (!databaseReady) {
-        throw new Error('数据库初始化失败，拒绝启动服务');
-    }
-    await socketEventBus.start();
-    await runDatabaseMaintenance();
-    databaseMaintenanceInterval = setInterval(runDatabaseMaintenance, 6 * 60 * 60 * 1000);
-    databaseMaintenanceInterval.unref?.();
-    server.listen(PORT, () => {
-        console.log(`🎮 游戏服务器运行在端口 ${PORT}`);
-        console.log(`📚 题库包含 ${questions.length} 道题目`);
-        console.log(`🌐 访问 http://localhost:${PORT} 开始游戏`);
-        console.log(`🚀 WebSocket飘屏系统已启动`);
-        console.log(`🎁 B站送礼功能已启用`);
+function startHttpServer() {
+    if (server.listening) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const cleanupListeners = () => {
+            server.off('listening', onListening);
+            server.off('error', onError);
+        };
+        const onListening = () => {
+            cleanupListeners();
+            console.log(`🎮 游戏服务器运行在端口 ${PORT}`);
+            console.log(`📚 题库包含 ${questions.length} 道题目`);
+            console.log(`🌐 访问 http://localhost:${PORT} 开始游戏`);
+            console.log('🚀 WebSocket飘屏系统已启动');
+            console.log('🎁 B站送礼功能已启用');
+            resolve();
+        };
+        const onError = (error) => {
+            cleanupListeners();
+            reject(error);
+        };
+        server.once('listening', onListening);
+        server.once('error', onError);
+        try {
+            server.listen(PORT);
+        } catch (error) {
+            cleanupListeners();
+            reject(error);
+        }
     });
 }
 
-startServer().catch((error) => {
-    console.error('服务启动失败:', error);
-    process.exitCode = 1;
-    pool.end().catch(() => {});
-});
-
-let shutdownStarted = false;
-async function shutdown(signal) {
-    if (shutdownStarted) return;
-    shutdownStarted = true;
-    console.log(`收到${signal}信号，正在关闭服务...`);
-    if (databaseMaintenanceInterval) clearInterval(databaseMaintenanceInterval);
-    clearInterval(socketSessionValidationInterval);
-    paidActionConcurrencyGuard.close();
-
+async function stopHttpServer() {
+    const timeout = setTimeout(() => {
+        server.closeAllConnections?.();
+    }, 10 * 1000);
+    timeout.unref?.();
     try {
-        io.close();
-        await new Promise((resolve) => {
-            if (!server.listening) return resolve();
-            const timeout = setTimeout(resolve, 10000);
-            timeout.unref?.();
-            server.close(() => {
-                clearTimeout(timeout);
-                resolve();
-            });
-        });
-        await socketEventBus.close();
-        await pool.end();
-        console.log('服务器已安全关闭');
-        process.exit(0);
-    } catch (error) {
-        console.error('关闭服务器时发生错误:', error);
-        process.exit(1);
+        await io.close();
+    } finally {
+        clearTimeout(timeout);
     }
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+applicationLifecycle.registerComponent('http-server', {
+    start: startHttpServer,
+    stop: stopHttpServer
+});
+
+async function startServer() {
+    await applicationLifecycle.start();
+    return server;
+}
+
+let shutdownPromise = null;
+function shutdown(signal = 'manual') {
+    if (shutdownPromise) return shutdownPromise;
+    console.log(`收到${signal}信号，正在关闭服务...`);
+    shutdownPromise = applicationLifecycle.stop().then(() => {
+        console.log('服务器已安全关闭');
+    });
+    return shutdownPromise;
+}
+
+function handleShutdownSignal(signal) {
+    void shutdown(signal).then(
+        () => { process.exitCode = 0; },
+        (error) => {
+            console.error('关闭服务器时发生错误:', error);
+            process.exitCode = 1;
+        }
+    );
+}
+
+if (require.main === module) {
+    process.once('SIGINT', () => handleShutdownSignal('SIGINT'));
+    process.once('SIGTERM', () => handleShutdownSignal('SIGTERM'));
+    void startServer().catch((error) => {
+        console.error('服务启动失败:', error);
+        process.exitCode = 1;
+    });
+}
+
+module.exports = {
+    app,
+    server,
+    io,
+    applicationLifecycle,
+    startServer,
+    shutdown
+};

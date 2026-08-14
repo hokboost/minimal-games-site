@@ -3,27 +3,36 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
-
-const root = path.resolve(__dirname, '..');
-const releaseFiles = execFileSync(
-    'git',
-    ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-    { cwd: root }
-)
-    .toString('utf8')
-    .split('\0')
-    .filter(Boolean);
+const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
+const excludedDirectories = new Set(['.git', 'node_modules', 'build', 'dist', 'coverage']);
+const releaseFiles = [];
+function walk(directory, prefix = '') {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+            if (!excludedDirectories.has(entry.name)) walk(path.join(directory, entry.name), relative);
+        } else if (entry.isFile() || entry.isSymbolicLink()) {
+            releaseFiles.push(relative);
+        }
+    }
+}
+walk(root);
 const forbiddenNames = [
     /(^|\/)\.env(?:\.|$)/,
     /(^|\/)cookie[^/]*\.txt$/i,
     /(^|\/)storage-state[^/]*\.json$/i,
+    /(^|\/).*\.har$/i,
+    /(^|\/).*\.log$/i,
+    /(^|\/).*\.dpapi$/i,
+    /(^|\/)browser-profile(?:\/|$)/i,
     /(^|\/)\.claude\/settings\.local\.json$/
 ];
 const secretPatterns = [
     /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
     /postgres(?:ql)?:\/\/[^\s:/]+:[^\s@/]+@/i,
-    /(?:SESSDATA|bili_jct|DedeUserID|DedeUserID__ckMd5)\s*[=:]\s*['"]?[A-Za-z0-9%._-]{16,}/
+    /(?:SESSDATA|bili_jct|DedeUserID|DedeUserID__ckMd5)\s*[=:]\s*['"]?[A-Za-z0-9%._-]{16,}/,
+    /\bgh[opsu]_[A-Za-z0-9_]{30,}\b/,
+    /\bAKIA[0-9A-Z]{16}\b/
 ];
 const failures = [];
 
@@ -47,4 +56,4 @@ if (failures.length > 0) {
     process.stderr.write(`${failures.join('\n')}\n`);
     process.exit(1);
 }
-console.log(`Release-file secret check passed (${releaseFiles.length} files)`);
+console.log(`Secret/artifact check passed (${releaseFiles.length} files under ${root})`);

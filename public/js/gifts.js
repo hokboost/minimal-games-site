@@ -466,31 +466,22 @@
         }
 
         
-        const heartboxQuantity = document.getElementById('heartbox-quantity');
-        const fanlightQuantity = document.getElementById('fanlight-quantity');
-        const tieduOneQuantity = document.getElementById('tiedu_one-quantity');
-        
-        heartboxQuantity.addEventListener('input', () => updateGiftTotal('heartbox', 150));
-        heartboxQuantity.addEventListener('change', () => {
-            const value = parseInt(heartboxQuantity.value);
-            if (value < 1) heartboxQuantity.value = 1;
-            if (value > 100) heartboxQuantity.value = 100;
-            updateGiftTotal('heartbox', 150);
-        });
-        
-        fanlightQuantity.addEventListener('input', () => updateGiftTotal('fanlight', 1));
-        fanlightQuantity.addEventListener('change', () => {
-            const value = parseInt(fanlightQuantity.value);
-            if (value < 1) fanlightQuantity.value = 1;
-            if (value > 100) fanlightQuantity.value = 100;
-            updateGiftTotal('fanlight', 1);
-        });
+        document.querySelectorAll('.gift-button[data-gift][data-cost]').forEach((button) => {
+            const giftType = button.dataset.gift;
+            const cost = Number(button.dataset.cost);
+            const quantityInput = document.getElementById(`${giftType}-quantity`);
+            if (!quantityInput || !Number.isSafeInteger(cost) || cost < 0) return;
 
-        tieduOneQuantity.addEventListener('input', () => updateGiftTotal('tiedu_one', 19980));
-        tieduOneQuantity.addEventListener('change', () => {
-            const value = parseInt(tieduOneQuantity.value);
-            if (value < 1) tieduOneQuantity.value = 1;
-            if (value > 100) tieduOneQuantity.value = 100;
-            updateGiftTotal('tiedu_one', 19980);
+            quantityInput.addEventListener('input', () => updateGiftTotal(giftType, cost));
+            quantityInput.addEventListener('change', () => {
+                const minimum = Number(quantityInput.min) || 1;
+                const maximum = Number(quantityInput.max) || 100;
+                const value = Number.parseInt(quantityInput.value, 10);
+                quantityInput.value = String(Math.min(maximum, Math.max(
+                    minimum,
+                    Number.isFinite(value) ? value : minimum
+                )));
+                updateGiftTotal(giftType, cost);
+            });
         });
     });

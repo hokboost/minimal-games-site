@@ -422,27 +422,20 @@
             <div class="tier-selection">
                 <h4><%= lang === 'zh' ? '选择游戏档位' : 'Select game tier' %></h4>
                 <div class="tier-buttons">
-                    <button class="tier-btn" data-cost="5" data-wins="5">
-                        <%= lang === 'zh' ? '普通版' : 'Basic' %><br>
-                        <span class="tier-cost">5 <%= lang === 'zh' ? '积分' : 'points' %></span><br>
-                        <span class="tier-detail">
-                            <%= lang === 'zh' ? '5个中奖号码+5个我的号码' : '5 winning numbers + 5 my numbers' %>
-                        </span>
-                    </button>
-                    <button class="tier-btn" data-cost="10" data-wins="5">
-                        <%= lang === 'zh' ? '进阶版' : 'Advanced' %><br>
-                        <span class="tier-cost">10 <%= lang === 'zh' ? '积分' : 'points' %></span><br>
-                        <span class="tier-detail">
-                            <%= lang === 'zh' ? '5个中奖号码+10个我的号码' : '5 winning numbers + 10 my numbers' %>
-                        </span>
-                    </button>
-                    <button class="tier-btn" data-cost="100" data-wins="5">
-                        <%= lang === 'zh' ? '豪华版' : 'Deluxe' %><br>
-                        <span class="tier-cost">100 <%= lang === 'zh' ? '积分' : 'points' %></span><br>
-                        <span class="tier-detail">
-                            <%= lang === 'zh' ? '5个中奖号码+20个我的号码' : '5 winning numbers + 20 my numbers' %>
-                        </span>
-                    </button>
+                    <% const tierNamesZh = ['普通版', '进阶版', '豪华版']; %>
+                    <% const tierNamesEn = ['Basic', 'Advanced', 'Deluxe']; %>
+                    <% scratchConfig.tiers.forEach((tier, index) => { %>
+                        <button class="tier-btn" data-cost="<%= tier.cost %>" data-wins="<%= tier.winCount %>">
+                            <%= lang === 'zh' ? (tierNamesZh[index] || `档位 ${index + 1}`) : (tierNamesEn[index] || `Tier ${index + 1}`) %><br>
+                            <span class="tier-cost"><%= tier.cost %> <%= lang === 'zh' ? '积分' : 'points' %></span><br>
+                            <span class="tier-detail">
+                                <%= lang === 'zh'
+                                    ? `${tier.winCount}个中奖号码+${tier.userCount}个我的号码`
+                                    : `${tier.winCount} winning numbers + ${tier.userCount} my numbers`
+                                %>
+                            </span>
+                        </button>
+                    <% }); %>
                 </div>
             </div>
         </div>

@@ -308,10 +308,10 @@
 
             <div class="action-row">
                 <button class="action-btn" id="addOneBtn">
-                    <%= lang === 'zh' ? '放入一颗' : 'Add One' %> (30)
+                    <%= lang === 'zh' ? '放入一颗' : 'Add One' %> (<%= stoneConfig.initialCost %>)
                 </button>
                 <button class="action-btn secondary" id="fillBtn">
-                    <%= lang === 'zh' ? '一键放满' : 'Fill All' %> (180)
+                    <%= lang === 'zh' ? '一键放满' : 'Fill All' %> (<%= stoneConfig.initialCost * stoneConfig.slotCount %>)
                 </button>
             </div>
 

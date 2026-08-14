@@ -24,8 +24,12 @@ module.exports = function registerGiftRoutes(app, deps) {
         security,
         generateCSRFToken,
         enqueueWishInventorySend,
-        paidActionConcurrencyGuard
+        paidActionConcurrencyGuard,
+        applicationLifecycle
     } = deps;
+    if (typeof applicationLifecycle?.registerRecurringJob !== 'function') {
+        throw new TypeError('Missing required application lifecycle');
+    }
     const basicRateLimit = requireFunction(security, 'basicRateLimit', 'security middleware');
     const readHeavyRateLimit = requireFunction(security, 'readHeavyRateLimit', 'security middleware');
     const userActionRateLimit = requireFunction(security, 'userActionRateLimit', 'security middleware');
@@ -46,6 +50,12 @@ module.exports = function registerGiftRoutes(app, deps) {
     );
     const workerGuards = [workerApiKeyGuard, activeWorkerGuard];
     const redeemableGiftTypes = new Set(['heartbox', 'fanlight', 'tiedu_one']);
+    const publicGiftPrices = Object.freeze(Object.fromEntries(
+        [...redeemableGiftTypes].map((giftType) => {
+            const configuredCost = giftConfig?.礼物映射?.[giftType]?.电币成本;
+            return [giftType, parseMoney(configuredCost, `${giftType} gift cost`, { min: 0 })];
+        })
+    ));
 
     function calculateDeliveredCost(totalCost, deliveredQuantity, requestedQuantity) {
         if (!Number.isSafeInteger(totalCost) || totalCost < 0
@@ -210,6 +220,15 @@ module.exports = function registerGiftRoutes(app, deps) {
         }
     }
 
+    let deliveryOutboxPromise = null;
+    function triggerDeliveryOutbox() {
+        if (deliveryOutboxPromise) return deliveryOutboxPromise;
+        deliveryOutboxPromise = processDeliveryOutbox().finally(() => {
+            deliveryOutboxPromise = null;
+        });
+        return deliveryOutboxPromise;
+    }
+
     // Lease cleanup is leader-elected. Only tasks proven not to have started an
     // external send may be refunded automatically.
     const monitorStuckGiftTasks = () => {
@@ -349,10 +368,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                 }
             }
         };
-        const initial = setTimeout(() => run().catch(() => {}), 30000);
-        initial.unref?.();
-        const interval = setInterval(() => run().catch(() => {}), INTERVAL_MS);
-        interval.unref?.();
+        return { run, intervalMs: INTERVAL_MS };
     };
 
     // 礼物兑换页面
@@ -377,6 +393,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                 title: '礼物兑换 - Minimal Games',
                 user: req.session.user,
                 balance: balance,
+                giftPrices: publicGiftPrices,
                 csrfToken: req.session.csrfToken
             });
 
@@ -610,6 +627,9 @@ module.exports = function registerGiftRoutes(app, deps) {
     });
 
     app.post('/api/pk/start', requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, requireCSRF, async (req, res) => {
+        if (process.env.PK_EXTERNAL_SEND_ENABLED !== 'true') {
+            return res.status(503).json({ success: false, message: 'PK 外部送礼已由安全开关暂停' });
+        }
         let client;
         try {
             client = await pool.connect();
@@ -806,6 +826,9 @@ module.exports = function registerGiftRoutes(app, deps) {
     });
 
     app.post('/api/pk-tasks/claim', ...workerGuards, async (req, res) => {
+        if (process.env.PK_EXTERNAL_SEND_ENABLED !== 'true') {
+            return res.status(503).json({ success: false, message: 'PK 外部送礼已暂停' });
+        }
         let client;
         try {
             client = await pool.connect();
@@ -1573,7 +1596,8 @@ module.exports = function registerGiftRoutes(app, deps) {
                 giftIds,
                 script,
                 success,
-                reason
+                reason,
+                providerTransactionIds
             } = req.body || {};
             const normalizedItems = normalizeGiftItems(giftIds);
             const resolvedTicketCount = computeTicketCount(giftIds, giftConfig);
@@ -1593,7 +1617,23 @@ module.exports = function registerGiftRoutes(app, deps) {
                 giftIds,
                 ticketCount: resolvedTicketCount
             });
-            const outcomeReason = String(reason || (success ? 'sent' : 'unconfirmed_failure')).slice(0, 1000);
+            const normalizedProviderTransactionIds = Array.isArray(providerTransactionIds)
+                && providerTransactionIds.length >= 1
+                && providerTransactionIds.length <= 100
+                && providerTransactionIds.every((value) => (
+                    typeof value === 'string'
+                    && value.length >= 1
+                    && value.length <= 200
+                    && !/[\r\n\0]/.test(value)
+                ))
+                ? [...new Set(providerTransactionIds.map((value) => value.trim()))]
+                : [];
+            const providerConfirmed = success && normalizedProviderTransactionIds.length > 0;
+            const outcomeReason = String(
+                providerConfirmed
+                    ? (reason || 'provider_confirmed')
+                    : success ? 'provider_receipt_missing' : (reason || 'unconfirmed_failure')
+            ).slice(0, 1000);
 
             client = await pool.connect();
             await client.query('BEGIN');
@@ -1638,8 +1678,8 @@ module.exports = function registerGiftRoutes(app, deps) {
                 INSERT INTO pk_gift_logs (
                     report_id, authorization_id, runner_generation, username, room_id,
                     gift_ids, ticket_count, script_name, success, reason,
-                    origin_worker_id, reporting_worker_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    origin_worker_id, reporting_worker_id, provider_receipt
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 ON CONFLICT (report_id) DO NOTHING
                 RETURNING id
             `, [
@@ -1651,10 +1691,13 @@ module.exports = function registerGiftRoutes(app, deps) {
                 JSON.stringify(normalizedItems),
                 resolvedTicketCount,
                 script ? String(script).slice(0, 50) : 'pk-proxy',
-                success,
+                providerConfirmed,
                 outcomeReason,
                 authorization.worker_id,
-                req.workerId
+                req.workerId,
+                normalizedProviderTransactionIds.length > 0
+                    ? JSON.stringify({ transactionIds: normalizedProviderTransactionIds })
+                    : null
             ]);
             if (logResult.rows.length === 0) {
                 await client.query('ROLLBACK');
@@ -1665,7 +1708,7 @@ module.exports = function registerGiftRoutes(app, deps) {
             // external attempt, so a pre-send failure can be released. Once
             // sending starts, every non-success result requires reconciliation.
             const previousStatus = authorization.status;
-            const nextStatus = success
+            const nextStatus = providerConfirmed
                 ? 'settled'
                 : previousStatus === 'reserved' ? 'released' : 'uncertain';
             if (nextStatus === 'released') {
@@ -1691,10 +1734,20 @@ module.exports = function registerGiftRoutes(app, deps) {
             const settled = await client.query(`
                 UPDATE pk_spend_authorizations
                 SET status = $2, report_id = $3, outcome_reason = $4,
+                    provider_receipt = $6,
                     settled_at = NOW(), updated_at = NOW()
                 WHERE authorization_id = $1 AND status = $5
                 RETURNING authorization_id
-            `, [authorizationId, nextStatus, reportId, outcomeReason, previousStatus]);
+            `, [
+                authorizationId,
+                nextStatus,
+                reportId,
+                outcomeReason,
+                previousStatus,
+                normalizedProviderTransactionIds.length > 0
+                    ? JSON.stringify({ transactionIds: normalizedProviderTransactionIds })
+                    : null
+            ]);
             if (settled.rowCount !== 1) {
                 throw new Error('PK authorization state changed concurrently');
             }
@@ -1721,6 +1774,10 @@ module.exports = function registerGiftRoutes(app, deps) {
         let existingExchange = null;
         let committedResponse = null;
         const idempotencyKey = req.idempotencyKey;
+
+        if (process.env.EXTERNAL_GIFTS_ENABLED !== 'true') {
+            return res.status(503).json({ success: false, message: '外部礼物兑换已由安全开关暂停' });
+        }
 
         try {
             const { giftType, cost, quantity = 1 } = req.body || {};
@@ -1796,6 +1853,9 @@ module.exports = function registerGiftRoutes(app, deps) {
                         message: '兑换过于频繁，请稍后再试'
                     });
                 }
+                await client.query(
+                    "SELECT pg_advisory_xact_lock(hashtextextended('global:gift-exposure', 0))"
+                );
 
                 // 1. 锁定用户行并检查余额
                 const lockResult = await client.query(
@@ -1855,6 +1915,33 @@ module.exports = function registerGiftRoutes(app, deps) {
 
                 if (currentBalance < costNum) { // ✅ FIX
                     throw new Error(`余额不足！当前余额: ${currentBalance} 积分，需要: ${costNum} 积分`); // ✅ FIX
+                }
+
+                const dailyLimits = await client.query(`
+                    SELECT
+                        COALESCE(SUM(cost) FILTER (WHERE username = $1), 0)::BIGINT AS user_total,
+                        COALESCE(SUM(cost), 0)::BIGINT AS global_total
+                    FROM gift_exchanges
+                    WHERE created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Shanghai')
+                        AT TIME ZONE 'Asia/Shanghai'
+                      AND status IN ('funds_locked', 'completed')
+                `, [username]);
+                const userDailyLimit = Number.parseInt(
+                    process.env.DAILY_USER_GIFT_SPEND_LIMIT || '10000',
+                    10
+                );
+                const globalDailyLimit = Number.parseInt(
+                    process.env.DAILY_GIFT_SPEND_LIMIT || '50000',
+                    10
+                );
+                const userTotal = Number(dailyLimits.rows[0]?.user_total || 0);
+                const globalTotal = Number(dailyLimits.rows[0]?.global_total || 0);
+                if (userTotal + costNum > userDailyLimit || globalTotal + costNum > globalDailyLimit) {
+                    await client.query('ROLLBACK');
+                    return res.status(429).json({
+                        success: false,
+                        message: '礼物兑换已达到安全支出上限'
+                    });
                 }
 
                 // 2. 检查是否有pending的任务（防止重复兑换）
@@ -1983,6 +2070,9 @@ module.exports = function registerGiftRoutes(app, deps) {
 
     // 获取待处理的礼物发送任务
     app.post('/api/gift-tasks/claim', ...workerGuards, async (req, res) => {
+        if (process.env.EXTERNAL_GIFTS_ENABLED !== 'true') {
+            return res.status(503).json({ success: false, message: '外部礼物兑换已暂停' });
+        }
         let client;
         try {
             client = await pool.connect();
@@ -2249,6 +2339,35 @@ module.exports = function registerGiftRoutes(app, deps) {
                 ? req.body.providerTransactionId.trim() || null
                 : null;
 
+            if (!providerTransactionId) {
+                await client.query(`
+                    UPDATE gift_exchanges
+                    SET delivery_status = 'uncertain',
+                        lease_expires_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = $1 AND status = 'funds_locked'
+                      AND claim_token = $2 AND worker_id = $3
+                      AND claim_generation = $4
+                `, [taskId, claimToken, req.workerId, claimGeneration]);
+                await client.query(`
+                    INSERT INTO gift_delivery_events (
+                        gift_exchange_id, event_type, claim_generation, worker_id, details
+                    ) VALUES ($1, 'delivery_uncertain', $2, $3, $4)
+                    ON CONFLICT (gift_exchange_id, event_type, claim_generation) DO NOTHING
+                `, [
+                    taskId,
+                    claimGeneration,
+                    req.workerId,
+                    JSON.stringify({ reason: 'provider_receipt_missing' })
+                ]);
+                await client.query('COMMIT');
+                return res.status(202).json({
+                    success: false,
+                    code: 'PROVIDER_RECEIPT_REQUIRED',
+                    message: '缺少可核对的第三方交易回执，任务已转入人工对账'
+                });
+            }
+
             if (refundAmount > 0) {
                 const refund = await BalanceLogger.updateBalance({
                     username,
@@ -2316,7 +2435,7 @@ module.exports = function registerGiftRoutes(app, deps) {
                 ON CONFLICT (event_type, aggregate_id) DO NOTHING
             `, [taskId, JSON.stringify({ username })]);
             await client.query('COMMIT');
-            setImmediate(() => processDeliveryOutbox().catch(() => {}));
+            void triggerDeliveryOutbox().catch(() => {});
             return res.json({ success: true, message: '任务完成' });
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
@@ -2532,11 +2651,24 @@ module.exports = function registerGiftRoutes(app, deps) {
         }
     });
 
-    // 启动卡住任务自动处理
-    monitorStuckGiftTasks();
-    const outboxInterval = setInterval(() => {
-        processDeliveryOutbox().catch(() => {});
-    }, 5000);
-    outboxInterval.unref?.();
-    setImmediate(() => processDeliveryOutbox().catch(() => {}));
+    // 后台任务由应用生命周期统一启停。
+    const stuckGiftTaskMonitor = monitorStuckGiftTasks();
+    applicationLifecycle.registerRecurringJob('gift-stuck-task-monitor', {
+        run: stuckGiftTaskMonitor.run,
+        initialDelayMs: 30 * 1000,
+        intervalMs: stuckGiftTaskMonitor.intervalMs,
+        unref: true
+    });
+    applicationLifecycle.registerComponent('gift-delivery-outbox-drain', {
+        async start() {},
+        async stop() {
+            if (deliveryOutboxPromise) await deliveryOutboxPromise.catch(() => {});
+        }
+    });
+    applicationLifecycle.registerRecurringJob('gift-delivery-outbox', {
+        run: triggerDeliveryOutbox,
+        intervalMs: 5 * 1000,
+        runOnStart: true,
+        unref: true
+    });
 };

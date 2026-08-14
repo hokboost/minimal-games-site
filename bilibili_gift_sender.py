@@ -20,6 +20,7 @@ if sys.platform == 'win32':
 from playwright.sync_api import sync_playwright
 import time
 import json
+from workers.bilibili.cookie_store import load_playwright_cookies
 
 def safe_print(text):
     """安全打印函数，处理编码问题 (log to stderr; keep stdout clean for JSON)."""
@@ -31,35 +32,9 @@ def safe_print(text):
 
 
 def load_cookies_from_txt(file_path):
-    """从cookie.txt文件加载cookies"""
-    cookies = []
+    """从 DPAPI 加密文件或受限兼容文本文件加载 cookies。"""
     try:
-        if os.path.islink(file_path) or not os.path.isfile(file_path):
-            return []
-        if os.name != "nt" and (os.stat(file_path).st_mode & 0o077):
-            return []
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip().startswith("#") or not line.strip():
-                    continue
-                parts = line.strip().split("\t")
-                if len(parts) == 1:
-                    parts = line.strip().split()
-                if len(parts) >= 7 and (parts[0].startswith(".") or parts[0].endswith(".com") or parts[0].endswith(".cn")):
-                    domain, _, path, _, _, name, value = parts[:7]
-                elif len(parts) >= 4:
-                    name, value, domain, path = parts[:4]
-                    if name.lower() in ("name", "cookie") or not domain:
-                        continue
-                else:
-                    continue
-                cookies.append({
-                    "name": name,
-                    "value": value,
-                    "domain": domain,
-                    "path": path
-                })
-        return cookies
+        return load_playwright_cookies(file_path)
     except Exception:
         safe_print("加载 Cookie 文件失败")
         return []
@@ -281,7 +256,14 @@ def send_gift_simple(gift_id, room_id, quantity=1):
 
         # 加载cookies
         safe_print("Loading cookies...")
-        cookie_path = os.environ.get('BILI_COOKIE_PATH', 'C:/Users/user/Desktop/jiaobenbili/cookie.txt')
+        cookie_path = os.environ.get(
+            'BILI_COOKIE_PATH',
+            os.path.join(
+                os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+                'MinimalGames',
+                'bilibili-cookie.dpapi'
+            )
+        )
         cookies = load_cookies_from_txt(cookie_path)
         cookies = normalize_live_cookies(cookies)
         if not cookies:

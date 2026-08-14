@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
+const base = require('./guard-test-target').enforceSafeTestTarget();
 
 // 翻牌专用测试脚本：
 // - 登录
@@ -12,7 +12,6 @@ require("./guard-test-target").enforceSafeTestTarget();
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
-const base = process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER || '尧顺宇';
 const password = process.env.AUTH_PASS || 'yaoshunyu';
 const flipIndex = Number(process.env.FLIP_INDEX || 0);

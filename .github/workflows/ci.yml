@@ -34,11 +34,14 @@ jobs:
       DB_PORT: 5432
       DB_SSL: "false"
       SESSION_SECRET: ci-session-secret-at-least-32-bytes
+      IDEMPOTENCY_HMAC_SECRET: ci-idempotency-secret-at-least-32-bytes
       LOG_HASH_SECRET: ci-log-secret-at-least-32-bytes-long
-      WINDOWS_API_KEY: ci-worker-api-key-at-least-32-bytes
-      GIFT_TASKS_HMAC_SECRET: ci-hmac-secret-at-least-32-bytes-long
+      WORKER_CREDENTIALS_JSON: '{"ci-worker-01":{"apiKey":"ci-worker-api-key-at-least-32-bytes","hmacSecret":"ci-hmac-secret-at-least-32-bytes-long"}}'
+      WORKER_CREDENTIAL_ID: ci-worker-01
+      WORKER_API_KEY: ci-worker-api-key-at-least-32-bytes
+      WORKER_HMAC_SECRET: ci-hmac-secret-at-least-32-bytes-long
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -48,7 +51,12 @@ jobs:
           python-version: "3.12"
       - run: npm ci
       - run: npm run test:all
+      - run: python -m unittest discover -s tests -p 'test_*.py'
       - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
+      - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:resilience
+      - run: npx playwright install --with-deps chromium
+      - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:e2e
+      - run: ALLOW_DATABASE_CREATE_TEST=true LOAD_TEST_DURATION_MS=5000 npm run test:load
       - run: npm audit --audit-level=high
       - run: python -m compileall -q bilibili_gift_sender.py workers/bilibili
       - run: npm sbom --sbom-format=cyclonedx > sbom.cdx.json

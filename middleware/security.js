@@ -333,11 +333,23 @@ function cleanupOldData() {
 
 }
 
-// 每小时清理一次
-const securityCleanupInterval = setInterval(cleanupOldData, 60 * 60 * 1000);
-securityCleanupInterval.unref?.();
+let securityCleanupInterval = null;
 
-cleanupOldData();
+// 由应用生命周期显式启停，避免仅导入模块就创建后台任务。
+function startCleanup() {
+    if (securityCleanupInterval) return false;
+    cleanupOldData();
+    securityCleanupInterval = setInterval(cleanupOldData, 60 * 60 * 1000);
+    securityCleanupInterval.unref?.();
+    return true;
+}
+
+function stopCleanup() {
+    if (!securityCleanupInterval) return false;
+    clearInterval(securityCleanupInterval);
+    securityCleanupInterval = null;
+    return true;
+}
 
 // 导出中间件
 module.exports = {
@@ -360,5 +372,7 @@ module.exports = {
     getBlacklist: () => Array.from(ipBlacklist),
     getBehaviorEntries: () => Array.from(userBehavior.entries()),
     getUserBehavior: (ip) => userBehavior.get(ip),
-    clearUserBehavior: (ip) => userBehavior.delete(ip)
+    clearUserBehavior: (ip) => userBehavior.delete(ip),
+    startCleanup,
+    stopCleanup
 };

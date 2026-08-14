@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
+const baseUrl = require('./guard-test-target').enforceSafeTestTarget();
 
 /**
  * 综合测试脚本：同时模拟正常玩家与“作弊”玩家
@@ -24,7 +24,6 @@ require("./guard-test-target").enforceSafeTestTarget();
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
-const baseUrl = process.env.TARGET_URL || 'http://localhost:3000';
 const normalUser = process.env.NORMAL_USER || '尧顺宇';
 const normalPass = process.env.NORMAL_PASS || 'yaoshunyu';
 const cheatUser = process.env.CHEAT_USER || '测试';

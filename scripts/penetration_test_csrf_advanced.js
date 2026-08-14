@@ -1,9 +1,8 @@
-require("./guard-test-target").enforceSafeTestTarget();
+const BASE_URL = require('./guard-test-target').enforceSafeTestTarget();
 const axios = require('axios');
 const tough = require('tough-cookie');
 const { wrapper } = require('axios-cookiejar-support');
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const RED_COLOR = '\x1b[31m';
 const GREEN_COLOR = '\x1b[32m';
 const RESET_COLOR = '\x1b[0m';

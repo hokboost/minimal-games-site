@@ -1,15 +1,21 @@
 const lang = document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en';
 const t = (zh, en) => (lang === 'zh' ? zh : en);
 const translateServerMessage = window.translateServerMessage || ((message) => message);
-const giftNameMap = {
-    deepsea_singer: { zh: '梦幻游乐园', en: 'Dreamland Park' },
-    sky_throne: { zh: '飞天转椅', en: 'Sky Throne' },
-    proposal: { zh: '原地求婚', en: 'On-the-Spot Proposal' },
-    wonderland: { zh: '梦游仙境', en: 'Wonderland Dream' },
-    white_bride: { zh: '纯白花嫁', en: 'Pure White Bride' },
-    crystal_ball: { zh: '水晶球', en: 'Crystal Ball' },
-    bobo: { zh: '啵啵', en: 'Bubbles' }
+const parsePageConfig = (name, fallback) => {
+    try {
+        return JSON.parse(decodeURIComponent(document.body.dataset[name] || ''));
+    } catch {
+        return fallback;
+    }
 };
+const gameCatalog = parsePageConfig('gameCatalog', []);
+const gameDefinitions = new Map(gameCatalog.map((game) => [game.id, game]));
+const recordViews = parsePageConfig('recordViews', {});
+const publicWishConfigs = parsePageConfig('wishConfigs', {});
+const giftNameMap = Object.fromEntries(Object.entries(publicWishConfigs).map(([giftType, config]) => [
+    giftType,
+    { zh: config.nameZh, en: config.nameEn }
+]));
 const giftNameByZh = Object.fromEntries(
     Object.values(giftNameMap).map(({ zh, en }) => [zh, en])
 );
@@ -19,17 +25,6 @@ const getWishGiftName = (giftType, giftName) => {
     }
     return giftNameMap[giftType]?.en || giftNameByZh[giftName] || giftName || giftType || '';
 };
-const formatScratchResult = (result) => {
-    if (!result || lang === 'zh') {
-        return result || '';
-    }
-    let formatted = result;
-    formatted = formatted.replace('未中奖', 'No Win');
-    formatted = formatted.replace('中奖', 'Win');
-    formatted = formatted.replace('积分', 'points');
-    return formatted;
-};
-
     let toastTimer = null;
 
     function showToast(message, type = 'info') {
@@ -189,18 +184,10 @@ const formatScratchResult = (result) => {
         currentGameType = gameType;
         currentPage = 1;
         
-        const titles = {
-            quiz: t('知识问答记录', 'Quiz Records'),
-            slot: t('老虎机记录', 'Slot Records'),
-            scratch: t('刮刮乐记录', 'Scratch Records'),
-            wish: t('祈愿记录', 'Wish Records'),
-            blindbox: t('盲盒记录', 'Blind Box Records'),
-            stone: t('合石头记录', 'Stone Match Records'),
-            flip: t('翻卡牌记录', 'Card Flip Records'),
-            duel: t('决斗挑战记录', 'Duel Records')
-        };
-        
-        document.getElementById('recordsTitle').textContent = titles[gameType];
+        const definition = gameDefinitions.get(gameType);
+        document.getElementById('recordsTitle').textContent = definition
+            ? `${lang === 'zh' ? definition.titleZh : definition.titleEn} · ${t('记录', 'Records')}`
+            : t('游戏记录', 'Game Records');
         document.getElementById('gameRecordsModal').hidden = false;
         
         loadGameRecords(gameType, currentPage);
@@ -255,8 +242,8 @@ const formatScratchResult = (result) => {
             const response = await fetch(`/api/game-records/${gameType}?page=${page}&limit=10`);
             const data = await response.json();
             
-            if (data.success) {
-                renderGameRecords(data.records, gameType);
+            if (data.success && Array.isArray(data.recordRows)) {
+                renderGameRecords(data.recordRows, gameType);
                 renderPagination(data.pagination, gameType);
             } else {
                 showContainerMessage(
@@ -390,94 +377,24 @@ const formatScratchResult = (result) => {
         }
     }
 
-    function renderGameRecords(records, gameType) {
+    function renderGameRecords(recordRows, gameType) {
         const recordsContent = document.getElementById('recordsContent');
         
-        if (records.length === 0) {
+        if (recordRows.length === 0) {
             showContainerMessage(recordsContent, t('暂无游戏记录', 'No game records'));
             return;
         }
-        const headersByGame = {
-            quiz: [t('游戏时间', 'Time'), t('得分', 'Score')],
-            slot: [t('游戏时间', 'Time'), t('结果', 'Result'), t('获得积分', 'Points Earned'), t('转动结果', 'Reels')],
-            scratch: [t('游戏时间', 'Time'), t('结果', 'Result'), t('档位', 'Tier'), t('匹配数', 'Matches')],
-            wish: [t('祈愿时间', 'Wish Time'), t('次数', 'Count'), t('消耗积分', 'Cost'), t('结果', 'Result')],
-            blindbox: [t('抽取时间', 'Time'), t('档位', 'Tier'), t('数量', 'Count'), t('消耗积分', 'Cost'), t('总价值', 'Total Value')],
-            stone: [t('操作时间', 'Time'), t('操作', 'Action'), t('花费', 'Cost'), t('变化', 'Change')],
-            flip: [t('操作时间', 'Time'), t('动作', 'Action'), t('成本/奖励', 'Cost/Reward'), t('结果', 'Result')],
-            duel: [t('挑战时间', 'Challenge Time'), t('礼物', 'Gift'), t('功力', 'Power'), t('消耗', 'Cost'), t('结果', 'Result')]
-        };
-        const headers = headersByGame[gameType];
+        const view = recordViews[gameType];
+        const headers = lang === 'zh' ? view?.headersZh : view?.headersEn;
         if (!headers) {
             showContainerMessage(recordsContent, t('记录类型无效', 'Invalid record type'));
             return;
         }
         const { table, tbody } = createRecordsTable(headers);
 
-        records.forEach(record => {
-            const playedAt = record.played_at || '';
-            let values = [];
-            if (gameType === 'quiz') {
-                values = [playedAt, `${record.score ?? 0} ${t('分', 'pts')}`];
-            } else if (gameType === 'slot') {
-                let amounts = [];
-                try {
-                    const parsed = typeof record.amounts === 'string'
-                        ? JSON.parse(record.amounts || '[]')
-                        : record.amounts;
-                    amounts = Array.isArray(parsed) ? parsed.slice(0, 20) : [];
-                } catch {
-                    amounts = [];
-                }
-                values = [
-                    playedAt,
-                    record.result === 'lost' ? t('未中奖', 'No Win') : t('中奖', 'Win'),
-                    `${record.payout || 0} ${t('积分', 'points')}`,
-                    `[${amounts.join(', ')}]`
-                ];
-            } else if (gameType === 'scratch') {
-                values = [
-                    playedAt,
-                    formatScratchResult(record.result),
-                    `${record.tier_cost ?? 0} ${t('积分', 'points')}`,
-                    `${record.matches_count ?? 0} ${t('个', '')}`
-                ];
-            } else if (gameType === 'wish') {
-                const successCount = Number(record.success_count || 0);
-                const wishGiftName = getWishGiftName(record.gift_type, record.gift_name) || t('礼物', 'Gift');
-                const resultText = successCount > 0
-                    ? `${wishGiftName} x${successCount}`
-                    : t('未中奖', 'No Win');
-                values = [playedAt, record.batch_count ?? 0, `${record.total_cost ?? 0} ${t('积分', 'points')}`, resultText];
-            } else if (gameType === 'blindbox') {
-                values = [
-                    playedAt,
-                    record.tier_name || '',
-                    record.box_count ?? 0,
-                    `${record.total_cost ?? 0} ${t('积分', 'points')}`,
-                    `${record.total_reward_value ?? 0} ${t('积分', 'points')}`
-                ];
-            } else if (gameType === 'stone') {
-                const beforeSlots = formatStoneSlots(record.before_slots);
-                const afterSlots = formatStoneSlots(record.after_slots);
-                const costText = record.cost > 0 ? `-${record.cost}` : (record.reward > 0 ? `+${record.reward}` : '0');
-                values = [playedAt, formatStoneAction(record.action_type), `${costText} ${t('积分', 'points')}`, `${beforeSlots} → ${afterSlots}`];
-            } else if (gameType === 'flip') {
-                const actionText = formatFlipAction(record.action_type);
-                const amountText = record.reward > 0 ? `+${record.reward}` : '0';
-                const resultText = t(
-                    `好牌${record.good_count || 0}，坏牌${record.bad_count || 0}`,
-                    `Good ${record.good_count || 0}, Bad ${record.bad_count || 0}`
-                );
-                values = [playedAt, actionText, `${amountText} ${t('积分', 'points')}`, resultText];
-            } else if (gameType === 'duel') {
-                const giftName = formatDuelGift(record.gift_type);
-                const resultText = record.success
-                    ? t(`成功 +${record.reward}`, `Success +${record.reward}`)
-                    : t('失败', 'Failed');
-                values = [playedAt, giftName, `${record.power ?? 0}%`, `-${record.cost ?? 0}`, resultText];
-            }
-            appendRecordRow(tbody, values);
+        recordRows.forEach((row) => {
+            const cells = Array.isArray(row?.cells) ? row.cells : [];
+            appendRecordRow(tbody, cells.map((cell) => cell?.[lang === 'zh' ? 'zh' : 'en'] ?? ''));
         });
         recordsContent.replaceChildren(table);
     }
@@ -531,54 +448,6 @@ const formatScratchResult = (result) => {
             button.textContent = t('下一页', 'Next');
             recordsPagination.appendChild(button);
         }
-    }
-
-    function formatStoneAction(actionType) {
-        const map = {
-            add: t('放入', 'Add'),
-            fill: t('一键放满', 'Fill'),
-            replace: t('更换', 'Replace'),
-            redeem: t('兑换', 'Redeem')
-        };
-        return map[actionType] || actionType;
-    }
-
-    function formatStoneSlots(rawSlots) {
-        let slots = [];
-        try {
-            slots = typeof rawSlots === 'string' ? JSON.parse(rawSlots) : rawSlots;
-        } catch (error) {
-            slots = [];
-        }
-        const colors = {
-            red: t('红', 'Red'),
-            orange: t('橙', 'Orange'),
-            yellow: t('黄', 'Yellow'),
-            green: t('绿', 'Green'),
-            cyan: t('青', 'Cyan'),
-            blue: t('蓝', 'Blue'),
-            purple: t('紫', 'Purple')
-        };
-        return (slots || []).map(color => colors[color] || t('空', 'Empty')).join('');
-    }
-
-    function formatFlipAction(actionType) {
-        const map = {
-            end: t('本局结果', 'Result')
-        };
-        return map[actionType] || actionType;
-    }
-
-    function formatDuelGift(giftType) {
-        const map = {
-            crown: t('至尊奖 30000', 'Crown Prize 30000'),
-            dragon: t('龙魂奖 13140', 'Dragon Prize 13140'),
-            phoenix: t('凤羽奖 5000', 'Phoenix Prize 5000'),
-            jade: t('玉阶奖 1000', 'Jade Prize 1000'),
-            bronze: t('青铜奖 500', 'Bronze Prize 500'),
-            iron: t('铁心奖 200', 'Iron Prize 200')
-        };
-        return map[giftType] || giftType;
     }
 
     function changePage(page) {

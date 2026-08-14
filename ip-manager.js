@@ -6,44 +6,66 @@ class IPManager {
         this.locationCache = new Map(); // IP地理位置缓存
         this.activityWriteCache = new Map();
         this.cleanupInterval = 60 * 60 * 1000; // 1小时清理一次缓存
-        this.startCleanup();
+        this.cleanupTimer = null;
+        this.cleanupPromise = null;
     }
 
     // 启动定期清理缓存
     startCleanup() {
-        const interval = setInterval(async () => {
-            const now = Date.now();
-            for (const [ip, data] of this.riskCache) {
-                if (now - data.timestamp > this.cleanupInterval) {
-                    this.riskCache.delete(ip);
-                }
-            }
-            for (const [ip, data] of this.locationCache) {
-                if (now - data.timestamp > this.cleanupInterval * 24) { // 地理位置缓存24小时
-                    this.locationCache.delete(ip);
-                }
-            }
-            for (const [key, entry] of this.activityWriteCache) {
-                if (now - Number(entry?.lastWrite || 0) > 5 * 60 * 1000 && Number(entry?.pending || 0) === 0) {
-                    this.activityWriteCache.delete(key);
-                }
-            }
-            try {
-                await pool.query(`
-                    DELETE FROM ip_activities
-                    WHERE id IN (
-                        SELECT id
-                        FROM ip_activities
-                        WHERE created_at < NOW() - INTERVAL '31 days'
-                        ORDER BY created_at
-                        LIMIT 5000
-                    )
-                `);
-            } catch (error) {
-                console.error('清理过期IP活动失败:', error);
-            }
+        if (this.cleanupTimer) return false;
+        this.cleanupTimer = setInterval(() => {
+            if (this.cleanupPromise) return;
+            this.cleanupPromise = Promise.resolve(this.cleanExpiredData())
+                .finally(() => {
+                    this.cleanupPromise = null;
+                });
         }, this.cleanupInterval);
-        interval.unref?.();
+        this.cleanupTimer.unref?.();
+        return true;
+    }
+
+    // 停止定期清理并等待当前一轮完成
+    async stopCleanup() {
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+            this.cleanupTimer = null;
+        }
+        if (this.cleanupPromise) {
+            await this.cleanupPromise.catch(() => {});
+        }
+    }
+
+    async cleanExpiredData() {
+        const now = Date.now();
+        for (const [ip, data] of this.riskCache) {
+            if (now - data.timestamp > this.cleanupInterval) {
+                this.riskCache.delete(ip);
+            }
+        }
+        for (const [ip, data] of this.locationCache) {
+            if (now - data.timestamp > this.cleanupInterval * 24) { // 地理位置缓存24小时
+                this.locationCache.delete(ip);
+            }
+        }
+        for (const [key, entry] of this.activityWriteCache) {
+            if (now - Number(entry?.lastWrite || 0) > 5 * 60 * 1000 && Number(entry?.pending || 0) === 0) {
+                this.activityWriteCache.delete(key);
+            }
+        }
+        try {
+            await pool.query(`
+                DELETE FROM ip_activities
+                WHERE id IN (
+                    SELECT id
+                    FROM ip_activities
+                    WHERE created_at < NOW() - INTERVAL '31 days'
+                    ORDER BY created_at
+                    LIMIT 5000
+                )
+            `);
+        } catch (error) {
+            console.error('清理过期IP活动失败:', error);
+        }
     }
 
     riskCacheKey(ip, username = null) {

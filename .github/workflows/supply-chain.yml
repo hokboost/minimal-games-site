@@ -1,0 +1,88 @@
+name: Supply Chain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Scan changed commits with Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Scan pull request with TruffleHog
+        if: github.event_name == 'pull_request'
+        uses: trufflesecurity/trufflehog@v3.95.3
+        with:
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --results=verified,unknown --fail
+      - name: Scan pushed commits with TruffleHog
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        uses: trufflesecurity/trufflehog@v3.95.3
+        with:
+          base: ${{ github.event.before }}
+          head: ${{ github.sha }}
+          extra_args: --results=verified,unknown --fail
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+
+  advisory-and-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run release:stage
+      - name: Verify release staging layout
+        shell: bash
+        run: |
+          test -d build/release/app
+          test -d build/release/domain
+          test -f build/release/docs/ARCHITECTURE.md
+          test -f build/release/docs/DATABASE_ROLES.md
+          if find build/release -type l -print -quit | grep -q .; then
+            echo "Release staging contains a symbolic link"
+            exit 1
+          fi
+          if find build/release \( -type d -iname __pycache__ -o -type f \( -iname '*.pyc' -o -iname '*.pyo' \) \) -print -quit | grep -q .; then
+            echo "Release staging contains Python cache artifacts"
+            exit 1
+          fi
+      - run: npm sbom --sbom-format=cyclonedx > sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyclonedx-sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-staging
+          path: build/release
+          if-no-files-found: error

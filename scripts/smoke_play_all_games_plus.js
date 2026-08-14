@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
+const baseUrl = require('./guard-test-target').enforceSafeTestTarget();
 
 /**
  * 增强版冒烟脚本（涵盖主要小游戏）
@@ -23,7 +23,6 @@ require("./guard-test-target").enforceSafeTestTarget();
 const { URL } = require('url');
 const fetch = require('node-fetch');
 
-const baseUrl = process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER;
 const password = process.env.AUTH_PASS;
 

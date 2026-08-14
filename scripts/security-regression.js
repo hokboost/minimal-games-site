@@ -41,9 +41,31 @@ const financialAuditMigration = read('migrations/strengthen_financial_audit.sql'
 const hardeningMigration = read('migrations/harden_money_and_workers.sql');
 const analyticsView = read('views/admin-analytics.ejs');
 const threeServer = read('workers/bilibili/threeserver.py');
+const gameEconomics = read('domain/games/economics.js');
+const gameConfiguration = read('domain/games/configuration.js');
+const gameRegistry = read('domain/games/registry.js');
+const gameRandom = read('domain/games/random.js');
+const gameBlindbox = read('domain/games/blindbox.js');
 const normalPk = read('workers/bilibili/normalpk.py');
 const firstWinPk = read('workers/bilibili/shousheng.py');
 const workerRoleLease = read('lib/worker-role-lease.js');
+const integrationEnvironment = read('tests/helpers/integration-environment.js');
+const runtimeResilience = read('scripts/test-runtime-resilience.js');
+const releaseBuilder = read('scripts/build-release.js');
+const guardedTestScripts = fs.readdirSync(path.join(root, 'scripts'))
+    .filter((file) => /^(?:penetration_test_|security_test_|simulation_|smoke_).*\.js$/.test(file)
+        || /^(?:test_concurrency_.*|test_flip_flow|test_multi_actor|test_replay_quiz_slot_scratch|test_wish_flow)\.js$/.test(file))
+    .map((file) => ({ file, source: read(path.join('scripts', file)) }));
+const { enforceSafeTestTarget } = require('./guard-test-target');
+
+function throws(callback) {
+    try {
+        callback();
+        return false;
+    } catch {
+        return true;
+    }
+}
 
 check('production rejects CSRF bypass flags',
     configValidation.includes("process.env.CSRF_TEST_MODE === 'true'")
@@ -62,19 +84,37 @@ check('admin access is not restricted by client IP', !admin.includes('adminIPWhi
 check('gift exchange uses an allowlist', gifts.includes('redeemableGiftTypes') && gifts.includes("new Set(['heartbox', 'fanlight', 'tiedu_one'])"));
 check('wish simulator uses role authorization', wish.includes('req.session.user.is_admin !== true') && !wish.includes("username !== 'hokboost'"));
 check('paid games use action rate limits', games.includes("app.post('/api/scratch/play', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection"));
-check('scratch probabilities use exact integer ranges', games.includes('if (random < 5000)') && games.includes('else if (random < 7100)'));
+check('scratch probabilities use exact integer ranges',
+    gameConfiguration.includes("{ id: 'win', label: '中奖', multiplier: 1, weightUnits: 500_000 }")
+    && gameConfiguration.includes("{ id: 'super', label: '超级大奖', multiplier: 4, weightUnits: 10_000 }")
+    && gameRegistry.includes("assertWeightTable('scratch', SCRATCH_CONFIG.outcomes)")
+    && games.includes('pickWeightedOutcome(SCRATCH_CONFIG.outcomes, randomInt)'));
 check('dictation PNG upload validates signature, dimensions, CRC, and stores normalized bytes',
     games.includes('pngSignature')
     && games.includes('1.5 * 1024 * 1024')
-    && games.includes('PNG.sync.read(imageBuffer, { checkCRC: true })')
+    && games.includes('await normalizePng(imageBuffer')
+    && read('lib/png-normalizer-worker.js').includes('PNG.sync.read(Buffer.from(image), { checkCRC: true })')
     && games.includes('headerWidth * headerHeight > 4_000_000')
     && games.includes('byte_size, width, height, content'));
 check('environment helper has no embedded credentials', fixEnv.includes("flag: 'wx'") && !/password\s*[:=]\s*['\"][^'\"]{6,}/i.test(fixEnv));
-check('gift listener has no default API credential', listener.includes('WINDOWS_API_KEY') && !listener.includes('your-api-key'));
+check('gift listener has no default API credential', listener.includes('WORKER_API_KEY') && !listener.includes('your-api-key'));
 check('uncertain gift outcomes are never auto-refunded', listener.includes('markTaskUncertain') && giftSender.includes('"outcome_uncertain": send_attempted'));
-check('a timed-out gift POST never falls back to a second sender',
-    listener.includes('Never switch to another sender after this boundary')
-    && !listener.includes('threeserver不可达，回退Python发送'));
+check('normal gifts preflight a room-bound HTTP sender before the irreversible send boundary',
+    listener.includes('const threeServerUrl = await this.ensureGiftThreeServer(roomId);')
+    && listener.indexOf('const threeServerUrl = await this.ensureGiftThreeServer(roomId);')
+        < listener.indexOf('const started = await this.startGiftTask')
+    && listener.indexOf('const started = await this.startGiftTask')
+        < listener.indexOf('externalSendStarted = true;')
+    && listener.indexOf('externalSendStarted = true;')
+        < listener.indexOf('const sendResult = await this.sendToThreeServer')
+    && listener.includes("THREESERVER_BACKEND: 'http'")
+    && listener.includes("confirm: 'api'")
+    && listener.includes('timeout: 25000')
+    && listener.includes('THREESERVER_LOCAL_TOKEN: backendToken')
+    && listener.includes("THREESERVER_ALLOWED_GIFT_IDS: this.allowedGiftIds.join(',')")
+    && listener.includes('const backendPort = await this.getFreePort();')
+    && listener.includes('await this.stopThreeServerProcess();')
+    && !listener.includes('callPythonScript'));
 check('external gift sends require provider confirmation and never retry ambiguous mutations',
     threeServer.includes('or "http"')
     && threeServer.includes('invalid_provider_response')
@@ -82,6 +122,17 @@ check('external gift sends require provider confirmation and never retry ambiguo
     && !threeServer.includes('assumed_success')
     && !normalPk.includes('retry_resp')
     && !firstWinPk.includes('retry_resp'));
+check('local sender authenticates every endpoint and bounds input/state',
+    threeServer.includes('@app.before_request')
+    && threeServer.includes('hmac.compare_digest')
+    && threeServer.includes('MAX_QUEUE_DEPTH = 100')
+    && threeServer.includes('REQUEST_STATUS_TTL_SECONDS = 3600')
+    && threeServer.includes('ALLOWED_GIFT_IDS'));
+check('provider receipts are mandatory before final settlement',
+    gifts.includes('PROVIDER_RECEIPT_REQUIRED')
+    && gifts.includes("reason: 'provider_receipt_missing'")
+    && gifts.includes('normalizedProviderTransactionIds.length > 0')
+    && listener.includes('providerTransactionIds.length !== 1'));
 check('started or uncertain gift tasks cannot be worker-refunded',
     gifts.includes("if (delivery_status !== 'claimed')")
     && gifts.includes('必须进入人工对账')
@@ -95,14 +146,18 @@ check('routine IP activity writes are throttled and counted',
 check('Render client IP uses validated forwarded address',
     server.includes("app.set('trust proxy', (address) => isTrustedProxyAddress(address))")
     && clientIp.includes("headers?.['x-forwarded-for']")
-    && clientIp.includes('isTrustedProxyAddress(socketAddress)'));
+    && clientIp.includes('isTrustedProxyAddress(socketAddress, options.env || process.env)'));
 check('IP rate limits use the resolved client address', server.includes('keyGenerator: clientIpRateLimitKey') && security.includes('keyGenerator: ipRateLimitKey'));
-check('registration stores its client IP', server.includes('username, password_hash, created_at, registration_ip') && server.includes("'register'"));
+check('registration stores its client IP', server.includes('username, password_hash, balance, created_at, registration_ip') && server.includes("'register'"));
 check('migration runner contains no embedded database URL',
     migrationRunner.includes("require('../db')")
     && migrationRunner.includes('applyDatabaseMigrations')
     && !migrationRunner.includes('postgres://'));
-check('quiz next is protected against duplicate token issuance', server.includes("'/api/quiz/next'") && quizClient.includes("idempotentFetch('/api/quiz/next'"));
+check('quiz next is protected against duplicate token issuance',
+    games.includes("app.post('/api/quiz/next'")
+    && games.includes("pg_advisory_xact_lock(hashtextextended($1, 0))")
+    && games.includes('await req.finalizeIdempotency?.(client, 200, responseBody)')
+    && quizClient.includes("idempotentFetch('/api/quiz/next'"));
 check('quiz advances without an artificial answer delay', quizClient.includes('questionIndex += 1;\n        nextQuestion();') && !/setTimeout\(\(\) => \{\s*questionIndex \+= 1;\s*nextQuestion\(\);/m.test(quizClient));
 check('quiz leaderboard includes valid administrator scores and uses explicit day boundaries',
     !games.includes('u.is_admin = FALSE')
@@ -110,7 +165,10 @@ check('quiz leaderboard includes valid administrator scores and uses explicit da
     && games.includes("+ INTERVAL '1 day'")
     && quizClient.includes('if (!response.ok || data.success !== true)'));
 check('password changes replay success after response loss', server.includes("'/api/change-password'") && profileClient.includes("idempotentFetch('/api/change-password'"));
-check('admin additive writes use idempotency', server.includes("'/api/admin/add-electric-coin'") && adminClient.includes('window.idempotentFetch(url, requestOptions)'));
+check('admin additive writes use idempotency',
+    admin.includes("app.post('/api/admin/add-electric-coin'")
+    && admin.includes('await req.finalizeIdempotency?.(client, 200, responseBody)')
+    && adminClient.includes('window.idempotentFetch(url, requestOptions)'));
 check('admin room binding submits reliably and accepts short Bilibili room IDs', /id="bind-room-form"[^>]*novalidate/.test(adminView) && adminView.includes('data-ux-event="admin.bind_room"') && adminClient.includes("document.addEventListener('submit'") && !adminClient.includes('Bind room "${roomId}" for') && adminClient.includes('/^\\d{1,12}$/') && admin.includes('/^\\d{1,12}$/'));
 check('room changes serialize gifts and PK while preserving uncertain sends',
     admin.includes("$1 || ':gift_exchange'")
@@ -139,7 +197,7 @@ check('ambiguous commits replay durable terminal results instead of overwriting 
 check('financial responses finalize inside business transactions', games.includes('req.finalizeIdempotency?.(client, 200, responseBody)') && wish.includes('req.finalizeIdempotency?.(client, 200, responseBody)'));
 check('balance ledger is append-only and validates new arithmetic', financialAuditMigration.includes('balance_logs_append_only') && financialAuditMigration.includes('balance_logs_amount_matches_check'));
 check('account deactivation preserves financial audit history', admin.includes('账户已停用，审计记录已保留') && !admin.includes("DELETE FROM balance_logs"));
-check('spin results are idempotent', server.includes("'/api/spin'") && read('public/js/spin.js').includes("idempotentFetch('/api/spin'"));
+check('spin results are idempotent', games.includes("app.post('/api/spin'") && read('public/js/spin.js').includes("idempotentFetch('/api/spin'"));
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
 check('administrator idempotency replays revalidate recent password and MFA',
     server.includes('getRecentAdminAuthDenial(req)')
@@ -182,7 +240,7 @@ check('external sends use a singleton worker lease and a cross-process provider 
     && server.includes('requireActiveWorkerLease')
     && gifts.includes('...workerGuards')
     && gifts.includes("hashtextextended('bilibili-provider-send', 0)")
-    && listener.includes('createWorkerInstanceId(process.env.GIFT_WORKER_ID)'));
+    && listener.includes("process.env.WORKER_CREDENTIAL_ID || ''"));
 check('PK shutdown rebuild advances generation instead of reopening terminal tasks',
     gifts.includes('SET command_generation = command_generation + 1')
     && gifts.includes("task.status IN ('pending', 'claimed', 'processing', 'uncertain')")
@@ -234,11 +292,62 @@ check('login failures are counted atomically without attacker-triggered account 
     && server.includes('WHEN account.locked_until > NOW() THEN account.locked_until')
     && !server.includes('failure_state.next_failures >= 5'));
 check('blindbox probabilities use exact million-unit integer weights',
-    games.includes('weightUnits = Math.round(weight * 1_000_000)')
-    && games.includes('totalWeight !== 1_000_000')
-    && games.includes('const roll = randomInt(0, totalWeight)')
-    && games.includes('if (roll < acc) return item'));
+    gameBlindbox.includes('assertWeightTable(`blindbox:${tierKey}`, outcomes)')
+    && gameRandom.includes('Number.isSafeInteger(outcome?.weightUnits)')
+    && gameRandom.includes('total !== WEIGHT_SCALE')
+    && gameRandom.includes('const roll = randomInt(0, WEIGHT_SCALE)')
+    && gameRandom.includes('if (roll < cursor) return outcome'));
+check('redeemable game RTP is startup-gated',
+    server.includes("require('./domain/games')")
+    && gameRegistry.includes("assertTargetRtp('flip:profit-optimal-policy'")
+    && gameRegistry.includes('validateStaticEconomics();')
+    && gameBlindbox.includes('assertTargetRtp(`blindbox:${tierKey}`')
+    && gameEconomics.includes('targetMinimum: 0.98')
+    && gameEconomics.includes('maximum: 0.99'));
 check('UX admin report includes page and preference analysis', analyticsView.includes('analytics.pages') && analyticsView.includes('analytics.languages') && analyticsView.includes('analytics.preferences'));
+check('integration runtime uses purpose-specific idempotency and per-worker credentials',
+    integrationEnvironment.includes('IDEMPOTENCY_HMAC_SECRET: TEST_SECRETS.idempotency')
+    && integrationEnvironment.includes('WORKER_CREDENTIALS_JSON: JSON.stringify(TEST_WORKER_CREDENTIALS)')
+    && integrationEnvironment.includes('delete env.WINDOWS_API_KEY')
+    && integrationEnvironment.includes('delete env.GIFT_TASKS_HMAC_SECRET')
+    && runtimeResilience.includes('TEST_WORKER_CREDENTIALS[workerId]')
+    && runtimeResilience.includes('IDEMPOTENCY_HMAC_SECRET'));
+check('mutating scripts execute only the origin returned by the safety guard',
+    guardedTestScripts.length >= 30
+    && guardedTestScripts.every(({ source }) => /const\s+[A-Za-z_$][\w$]*\s*=\s*require\(['"]\.\/guard-test-target['"]\)\.enforceSafeTestTarget\(\);/.test(source))
+    && guardedTestScripts.every(({ source }) => !/process\.env\.(?:TARGET_URL|BASE_URL)|process\.argv\[2\]/.test(source)));
+check('target guard rejects conflicting environment targets', throws(() => enforceSafeTestTarget({
+    argv: ['node', 'security-test.js'],
+    env: {
+        ALLOW_MUTATING_SECURITY_TESTS: 'I_ACKNOWLEDGE_TEST_SIDE_EFFECTS',
+        TARGET_URL: 'http://localhost:3000',
+        BASE_URL: 'https://example.invalid'
+    }
+})));
+check('target guard returns the exact validated command-line origin',
+    enforceSafeTestTarget({
+        argv: ['node', 'security-test.js', '--verbose', 'http://127.0.0.1:4555/nested/path'],
+        env: {
+            ALLOW_MUTATING_SECURITY_TESTS: 'I_ACKNOWLEDGE_TEST_SIDE_EFFECTS',
+            BASE_URL: 'http://localhost:3000'
+        }
+    }) === 'http://127.0.0.1:4555');
+check('release builder includes application layers and recursively excludes unsafe entries',
+    releaseBuilder.includes("'app', 'data', 'domain'")
+    && releaseBuilder.includes("'docs/ARCHITECTURE.md', 'docs/DATABASE_ROLES.md'")
+    && releaseBuilder.includes('assertNoSymbolicLinks(path.join(source, name)')
+    && releaseBuilder.includes("path.basename(relative).toLowerCase() === '__pycache__'")
+    && releaseBuilder.includes('/\\.py[co]$/i')
+    && releaseBuilder.includes('verifyRelativeJavaScriptDependencies(target)'));
+check('server startup and shutdown execute the registered application lifecycle',
+    server.includes('registerRuntimeLifecycle();')
+    && server.includes("applicationLifecycle.registerComponent('http-server'")
+    && server.includes('await applicationLifecycle.start();')
+    && server.includes('shutdownPromise = applicationLifecycle.stop()')
+    && server.includes('if (require.main === module)')
+    && gifts.includes("applicationLifecycle.registerRecurringJob('gift-delivery-outbox'")
+    && !server.includes('socketSessionValidationInterval')
+    && !/setInterval\((?:recoverStaleIdempotencyKeys|runDatabaseMaintenance|autoSendExpiredWishRewards)/.test(server));
 
 const failed = checks.filter((item) => !item.condition);
 for (const item of checks) {

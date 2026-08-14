@@ -195,7 +195,8 @@
         }
     </style>
 </head>
-<body class="app-redesign game-page page-duel" data-csrf-token="<%= csrfToken %>">
+<% const duelDefaultPower = Math.max(20, duelConfig.rewards.crown.minimumPower); %>
+<body class="app-redesign game-page page-duel" data-csrf-token="<%= csrfToken %>" data-duel-config="<%= encodeURIComponent(JSON.stringify(duelConfig)) %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
@@ -221,13 +222,13 @@
             <div class="panel-card">
                 <h3><%= lang === 'zh' ? '选择功力' : 'Select Power' %></h3>
                 <div class="control-row">
-                    <label><%= lang === 'zh' ? '功力（1-80%）' : 'Power (1-80%)' %></label>
-                    <input type="range" id="powerRange" min="1" max="80" value="20">
-                    <input type="number" id="powerInput" min="1" max="80" value="20">
+                    <label><%= lang === 'zh' ? `功力（按奖品最低值-${duelConfig.maximumPower}%）` : `Power (tier minimum-${duelConfig.maximumPower}%)` %></label>
+                    <input type="range" id="powerRange" min="<%= duelConfig.rewards.crown.minimumPower %>" max="<%= duelConfig.maximumPower %>" value="<%= duelDefaultPower %>">
+                    <input type="number" id="powerInput" min="<%= duelConfig.rewards.crown.minimumPower %>" max="<%= duelConfig.maximumPower %>" value="<%= duelDefaultPower %>">
                 </div>
                 <div class="summary-box">
-                    <%= lang === 'zh' ? '功力' : 'Power' %>：<strong id="powerValue">20%</strong><br>
-                    <%= lang === 'zh' ? '消耗积分' : 'Cost' %>：<strong id="costValue">1040</strong>
+                    <%= lang === 'zh' ? '功力' : 'Power' %>：<strong id="powerValue"><%= duelDefaultPower %>%</strong><br>
+                    <%= lang === 'zh' ? '消耗积分' : 'Cost' %>：<strong id="costValue"><%= duelConfig.rewards.crown.costs[duelDefaultPower] %></strong>
                 </div>
                 <div class="action-row">
                     <button class="action-btn" id="duelBtn">

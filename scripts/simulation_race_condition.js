@@ -1,7 +1,6 @@
-require("./guard-test-target").enforceSafeTestTarget();
+const BASE_URL = require('./guard-test-target').enforceSafeTestTarget();
 const axios = require('axios');
 
-const BASE_URL = process.env.TARGET_URL || 'http://localhost:3000';
 const USERNAME = process.env.AUTH_USER || 'admin';
 const PASSWORD = process.env.AUTH_PASS || 'password';
 

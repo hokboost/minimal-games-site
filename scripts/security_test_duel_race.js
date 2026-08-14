@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-require("./guard-test-target").enforceSafeTestTarget();
 'use strict';
+const baseUrl = require('./guard-test-target').enforceSafeTestTarget();
 
 /**
  * Duel 并发/篡改安全测试
@@ -19,7 +19,6 @@ require("./guard-test-target").enforceSafeTestTarget();
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
-const baseUrl = process.env.TARGET_URL || 'http://localhost:3000';
 const username = process.env.AUTH_USER;
 const password = process.env.AUTH_PASS;
 const concurrency = Number(process.env.CONCURRENCY || 10);

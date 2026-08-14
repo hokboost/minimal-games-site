@@ -25,11 +25,29 @@ services:
         value: ""
       - key: SESSION_SECRET
         sync: false
+      - key: IDEMPOTENCY_HMAC_SECRET
+        sync: false
+      - key: RESET_TOKEN_SECRET
+        sync: false
+      - key: ANALYTICS_TOKEN_SECRET
+        sync: false
+      - key: DICTATION_TOKEN_SECRET
+        sync: false
       - key: LOG_HASH_SECRET
         sync: false
-      - key: WINDOWS_API_KEY
+      - key: WORKER_CREDENTIALS_JSON
         sync: false
-      - key: GIFT_TASKS_HMAC_SECRET
+      - key: READINESS_TOKEN
         sync: false
-      - key: ADMIN_TOTP_SECRET
+      - key: ADMIN_TOTP_SECRETS_JSON
         sync: false
+      - key: TRUSTED_PROXY_ADDRESSES
+        sync: false
+      - key: EXTERNAL_GIFTS_ENABLED
+        value: "false"
+      - key: PK_EXTERNAL_SEND_ENABLED
+        value: "false"
+      - key: DAILY_GIFT_SPEND_LIMIT
+        value: "50000"
+      - key: DAILY_USER_GIFT_SPEND_LIMIT
+        value: "10000"

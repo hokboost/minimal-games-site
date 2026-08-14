@@ -449,7 +449,7 @@
         }
     </style>
 </head>
-<body class="app-redesign game-page page-wish" data-csrf-token="<%= csrfToken %>" data-can-test="<%= canWishTest ? 'true' : 'false' %>">
+<body class="app-redesign game-page page-wish" data-csrf-token="<%= csrfToken %>" data-can-test="<%= canWishTest ? 'true' : 'false' %>" data-wish-configs="<%= encodeURIComponent(JSON.stringify(wishConfigs || {})) %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
@@ -478,104 +478,24 @@
         
         <div class="wish-container">
             <div class="wish-gift-grid">
-                <div class="gift-card gift-card-large" data-gift="deepsea_singer">
-                    <div class="gift-title"><%= lang === 'zh' ? '梦幻游乐园' : 'Dreamland Park' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 30000 积分 · 500 积分/次' : 'Value 30000 points · 500 points/draw' %></div>
-                    <div class="gift-actions">
-                        <button class="gift-action-btn" data-gift="deepsea_singer" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
-                        <button class="gift-action-btn secondary" data-gift="deepsea_singer" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="deepsea_singer" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                <% Object.entries(wishConfigs || {}).forEach(([giftType, config], index) => { %>
+                    <div class="gift-card <%= index === 0 ? 'gift-card-large' : '' %>" data-gift="<%= giftType %>">
+                        <div class="gift-title"><%= lang === 'zh' ? config.nameZh : config.nameEn %></div>
+                        <div class="gift-meta"><%= lang === 'zh'
+                            ? `价值 ${config.rewardValue} 积分 · ${config.cost} 积分/次`
+                            : `Value ${config.rewardValue} points · ${config.cost} points/draw`
+                        %></div>
+                        <div class="gift-actions">
+                            <button class="gift-action-btn" data-gift="<%= giftType %>" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
+                            <button class="gift-action-btn secondary" data-gift="<%= giftType %>" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
+                            <button class="gift-action-btn test admin-test-btn" data-gift="<%= giftType %>" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
+                        </div>
+                        <div class="gift-progress">
+                            <progress class="gift-progress-bar" data-progress-bar="<%= giftType %>" max="100" value="0"></progress>
+                            <div class="gift-progress-text" data-progress-text="<%= giftType %>">0 / <%= config.guaranteeCount %></div>
+                        </div>
                     </div>
-                    <div class="gift-progress">
-                        <progress class="gift-progress-bar" data-progress-bar="deepsea_singer" max="100" value="0"></progress>
-                        <div class="gift-progress-text" data-progress-text="deepsea_singer">0 / 148</div>
-                    </div>
-                </div>
-
-                <div class="gift-card" data-gift="sky_throne">
-                    <div class="gift-title"><%= lang === 'zh' ? '飞天转椅' : 'Sky Throne' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 10000 积分 · 250 积分/次' : 'Value 10000 points · 250 points/draw' %></div>
-                    <div class="gift-actions">
-                        <button class="gift-action-btn" data-gift="sky_throne" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
-                        <button class="gift-action-btn secondary" data-gift="sky_throne" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="sky_throne" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
-                    </div>
-                    <div class="gift-progress">
-                        <progress class="gift-progress-bar" data-progress-bar="sky_throne" max="100" value="0"></progress>
-                        <div class="gift-progress-text" data-progress-text="sky_throne">0 / 83</div>
-                    </div>
-                </div>
-
-                <div class="gift-card" data-gift="proposal">
-                    <div class="gift-title"><%= lang === 'zh' ? '原地求婚' : 'On-the-Spot Proposal' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 5200 积分 · 208 积分/次' : 'Value 5200 points · 208 points/draw' %></div>
-                    <div class="gift-actions">
-                        <button class="gift-action-btn" data-gift="proposal" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
-                        <button class="gift-action-btn secondary" data-gift="proposal" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="proposal" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
-                    </div>
-                    <div class="gift-progress">
-                        <progress class="gift-progress-bar" data-progress-bar="proposal" max="100" value="0"></progress>
-                        <div class="gift-progress-text" data-progress-text="proposal">0 / 52</div>
-                    </div>
-                </div>
-
-                <div class="gift-card" data-gift="wonderland">
-                    <div class="gift-title"><%= lang === 'zh' ? '梦游仙境' : 'Wonderland Dream' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 3000 积分 · 150 积分/次' : 'Value 3000 points · 150 points/draw' %></div>
-                    <div class="gift-actions">
-                        <button class="gift-action-btn" data-gift="wonderland" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
-                        <button class="gift-action-btn secondary" data-gift="wonderland" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="wonderland" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
-                    </div>
-                    <div class="gift-progress">
-                        <progress class="gift-progress-bar" data-progress-bar="wonderland" max="100" value="0"></progress>
-                        <div class="gift-progress-text" data-progress-text="wonderland">0 / 41</div>
-                    </div>
-                </div>
-
-
-                <div class="gift-card" data-gift="white_bride">
-                    <div class="gift-title"><%= lang === 'zh' ? '纯白花嫁' : 'Pure White Bride' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 1314 积分 · 75 积分/次' : 'Value 1314 points · 75 points/draw' %></div>
-                    <div class="gift-actions">
-                        <button class="gift-action-btn" data-gift="white_bride" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
-                        <button class="gift-action-btn secondary" data-gift="white_bride" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="white_bride" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
-                    </div>
-                    <div class="gift-progress">
-                        <progress class="gift-progress-bar" data-progress-bar="white_bride" max="100" value="0"></progress>
-                        <div class="gift-progress-text" data-progress-text="white_bride">0 / 34</div>
-                    </div>
-                </div>
-
-                <div class="gift-card" data-gift="crystal_ball">
-                    <div class="gift-title"><%= lang === 'zh' ? '水晶球' : 'Crystal Ball' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 1000 积分 · 66 积分/次' : 'Value 1000 points · 66 points/draw' %></div>
-                    <div class="gift-actions">
-                        <button class="gift-action-btn" data-gift="crystal_ball" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
-                        <button class="gift-action-btn secondary" data-gift="crystal_ball" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="crystal_ball" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
-                    </div>
-                    <div class="gift-progress">
-                        <progress class="gift-progress-bar" data-progress-bar="crystal_ball" max="100" value="0"></progress>
-                        <div class="gift-progress-text" data-progress-text="crystal_ball">0 / 32</div>
-                    </div>
-                </div>
-
-                <div class="gift-card" data-gift="bobo">
-                    <div class="gift-title"><%= lang === 'zh' ? '啵啵' : 'Bubbles' %></div>
-                    <div class="gift-meta"><%= lang === 'zh' ? '价值 399 积分 · 50 积分/次' : 'Value 399 points · 50 points/draw' %></div>
-                    <div class="gift-actions">
-                        <button class="gift-action-btn" data-gift="bobo" data-count="1"><%= lang === 'zh' ? '抽一次' : 'Draw Once' %></button>
-                        <button class="gift-action-btn secondary" data-gift="bobo" data-count="10"><%= lang === 'zh' ? '十连' : '10x Draw' %></button>
-                        <button class="gift-action-btn test admin-test-btn" data-gift="bobo" hidden><%= lang === 'zh' ? '10万次测试' : '100k Test' %></button>
-                    </div>
-                    <div class="gift-progress">
-                        <progress class="gift-progress-bar" data-progress-bar="bobo" max="100" value="0"></progress>
-                        <div class="gift-progress-text" data-progress-text="bobo">0 / 16</div>
-                    </div>
-                </div>
+                <% }); %>
             </div>
             
             <div class="probability-actions">

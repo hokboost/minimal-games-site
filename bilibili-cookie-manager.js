@@ -1,8 +1,12 @@
-const { chromium } = require('playwright');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const {
+    decodeCookieBuffer,
+    hardenCookieAcl,
+    protectCookieText
+} = require('./lib/windows-dpapi-cookie');
 
 class BilibiliCookieManager {
     constructor(cookiePath = process.env.BILI_COOKIE_PATH) {
@@ -10,7 +14,7 @@ class BilibiliCookieManager {
             process.env.LOCALAPPDATA || path.join(os.homedir(), '.local', 'share'),
             'MinimalGames'
         );
-        this.cookiePath = path.resolve(cookiePath || path.join(privateDataDir, 'bilibili-cookie.txt'));
+        this.cookiePath = path.resolve(cookiePath || path.join(privateDataDir, 'bilibili-cookie.dpapi'));
         this.browser = null;
         this.page = null;
         this.currentCookies = null;
@@ -56,6 +60,7 @@ class BilibiliCookieManager {
     async testCookieValidity(cookies) {
         try {
             console.log('🔍 测试cookie有效性...');
+            const { chromium } = require('playwright');
             
             // 启动临时浏览器测试
             const browser = await chromium.launch({ headless: true });
@@ -94,6 +99,7 @@ class BilibiliCookieManager {
     async autoLogin(options = {}) {
         try {
             console.log('🚀 开始自动登录B站获取cookie...');
+            const { chromium } = require('playwright');
             
             this.browser = await chromium.launch({ 
                 headless: false,  // 显示浏览器以便用户操作
@@ -218,14 +224,21 @@ class BilibiliCookieManager {
             }
 
             const cookies = [];
-            const content = fs.readFileSync(filePath, 'utf-8');
+            const content = decodeCookieBuffer(fs.readFileSync(filePath), {
+                allowPlaintext: process.env.ALLOW_PLAINTEXT_BILI_COOKIE === 'true'
+            });
             
-            for (const line of content.split('\n')) {
-                if (line.trim().startsWith('#') || !line.trim()) {
+            for (const rawLine of content.split('\n')) {
+                let line = rawLine.trim();
+                if (line.startsWith('#HttpOnly_')) {
+                    line = line.slice('#HttpOnly_'.length);
+                } else if (!line || line.startsWith('#')) {
                     continue;
                 }
-                const parts = line.trim().split('\t');
-                if (parts.length >= 7) {
+                const parts = line.split('\t');
+                if (parts.length >= 7
+                    && ['TRUE', 'FALSE'].includes(parts[1])
+                    && ['TRUE', 'FALSE'].includes(parts[3])) {
                     const [domain, , path, , , name, value] = parts;
                     cookies.push({
                         name: name,
@@ -285,8 +298,12 @@ class BilibiliCookieManager {
                 directory,
                 `.${path.basename(this.cookiePath)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`
             );
+            const plaintext = lines.join('\n');
+            const payload = process.platform === 'win32'
+                ? protectCookieText(plaintext)
+                : Buffer.from(plaintext, 'utf8');
             descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
-            fs.writeFileSync(descriptor, lines.join('\n'), { encoding: 'utf8' });
+            fs.writeFileSync(descriptor, payload);
             fs.fsyncSync(descriptor);
             fs.closeSync(descriptor);
             descriptor = null;
@@ -294,6 +311,7 @@ class BilibiliCookieManager {
             fs.renameSync(temporaryPath, this.cookiePath);
             temporaryPath = null;
             try { fs.chmodSync(this.cookiePath, 0o600); } catch (error) { /* Best effort on Windows. */ }
+            if (process.platform === 'win32') hardenCookieAcl(this.cookiePath);
             console.log('Cookie 已安全保存');
 
         } catch (error) {

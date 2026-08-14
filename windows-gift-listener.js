@@ -4,7 +4,7 @@ require('./lib/safe-logger').installSafeConsole();
 
 /**
  * Windows B站礼物发送监听服务
- * 轮询Render服务器，获取待处理的礼物发送任务，调用Python Playwright脚本处理
+ * 轮询Render服务器，并通过本机受保护的 provider-confirmed HTTP sender 处理礼物任务。
  */
 
 const { spawn } = require('child_process');
@@ -28,7 +28,7 @@ const CHILD_ENV_KEYS = [
     'SystemRoot', 'WINDIR', 'PATH', 'Path', 'PATHEXT', 'TEMP', 'TMP',
     'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'LANG', 'TZ',
     'PYTHONHOME', 'PYTHONPATH', 'PYTHONUTF8', 'PYTHONIOENCODING',
-    'PLAYWRIGHT_BROWSERS_PATH', 'THREESERVER_BACKEND',
+    'PLAYWRIGHT_BROWSERS_PATH', 'THREESERVER_BACKEND', 'BILI_COOKIE_PATH',
     'BALANCE_CHECK_ENABLED', 'BALANCE_AUTO_REFRESH_INTERVAL',
     'BILI_USER_AGENT', 'BILI_BAG_CACHE_TTL', 'BILI_GIFTSEND_PREFER_BAG',
     'GIFT_CLICK_DELAY_MS', 'GIFT_TRY_BULK_SEND', 'GIFT_FALLBACK_SCROLL',
@@ -43,6 +43,16 @@ function createChildEnvironment(overrides = {}) {
     return { ...env, ...overrides };
 }
 
+function loadAllowedGiftIds() {
+    const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'gift-codes.json'), 'utf8'));
+    const ids = new Set(Object.keys(config['礼物池配置'] || {}));
+    for (const gift of Object.values(config['礼物映射'] || {})) {
+        if (/^\d+$/.test(String(gift?.bilibili_id || ''))) ids.add(String(gift.bilibili_id));
+    }
+    if (ids.size === 0) throw new Error('礼物允许列表为空');
+    return [...ids].sort();
+}
+
 function transportErrorCode(error) {
     const status = Number(error?.response?.status);
     if (Number.isInteger(status)) return `http_${status}`;
@@ -53,6 +63,28 @@ function transportErrorCode(error) {
 function isWorkerLeaseError(error) {
     return ['WORKER_LEASE_HELD', 'WORKER_LEASE_NOT_HELD']
         .includes(error?.response?.data?.code);
+}
+
+function collectProviderTransactionIds(payload) {
+    const found = new Set();
+    const visit = (value) => {
+        if (!value || typeof value !== 'object') return;
+        for (const key of ['provider_transaction_id', 'transaction_id']) {
+            const id = value[key];
+            if ((typeof id === 'string' || Number.isSafeInteger(id))
+                && String(id).length <= 200) found.add(String(id));
+        }
+        if (Array.isArray(value.provider_transaction_ids)) {
+            for (const id of value.provider_transaction_ids) {
+                if ((typeof id === 'string' || Number.isSafeInteger(id))
+                    && String(id).length <= 200) found.add(String(id));
+            }
+        }
+        if (Array.isArray(value.results)) value.results.forEach(visit);
+        if (Array.isArray(value.parts)) value.parts.forEach(visit);
+    };
+    visit(payload);
+    return [...found];
 }
 
 function createWorkerInstanceId(configuredBase, hostname = os.hostname(), suffix = null) {
@@ -100,19 +132,19 @@ class WindowsGiftListener {
     constructor() {
         // 配置服务器URL（根据实际部署地址修改）
         this.serverUrl = process.env.SERVER_URL || 'https://minimal-games-site.onrender.com';  // 或者你的实际Render URL
-        this.apiKey = process.env.WINDOWS_API_KEY || '';
-        this.hmacSecret = process.env.GIFT_TASKS_HMAC_SECRET || ''; // 签名密钥
-        this.workerId = createWorkerInstanceId(process.env.GIFT_WORKER_ID);
+        this.apiKey = process.env.WORKER_API_KEY || '';
+        this.hmacSecret = process.env.WORKER_HMAC_SECRET || '';
+        this.workerId = process.env.WORKER_CREDENTIAL_ID || '';
         this.pollInterval = 2000; // 2秒轮询一次
         this.isPollingGifts = false;
         this.isPollingPk = false;
-        this.pythonScript = this.resolveGiftSenderScript();
-        this.pythonPath = process.env.GIFT_SENDER_PYTHON || 'python';
-        this.threeServerUrl = 'http://127.0.0.1:9876';
+        this.threeServerUrl = null;
+        this.threeServerToken = crypto.randomBytes(32).toString('hex');
+        this.allowedGiftIds = loadAllowedGiftIds();
         this.threeServerRoomId = null;
-        this.threeServerLastCheck = 0;
-        this.threeServerCheckTtl = 5000;
-        this.threeServerScript = this.resolveVersionedScript('THREESERVER_SCRIPT', 'threeserver.py');
+        this.threeServerScript = this.resolveVersionedScript('THREESERVER_SCRIPT', 'threeserver.py', [
+            'cookie_store.py'
+        ]);
         this.threeServerPythonPath = process.env.THREESERVER_PYTHON || 'python';
         this.threeServerProcess = null;
         this.threeServerProcessRoomId = null;
@@ -135,7 +167,6 @@ class WindowsGiftListener {
         this.currentGiftPoll = null;
         this.currentPkPoll = null;
         this.activeGiftTask = null;
-        this.activeGiftProcess = null;
         this.activePkTask = null;
         this.lastHeartbeatAt = 0;
         this.heartbeatPromise = null;
@@ -186,31 +217,13 @@ class WindowsGiftListener {
         return selectedPath;
     }
 
-    resolveGiftSenderScript() {
-        const bundledPath = path.join(__dirname, 'bilibili_gift_sender.py');
-        const configuredPath = String(process.env.GIFT_SENDER_SCRIPT || '').trim();
-        const selectedPath = configuredPath ? path.resolve(configuredPath) : bundledPath;
-        const selectedStat = fs.lstatSync(selectedPath);
-        const bundledStat = fs.lstatSync(bundledPath);
-        if (!selectedStat.isFile() || selectedStat.isSymbolicLink()
-            || !bundledStat.isFile() || bundledStat.isSymbolicLink()) {
-            throw new Error('GIFT_SENDER_SCRIPT必须指向普通文件');
-        }
-        const selectedDigest = crypto.createHash('sha256').update(fs.readFileSync(selectedPath)).digest();
-        const bundledDigest = crypto.createHash('sha256').update(fs.readFileSync(bundledPath)).digest();
-        if (!crypto.timingSafeEqual(selectedDigest, bundledDigest)) {
-            throw new Error('GIFT_SENDER_SCRIPT与当前发布版本不一致，拒绝启动');
-        }
-        return selectedPath;
-    }
-
     // 启动监听服务
     async start() {
         if (!this.hmacSecret) {
-            throw new Error('缺少GIFT_TASKS_HMAC_SECRET环境变量，无法进行签名请求');
+            throw new Error('缺少WORKER_HMAC_SECRET环境变量，无法进行签名请求');
         }
         if (!this.apiKey || this.apiKey.length < 32) {
-            throw new Error('缺少有效的WINDOWS_API_KEY环境变量');
+            throw new Error('缺少有效的WORKER_API_KEY环境变量');
         }
         if (this.pollTimer) return;
         await this.refreshHeartbeat(true);
@@ -668,9 +681,11 @@ class WindowsGiftListener {
         try {
             const quantity = Number(task.quantity);
             const roomId = task.roomId ? String(task.roomId) : '';
+            const giftId = String(task.giftId || '');
             if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000
                 || !/^\d{1,12}$/.test(roomId)
-                || !task.giftId
+                || !/^\d+$/.test(giftId)
+                || !this.allowedGiftIds.includes(giftId)
                 || !Number.isSafeInteger(Number(task.claimGeneration))) {
                 await this.markTaskFailed(
                     task.id, task.claimToken, task.claimGeneration, 'invalid_task_parameters'
@@ -678,79 +693,58 @@ class WindowsGiftListener {
                 return;
             }
             releaseExternalSend = await this.externalSendSemaphore.acquire(15000);
+
+            // Local sender startup is preflight work. Keep the remote task in
+            // `claimed` until the room-specific, token-protected HTTP sender
+            // confirms its room, so a startup failure remains safely refundable.
+            const threeServerUrl = await this.ensureGiftThreeServer(roomId);
             const started = await this.startGiftTask(task.id, task.claimToken, task.claimGeneration);
             if (!started) {
                 console.error('礼物任务租约无法确认，未执行外部发送', { taskId: task.id });
                 return;
             }
+
+            // This is the irreversible boundary: the following POST may reach
+            // the provider even if the local HTTP response is later lost.
             externalSendStarted = true;
             activeTask.externalSendStarted = true;
-            const threeServerRoomId = await this.getThreeServerRoomId();
-            const canUseThreeServer = roomId && threeServerRoomId && roomId === threeServerRoomId;
-
-            if (canUseThreeServer) {
-                const sendResult = await this.sendToThreeServer(task.giftId, quantity);
-                if (sendResult.success) {
-                    const markResult = await this.markTaskComplete(task.id, task.claimToken, task.claimGeneration, {
-                        actualQuantity: quantity,
-                        requestedQuantity: quantity,
-                        partialSuccess: false,
-                        providerTransactionId: sendResult.providerTransactionId
-                    });
-                    if (markResult) {
-                        console.log('礼物任务已完成', { taskId: task.id, quantity });
-                    } else {
-                        await this.markTaskUncertain(task.id, task.claimToken, task.claimGeneration, 'threeserver_ack_unconfirmed');
-                        console.warn('礼物已发送但回执未确认', { taskId: task.id });
-                    }
-                    return;
+            const sendResult = await this.sendToThreeServer(
+                giftId,
+                quantity,
+                threeServerUrl,
+                this.threeServerToken
+            );
+            if (sendResult.success) {
+                const markResult = await this.markTaskComplete(task.id, task.claimToken, task.claimGeneration, {
+                    actualQuantity: quantity,
+                    requestedQuantity: quantity,
+                    partialSuccess: false,
+                    providerTransactionId: sendResult.providerTransactionId
+                });
+                if (markResult) {
+                    console.log('礼物任务已完成', { taskId: task.id, quantity });
+                } else {
+                    await this.markTaskUncertain(
+                        task.id,
+                        task.claimToken,
+                        task.claimGeneration,
+                        'threeserver_ack_unconfirmed'
+                    );
+                    console.warn('礼物已发送但回执未确认', { taskId: task.id });
                 }
-
-                const failureReason = sendResult.balance_insufficient
-                    ? 'provider_balance_insufficient'
-                    : 'threeserver_result_uncertain';
-                // The POST may have reached the provider even when its response
-                // was lost. Never switch to another sender after this boundary.
-                await this.markTaskUncertain(task.id, task.claimToken, task.claimGeneration, failureReason);
-                console.warn('礼物外部发送结果需要对账', { taskId: task.id });
                 return;
             }
 
-            const result = await this.callPythonScript(task.giftId, task.roomId, quantity);
-            if (result.success || result.partial_success) {
-                    const markResult = await this.markTaskComplete(task.id, task.claimToken, task.claimGeneration, {
-                        actualQuantity: result.actual_quantity,
-                        requestedQuantity: result.requested_quantity,
-                        partialSuccess: result.partial_success,
-                        providerTransactionId: result.provider_transaction_id || result.transaction_id
-                });
-                if (markResult) {
-                    console.log(result.partial_success ? '礼物任务部分完成' : '礼物任务完成', {
-                        taskId: task.id,
-                        roomId: task.roomId,
-                        actualQuantity: result.actual_quantity,
-                        requestedQuantity: result.requested_quantity
-                    });
-                } else {
-                    await this.markTaskUncertain(task.id, task.claimToken, task.claimGeneration, 'python_ack_unconfirmed');
-                    console.warn('礼物已发送但回执未确认', { taskId: task.id });
-                }
-            } else {
-                if (result.outcome_uncertain) {
-                    await this.markTaskUncertain(task.id, task.claimToken, task.claimGeneration, 'python_result_uncertain');
-                    console.warn('礼物发送结果待确认', { taskId: task.id });
-                    return;
-                }
-                if (result.balance_insufficient) {
-                    console.warn('第三方送礼账户余额不足', { taskId: task.id });
-                }
-                await this.markTaskUncertain(
-                    task.id,
-                    task.claimToken,
-                    task.claimGeneration,
-                    result.balance_insufficient ? 'provider_balance_insufficient' : 'provider_result_uncertain'
-                );
-            }
+            const failureReason = sendResult.balance_insufficient
+                ? 'provider_balance_insufficient'
+                : sendResult.error === 'provider_receipt_missing'
+                    ? 'provider_receipt_missing'
+                    : sendResult.error === 'provider_receipt_ambiguous'
+                        ? 'provider_receipt_ambiguous'
+                        : 'threeserver_result_uncertain';
+            // Never fall back to the browser sender after this POST boundary.
+            await this.markTaskUncertain(task.id, task.claimToken, task.claimGeneration, failureReason);
+            console.warn('礼物外部发送结果需要对账', { taskId: task.id });
 
         } catch (error) {
             console.error('处理礼物任务时发生异常', {
@@ -772,18 +766,41 @@ class WindowsGiftListener {
         }
     }
 
-    async sendToThreeServer(giftId, quantity) {
-        const gifts = Array.from({ length: quantity }, () => String(giftId));
+    async sendToThreeServer(
+        giftId,
+        quantity,
+        serverUrl = this.threeServerUrl,
+        token = this.threeServerToken
+    ) {
+        const gifts = [{ id: String(giftId), count: quantity }];
         try {
-            const response = await axios.post(`${this.threeServerUrl}/send`, { gifts }, { timeout: 3000 });
+            // Ask threeserver to wait for the provider API result. Its API
+            // confirmation window is 20 seconds, so keep the local transport
+            // alive slightly longer instead of manufacturing an early timeout.
+            const response = await axios.post(`${serverUrl}/send`, {
+                gifts,
+                wait: true,
+                confirm: 'api'
+            }, {
+                timeout: 25000,
+                headers: { 'X-Local-Sender-Token': token }
+            });
             if (response.data?.success === true || response.data?.status === 'ok') {
+                const providerTransactionIds = collectProviderTransactionIds(response.data);
+                if (providerTransactionIds.length !== 1) {
+                    return {
+                        success: false,
+                        reachable: true,
+                        error: providerTransactionIds.length === 0
+                            ? 'provider_receipt_missing'
+                            : 'provider_receipt_ambiguous'
+                    };
+                }
                 return {
                     success: true,
                     reachable: true,
                     results: response.data.results,
-                    providerTransactionId: response.data.provider_transaction_id
-                        || response.data.transaction_id
-                        || null
+                    providerTransactionId: providerTransactionIds[0]
                 };
             }
             return {
@@ -799,25 +816,6 @@ class WindowsGiftListener {
                 balance_insufficient: error.response?.status === 402 || error.response?.data?.balance_insufficient === true,
                 error: transportErrorCode(error)
             };
-        }
-    }
-
-    async getThreeServerRoomId(force = false) {
-        const now = Date.now();
-        if (!force && this.threeServerRoomId && now - this.threeServerLastCheck < this.threeServerCheckTtl) {
-            return this.threeServerRoomId;
-        }
-        try {
-            const response = await axios.get(`${this.threeServerUrl}/`, { timeout: 1000 });
-            const roomId = response.data?.room_id ? String(response.data.room_id) : null;
-            if (roomId) {
-                this.threeServerRoomId = roomId;
-                this.threeServerLastCheck = now;
-                return roomId;
-            }
-            return null;
-        } catch (error) {
-            return null;
         }
     }
 
@@ -846,25 +844,122 @@ class WindowsGiftListener {
         return targetPath;
     }
 
+    launchGiftThreeServer({ configPath, backendPort, backendToken }) {
+        const child = spawn(this.threeServerPythonPath, [this.threeServerScript], {
+            cwd: path.dirname(this.threeServerScript),
+            env: createChildEnvironment({
+                BILIPK_CONFIG: configPath,
+                THREESERVER_PORT: String(backendPort),
+                THREESERVER_LOCAL_TOKEN: backendToken,
+                THREESERVER_ALLOWED_GIFT_IDS: this.allowedGiftIds.join(','),
+                THREESERVER_BACKEND: 'http'
+            }),
+            windowsHide: true
+        });
+        child.stdout?.resume();
+        child.stderr?.resume();
+        return child;
+    }
+
+    async ensureGiftThreeServer(roomId) {
+        if (this.shuttingDown) throw new Error('工作器正在关机');
+        const desiredRoomId = String(roomId || '');
+        if (!/^\d{1,12}$/.test(desiredRoomId)) {
+            throw new Error('礼物目标房间无效');
+        }
+
+        const existing = this.threeServerProcess;
+        if (existing && this.threeServerProcessRoomId === desiredRoomId
+            && existing.exitCode === null && existing.signalCode === null
+            && this.threeServerUrl) {
+            const confirmed = await this.waitForThreeServerRoom(
+                desiredRoomId,
+                3000,
+                this.threeServerUrl,
+                this.threeServerToken
+            );
+            if (confirmed) return this.threeServerUrl;
+        }
+        if (existing) await this.stopThreeServerProcess();
+
+        const backendPort = await this.getFreePort();
+        const backendUrl = `http://127.0.0.1:${backendPort}`;
+        const backendToken = crypto.randomBytes(32).toString('hex');
+        const configPath = await this.ensureRoomConfig(desiredRoomId);
+        if (this.shuttingDown) throw new Error('工作器正在关机');
+
+        const child = this.launchGiftThreeServer({
+            configPath,
+            backendPort,
+            backendToken
+        });
+        this.threeServerProcess = child;
+        this.threeServerProcessRoomId = desiredRoomId;
+        this.threeServerUrl = backendUrl;
+        this.threeServerToken = backendToken;
+        this.threeServerRoomId = null;
+
+        const clearProcessState = () => {
+            if (this.threeServerProcess !== child) return;
+            this.threeServerProcess = null;
+            this.threeServerProcessRoomId = null;
+            this.threeServerUrl = null;
+            this.threeServerRoomId = null;
+        };
+        child.once('close', clearProcessState);
+        child.once('error', clearProcessState);
+
+        try {
+            await waitForChildSpawn(child);
+            if (this.threeServerProcess !== child
+                || child.exitCode !== null || child.signalCode !== null) {
+                throw new Error('threeserver在启动确认后立即退出');
+            }
+            const ready = await this.waitForThreeServerRoom(
+                desiredRoomId,
+                20000,
+                backendUrl,
+                backendToken
+            );
+            if (!ready) throw new Error('threeserver未能确认目标房间');
+            if (this.threeServerProcess !== child || this.shuttingDown) {
+                throw new Error('threeserver启动期间工作器状态已变化');
+            }
+            this.threeServerRoomId = desiredRoomId;
+            return backendUrl;
+        } catch (error) {
+            if (this.threeServerProcess === child) {
+                await this.stopThreeServerProcess();
+            } else {
+                await this.terminateProcessTree(child.pid);
+            }
+            throw new Error('普通礼物threeserver启动或房间确认失败', { cause: error });
+        }
+    }
+
     async stopThreeServerProcess() {
         const child = this.threeServerProcess;
-        if (!child) {
-            return;
-        }
+        if (!child) return;
+        this.threeServerProcess = null;
+        this.threeServerProcessRoomId = null;
+        this.threeServerUrl = null;
+        this.threeServerRoomId = null;
         try {
-            child.kill('SIGTERM');
+            await this.terminateProcessTree(child.pid);
         } catch (error) {
             console.error('threeserver停止失败', { errorCode: transportErrorCode(error) });
         }
-        this.threeServerProcess = null;
-        this.threeServerProcessRoomId = null;
-        this.threeServerRoomId = null;
     }
 
-    async waitForThreeServerRoom(roomId, timeoutMs = 10000, serverUrl = this.threeServerUrl) {
+    async waitForThreeServerRoom(
+        roomId,
+        timeoutMs = 10000,
+        serverUrl = this.threeServerUrl,
+        token = this.threeServerToken
+    ) {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
-            const current = await this.fetchThreeServerRoomId(serverUrl);
+            const current = await this.fetchThreeServerRoomId(serverUrl, token);
             if (current && String(current) === String(roomId)) {
                 return true;
             }
@@ -873,9 +968,12 @@ class WindowsGiftListener {
         return false;
     }
 
-    async fetchThreeServerRoomId(serverUrl) {
+    async fetchThreeServerRoomId(serverUrl, token = this.threeServerToken) {
         try {
-            const response = await axios.get(`${serverUrl}/`, { timeout: 1000 });
+            const response = await axios.get(`${serverUrl}/`, {
+                timeout: 1000,
+                headers: { 'X-Local-Sender-Token': token }
+            });
             return response.data?.room_id ? String(response.data.room_id) : null;
         } catch (error) {
             return null;
@@ -908,13 +1006,16 @@ class WindowsGiftListener {
 
         const backendPort = await this.getFreePort();
         const backendUrl = `http://127.0.0.1:${backendPort}`;
+        const backendToken = crypto.randomBytes(32).toString('hex');
         const configPath = await this.ensureRoomConfig(desiredRoomId);
         if (this.shuttingDown) throw new Error('工作器正在关机');
         const child = spawn(this.threeServerPythonPath, [this.threeServerScript], {
             cwd: path.dirname(this.threeServerScript),
             env: createChildEnvironment({
                 BILIPK_CONFIG: configPath,
-                THREESERVER_PORT: String(backendPort)
+                THREESERVER_PORT: String(backendPort),
+                THREESERVER_LOCAL_TOKEN: backendToken,
+                THREESERVER_ALLOWED_GIFT_IDS: this.allowedGiftIds.join(',')
             }),
             windowsHide: true
         });
@@ -923,6 +1024,7 @@ class WindowsGiftListener {
             process: child,
             backendPort,
             backendUrl,
+            backendToken,
             roomId: desiredRoomId,
             generationId,
             proxyServer: null,
@@ -945,14 +1047,19 @@ class WindowsGiftListener {
             }
         });
 
-        const ready = await this.waitForThreeServerRoom(desiredRoomId, 20000, backendUrl);
+        const ready = await this.waitForThreeServerRoom(
+            desiredRoomId,
+            20000,
+            backendUrl,
+            backendToken
+        );
         if (!ready) {
             await this.stopPkThreeServer(username);
             throw new Error('threeserver未能确认目标房间');
         }
         const proxySecret = crypto.randomBytes(24).toString('hex');
         const proxy = await this.startPkAuthorizationProxy({
-            username, roomId: desiredRoomId, generationId, backendUrl, proxySecret
+            username, roomId: desiredRoomId, generationId, backendUrl, backendToken, proxySecret
         });
         entry.proxyServer = proxy.server;
         entry.url = proxy.url;
@@ -975,10 +1082,12 @@ class WindowsGiftListener {
         this.pkThreeServers.delete(username);
     }
 
-    async startPkAuthorizationProxy({ username, roomId, generationId, backendUrl, proxySecret }) {
+    async startPkAuthorizationProxy({
+        username, roomId, generationId, backendUrl, backendToken = '', proxySecret
+    }) {
         const server = http.createServer((req, res) => {
             this.handlePkProxyRequest({
-                req, res, username, roomId, generationId, backendUrl, proxySecret
+                req, res, username, roomId, generationId, backendUrl, backendToken, proxySecret
             }).catch((error) => {
                 console.error('PK本地预授权代理错误');
                 if (!res.headersSent) {
@@ -1104,13 +1213,16 @@ class WindowsGiftListener {
         }
     }
 
-    async handlePkProxyRequest({ req, res, username, roomId, generationId, backendUrl, proxySecret }) {
+    async handlePkProxyRequest({
+        req, res, username, roomId, generationId, backendUrl, backendToken = '', proxySecret
+    }) {
         const requestUrl = new URL(req.url, 'http://127.0.0.1');
         const proxyRoot = `/${proxySecret}`;
         if (req.method === 'GET'
             && (requestUrl.pathname === proxyRoot || requestUrl.pathname === `${proxyRoot}/`)) {
             const response = await axios.get(`${backendUrl}/`, {
                 timeout: 1500,
+                headers: { 'X-Local-Sender-Token': backendToken },
                 validateStatus: () => true
             });
             return this.sendLocalJson(res, response.status, response.data);
@@ -1247,6 +1359,7 @@ class WindowsGiftListener {
             try {
                 backendResponse = await axios.post(`${backendUrl}/send`, { gifts }, {
                     timeout: 10000,
+                    headers: { 'X-Local-Sender-Token': backendToken },
                     validateStatus: () => true
                 });
                 reportSuccess = backendResponse.status >= 200 && backendResponse.status < 300
@@ -1267,7 +1380,8 @@ class WindowsGiftListener {
                 reportId,
                 script: 'pk-local-proxy',
                 success: reportSuccess,
-                reason: outcomeReason
+                reason: outcomeReason,
+                providerTransactionIds: collectProviderTransactionIds(backendResponse?.data)
             };
             try {
                 this.spoolPkReport(reportPayload, 'final');
@@ -1387,127 +1501,6 @@ class WindowsGiftListener {
             const child = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
             child.once('close', resolve);
             child.once('error', resolve);
-        });
-    }
-
-    // 调用Python Playwright脚本
-    async callPythonScript(giftId, roomId, quantity = 1) {
-        if (this.shuttingDown) {
-            return {
-                success: false,
-                outcome_uncertain: true,
-                error: '工作器正在关机，未继续发送'
-            };
-        }
-        return new Promise((resolve) => {
-            const pythonProcess = spawn(this.pythonPath, [
-                this.pythonScript,
-                String(giftId),
-                String(roomId),
-                String(quantity)
-            ], {
-                stdio: ['pipe', 'pipe', 'pipe'],
-                env: createChildEnvironment({
-                    BILI_COOKIE_PATH: process.env.BILI_COOKIE_PATH || 'C:/Users/user/Desktop/jiaobenbili/cookie.txt',
-                    BILIPK_CONFIG: process.env.BILIPK_CONFIG || this.pkConfigPath
-                })
-            });
-            this.activeGiftProcess = pythonProcess;
-
-            let output = '';
-            let outputTooLarge = false;
-            let settled = false;
-            const finish = (result) => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timeout);
-                if (this.activeGiftProcess === pythonProcess) this.activeGiftProcess = null;
-                resolve(result);
-            };
-            const timeout = setTimeout(() => {
-                try {
-                    pythonProcess.kill('SIGTERM');
-                } catch (error) {
-                    console.error('终止超时Python进程失败', {
-                        errorCode: transportErrorCode(error)
-                    });
-                }
-                finish({
-                    success: false,
-                    giftId,
-                    roomId,
-                    outcome_uncertain: true,
-                    error: 'Python送礼进程超时，结果无法确认'
-                });
-            }, 3 * 60 * 1000);
-            timeout.unref?.();
-
-            pythonProcess.stdout.on('data', (data) => {
-                if (output.length + data.length > 256 * 1024) {
-                    outputTooLarge = true;
-                    pythonProcess.kill('SIGTERM');
-                    return;
-                }
-                output += data.toString('utf8');
-            });
-
-            pythonProcess.stderr.on('data', (data) => {
-                // Drain third-party stderr without copying secrets into logs.
-            });
-
-            pythonProcess.on('close', (code) => {
-                // 🛡️ 修复：不管exit code，始终解析JSON结果
-                try {
-                    if (outputTooLarge) {
-                        finish({ success: false, outcome_uncertain: true, error: '发送脚本输出超过安全上限' });
-                        return;
-                    }
-                    // 修复JSON解析：使用正确的换行符分割
-                    const lines = output.trim().split('\n'); // 修复：使用单个\n而不是\\n
-                    
-                    // 从后往前查找JSON结果（Python脚本最后输出JSON）
-                    for (const line of lines.reverse()) {
-                        const trimmed = line.trim();
-                        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-                            try {
-                                const result = JSON.parse(trimmed);
-                                finish(result);
-                                return;
-                            } catch (jsonError) {
-                                continue; // 继续尝试其他行
-                            }
-                        }
-                    }
-                    
-                    // 没有找到有效JSON输出，这是异常情况
-                    finish({
-                        success: false,
-                        giftId: giftId,
-                        roomId: roomId,
-                        outcome_uncertain: true,
-                        error: `Python脚本未返回有效JSON结果 (exit code: ${code})`
-                    });
-                    
-                } catch (parseError) {
-                    console.error('发送脚本输出解析失败');
-                    finish({
-                        success: false,
-                        giftId: giftId,
-                        roomId: roomId,
-                        outcome_uncertain: true,
-                        error: `Python脚本输出解析失败: ${parseError.message}`
-                    });
-                }
-            });
-
-            pythonProcess.on('error', (error) => {
-                finish({
-                    success: false,
-                    giftId: giftId,
-                    roomId: roomId,
-                    error: 'python_process_start_failed'
-                });
-            });
         });
     }
 
@@ -1669,11 +1662,6 @@ class WindowsGiftListener {
         if (this.pollTimer) {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
-        }
-
-        const activeProcess = this.activeGiftProcess;
-        if (activeProcess?.pid) {
-            await this.terminateProcessTree(activeProcess.pid);
         }
 
         const waitForPolls = Promise.allSettled([

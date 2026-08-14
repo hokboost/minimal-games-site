@@ -1,21 +1,6 @@
 <%
-const catalog = [
-    { index: '01', group: 'points', key: 'quiz', href: '/quiz', category: 'brain', titleZh: '知识问答', titleEn: 'Quiz Sprint', descZh: '15 道随机题，在 30 秒里完成一次知识冲刺。', descEn: 'A 15-question knowledge sprint against a 30-second clock.', costZh: '10 积分', costEn: '10 points', metaZh: '答对返币', metaEn: 'Earn per answer' },
-    { index: '02', group: 'free', key: 'dictation', href: '/dictation', category: 'brain', titleZh: '汉字听写', titleEn: 'Chinese Dictation', descZh: '听读音、辨同音字，连续完成三关练习。', descEn: 'Listen, identify homophones, and clear three focused stages.', costZh: '需听写机会', costEn: 'Attempt required', metaZh: '管理员发放', metaEn: 'Admin granted' },
-    { index: '03', group: 'points', key: 'slot', href: '/slot', category: 'chance', titleZh: '幸运老虎机', titleEn: 'Lucky Reels', descZh: '设定自己的下注金额，等待三格数字停下。', descEn: 'Set your stake and watch all three number reels settle.', costZh: '1 - 1000 积分', costEn: '1 - 1000 points', metaZh: '自由下注', metaEn: 'Flexible stake' },
-    { index: '04', group: 'points', key: 'scratch', href: '/scratch', category: 'chance', titleZh: '刮刮乐', titleEn: 'Scratch Card', descZh: '选择奖券档位，亲手刮开藏在涂层下的号码。', descEn: 'Choose a ticket tier and reveal the numbers by hand.', costZh: '5 积分起', costEn: 'From 5 points', metaZh: '三档奖券', metaEn: '3 ticket tiers' },
-    { index: '05', group: 'gift', key: 'wish', href: '/wish', category: 'chance', titleZh: '幸运祈愿', titleEn: 'Lucky Wish', descZh: '七种礼物奖池，支持单抽、十连与独立保底。', descEn: 'Seven gift pools with single pulls, ten-pulls, and pity.', costZh: '50 积分起', costEn: 'From 50 points', metaZh: '奖励进入背包', metaEn: 'Rewards enter backpack' },
-    { index: '06', group: 'gift', key: 'blindbox', href: '/blindbox', category: 'chance', titleZh: '惊喜盲盒', titleEn: 'Surprise Boxes', descZh: '选好档位和数量，一次开启最多 50 盒。', descEn: 'Pick a tier and open up to 50 surprise boxes at once.', costZh: '50 积分起', costEn: 'From 50 points', metaZh: '奖励进入背包', metaEn: 'Rewards enter backpack' },
-    { index: '07', group: 'points', key: 'stone', href: '/stone', category: 'strategy', titleZh: '合石头', titleEn: 'Stone Match', descZh: '填满六个槽位，用同色组合换取更高奖励。', descEn: 'Fill six slots and build color matches for bigger rewards.', costZh: '30 积分 / 颗', costEn: '30 points / stone', metaZh: '六槽配色', metaEn: '6-slot board' },
-    { index: '08', group: 'points', key: 'flip', href: '/flip', category: 'strategy', titleZh: '翻卡牌', titleEn: 'Card Flip', descZh: '避开坏牌，继续加注，或在合适的时候收手。', descEn: 'Avoid bad cards, keep going, or cash out at the right time.', costZh: '50 积分起', costEn: 'From 50 points', metaZh: '随时收手', metaEn: 'Cash out anytime' },
-    { index: '09', group: 'points', key: 'duel', href: '/duel', category: 'challenge', titleZh: '决斗挑战', titleEn: 'Duel Challenge', descZh: '调整功力，在成本、胜率和奖励之间做选择。', descEn: 'Balance your power level against cost, odds, and reward.', costZh: '动态成本', costEn: 'Dynamic cost', metaZh: '六档奖励', metaEn: '6 reward tiers' },
-    { index: '10', group: 'free', key: 'spin', href: '/spin', category: 'challenge', titleZh: '挑战转盘', titleEn: 'Challenge Wheel', descZh: '从 14 项直播、体能和趣味任务中随机抽取一个。', descEn: 'Draw one of 14 live, fitness, and playful challenges.', costZh: '免费', costEn: 'Free', metaZh: '14 项任务', metaEn: '14 challenges' }
-];
-const groups = [
-    { key: 'points', titleZh: '积分玩法', titleEn: 'Points games', descZh: '每局都有明确的积分支出与结算', descEn: 'Every round has a clear points cost and settlement' },
-    { key: 'gift', titleZh: '礼物背包玩法', titleEn: 'Backpack reward games', descZh: '奖励是待发送礼物，与积分结算分开', descEn: 'Rewards are stored gifts, separate from points settlement' },
-    { key: 'free', titleZh: '免费与次数玩法', titleEn: 'Free and allowance games', descZh: '不使用积分余额', descEn: 'Does not use the points balance' }
-];
+const catalog = gameCatalog || [];
+const groups = gameCatalogGroups || [];
 const catalogAuthorized = typeof user !== 'undefined' && user && user.authorized;
 %>
 <div class="catalog-groups" id="game-catalog">
@@ -28,10 +13,10 @@ const catalogAuthorized = typeof user !== 'undefined' && user && user.authorized
         <div class="catalog-grid">
     <% catalog.filter((game) => game.group === group.key).forEach((game) => { %>
         <a
-            class="catalog-card game-card--<%= game.key %>"
+            class="catalog-card game-card--<%= game.id %>"
             href="<%= catalogAuthorized ? game.href : (user ? '#' : '/login') %>"
             data-category="<%= game.category %>"
-            data-game="<%= game.key %>"
+            data-game="<%= game.id %>"
             <%= !catalogAuthorized && user ? 'aria-disabled=true tabindex=-1' : '' %>
         >
             <span class="catalog-media" aria-hidden="true">

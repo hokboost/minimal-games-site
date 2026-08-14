@@ -6,7 +6,7 @@
     <title><%= lang === 'zh' ? '知识问答' : 'Quiz' %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="app-redesign game-page page-quiz" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>">
+<body class="app-redesign game-page page-quiz" data-username="<%= username %>" data-csrf-token="<%= csrfToken %>" data-question-count="<%= quizConfig.questionCount %>" data-round-cost="<%= quizConfig.roundCost %>" data-reward-per-correct="<%= quizConfig.rewardPerCorrect %>" data-daily-reward-cap="<%= quizConfig.dailyRewardCap %>">
     <%- include('partials/language-switcher') %>
 
     <div class="container">
@@ -23,13 +23,16 @@
             <div class="balance-info">
                 <h3><%= lang === 'zh' ? '当前积分' : 'Current Points' %> <span id="current-balance"><%= balance || 0 %></span></h3>
                 <p class="cost-info">
-                    <%= lang === 'zh' ? '入场 10 积分 · 每答对一题返 2 积分' : 'Entry 10 points · Earn 2 points per correct answer' %>
+                    <%= lang === 'zh'
+                        ? `入场 ${quizConfig.roundCost} 积分 · 每题 ${quizConfig.rewardPerCorrect} 积分，每日奖励最多 ${quizConfig.dailyRewardCap} 积分`
+                        : `Entry ${quizConfig.roundCost} points · ${quizConfig.rewardPerCorrect} per answer, capped at ${quizConfig.dailyRewardCap} reward points daily`
+                    %>
                 </p>
             </div>
             <p class="game-desc">
                 <%= lang === 'zh'
-                    ? '挑战知识问答，展示你的智慧！15题总共30秒，答对得分，答错不扣分。'
-                    : 'Challenge your knowledge and show your wisdom! 15 questions in 30 seconds total. Correct answers earn points, wrong answers don\'t lose points.'
+                    ? `挑战知识问答，展示你的智慧！${quizConfig.questionCount}题总共30秒，答对得分，答错不扣分。`
+                    : `Challenge your knowledge and show your wisdom! ${quizConfig.questionCount} questions in 30 seconds total. Correct answers earn points, wrong answers don't lose points.`
                 %>
             </p>
             <button id="start-quiz-btn">
@@ -40,7 +43,7 @@
         <div id="quiz" class="quiz-section" hidden>
             <div class="quiz-header">
                 <p id="timer" class="timer"><%= lang === 'zh' ? '准备中...' : 'Preparing...' %></p>
-                <p id="progress" class="progress"><%= lang === 'zh' ? '题目' : 'Question' %> 1/15</p>
+                <p id="progress" class="progress"><%= lang === 'zh' ? '题目' : 'Question' %> 1/<%= quizConfig.questionCount %></p>
             </div>
             <div class="quiz-container">
                 <div id="question" class="question"></div>

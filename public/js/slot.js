@@ -17,12 +17,22 @@
     };
 
     const { username, csrfToken } = document.body.dataset;
+    const configuredMinimumBet = Number(document.body.dataset.minimumBet);
+    const configuredMaximumBet = Number(document.body.dataset.maximumBet);
+    const minimumBet = Number.isSafeInteger(configuredMinimumBet) && configuredMinimumBet > 0
+        ? configuredMinimumBet
+        : 1;
+    const maximumBet = Number.isSafeInteger(configuredMaximumBet)
+        && configuredMaximumBet >= minimumBet
+        ? configuredMaximumBet
+        : minimumBet;
     const csrf = csrfToken || '';
     const r1 = document.getElementById('r1');
     const r2 = document.getElementById('r2');
     const r3 = document.getElementById('r3');
     const btn = document.getElementById('spinBtn');
     const result = document.getElementById('rewardResult');
+    let requestInFlight = false;
 
     function generateSpinNumbers(betAmount) {
         const baseNumbers = [50, 100, 150, 200];
@@ -30,7 +40,7 @@
     }
 
     function animateSpin(finalReels, payout, callback) {
-        const betAmount = parseInt(document.getElementById('bet-amount').value, 10) || 10;
+        const betAmount = parseInt(document.getElementById('bet-amount').value, 10) || minimumBet;
         const spinNumbers = generateSpinNumbers(betAmount);
 
         let steps = 38;
@@ -71,11 +81,15 @@
     }
 
     async function playSlot() {
+        if (requestInFlight) return;
         const betAmount = parseInt(document.getElementById('bet-amount').value, 10);
         const currentBalance = parseInt(document.getElementById('current-balance').textContent, 10);
 
-        if (!betAmount || betAmount < 1 || betAmount > 1000) {
-            alert(t('请输入有效的投注金额 (1-1000积分)', 'Enter a valid bet amount (1-1000 points)'));
+        if (!Number.isSafeInteger(betAmount) || betAmount < minimumBet || betAmount > maximumBet) {
+            alert(t(
+                `请输入有效的投注金额 (${minimumBet}-${maximumBet}积分)`,
+                `Enter a valid bet amount (${minimumBet}-${maximumBet} points)`
+            ));
             return;
         }
 
@@ -87,6 +101,7 @@
             return;
         }
 
+        requestInFlight = true;
         btn.disabled = true;
         result.textContent = t('游戏中...', 'Spinning...');
         result.className = 'result-text';
@@ -145,12 +160,13 @@
             console.error('Slot play error:', error);
             result.textContent = t('网络错误，请稍后重试', 'Network error, please try again');
         } finally {
+            requestInFlight = false;
             btn.disabled = false;
         }
     }
 
     function generateReelsForOutcome(outcome, payout) {
-        const betAmount = parseInt(document.getElementById('bet-amount').value, 10) || 10;
+        const betAmount = parseInt(document.getElementById('bet-amount').value, 10) || minimumBet;
         const spinNumbers = generateSpinNumbers(betAmount);
 
         if (outcome === '不亏不赚' || outcome.includes('×') || outcome.includes('中奖')) {

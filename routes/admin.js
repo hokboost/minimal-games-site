@@ -18,11 +18,20 @@ module.exports = function registerAdminRoutes(app, deps) {
         SessionManager,
         notifySecurityEvent,
         disconnectUserSockets,
-        passwordResetTokenSecret
+        getAdminTotpSecret,
+        passwordResetTokenSecret,
+        gameRegistry
     } = deps;
     if (!Buffer.isBuffer(passwordResetTokenSecret) || passwordResetTokenSecret.length < 32) {
         throw new Error('passwordResetTokenSecret must be a Buffer of at least 32 bytes');
     }
+    if (!Array.isArray(gameRegistry?.GAME_DEFINITIONS)
+        || typeof gameRegistry?.records?.resolveRecordGames !== 'function'
+        || typeof gameRegistry.records.loadLatestRecords !== 'function'
+        || typeof gameRegistry.records.loadAdminRecordSections !== 'function') {
+        throw new TypeError('Missing required game record registry');
+    }
+    const adminRecordGames = gameRegistry.records.resolveRecordGames(gameRegistry.GAME_DEFINITIONS);
 
     const adminRateLimit = requireFunction(security, 'adminRateLimit', 'security middleware');
     const adminStrictLimit = requireFunction(security, 'adminStrictLimit', 'security middleware');
@@ -335,7 +344,9 @@ module.exports = function registerAdminRoutes(app, deps) {
             }
 
             const userResult = await pool.query(
-                'SELECT password_hash FROM users WHERE username = $1 AND is_admin = true AND deactivated = false',
+                `SELECT password_hash, last_admin_totp_counter
+                 FROM users
+                 WHERE username = $1 AND is_admin = true AND deactivated = false`,
                 [req.session.user.username]
             );
             const validPassword = userResult.rows.length === 1
@@ -344,18 +355,19 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(401).json({ success: false, message: '管理员密码错误' });
             }
 
-            const totpSecret = process.env.ADMIN_TOTP_SECRET;
-            if (totpSecret) {
-                const { verifyTotp } = require('../lib/totp');
-                if (!verifyTotp(totpSecret, totpCode)) {
-                    return res.status(401).json({ success: false, message: '动态验证码错误或已过期' });
-                }
+            const totpSecret = getAdminTotpSecret(req.session.user.username);
+            const { matchTotpCounter } = require('../lib/totp');
+            const totpCounter = totpSecret ? matchTotpCounter(totpSecret, totpCode) : null;
+            if (totpCounter === null
+                || (userResult.rows[0].last_admin_totp_counter !== null
+                    && totpCounter <= Number(userResult.rows[0].last_admin_totp_counter))) {
+                return res.status(401).json({ success: false, message: '动态验证码错误或已过期' });
             }
 
             client = await pool.connect();
             await client.query('BEGIN');
             const stillCurrent = await client.query(`
-                SELECT account.password_hash
+                SELECT account.password_hash, account.last_admin_totp_counter
                 FROM users AS account
                 JOIN active_sessions AS active ON active.username = account.username
                 WHERE account.username = $1
@@ -366,9 +378,22 @@ module.exports = function registerAdminRoutes(app, deps) {
                 FOR SHARE OF account, active
             `, [req.session.user.username, req.sessionID]);
             if (stillCurrent.rows.length !== 1
-                || stillCurrent.rows[0].password_hash !== userResult.rows[0].password_hash) {
+                || stillCurrent.rows[0].password_hash !== userResult.rows[0].password_hash
+                || (stillCurrent.rows[0].last_admin_totp_counter !== null
+                    && totpCounter <= Number(stillCurrent.rows[0].last_admin_totp_counter))) {
                 await client.query('ROLLBACK');
                 return res.status(409).json({ success: false, message: '管理员凭据或会话已发生变化，请重新登录' });
+            }
+            const consumedTotp = await client.query(`
+                UPDATE users
+                SET last_admin_totp_counter = $2
+                WHERE username = $1
+                  AND (last_admin_totp_counter IS NULL OR last_admin_totp_counter < $2)
+                RETURNING username
+            `, [req.session.user.username, totpCounter]);
+            if (consumedTotp.rowCount !== 1) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ success: false, message: '动态验证码已使用，请等待下一组验证码' });
             }
 
             await auditAdminAction({
@@ -377,18 +402,18 @@ module.exports = function registerAdminRoutes(app, deps) {
                 action: 'admin_reauthenticated',
                 clientIP: req.clientIP,
                 requestId: req.requestId,
-                authStrength: totpSecret ? 'password_totp' : 'password'
+                authStrength: 'password_totp'
             });
             await client.query('COMMIT');
 
             const verifiedAt = Date.now();
-            if (totpSecret) req.session.lastMfaVerifiedAt = verifiedAt;
+            req.session.lastMfaVerifiedAt = verifiedAt;
             req.session.lastAuthenticatedAt = verifiedAt;
             sessionStamped = true;
             await new Promise((resolve, reject) => {
                 req.session.save((error) => (error ? reject(error) : resolve()));
             });
-            return res.json({ success: true, mfaRequired: Boolean(totpSecret) });
+            return res.json({ success: true, mfaRequired: true });
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             if (sessionStamped) {
@@ -413,86 +438,31 @@ module.exports = function registerAdminRoutes(app, deps) {
                 generateCSRFToken(req); // 统一使用csrf库
             }
 
+            const afterUsername = typeof req.query.after === 'string'
+                && usernamePattern.test(normalizeUsername(req.query.after))
+                ? normalizeUsername(req.query.after)
+                : '';
             const usersResult = await pool.query(
                 `SELECT username, balance, spins_allowed, authorized, is_admin,
                         login_failures, last_failure_time, locked_until
                  FROM users
-                 WHERE deactivated = false
-                 ORDER BY username`
+                 WHERE deactivated = false AND username > $1
+                 ORDER BY username
+                 LIMIT 51`,
+                [afterUsername]
             );
 
-            const users = usersResult.rows.map(user => ({
+            const hasNextUsersPage = usersResult.rows.length > 50;
+            const users = usersResult.rows.slice(0, 50).map(user => ({
                 ...user,
                 is_locked: user.locked_until && new Date(user.locked_until) > new Date(),
                 lock_minutes: user.locked_until ? Math.ceil((new Date(user.locked_until) - new Date()) / 60000) : 0
             }));
-
-            const [quizResult, slotResult, scratchResult, wishResult, stoneResult, flipResult, duelResult] = await Promise.all([
-                pool.query(`
-                    SELECT DISTINCT ON (username)
-                        username,
-                        score,
-                        to_char(submitted_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM submissions
-                    ORDER BY username, submitted_at DESC
-                `),
-                pool.query(`
-                    SELECT DISTINCT ON (username)
-                        username,
-                        COALESCE(payout_amount, 0) as payout,
-                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM slot_results
-                    ORDER BY username, created_at DESC
-                `),
-                pool.query(`
-                    SELECT DISTINCT ON (username)
-                        username,
-                        COALESCE(reward::text, '0') as reward_text,
-                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM scratch_results
-                    ORDER BY username, created_at DESC
-                `),
-                pool.query(`
-                    SELECT DISTINCT ON (username)
-                        username,
-                        reward,
-                        success,
-                        cost,
-                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM wish_results
-                    ORDER BY username, created_at DESC
-                `),
-                pool.query(`
-                    SELECT DISTINCT ON (username)
-                        username,
-                        action_type,
-                        COALESCE(reward, 0) as reward,
-                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM stone_logs
-                    ORDER BY username, created_at DESC
-                `),
-                pool.query(`
-                    SELECT DISTINCT ON (username)
-                        username,
-                        good_count,
-                        bad_count,
-                        COALESCE(reward, 0) as reward,
-                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM flip_logs
-                    WHERE action_type = 'end'
-                    ORDER BY username, created_at DESC
-                `),
-                pool.query(`
-                    SELECT DISTINCT ON (username)
-                        username,
-                        gift_type,
-                        success,
-                        COALESCE(reward, 0) as reward,
-                        to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM duel_logs
-                    ORDER BY username, created_at DESC
-                `)
-            ]);
+            const usernames = users.map((user) => user.username);
+            const recentRecordData = await gameRegistry.records.loadLatestRecords(pool, {
+                usernames,
+                gameDefinitions: adminRecordGames
+            });
 
             let dictationSubmissions = [];
             try {
@@ -529,80 +499,25 @@ module.exports = function registerAdminRoutes(app, deps) {
                            to_char(ended_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as ended_at,
                            to_char(started_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as started_at
                     FROM dictation_sessions
+                    WHERE username = ANY($1::text[])
                     ORDER BY username, COALESCE(ended_at, started_at) DESC
-                `);
+                `, [usernames]);
                 dictationLatest = latestResult.rows;
             } catch (error) {
                 console.error('Dictation latest session query error:', error);
             }
-
-            const latestRecords = {};
-            users.forEach((user) => {
-                latestRecords[user.username] = {
-                    quiz: '-',
-                    slot: '-',
-                    scratch: '-',
-                    wish: '-',
-                    stone: '-',
-                    flip: '-',
-                    duel: '-',
-                    spin: '未记录'
-                };
-            });
-
-            quizResult.rows.forEach((row) => {
-                if (latestRecords[row.username]) {
-                    latestRecords[row.username].quiz = `${row.played_at} | 分数 ${row.score}`;
-                }
-            });
-
-            slotResult.rows.forEach((row) => {
-                if (latestRecords[row.username]) {
-                    latestRecords[row.username].slot = `${row.played_at} | ${row.payout}积分`;
-                }
-            });
-
-            scratchResult.rows.forEach((row) => {
-                if (latestRecords[row.username]) {
-                    latestRecords[row.username].scratch = `${row.played_at} | ${row.reward_text}积分`;
-                }
-            });
-
-            wishResult.rows.forEach((row) => {
-                if (latestRecords[row.username]) {
-                    const rewardText = row.success ? (row.reward || '中奖') : '未中奖';
-                    latestRecords[row.username].wish = `${row.played_at} | ${rewardText}`;
-                }
-            });
-
-            stoneResult.rows.forEach((row) => {
-                if (latestRecords[row.username]) {
-                    latestRecords[row.username].stone = `${row.played_at} | ${row.action_type} | ${row.reward}积分`;
-                }
-            });
-
-            flipResult.rows.forEach((row) => {
-                if (latestRecords[row.username]) {
-                    latestRecords[row.username].flip = `${row.played_at} | 好${row.good_count}坏${row.bad_count} | ${row.reward}积分`;
-                }
-            });
-
-            duelResult.rows.forEach((row) => {
-                if (latestRecords[row.username]) {
-                    const giftLabel = row.gift_type ? row.gift_type : '礼物';
-                    const resultLabel = row.success ? '成功' : '失败';
-                    latestRecords[row.username].duel = `${row.played_at} | ${giftLabel} | ${resultLabel} | ${row.reward}积分`;
-                }
-            });
 
             res.render('admin', {
                 title: '管理后台 - Minimal Games',
                 user: req.session.user,
                 userLoggedIn: req.session.user?.username,
                 users: users,
-                latestRecords: latestRecords,
+                nextUsersCursor: hasNextUsersPage ? users.at(-1)?.username : null,
+                recordGames: recentRecordData.games,
+                latestRecords: recentRecordData.byUsername,
                 dictationSubmissions: dictationSubmissions,
                 dictationLatest: dictationLatest,
+                adminMfaConfigured: Boolean(getAdminTotpSecret(req.session.user.username)),
                 csrfToken: req.session.csrfToken
             });
         } catch (err) {
@@ -626,113 +541,18 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(404).send('用户不存在');
             }
 
-            const [
-                quizResult,
-                slotResult,
-                scratchResult,
-                wishResult,
-                stoneResult,
-                flipResult,
-                duelResult
-            ] = await Promise.all([
-                pool.query(`
-                    SELECT score,
-                           to_char(submitted_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM submissions
-                    WHERE username = $1
-                    ORDER BY submitted_at DESC
-                    LIMIT 200
-                `, [targetUsername]),
-                pool.query(`
-                    SELECT won as result,
-                           COALESCE(payout_amount, 0) as payout,
-                           COALESCE(bet_amount, 0) as bet_amount,
-                           COALESCE(multiplier, 0) as multiplier,
-                           COALESCE(game_details->>'amounts', '') as amounts,
-                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM slot_results
-                    WHERE username = $1
-                    ORDER BY created_at DESC
-                    LIMIT 200
-                `, [targetUsername]),
-                pool.query(`
-                    SELECT COALESCE(reward::text, '0') as reward,
-                           COALESCE(matches_count, 0) as matches_count,
-                           COALESCE(tier_cost, 0) as tier_cost,
-                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM scratch_results
-                    WHERE username = $1
-                    ORDER BY created_at DESC
-                    LIMIT 200
-                `, [targetUsername]),
-                pool.query(`
-                    SELECT gift_type,
-                           cost,
-                           success,
-                           reward,
-                           wishes_count,
-                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM wish_results
-                    WHERE username = $1
-                    ORDER BY created_at DESC
-                    LIMIT 200
-                `, [targetUsername]),
-                pool.query(`
-                    SELECT action_type,
-                           COALESCE(cost, 0) as cost,
-                           COALESCE(reward, 0) as reward,
-                           slot_index,
-                           before_slots,
-                           after_slots,
-                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM stone_logs
-                    WHERE username = $1
-                    ORDER BY created_at DESC
-                    LIMIT 200
-                `, [targetUsername]),
-                pool.query(`
-                    SELECT action_type,
-                           COALESCE(cost, 0) as cost,
-                           COALESCE(reward, 0) as reward,
-                           card_index,
-                           card_type,
-                           good_count,
-                           bad_count,
-                           ended,
-                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM flip_logs
-                    WHERE username = $1
-                    ORDER BY created_at DESC
-                    LIMIT 200
-                `, [targetUsername]),
-                pool.query(`
-                    SELECT gift_type,
-                           power,
-                           cost,
-                           success,
-                           COALESCE(reward, 0) as reward,
-                           to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') as played_at
-                    FROM duel_logs
-                    WHERE username = $1
-                    ORDER BY created_at DESC
-                    LIMIT 200
-                `, [targetUsername])
-            ]);
+            const recordSections = await gameRegistry.records.loadAdminRecordSections(pool, {
+                username: targetUsername,
+                gameDefinitions: adminRecordGames,
+                limit: 200
+            });
 
             res.render('admin-user-records', {
                 title: `用户记录 - ${targetUsername}`,
                 user: req.session.user,
                 targetUsername,
                 csrfToken: req.session.csrfToken,
-                records: {
-                    quiz: quizResult.rows,
-                    slot: slotResult.rows,
-                    scratch: scratchResult.rows,
-                    wish: wishResult.rows,
-                    stone: stoneResult.rows,
-                    flip: flipResult.rows,
-                    duel: duelResult.rows
-                }
+                recordSections
             });
         } catch (error) {
             console.error('管理员用户记录加载失败:', error);
@@ -812,7 +632,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: process.env.ADMIN_TOTP_SECRET ? 'password_totp' : 'password'
+                authStrength: getAdminTotpSecret(adminUsername) ? 'password_totp' : 'password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -1190,7 +1010,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { oldBalance: currentBalance, newBalance: balance, delta },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: process.env.ADMIN_TOTP_SECRET ? 'password_totp' : 'password'
+                authStrength: getAdminTotpSecret(adminUsername) ? 'password_totp' : 'password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -1899,7 +1719,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { terminatedSessions: otherSessionIds.length },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: process.env.ADMIN_TOTP_SECRET ? 'password_totp' : 'password'
+                authStrength: getAdminTotpSecret(adminUsername) ? 'password_totp' : 'password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -2715,7 +2535,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { authorizationId, outcome, refundAmount, reason },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: process.env.ADMIN_TOTP_SECRET ? 'recent_password_totp' : 'recent_password'
+                authStrength: getAdminTotpSecret(req.session.user.username)
+                    ? 'recent_password_totp' : 'recent_password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -2867,7 +2688,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { taskId, outcome, deliveredQuantity, refundAmount, reason, providerTransactionId },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: process.env.ADMIN_TOTP_SECRET ? 'recent_password_totp' : 'recent_password'
+                authStrength: getAdminTotpSecret(req.session.user.username)
+                    ? 'recent_password_totp' : 'recent_password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');

@@ -1,6 +1,6 @@
 @echo off
 cd /d C:\Users\user\minimal-games-site
-set BILI_COOKIE_PATH=C:\Users\user\AppData\Local\BiliPKTool\cookie.txt
+set BILI_COOKIE_PATH=C:\Users\user\AppData\Local\MinimalGames\bilibili-cookie.dpapi
 set SERVER_URL=https://www.wuguijiang.com
 set BILIPK_PYTHON=py
 set BILIPK_CONFIG=C:\Users\user\Desktop\jiaobenbili\config_gift_only.json

@@ -3,15 +3,33 @@ const pool = require('./db');
 class SessionManager {
     constructor() {
         this.cleanupInterval = 30 * 60 * 1000; // 30分钟清理一次过期会话
-        this.startCleanup();
+        this.cleanupTimer = null;
+        this.cleanupPromise = null;
     }
 
     // 启动定期清理过期会话
     startCleanup() {
-        const interval = setInterval(async () => {
-            await this.cleanExpiredSessions();
+        if (this.cleanupTimer) return false;
+        this.cleanupTimer = setInterval(() => {
+            if (this.cleanupPromise) return;
+            this.cleanupPromise = Promise.resolve(this.cleanExpiredSessions())
+                .finally(() => {
+                    this.cleanupPromise = null;
+                });
         }, this.cleanupInterval);
-        interval.unref?.();
+        this.cleanupTimer.unref?.();
+        return true;
+    }
+
+    // 停止定期清理并等待当前一轮完成
+    async stopCleanup() {
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+            this.cleanupTimer = null;
+        }
+        if (this.cleanupPromise) {
+            await this.cleanupPromise.catch(() => {});
+        }
     }
 
     // 创建新会话并踢出其他设备
@@ -322,16 +340,6 @@ class SessionManager {
             client = await pool.connect();
             await client.query('BEGIN');
             await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`session:${username}`]);
-            const userResult = await client.query(
-                'SELECT is_admin FROM users WHERE username = $1 FOR UPDATE',
-                [username]
-            );
-            if (userResult.rows[0]?.is_admin === true) {
-                await client.query('ROLLBACK');
-                console.log('拒绝强制注销管理员账号', { username });
-                return 0;
-            }
-
             const result = await client.query(`
                 SELECT session_id
                 FROM active_sessions
