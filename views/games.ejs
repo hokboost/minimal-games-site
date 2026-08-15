@@ -18,7 +18,7 @@
                 <div>
                     <span class="eyebrow"><%= lang === 'zh' ? 'Minimal Games' : 'Minimal Games' %></span>
                     <h1 id="games-title"><%= lang === 'zh' ? '找一款合拍的游戏' : 'Find a game that fits' %></h1>
-                    <p><%= lang === 'zh' ? '十款游戏，四种节奏。从短促的知识冲刺，到可以慢慢权衡的策略玩法，都在这里。' : 'Ten games across four moods, from quick knowledge sprints to slower strategic choices.' %></p>
+                    <p><%= lang === 'zh' ? `${(gameCatalog || []).length} 款游戏，四种节奏。从短促的知识冲刺，到可以慢慢权衡的策略玩法，都在这里。` : `${(gameCatalog || []).length} games across four moods, from quick knowledge sprints to slower strategic choices.` %></p>
                 </div>
             </section>
 
@@ -47,7 +47,7 @@
             <section class="catalog-section" aria-label="<%= lang === 'zh' ? '游戏目录' : 'Game catalog' %>">
                 <div class="catalog-heading catalog-heading--compact">
                     <div class="catalog-filters" role="group" aria-label="<%= lang === 'zh' ? '筛选游戏类型' : 'Filter game category' %>">
-                        <button type="button" class="active" data-catalog-filter="all" aria-pressed="true"><%= lang === 'zh' ? '全部 10' : 'All 10' %></button>
+                        <button type="button" class="active" data-catalog-filter="all" aria-pressed="true"><%= lang === 'zh' ? `全部 ${(gameCatalog || []).length}` : `All ${(gameCatalog || []).length}` %></button>
                         <button type="button" data-catalog-filter="brain" aria-pressed="false"><%= lang === 'zh' ? '益智' : 'Brain' %></button>
                         <button type="button" data-catalog-filter="chance" aria-pressed="false"><%= lang === 'zh' ? '运气' : 'Chance' %></button>
                         <button type="button" data-catalog-filter="strategy" aria-pressed="false"><%= lang === 'zh' ? '策略' : 'Strategy' %></button>

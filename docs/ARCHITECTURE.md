@@ -20,6 +20,7 @@ domain/games/
   blindbox.js                    gift-value-backed runtime adapter
   records.js                     profile/history/admin read adapters and DTOs
   presentation.js                compatibility export of provider-owned view metadata
+  doudizhu/                      pure cards, combinations, state machine and bounded AI
 routes/*.js                       HTTP validation and transaction orchestration
 lib/*.js                          infrastructure and cross-cutting controls
 workers/bilibili/                 provider-side execution boundary
@@ -54,6 +55,8 @@ the HTTP server becomes ready.
   integer pricing cannot satisfy the interval are rejected.
 - Quiz is classified as a daily-capped skill reward, not misrepresented as a
   fixed-probability RTP game.
+- Dou Dizhu is a free competitive-skill game. It uses match scoring only and is
+  deliberately outside the redeemable-value RTP policy.
 
 Do not add a second copy of costs, probabilities, multipliers, or gift weights
 to a route, browser script, EJS template, preview script, or test. Browser code
@@ -89,6 +92,12 @@ identifiers stay server-side.
 idempotent-write and admin-failure-audit lists and validates duplicate routes,
 unknown policies, and missing CSRF/worker authentication at startup. Route
 handlers remain explicit Express registrations so middleware order is visible.
+
+The Dou Dizhu implementation is the reference shape for a persistent free
+strategy game: `domain/games/doudizhu/` has no Express or database dependency,
+`routes/doudizhu.js` owns projection and compare-and-swap persistence, and the
+browser submits only a game ID, expected revision, action type, bid, or owned
+card IDs. Private hands and random state never enter the public projection.
 
 ## Transaction rules
 

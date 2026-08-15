@@ -24,7 +24,8 @@ const GAME_PAGES = [
     { path: '/flip', control: '#startBtn' },
     { path: '/duel', control: '#duelBtn' },
     { path: '/dictation', control: '#start-btn' },
-    { path: '/wish', control: '.gift-action-btn[data-gift="bobo"][data-count="1"]' }
+    { path: '/wish', control: '.gift-action-btn[data-gift="bobo"][data-count="1"]' },
+    { path: '/doudizhu', control: '#startDoudizhuBtn' }
 ];
 
 async function eventually(check, timeoutMs = 8000) {
@@ -269,6 +270,21 @@ async function exerciseEveryGame(page, database, user) {
         button.click();
     }));
     assert.equal(await countRows(database.pool, 'wish_sessions', user.username), 1);
+
+    await page.goto(`${page.baseUrl}/doudizhu`, { waitUntil: 'domcontentloaded' });
+    const doudizhuStart = await waitForApiAction(
+        page,
+        '/api/doudizhu/start',
+        () => page.locator('#startDoudizhuBtn').evaluate((button) => {
+            button.click();
+            button.click();
+        })
+    );
+    assert.equal(await countRows(database.pool, 'doudizhu_games', user.username), 1);
+    assert.equal(doudizhuStart.body.state.humanSeat >= 0, true);
+    assert.equal(doudizhuStart.body.state.humanSeat <= 2, true);
+    assert.equal(doudizhuStart.body.state.hand.length >= 1, true);
+    assert.equal(Object.hasOwn(doudizhuStart.body.state, 'hands'), false);
 }
 
 async function run() {
@@ -330,7 +346,7 @@ async function run() {
         assert.deepEqual(mobileFailures, [], `Mobile browser failures:\n${mobileFailures.join('\n')}`);
         await mobileContext.close();
 
-        console.log('Browser E2E passed for all 10 games on desktop and mobile');
+        console.log(`Browser E2E passed for all ${GAME_PAGES.length} games on desktop and mobile`);
     } finally {
         await browser?.close().catch(() => {});
         await app?.stop().catch(() => {});

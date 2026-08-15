@@ -93,6 +93,7 @@ const registerAdminRoutes = require('./routes/admin');
 const registerGiftRoutes = require('./routes/gifts');
 const registerWishRoutes = require('./routes/wish');
 const registerGameRoutes = require('./routes/games');
+const registerDoudizhuRoutes = require('./routes/doudizhu');
 const registerAnalyticsRoutes = require('./routes/analytics');
 
 // 导入i18n国际化
@@ -2854,6 +2855,17 @@ registerGameRoutes(app, {
     logFlipAction,
     paidActionConcurrencyGuard,
     giftConfig
+});
+
+registerDoudizhuRoutes(app, {
+    pool,
+    gameRegistry,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireCSRF,
+    security,
+    paidActionConcurrencyGuard
 });
 
 // 404 处理（必须在所有API路由之后）

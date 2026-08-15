@@ -95,6 +95,7 @@ test('game registry definitions and configuration are immutable and internally v
     for (const [name, config] of Object.entries({
         WISH_CONFIGS: gameRegistry.WISH_CONFIGS,
         BLINDBOX_CONFIG: gameRegistry.BLINDBOX_CONFIG,
+        DOUDIZHU_CONFIG: gameRegistry.DOUDIZHU_CONFIG,
         SLOT_CONFIG: gameRegistry.SLOT_CONFIG,
         SCRATCH_CONFIG: gameRegistry.SCRATCH_CONFIG,
         STONE_CONFIG: gameRegistry.STONE_CONFIG,
@@ -113,6 +114,12 @@ test('game registry definitions and configuration are immutable and internally v
         gameRegistry.WISH_CONFIGS.bobo.cost = originalWishCost + 1;
     }, TypeError);
     assert.equal(gameRegistry.WISH_CONFIGS.bobo.cost, originalWishCost);
+    assert.equal(gameRegistry.validateDoudizhuConfiguration(), true);
+    assert.equal(
+        gameRegistry.DOUDIZHU_CONFIG.cardsPerPlayer * gameRegistry.DOUDIZHU_CONFIG.playerCount
+            + gameRegistry.DOUDIZHU_CONFIG.bottomCardCount,
+        54
+    );
 });
 
 test('every Wish tier has exact guaranteed-geometric RTP inside the target band', () => {
@@ -388,6 +395,7 @@ test('public game projections omit server-only probability and settlement fields
     const publicScratch = gameRegistry.getPublicScratchConfig();
     const publicStone = gameRegistry.getPublicStoneConfig();
     const publicSpin = gameRegistry.getPublicSpinConfig();
+    const publicDoudizhu = gameRegistry.getPublicDoudizhuConfig();
     const forbidden = new Set([
         'bilibiliGiftId',
         'giftId',
@@ -406,6 +414,7 @@ test('public game projections omit server-only probability and settlement fields
     assertNoForbiddenKeys(publicScratch, forbidden, 'scratch');
     assertNoForbiddenKeys(publicStone, forbidden, 'stone');
     assertNoForbiddenKeys(publicSpin, forbidden, 'spin');
+    assertNoForbiddenKeys(publicDoudizhu, forbidden, 'doudizhu');
 
     for (const [name, projection] of Object.entries({
         publicWish,
@@ -415,7 +424,8 @@ test('public game projections omit server-only probability and settlement fields
         publicSlot,
         publicScratch,
         publicStone,
-        publicSpin
+        publicSpin,
+        publicDoudizhu
     })) {
         assertDeepFrozen(projection, name);
     }
@@ -468,6 +478,17 @@ test('public game projections omit server-only probability and settlement fields
         assert.deepEqual(Object.keys(tier).sort(), ['cost', 'userCount', 'winCount']);
     }
     assert.deepEqual(Object.keys(publicStone).sort(), ['initialCost', 'slotCount']);
+    assert.deepEqual(Object.keys(publicDoudizhu).sort(), [
+        'bottomCardCount',
+        'cardsPerPlayer',
+        'maximumBid',
+        'maximumSelectedCards',
+        'playerCount',
+        'rulesVersion'
+    ]);
+    assert.equal(publicDoudizhu.rulesVersion, 'classic-jj-v1');
+    assert.equal(Object.hasOwn(publicDoudizhu, 'aiNodeBudget'), false);
+    assert.equal(Object.hasOwn(publicDoudizhu, 'aiDeadlineMs'), false);
 });
 
 test('every record-enabled game has presentation and query providers with no orphans', () => {

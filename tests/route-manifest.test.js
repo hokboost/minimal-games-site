@@ -18,6 +18,7 @@ const mutationFiles = [
     'server.js',
     'routes/admin.js',
     'routes/analytics.js',
+    'routes/doudizhu.js',
     'routes/games.js',
     'routes/gifts.js',
     'routes/wish.js'

@@ -13,6 +13,7 @@ const allowlist = [
     'bilibili_gift_sender.py', 'windows-gift-listener.js',
     'README.md', 'SECURITY.md', 'render.yaml',
     'docs/ARCHITECTURE.md', 'docs/DATABASE_ROLES.md', 'docs/GAME_ECONOMICS.md',
+    'docs/THIRD_PARTY_NOTICES.md',
     'app', 'data', 'domain', 'lib', 'middleware', 'migrations', 'public', 'routes', 'views',
     'workers/bilibili', 'scripts/run-migrations.js', 'scripts/check-secrets.js'
 ];

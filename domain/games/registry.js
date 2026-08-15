@@ -3,6 +3,7 @@
 const { GAME_DEFINITIONS, GAME_GROUPS } = require('./catalog');
 const {
     BLINDBOX_CONFIG,
+    DOUDIZHU_CONFIG,
     DUEL_CONFIG,
     FLIP_CONFIG,
     QUIZ_CONFIG,
@@ -29,6 +30,7 @@ const SUPPORTED_ECONOMICS_KINDS = new Set([
     'allowance',
     'daily-capped-skill',
     'dynamic-probability',
+    'competitive-skill',
     'free',
     'guaranteed-geometric',
     'optimal-stopping',
@@ -79,6 +81,28 @@ function validateDefinitions() {
         hrefs.add(definition.href);
         indexes.add(definition.index);
     }
+}
+
+function validateDoudizhuConfiguration() {
+    const config = DOUDIZHU_CONFIG;
+    if (config.rulesVersion !== 'classic-jj-v1'
+        || config.playerCount !== 3
+        || config.cardsPerPlayer * config.playerCount + config.bottomCardCount !== 54
+        || config.bottomCardCount !== 3
+        || config.maximumBid !== 3
+        || config.maximumSelectedCards !== 20
+        || !Number.isSafeInteger(config.maxBotActionsPerRequest)
+        || config.maxBotActionsPerRequest < 1
+        || config.maxBotActionsPerRequest > 128
+        || !Number.isSafeInteger(config.aiNodeBudget)
+        || config.aiNodeBudget < 100
+        || config.aiNodeBudget > 100_000
+        || !Number.isSafeInteger(config.aiDeadlineMs)
+        || config.aiDeadlineMs < 25
+        || config.aiDeadlineMs > 1_000) {
+        throw new Error('Invalid doudizhu configuration');
+    }
+    return true;
 }
 
 function calculateDuelCost(giftType, power) {
@@ -189,6 +213,7 @@ function validateStaticEconomics() {
 }
 
 validateDefinitions();
+validateDoudizhuConfiguration();
 const ECONOMICS_REPORT = validateStaticEconomics();
 const definitionById = new Map(GAME_DEFINITIONS.map((definition) => [definition.id, definition]));
 
@@ -309,8 +334,20 @@ function getPublicSpinConfig() {
     });
 }
 
+function getPublicDoudizhuConfig() {
+    return Object.freeze({
+        rulesVersion: DOUDIZHU_CONFIG.rulesVersion,
+        playerCount: DOUDIZHU_CONFIG.playerCount,
+        cardsPerPlayer: DOUDIZHU_CONFIG.cardsPerPlayer,
+        bottomCardCount: DOUDIZHU_CONFIG.bottomCardCount,
+        maximumBid: DOUDIZHU_CONFIG.maximumBid,
+        maximumSelectedCards: DOUDIZHU_CONFIG.maximumSelectedCards
+    });
+}
+
 module.exports = {
     BLINDBOX_CONFIG,
+    DOUDIZHU_CONFIG,
     DUEL_CONFIG,
     ECONOMICS_REPORT,
     FLIP_CONFIG,
@@ -326,6 +363,7 @@ module.exports = {
     calculateDuelCost,
     duelMinimumPower,
     getGameDefinition,
+    getPublicDoudizhuConfig,
     getPublicDuelConfig,
     getPublicQuizConfig,
     getPublicScratchConfig,
@@ -335,6 +373,7 @@ module.exports = {
     getPublicWishConfigs,
     getWishConfig,
     validateGiftBackedConfiguration,
+    validateDoudizhuConfiguration,
     validateDefinitions,
     validateStaticEconomics
 };

@@ -2489,3 +2489,632 @@ html body.game-page.page-duel .result-box {
         animation-iteration-count: 1 !important;
     }
 }
+
+/* Fight the Landlord ----------------------------------------------------- */
+html body.game-page.page-doudizhu {
+    --game-accent: #217a4c;
+    --ddz-felt: #176441;
+    --ddz-felt-deep: #0e4b30;
+    --ddz-cream: #fffaf0;
+    --ddz-gold: #e8bd58;
+    --ddz-red: #b83939;
+}
+
+html body.page-doudizhu .ddz-page-shell {
+    width: min(100%, 1220px) !important;
+    max-width: 1220px !important;
+}
+
+html body.page-doudizhu .ddz-kicker,
+html body.page-doudizhu .ddz-eyebrow {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--game-accent);
+    font-size: 0.72rem;
+    font-weight: 850;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase;
+}
+
+html body.page-doudizhu .ddz-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 28px;
+    margin-bottom: 18px;
+    padding: 24px 26px;
+    border: 1px solid #cdd8ce;
+    border-radius: 14px;
+    background: linear-gradient(120deg, #f7fbf6, #e7f1e9);
+}
+
+html body.page-doudizhu .ddz-hero h2,
+html body.page-doudizhu .ddz-panel h2,
+html body.page-doudizhu .ddz-outcome h2 {
+    margin: 0;
+    color: var(--game-ink);
+    font-size: clamp(1.25rem, 2.4vw, 1.85rem);
+    line-height: 1.18;
+}
+
+html body.page-doudizhu .ddz-hero p {
+    max-width: 810px;
+    margin: 10px 0 0;
+    color: #51605a;
+}
+
+html body.page-doudizhu .ddz-primary-action {
+    white-space: nowrap;
+}
+
+html body.page-doudizhu .ddz-status-line {
+    min-height: 46px;
+    margin-bottom: 10px;
+    padding: 11px 16px;
+    border: 1px solid var(--game-line);
+    border-radius: 9px;
+    background: var(--game-surface);
+    color: #33433d;
+    font-weight: 720;
+    text-align: center;
+}
+
+html body.page-doudizhu .ddz-status-line.is-error {
+    border-color: #d9a9a4;
+    background: #fff1ef;
+    color: var(--game-danger);
+}
+
+html body.page-doudizhu .ddz-match {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #0c432b;
+    border-radius: 18px;
+    background: var(--ddz-felt);
+    box-shadow: 0 22px 54px rgba(13, 55, 36, 0.2);
+    color: #fff;
+}
+
+html body.page-doudizhu .ddz-scorebar {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.16);
+}
+
+html body.page-doudizhu .ddz-scorebar span {
+    padding: 10px 14px;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 0.76rem;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+html body.page-doudizhu .ddz-scorebar strong {
+    margin-left: 5px;
+    color: #fff;
+    font-size: 0.9rem;
+}
+
+html body.page-doudizhu .ddz-table-felt {
+    position: relative;
+    min-height: 490px;
+    padding: 30px 34px 20px;
+    background:
+        radial-gradient(circle at 50% 44%, rgba(255, 255, 255, 0.08), transparent 37%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.08));
+}
+
+html body.page-doudizhu .ddz-table-felt::after {
+    position: absolute;
+    inset: 13% 12% 19%;
+    border: 1px solid rgba(232, 189, 88, 0.28);
+    border-radius: 50%;
+    pointer-events: none;
+    content: "";
+}
+
+html body.page-doudizhu .ddz-opponents {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+html body.page-doudizhu .ddz-seat {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 190px;
+    padding: 9px 11px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 12px;
+    background: rgba(4, 35, 22, 0.54);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+}
+
+html body.page-doudizhu .ddz-seat.is-active {
+    border-color: var(--ddz-gold);
+    box-shadow: 0 0 0 3px rgba(232, 189, 88, 0.22), 0 8px 18px rgba(0, 0, 0, 0.15);
+}
+
+html body.page-doudizhu .ddz-seat.is-landlord .ddz-avatar {
+    border-color: #f7cc63;
+    background: #704c0d;
+    color: #ffe69a;
+}
+
+html body.page-doudizhu .ddz-avatar {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 900;
+}
+
+html body.page-doudizhu .ddz-seat-name,
+html body.page-doudizhu .ddz-role {
+    display: block;
+}
+
+html body.page-doudizhu .ddz-seat-name {
+    overflow: hidden;
+    color: #fff;
+    font-size: 0.9rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+html body.page-doudizhu .ddz-role {
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 0.72rem;
+}
+
+html body.page-doudizhu .ddz-card-count {
+    display: grid;
+    min-width: 34px;
+    height: 40px;
+    place-items: center;
+    border: 2px solid rgba(255, 255, 255, 0.67);
+    border-radius: 5px;
+    background: #8c2d2d;
+    color: #fff;
+    font-weight: 850;
+}
+
+html body.page-doudizhu .ddz-table-center {
+    position: absolute;
+    z-index: 2;
+    top: 112px;
+    right: 18%;
+    left: 18%;
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    text-align: center;
+}
+
+html body.page-doudizhu .ddz-bottom-area > span,
+html body.page-doudizhu .ddz-trick-label {
+    display: block;
+    margin-bottom: 6px;
+    color: rgba(255, 255, 255, 0.64);
+    font-size: 0.68rem;
+    font-weight: 760;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase;
+}
+
+html body.page-doudizhu .ddz-mini-cards,
+html body.page-doudizhu .ddz-played-cards {
+    display: flex;
+    min-height: 58px;
+    align-items: center;
+    justify-content: center;
+}
+
+html body.page-doudizhu .ddz-turn-indicator {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.15);
+    font-size: 0.78rem;
+}
+
+html body.page-doudizhu .ddz-turn-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ddz-gold);
+    box-shadow: 0 0 0 4px rgba(232, 189, 88, 0.18);
+}
+
+html body.page-doudizhu .ddz-trick {
+    min-width: 250px;
+    min-height: 112px;
+    padding: 10px 18px;
+    border-radius: 13px;
+    background: rgba(0, 0, 0, 0.08);
+}
+
+html body.page-doudizhu .ddz-combination {
+    display: block;
+    min-height: 20px;
+    margin-top: 4px;
+    color: #f9dfa1;
+    font-size: 0.78rem;
+}
+
+html body.page-doudizhu .ddz-seat--self {
+    position: absolute;
+    z-index: 2;
+    bottom: 22px;
+    left: 50%;
+    width: min(330px, calc(100% - 28px));
+    transform: translateX(-50%);
+}
+
+html body.page-doudizhu .ddz-action-zone {
+    position: relative;
+    z-index: 3;
+    display: grid;
+    justify-items: center;
+    gap: 8px;
+    min-height: 92px;
+    padding: 12px 16px 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.13);
+    background: var(--ddz-felt-deep);
+}
+
+html body.page-doudizhu .ddz-bid-controls,
+html body.page-doudizhu .ddz-play-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+}
+
+html body.page-doudizhu .ddz-bid-controls > span {
+    margin-right: 4px;
+    color: rgba(255, 255, 255, 0.76);
+    font-size: 0.82rem;
+    font-weight: 750;
+}
+
+html body.page-doudizhu .ddz-bid-controls > div {
+    display: flex;
+    gap: 7px;
+}
+
+html body.page-doudizhu :where(.ddz-bid-controls, .ddz-play-controls) button {
+    min-width: 78px;
+    min-height: 40px;
+    padding: 8px 14px !important;
+    border-color: rgba(255, 255, 255, 0.42) !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+}
+
+html body.page-doudizhu :where(.ddz-bid-controls, .ddz-play-controls) button:hover:not(:disabled) {
+    border-color: #fff !important;
+    background: rgba(255, 255, 255, 0.22) !important;
+}
+
+html body.page-doudizhu .ddz-play-controls #playBtn,
+html body.page-doudizhu .ddz-bid-controls button[data-bid="3"] {
+    border-color: #f2c760 !important;
+    background: #d49b22 !important;
+    color: #1f2c24 !important;
+}
+
+html body.page-doudizhu .ddz-selection-status {
+    min-height: 20px;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 0.76rem;
+}
+
+html body.page-doudizhu .ddz-hand {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    min-height: 150px;
+    align-items: flex-end;
+    justify-content: center;
+    overflow-x: auto;
+    padding: 16px 24px 22px;
+    background: #0a3d27;
+    scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+html body.page-doudizhu .ddz-card {
+    position: relative;
+    flex: 0 0 56px;
+    width: 56px;
+    height: 82px;
+    min-height: 82px !important;
+    margin-left: -25px;
+    padding: 6px 5px !important;
+    border: 1px solid #d7d1c3 !important;
+    border-radius: 6px !important;
+    background: var(--ddz-cream) !important;
+    color: #171b19 !important;
+    box-shadow: 0 5px 10px rgba(0, 0, 0, 0.22) !important;
+    font-family: Georgia, "Times New Roman", serif !important;
+    font-size: 1rem;
+    font-weight: 850 !important;
+    line-height: 1 !important;
+    text-align: left;
+    transform: none !important;
+    transition: translate 120ms ease, box-shadow 120ms ease !important;
+}
+
+html body.page-doudizhu .ddz-card:first-child {
+    margin-left: 0;
+}
+
+html body.page-doudizhu button.ddz-card:hover:not(:disabled) {
+    z-index: 4;
+    border-color: var(--ddz-gold) !important;
+    background: #fffefa !important;
+    color: #171b19 !important;
+    box-shadow: 0 9px 18px rgba(0, 0, 0, 0.28) !important;
+    translate: 0 -6px;
+}
+
+html body.page-doudizhu .ddz-card.is-selected {
+    z-index: 5;
+    border-color: #f0c35b !important;
+    box-shadow: 0 0 0 3px rgba(240, 195, 91, 0.42), 0 10px 20px rgba(0, 0, 0, 0.3) !important;
+    translate: 0 -15px;
+}
+
+html body.page-doudizhu .ddz-card.is-red {
+    color: var(--ddz-red) !important;
+}
+
+html body.page-doudizhu .ddz-card-rank,
+html body.page-doudizhu .ddz-card-suit {
+    display: block;
+    pointer-events: none;
+}
+
+html body.page-doudizhu .ddz-card-suit {
+    margin-top: 2px;
+    font-size: 1.08em;
+}
+
+html body.page-doudizhu .ddz-card.ddz-card--mini {
+    flex-basis: 38px;
+    width: 38px;
+    height: 55px;
+    min-height: 55px !important;
+    margin-left: -9px;
+    padding: 4px !important;
+    font-size: 0.72rem;
+    pointer-events: none;
+}
+
+html body.page-doudizhu .ddz-card.ddz-card--mini:first-child {
+    margin-left: 0;
+}
+
+html body.page-doudizhu .ddz-card-back {
+    width: 38px;
+    height: 55px;
+    margin-left: -9px;
+    border: 2px solid #efe8d7;
+    border-radius: 5px;
+    background: repeating-linear-gradient(45deg, #8f3030, #8f3030 4px, #762424 4px, #762424 8px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+html body.page-doudizhu .ddz-outcome {
+    position: absolute;
+    z-index: 10;
+    inset: 50% auto auto 50%;
+    width: min(92%, 470px);
+    padding: 25px;
+    border: 1px solid #d6c28e;
+    border-radius: 14px;
+    background: rgba(255, 253, 247, 0.98);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    color: var(--game-ink);
+    text-align: center;
+    transform: translate(-50%, -50%);
+}
+
+html body.page-doudizhu .ddz-outcome p {
+    color: var(--game-muted);
+}
+
+html body.page-doudizhu .ddz-info-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 18px;
+    margin-top: 24px;
+}
+
+html body.page-doudizhu .ddz-panel {
+    padding: 23px;
+    border: 1px solid var(--game-line);
+    border-radius: 12px;
+    background: var(--game-surface);
+    box-shadow: var(--game-shadow-small);
+}
+
+html body.page-doudizhu .ddz-panel-heading {
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--game-line);
+}
+
+html body.page-doudizhu .ddz-event-log {
+    max-height: 310px;
+    margin: 16px 0 0;
+    padding-left: 23px;
+    overflow-y: auto;
+    color: #4f5b57;
+}
+
+html body.page-doudizhu .ddz-event-log li {
+    margin: 8px 0;
+    padding-left: 5px;
+}
+
+html body.page-doudizhu .ddz-event-log li::marker {
+    color: var(--game-accent);
+    font-weight: 800;
+}
+
+html body.page-doudizhu .ddz-rule-list {
+    margin: 16px 0 0;
+    padding-left: 20px;
+    color: #4f5b57;
+}
+
+html body.page-doudizhu .ddz-rule-list li {
+    margin: 8px 0;
+}
+
+html body.page-doudizhu .ddz-fairness-note {
+    margin: 17px 0 0;
+    padding: 13px 15px;
+    border-left: 4px solid var(--game-accent);
+    background: var(--game-green-soft);
+    color: #36544a;
+    font-size: 0.86rem;
+}
+
+@media (max-width: 760px) {
+    html body.page-doudizhu .ddz-hero {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+        padding: 20px;
+    }
+
+    html body.page-doudizhu .ddz-primary-action {
+        width: 100%;
+    }
+
+    html body.page-doudizhu .ddz-scorebar {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    html body.page-doudizhu .ddz-table-felt {
+        min-height: 430px;
+        padding: 20px 12px 16px;
+    }
+
+    html body.page-doudizhu .ddz-table-felt::after {
+        inset: 18% 5% 22%;
+    }
+
+    html body.page-doudizhu .ddz-seat {
+        grid-template-columns: 34px minmax(0, 1fr) 28px;
+        gap: 6px;
+        min-width: 0;
+        width: calc(50% - 6px);
+        padding: 7px;
+    }
+
+    html body.page-doudizhu .ddz-avatar {
+        width: 34px;
+        height: 34px;
+        font-size: 0.62rem;
+    }
+
+    html body.page-doudizhu .ddz-seat-name {
+        font-size: 0.76rem;
+    }
+
+    html body.page-doudizhu .ddz-role {
+        font-size: 0.63rem;
+    }
+
+    html body.page-doudizhu .ddz-card-count {
+        min-width: 28px;
+        height: 35px;
+    }
+
+    html body.page-doudizhu .ddz-table-center {
+        top: 92px;
+        right: 4%;
+        left: 4%;
+        gap: 9px;
+    }
+
+    html body.page-doudizhu .ddz-trick {
+        min-width: 210px;
+        min-height: 100px;
+    }
+
+    html body.page-doudizhu .ddz-seat--self {
+        bottom: 15px;
+        width: calc(100% - 24px);
+    }
+
+    html body.page-doudizhu .ddz-action-zone {
+        min-height: 116px;
+        padding-inline: 8px;
+    }
+
+    html body.page-doudizhu .ddz-bid-controls {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    html body.page-doudizhu .ddz-bid-controls > span {
+        margin: 0;
+    }
+
+    html body.page-doudizhu :where(.ddz-bid-controls, .ddz-play-controls) button {
+        min-width: 64px;
+        padding-inline: 10px !important;
+    }
+
+    html body.page-doudizhu .ddz-hand {
+        min-height: 132px;
+        justify-content: flex-start;
+        padding: 16px 14px 18px;
+    }
+
+    html body.page-doudizhu .ddz-card {
+        flex-basis: 45px;
+        width: 45px;
+        height: 72px;
+        min-height: 72px !important;
+        margin-left: -22px;
+        font-size: 0.84rem;
+    }
+
+    html body.page-doudizhu .ddz-info-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 390px) {
+    html body.page-doudizhu .ddz-scorebar span {
+        padding-inline: 7px;
+        font-size: 0.67rem;
+    }
+
+    html body.page-doudizhu .ddz-play-controls {
+        width: 100%;
+    }
+
+    html body.page-doudizhu .ddz-play-controls button {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+}

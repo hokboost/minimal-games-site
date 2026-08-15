@@ -2,6 +2,7 @@
 
 const {
     BLINDBOX_CONFIG,
+    DOUDIZHU_CONFIG,
     FLIP_CONFIG,
     QUIZ_CONFIG,
     SCRATCH_CONFIG,
@@ -285,6 +286,29 @@ const GAME_DEFINITIONS = deepFreeze([
         costEn: 'Free',
         metaZh: `${SPIN_CONFIG.challenges.length} 项任务`,
         metaEn: `${SPIN_CONFIG.challenges.length} challenges`
+    }),
+    defineGame({
+        id: 'doudizhu',
+        index: '11',
+        group: 'free',
+        href: '/doudizhu',
+        actions: [
+            action('/api/doudizhu/start', CAPACITY_USER_ACTION_POLICIES),
+            action('/api/doudizhu/action', CAPACITY_USER_ACTION_POLICIES),
+            action('/api/doudizhu/hint', CAPACITY_USER_ACTION_POLICIES)
+        ],
+        assetKind: 'free',
+        category: 'strategy',
+        economicsKind: 'competitive-skill',
+        recordView: null,
+        titleZh: '欢乐斗地主',
+        titleEn: 'Fight the Landlord',
+        descZh: '随机入座，叫分争地主，与两位公平人机完整对局。',
+        descEn: 'Take a random seat, bid for landlord, and play a full match against two fair bots.',
+        costZh: '免费',
+        costEn: 'Free',
+        metaZh: `${DOUDIZHU_CONFIG.playerCount} 人经典叫分`,
+        metaEn: `${DOUDIZHU_CONFIG.playerCount}-player classic bidding`
     })
 ]);
 

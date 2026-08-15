@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#174d36">
+    <title><%= lang === 'zh' ? '欢乐斗地主 · Minimal Games' : 'Fight the Landlord · Minimal Games' %></title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body
+    class="app-redesign game-page page-doudizhu"
+    data-username="<%= username %>"
+    data-csrf-token="<%= csrfToken %>"
+    data-doudizhu-config="<%= encodeURIComponent(JSON.stringify(doudizhuConfig || {})) %>"
+    data-initial-state="<%= encodeURIComponent(JSON.stringify(initialState || null)) %>"
+>
+    <%- include('partials/language-switcher') %>
+
+    <div class="container ddz-page-shell">
+        <header class="header">
+            <div>
+                <span class="ddz-kicker"><%= lang === 'zh' ? '三人经典叫分' : 'Classic three-player bidding' %></span>
+                <h1><%= lang === 'zh' ? '欢乐斗地主' : 'Fight the Landlord' %></h1>
+            </div>
+            <nav class="nav-links" aria-label="<%= lang === 'zh' ? '页面导航' : 'Page navigation' %>">
+                <span><%= lang === 'zh' ? '玩家' : 'Player' %>：<%= username %></span>
+                <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
+                <a href="#ddz-rules"><%= lang === 'zh' ? '规则' : 'Rules' %></a>
+            </nav>
+        </header>
+
+        <section class="ddz-hero" aria-labelledby="ddz-hero-title">
+            <div>
+                <span class="ddz-eyebrow"><%= lang === 'zh' ? '免费策略对局' : 'Free strategy match' %></span>
+                <h2 id="ddz-hero-title"><%= lang === 'zh' ? '你可能是地主，也可能与人机并肩作战' : 'Become the landlord—or team up with a bot' %></h2>
+                <p><%= lang === 'zh'
+                    ? '每局随机入座。三人依次叫 0–3 分，最高叫分者拿走三张底牌并先出牌。两位人机只会看到各自应当知道的信息。'
+                    : 'Seats are randomized every match. Players bid 0–3; the highest bidder takes the three bottom cards and leads. Each bot sees only information it is allowed to know.'
+                %></p>
+            </div>
+            <button type="button" id="startDoudizhuBtn" class="ddz-primary-action">
+                <%= lang === 'zh' ? '开始新对局' : 'Start a new match' %>
+            </button>
+        </section>
+
+        <div class="ddz-status-line" id="statusText" role="status" aria-live="polite">
+            <%= lang === 'zh' ? '准备好后开始新对局。' : 'Start a new match when you are ready.' %>
+        </div>
+
+        <section class="ddz-match" id="doudizhuTable" aria-label="<%= lang === 'zh' ? '斗地主牌桌' : 'Fight the Landlord table' %>">
+            <div class="ddz-scorebar" aria-label="<%= lang === 'zh' ? '本局信息' : 'Match information' %>">
+                <span><%= lang === 'zh' ? '第' : 'Deal' %> <strong id="dealNumber">–</strong> <%= lang === 'zh' ? '局' : '' %></span>
+                <span><%= lang === 'zh' ? '身份' : 'Role' %> <strong id="humanRole">–</strong></span>
+                <span><%= lang === 'zh' ? '叫分' : 'Contract' %> <strong id="contractBid">–</strong></span>
+                <span><%= lang === 'zh' ? '倍数' : 'Multiplier' %> <strong id="multiplier">×1</strong></span>
+            </div>
+
+            <div class="ddz-table-felt">
+                <div class="ddz-opponents" aria-label="<%= lang === 'zh' ? '人机玩家' : 'Bot players' %>">
+                    <article class="ddz-seat ddz-seat--opponent" id="opponentLeft">
+                        <div class="ddz-avatar" aria-hidden="true">AI</div>
+                        <div>
+                            <strong class="ddz-seat-name">AI 1</strong>
+                            <span class="ddz-role"><%= lang === 'zh' ? '等待开局' : 'Waiting' %></span>
+                        </div>
+                        <span class="ddz-card-count">0</span>
+                    </article>
+                    <article class="ddz-seat ddz-seat--opponent" id="opponentRight">
+                        <div class="ddz-avatar" aria-hidden="true">AI</div>
+                        <div>
+                            <strong class="ddz-seat-name">AI 2</strong>
+                            <span class="ddz-role"><%= lang === 'zh' ? '等待开局' : 'Waiting' %></span>
+                        </div>
+                        <span class="ddz-card-count">0</span>
+                    </article>
+                </div>
+
+                <div class="ddz-table-center">
+                    <div class="ddz-bottom-area">
+                        <span id="bottomLabel"><%= lang === 'zh' ? '底牌' : 'Bottom cards' %></span>
+                        <div class="ddz-mini-cards" id="bottomCards" aria-label="<%= lang === 'zh' ? '公开底牌' : 'Revealed bottom cards' %>"></div>
+                    </div>
+
+                    <div class="ddz-turn-indicator" id="turnIndicator">
+                        <span class="ddz-turn-dot" aria-hidden="true"></span>
+                        <strong><%= lang === 'zh' ? '尚未开局' : 'No active match' %></strong>
+                    </div>
+
+                    <div class="ddz-trick" aria-live="polite">
+                        <span class="ddz-trick-label" id="trickLabel"><%= lang === 'zh' ? '桌面出牌' : 'Current trick' %></span>
+                        <div class="ddz-played-cards" id="lastPlay"></div>
+                        <span class="ddz-combination" id="combinationLabel">–</span>
+                    </div>
+                </div>
+
+                <article class="ddz-seat ddz-seat--self" id="selfSeat">
+                    <div class="ddz-avatar" aria-hidden="true"><%= lang === 'zh' ? '我' : 'YOU' %></div>
+                    <div>
+                        <strong class="ddz-seat-name"><%= username %></strong>
+                        <span class="ddz-role"><%= lang === 'zh' ? '等待开局' : 'Waiting' %></span>
+                    </div>
+                    <span class="ddz-card-count">0</span>
+                </article>
+            </div>
+
+            <div class="ddz-action-zone">
+                <div class="ddz-bid-controls" id="bidControls" hidden>
+                    <span><%= lang === 'zh' ? '轮到你叫分' : 'Your bid' %></span>
+                    <div>
+                        <button type="button" data-bid="0"><%= lang === 'zh' ? '不叫' : 'Pass' %></button>
+                        <button type="button" data-bid="1">1 <%= lang === 'zh' ? '分' : '' %></button>
+                        <button type="button" data-bid="2">2 <%= lang === 'zh' ? '分' : '' %></button>
+                        <button type="button" data-bid="3">3 <%= lang === 'zh' ? '分' : '' %></button>
+                    </div>
+                </div>
+
+                <div class="ddz-play-controls" id="playControls" hidden>
+                    <button type="button" id="hintBtn" class="ddz-secondary-action"><%= lang === 'zh' ? '提示' : 'Hint' %></button>
+                    <button type="button" id="passBtn" class="ddz-secondary-action"><%= lang === 'zh' ? '不出' : 'Pass' %></button>
+                    <button type="button" id="playBtn"><%= lang === 'zh' ? '出牌' : 'Play' %></button>
+                </div>
+
+                <p class="ddz-selection-status" id="selectionStatus">
+                    <%= lang === 'zh' ? '点击手牌进行选择。' : 'Select cards from your hand.' %>
+                </p>
+            </div>
+
+            <div class="ddz-hand" id="humanHand" role="group" aria-label="<%= lang === 'zh' ? '你的手牌' : 'Your hand' %>"></div>
+
+            <section class="ddz-outcome" id="outcomePanel" hidden aria-live="polite">
+                <span class="ddz-eyebrow"><%= lang === 'zh' ? '本局结束' : 'Match complete' %></span>
+                <h2 id="outcomeTitle"></h2>
+                <p id="outcomeSummary"></p>
+                <button type="button" id="outcomeRestartBtn"><%= lang === 'zh' ? '再来一局' : 'Play again' %></button>
+            </section>
+        </section>
+
+        <div class="ddz-info-grid">
+            <section class="ddz-panel" aria-labelledby="ddz-log-title">
+                <div class="ddz-panel-heading">
+                    <span class="ddz-eyebrow"><%= lang === 'zh' ? '公开信息' : 'Public information' %></span>
+                    <h2 id="ddz-log-title"><%= lang === 'zh' ? '叫分与出牌记录' : 'Bids and plays' %></h2>
+                </div>
+                <ol class="ddz-event-log" id="eventLog">
+                    <li><%= lang === 'zh' ? '新对局开始后，公开动作会显示在这里。' : 'Public actions will appear here after the match starts.' %></li>
+                </ol>
+            </section>
+
+            <section class="ddz-panel" id="ddz-rules" aria-labelledby="ddz-rules-title">
+                <div class="ddz-panel-heading">
+                    <span class="ddz-eyebrow"><%= lang === 'zh' ? '规则档案' : 'Rules profile' %></span>
+                    <h2 id="ddz-rules-title"><%= lang === 'zh' ? '经典斗地主' : 'Classic rules' %></h2>
+                </div>
+                <ul class="ddz-rule-list">
+                    <li><%= lang === 'zh' ? '54 张牌，三家各 17 张，地主获得最后 3 张底牌。' : '54 cards: 17 per player, with the final 3 going to the landlord.' %></li>
+                    <li><%= lang === 'zh' ? '依次叫 0–3 分；必须高于当前叫分，叫 3 分立即成为地主；三家不叫会重新发牌。' : 'Bid 0–3 in turn. A bid must beat the current bid; 3 wins immediately. All passes trigger a redeal.' %></li>
+                    <li><%= lang === 'zh' ? '支持顺子、连对、飞机、四带二、炸弹和王炸；顺子不能包含 2 或王。' : 'Includes straights, pair chains, airplanes, four-with-two, bombs, and the joker rocket. Sequences cannot contain 2s or jokers.' %></li>
+                    <li><%= lang === 'zh' ? '两位农民同队。任意农民先出完即农民获胜；地主先出完则地主获胜。' : 'The farmers are a team. Either farmer emptying their hand wins for both; the landlord wins by finishing first.' %></li>
+                </ul>
+                <p class="ddz-fairness-note"><%= lang === 'zh'
+                    ? '公平 AI：人机决策只使用自己的手牌、公开底牌、历史动作和剩余牌数，不读取其他玩家暗牌。'
+                    : 'Fair AI: bots use only their own hand, revealed bottom cards, public history, and card counts—never another player’s hidden cards.'
+                %></p>
+            </section>
+        </div>
+
+        <div class="game-disclaimer">
+            <%= lang === 'zh'
+                ? '本玩法完全免费，只记录本局虚拟战绩，不使用积分、礼物或真实货币。'
+                : 'This mode is completely free. It uses no points, gifts, or real money.'
+            %>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/security-alerts.js"></script>
+    <script src="/js/doudizhu.js"></script>
+</body>
+</html>

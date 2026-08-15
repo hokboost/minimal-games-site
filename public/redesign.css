@@ -931,6 +931,7 @@ html.music-shell-child .persistent-music-player {
 .game-card--flip { --accent: var(--teal); }
 .game-card--duel,
 .game-card--spin { --accent: #9a6617; }
+.game-card--doudizhu { --accent: #217a4c; }
 
 .game-card--quiz .catalog-media { background-position: 50% 4%; }
 .game-card--dictation .catalog-media { background-position: 1% 12%; }

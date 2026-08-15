@@ -13,6 +13,18 @@ const QUIZ_CONFIG = deepFreeze({
     dailyRewardCap: 5
 });
 
+const DOUDIZHU_CONFIG = deepFreeze({
+    rulesVersion: 'classic-jj-v1',
+    playerCount: 3,
+    cardsPerPlayer: 17,
+    bottomCardCount: 3,
+    maximumBid: 3,
+    maximumSelectedCards: 20,
+    maxBotActionsPerRequest: 64,
+    aiNodeBudget: 12_000,
+    aiDeadlineMs: 220
+});
+
 const WISH_CONFIGS = deepFreeze({
     deepsea_singer: {
         giftType: 'deepsea_singer',
@@ -306,6 +318,7 @@ const SPIN_CONFIG = deepFreeze({
 
 module.exports = {
     BLINDBOX_CONFIG,
+    DOUDIZHU_CONFIG,
     DUEL_CONFIG,
     FLIP_CONFIG,
     QUIZ_CONFIG,

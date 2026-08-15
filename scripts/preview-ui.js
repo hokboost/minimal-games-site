@@ -46,6 +46,13 @@ const previewBlindbox = gameRegistry.createBlindboxRuntime(previewGiftConfig);
 const blindboxTiers = previewBlindbox.tiers;
 const blindboxCounts = previewBlindbox.counts;
 const blindboxConfigs = previewBlindbox.configs;
+const previewDoudizhuState = Object.freeze({
+    ...gameRegistry.doudizhu.projectState(
+        gameRegistry.doudizhu.createGame({ rng: () => 0, humanSeat: 0 }),
+        0
+    ),
+    gameId: '00000000-0000-4000-8000-000000000001'
+});
 const adminRecordGames = gameRegistry.records.resolveRecordGames(gameRegistry.GAME_DEFINITIONS);
 const previewGiftPrices = Object.freeze(Object.fromEntries(
     ['heartbox', 'fanlight', 'tiedu_one'].map((giftType) => [
@@ -389,6 +396,10 @@ for (const [route, page] of Object.entries(gamePages)) {
         if (page.view === 'scratch') locals.scratchConfig = gameRegistry.getPublicScratchConfig();
         if (page.view === 'stone') locals.stoneConfig = gameRegistry.getPublicStoneConfig();
         if (page.view === 'spin') locals.spinConfig = gameRegistry.getPublicSpinConfig();
+        if (page.view === 'doudizhu') {
+            locals.doudizhuConfig = gameRegistry.getPublicDoudizhuConfig();
+            locals.initialState = previewDoudizhuState;
+        }
         if (page.view === 'duel') {
             locals.duelConfig = gameRegistry.getPublicDuelConfig();
         }
@@ -442,6 +453,10 @@ app.get('/api/flip/state', (req, res) => previewApi(res, {
         type: index === 0 ? 'good' : 'unknown',
         flipped: index === 0
     }))
+}, true));
+
+app.get('/api/doudizhu/state', (req, res) => previewApi(res, {
+    state: previewDoudizhuState
 }, true));
 
 app.get('/api/wish/progress', (req, res) => previewApi(res, {

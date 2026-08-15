@@ -46,12 +46,34 @@ const gameConfiguration = read('domain/games/configuration.js');
 const gameRegistry = read('domain/games/registry.js');
 const gameRandom = read('domain/games/random.js');
 const gameBlindbox = read('domain/games/blindbox.js');
+const gameCatalog = read('domain/games/catalog.js');
+const doudizhuRoute = read('routes/doudizhu.js');
+const doudizhuEngine = read('domain/games/doudizhu/engine.js');
+const doudizhuAi = read('domain/games/doudizhu/ai.js');
+const thirdPartyNotices = read('docs/THIRD_PARTY_NOTICES.md');
+const packageManifest = JSON.parse(read('package.json'));
 const normalPk = read('workers/bilibili/normalpk.py');
 const firstWinPk = read('workers/bilibili/shousheng.py');
 const workerRoleLease = read('lib/worker-role-lease.js');
 const integrationEnvironment = read('tests/helpers/integration-environment.js');
 const runtimeResilience = read('scripts/test-runtime-resilience.js');
 const releaseBuilder = read('scripts/build-release.js');
+const doudizhuProjectionSource = doudizhuEngine.slice(
+    doudizhuEngine.indexOf('function projectState('),
+    doudizhuEngine.indexOf('function projectObservation(')
+);
+const doudizhuActionRouteSource = doudizhuRoute.slice(
+    doudizhuRoute.indexOf("app.post('/api/doudizhu/action'"),
+    doudizhuRoute.indexOf("app.post('/api/doudizhu/hint'")
+);
+const doudizhuDependencyNames = Object.keys({
+    ...(packageManifest.dependencies || {}),
+    ...(packageManifest.devDependencies || {}),
+    ...(packageManifest.optionalDependencies || {})
+});
+const doudizhuSourceEntries = fs.readdirSync(path.join(root, 'domain', 'games', 'doudizhu'), {
+    withFileTypes: true
+});
 const guardedTestScripts = fs.readdirSync(path.join(root, 'scripts'))
     .filter((file) => /^(?:penetration_test_|security_test_|simulation_|smoke_).*\.js$/.test(file)
         || /^(?:test_concurrency_.*|test_flip_flow|test_multi_actor|test_replay_quiz_slot_scratch|test_wish_flow)\.js$/.test(file))
@@ -339,6 +361,52 @@ check('release builder includes application layers and recursively excludes unsa
     && releaseBuilder.includes("path.basename(relative).toLowerCase() === '__pycache__'")
     && releaseBuilder.includes('/\\.py[co]$/i')
     && releaseBuilder.includes('verifyRelativeJavaScriptDependencies(target)'));
+check('doudizhu requests cannot choose identity, seat, revision, or hidden state',
+    doudizhuRoute.includes("['gameId', 'expectedRevision', 'type', 'bid', 'cardIds']")
+    && doudizhuRoute.includes("['gameId', 'expectedRevision']")
+    && doudizhuRoute.includes('const allowedKeys = new Set(CSRF_BODY_KEYS);')
+    && doudizhuRoute.includes('seat: game.state.humanSeat')
+    && !/req\.body(?:\?\.|\.)?(?:username|seat|humanSeat|turnSeat|state|hands|deck|seed|revision)\b/.test(doudizhuRoute));
+check('doudizhu public projection excludes opponent hands and private deck state',
+    doudizhuProjectionSource.startsWith('function projectState(')
+    && doudizhuProjectionSource.includes('hand: state.hands[seat]')
+    && !/\b(?:hands|deck|seed|playedCards|nonPassPlays)\s*:/.test(doudizhuProjectionSource)
+    && (doudizhuRoute.match(/state:\s*publicState\(/g) || []).length >= 5
+    && !/state:\s*privateState\b/.test(doudizhuRoute));
+check('doudizhu mutations use capacity, auth, rate-limit, CSRF, and idempotency policy',
+    ['start', 'action', 'hint'].every((operation) => new RegExp(
+        `app\\.post\\('/api/doudizhu/${operation}',\\s*rejectWhenOverloaded,\\s*requireLogin,\\s*requireAuthorized,\\s*basicRateLimit,\\s*userActionRateLimit,\\s*csrfProtection,`
+    ).test(doudizhuRoute))
+    && ['start', 'action', 'hint'].every((operation) => gameCatalog.includes(
+        `action('/api/doudizhu/${operation}', CAPACITY_USER_ACTION_POLICIES)`
+    ))
+    && /const CAPACITY_USER_ACTION_POLICIES = deepFreeze\(\[[\s\S]*?'idempotent'[\s\S]*?\]\);/.test(gameCatalog));
+check('doudizhu action persistence uses owner-bound revision CAS and transactional idempotency',
+    /WHERE id = \$1\s+AND username = \$2\s+AND status = 'active'\s+AND revision = \$3/s.test(doudizhuActionRouteSource)
+    && doudizhuActionRouteSource.includes('privateState.revision <= parsed.expectedRevision')
+    && doudizhuActionRouteSource.indexOf('req.finalizeIdempotency?.(client, 200, responseBody)')
+        < doudizhuActionRouteSource.indexOf("client.query('COMMIT')"));
+check('doudizhu card selection, bot advancement, and AI search are explicitly bounded',
+    gameConfiguration.includes('maximumSelectedCards: 20')
+    && gameConfiguration.includes('maxBotActionsPerRequest: 64')
+    && gameConfiguration.includes('aiNodeBudget: 12_000')
+    && gameConfiguration.includes('aiDeadlineMs: 220')
+    && doudizhuRoute.includes('cardIds.length > serverConfig.maximumSelectedCards')
+    && doudizhuRoute.includes('maxNodes: serverConfig.aiNodeBudget')
+    && doudizhuRoute.includes('deadlineMs: serverConfig.aiDeadlineMs')
+    && doudizhuRoute.includes('maxActions: serverConfig.maxBotActionsPerRequest')
+    && doudizhuAi.includes('RULE_PROFILE.ai.hardMaxNodes')
+    && doudizhuAi.includes('RULE_PROFILE.ai.hardDeadlineMs')
+    && doudizhuAi.includes('RULE_PROFILE.ai.hardMaxBotActions'));
+check('doudizhu bundles no third-party runtime or model artifacts',
+    !doudizhuDependencyNames.some((name) => /(?:douzero|rlcard|doudizhu)/i.test(name))
+    && doudizhuSourceEntries.every((entry) => entry.isFile() && entry.name.endsWith('.js'))
+    && thirdPartyNotices.includes('does not copy,')
+    && thirdPartyNotices.includes('RLCard')
+    && thirdPartyNotices.includes('MIT License')
+    && thirdPartyNotices.includes('DouZero')
+    && thirdPartyNotices.includes('Apache License 2.0')
+    && thirdPartyNotices.includes('Neither project is a runtime or build dependency'));
 check('server startup and shutdown execute the registered application lifecycle',
     server.includes('registerRuntimeLifecycle();')
     && server.includes("applicationLifecycle.registerComponent('http-server'")

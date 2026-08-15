@@ -29,7 +29,7 @@
                         <% } %>
                     </div>
                     <div class="hero-notes" aria-label="<%= lang === 'zh' ? '游戏厅概况' : 'Game room overview' %>">
-                        <span><strong>10</strong> <%= lang === 'zh' ? '款玩法' : 'games' %></span>
+                        <span><strong><%= (gameCatalog || []).length %></strong> <%= lang === 'zh' ? '款玩法' : 'games' %></span>
                         <span><strong>4</strong> <%= lang === 'zh' ? '种节奏' : 'ways to play' %></span>
                         <span><%= lang === 'zh' ? '纯虚拟娱乐' : 'Virtual play only' %></span>
                     </div>
@@ -66,7 +66,7 @@
                         <p><%= lang === 'zh' ? '想动脑、碰运气，还是来一次策略挑战？' : 'Think, test your luck, or take on a strategic challenge.' %></p>
                     </div>
                     <div class="catalog-filters" role="group" aria-label="<%= lang === 'zh' ? '筛选游戏类型' : 'Filter game category' %>">
-                        <button type="button" class="active" data-catalog-filter="all" aria-pressed="true"><%= lang === 'zh' ? '全部 10' : 'All 10' %></button>
+                        <button type="button" class="active" data-catalog-filter="all" aria-pressed="true"><%= lang === 'zh' ? `全部 ${(gameCatalog || []).length}` : `All ${(gameCatalog || []).length}` %></button>
                         <button type="button" data-catalog-filter="brain" aria-pressed="false"><%= lang === 'zh' ? '益智' : 'Brain' %></button>
                         <button type="button" data-catalog-filter="chance" aria-pressed="false"><%= lang === 'zh' ? '运气' : 'Chance' %></button>
                         <button type="button" data-catalog-filter="strategy" aria-pressed="false"><%= lang === 'zh' ? '策略' : 'Strategy' %></button>
