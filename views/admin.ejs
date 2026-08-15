@@ -24,16 +24,6 @@
         </div>
 
         <div class="admin-content">
-            <% if (!adminMfaConfigured) { %>
-                <div class="admin-security-warning" role="status">
-                    <strong><%= lang === 'zh' ? '管理员动态验证未配置' : 'Admin MFA is not configured' %></strong>
-                    <span><%= lang === 'zh'
-                        ? '当前管理员缺少独立 MFA 配置。请在 Render 的 ADMIN_TOTP_SECRETS_JSON 中为该用户名配置密钥。'
-                        : 'This administrator lacks an individual MFA secret. Add the username to ADMIN_TOTP_SECRETS_JSON in Render.'
-                    %></span>
-                </div>
-            <% } %>
-            
             <div class="cookie-management">
                 <h2><%= lang === 'zh' ? 'B站 Cookie 管理' : 'Bilibili cookie management' %></h2>
                 <div class="admin-cookie-toolbar">
@@ -370,21 +360,6 @@
 
     .admin-content {
         overflow-x: auto;
-    }
-
-    .admin-security-warning {
-        display: grid;
-        gap: 0.35rem;
-        margin-bottom: 1rem;
-        padding: 0.9rem 1rem;
-        border: 1px solid #ffca28;
-        border-radius: 6px;
-        background: rgba(255, 202, 40, 0.12);
-        color: #fff4c2;
-    }
-
-    .admin-security-warning strong {
-        color: #ffdf70;
     }
 
     .recent-records {

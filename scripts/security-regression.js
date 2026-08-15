@@ -30,6 +30,7 @@ const musicPlayer = read('public/js/music-player.js');
 const languageSwitcher = read('views/partials/language-switcher.ejs');
 const adminClient = read('public/js/admin.js');
 const adminView = read('views/admin.ejs');
+const loginView = read('views/login.ejs');
 const giftsClient = read('public/js/gifts.js');
 const quizClient = read('public/js/quiz.js');
 const profileClient = read('public/js/profile.js');
@@ -221,10 +222,21 @@ check('balance ledger is append-only and validates new arithmetic', financialAud
 check('account deactivation preserves financial audit history', admin.includes('账户已停用，审计记录已保留') && !admin.includes("DELETE FROM balance_logs"));
 check('spin results are idempotent', games.includes("app.post('/api/spin'") && read('public/js/spin.js').includes("idempotentFetch('/api/spin'"));
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
-check('administrator idempotency replays revalidate recent password and MFA',
+check('administrator idempotency replays revalidate recent password authentication',
     server.includes('getRecentAdminAuthDenial(req)')
     && server.includes('if (requiresAdmin)')
     && server.includes('recentAuthDenial'));
+check('administrator authentication has no mandatory TOTP configuration or prompt',
+    !/ADMIN_TOTP|totpCode|lastMfaVerifiedAt|getAdminTotpSecret|matchTotpCounter/.test([
+        server,
+        admin,
+        adminClient,
+        adminView,
+        loginView,
+        configValidation
+    ].join('\n'))
+    && adminClient.includes('JSON.stringify({ password })')
+    && admin.includes("authStrength: 'password'"));
 check('idempotency migration upgrades the legacy schema',
     idempotencyMigration.includes('RENAME COLUMN idem_key TO idempotency_key')
     && idempotencyMigration.includes("SET status = 'pending'")

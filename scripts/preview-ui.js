@@ -352,7 +352,6 @@ app.get('/admin', (req, res) => {
             started_at: '2026-07-11 19:01:00',
             ended_at: '2026-07-11 19:08:00'
         }],
-        adminMfaConfigured: false,
         csrfToken
     });
 });

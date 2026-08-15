@@ -39,8 +39,6 @@ services:
         sync: false
       - key: READINESS_TOKEN
         sync: false
-      - key: ADMIN_TOTP_SECRETS_JSON
-        sync: false
       - key: TRUSTED_PROXY_ADDRESSES
         sync: false
       - key: EXTERNAL_GIFTS_ENABLED

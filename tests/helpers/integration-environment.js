@@ -184,8 +184,6 @@ function createAppEnvironment({ databaseName, port, applicationName, faultToken,
         TEST_FAULT_TOKEN: faultToken || '',
         TEST_FAULT_PAUSE_MS: '1500'
     };
-    delete env.ADMIN_TOTP_SECRET;
-    delete env.ADMIN_TOTP_SECRETS_JSON;
     delete env.WINDOWS_API_KEY;
     delete env.GIFT_TASKS_HMAC_SECRET;
     return env;

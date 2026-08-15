@@ -13,6 +13,7 @@ const registerDoudizhuRoutes = require('../routes/doudizhu');
 
 const root = path.resolve(__dirname, '..');
 const routeSource = fs.readFileSync(path.join(root, 'routes/doudizhu.js'), 'utf8');
+const uiSource = fs.readFileSync(path.join(root, 'public/js/doudizhu.js'), 'utf8');
 const GAME_ID = '11111111-1111-4111-8111-111111111111';
 const FORBIDDEN_PUBLIC_KEYS = new Set([
     'deck',
@@ -472,4 +473,29 @@ test('Dou Dizhu has no third-party runtime package or bundled model artifacts', 
     assert.match(notices, /RLCard[\s\S]*MIT License/);
     assert.match(notices, /DouZero[\s\S]*Apache License 2\.0/);
     assert.match(notices, /Neither project is a runtime or build dependency/);
+});
+
+test('Doudizhu hand selection recovers after requests without requiring Hint', () => {
+    const setBusyStart = uiSource.indexOf('function setBusy(');
+    const setBusyEnd = uiSource.indexOf('\n    function showError(', setBusyStart);
+    const setBusySource = uiSource.slice(setBusyStart, setBusyEnd);
+    const postStart = uiSource.indexOf('async function post(');
+    const postEnd = uiSource.indexOf('\n    async function startMatch(', postStart);
+    const postSource = uiSource.slice(postStart, postEnd);
+    const toggleStart = uiSource.indexOf('function toggleCard(');
+    const toggleEnd = uiSource.indexOf('\n    function setBusy(', toggleStart);
+    const toggleSource = uiSource.slice(toggleStart, toggleEnd);
+
+    assert.ok(setBusyStart >= 0 && postStart >= 0 && toggleStart >= 0);
+    assert.match(setBusySource, /actionInFlight\s*=\s*busy/);
+    assert.match(setBusySource, /renderHand\(\);[\s\S]*renderControls\(\);/,
+        'busy transitions must refresh both card buttons and controls');
+    assert.match(postSource, /finally\s*{\s*setBusy\(false\);\s*}/,
+        'every completed request must restore card interactivity');
+    assert.match(toggleSource, /state\?\.phase\s*!==\s*'playing'/);
+    assert.match(toggleSource, /!state\?\.legal\?\.canAct/);
+    assert.match(toggleSource, /selectedCardIds\.(?:add|delete)/);
+    assert.match(uiSource,
+        /elements\.play\.disabled\s*=\s*actionInFlight\s*\|\|\s*!playing\s*\|\|\s*selectedCardIds\.size\s*===\s*0/,
+        'Play is available for a non-empty selection without invoking Hint');
 });

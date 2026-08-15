@@ -46,10 +46,6 @@ async function adminFetch(url, options = {}) {
 
     const password = prompt(t('请输入管理员密码以继续：', 'Enter your admin password to continue:'));
     if (!password) return response;
-    const totpCode = denial.mfaRequired
-        ? prompt(t('请输入6位动态验证码：', 'Enter the 6-digit authenticator code:'))
-        : '';
-    if (denial.mfaRequired && !totpCode) return response;
 
     const authResponse = await fetch('/api/admin/reauthenticate', {
         method: 'POST',
@@ -57,7 +53,7 @@ async function adminFetch(url, options = {}) {
             'Content-Type': 'application/json',
             'X-CSRF-Token': csrfToken
         },
-        body: JSON.stringify({ password, totpCode })
+        body: JSON.stringify({ password })
     });
     const authResult = await authResponse.json().catch(() => ({}));
     if (!authResponse.ok || !authResult.success) {

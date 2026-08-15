@@ -41,7 +41,7 @@ does not claim that the repository is mathematically bug-free.
 - Session revocation is checked transactionally for protected writes; Socket.IO
   sessions are revalidated and cross-instance events use PostgreSQL.
 - Administrator IP restrictions and optional HMAC bypass logic were removed.
-  High-risk writes require recent password verification and optional TOTP, and
+  High-risk writes require recent password verification, and
   success/failure is audited (P1-28, P1-31, P1-32).
 - Account removal is now deactivation: financial/security evidence is retained,
   sessions are revoked, and unstarted external work is safely released
@@ -101,9 +101,6 @@ does not claim that the repository is mathematically bug-free.
   or local machines (remaining part of P0-01/P0-02).
 - Decide separately whether to rewrite Git history. That requires coordination
   and a force push, so it was intentionally not done in this audit.
-- Configure `ADMIN_TOTP_SECRET` in production. The code supports TOTP, but an
-  unset production secret means step-up is password-only. Dual approval or a
-  hardware-key flow is not yet implemented.
 - Bilibili does not provide a confirmed universal idempotency/provider
   transaction ID for every send path. Missing confirmation is conservatively
   held as `uncertain`; it still requires administrator/provider reconciliation

@@ -35,7 +35,6 @@ const {
     createSpendHash,
     normalizeGiftItems
 } = require('../lib/pk-spend');
-const { decodeBase32, generateTotp, matchTotpCounter, verifyTotp } = require('../lib/totp');
 const gameRegistry = require('../domain/games');
 const {
     assertRtp,
@@ -47,7 +46,6 @@ const {
     wishRtp
 } = gameRegistry.economics;
 const { parseWorkerCredentials } = require('../lib/worker-credentials');
-const { getAdminTotpSecret, parseAdminTotpSecrets } = require('../lib/admin-mfa');
 const { createConcurrencyGuard } = require('../lib/concurrency-guard');
 const { multiplyMoney, parseInteger, parseMoney } = require('../lib/integer-money');
 const { randomArrayIndex, randomArrayItem } = require('../lib/random-index');
@@ -773,7 +771,7 @@ test('spin results always map to configured challenges and normalized angles', (
     }
 });
 
-test('production configuration rejects CSRF bypasses and insecure worker origins', async () => {
+test('production configuration rejects unsafe settings without requiring administrator TOTP', async () => {
     const validSecrets = {
         NODE_ENV: 'production',
         DB_HOST: 'db.example.test',
@@ -792,7 +790,6 @@ test('production configuration rejects CSRF bypasses and insecure worker origins
         WORKER_CREDENTIAL_ID: 'worker-test-01',
         WORKER_API_KEY: 'w'.repeat(32),
         WORKER_HMAC_SECRET: 'h'.repeat(32),
-        ADMIN_TOTP_SECRETS_JSON: JSON.stringify({ admin: 'JBSWY3DPEHPK3PXP' }),
         READINESS_TOKEN: 'q'.repeat(32),
         CSRF_AUTO_FILL: 'true',
         CSRF_TEST_MODE: undefined,
@@ -822,6 +819,135 @@ test('production configuration rejects CSRF bypasses and insecure worker origins
     }, async () => {
         assert.throws(validateServerEnvironment, /TLS verification cannot be disabled/);
     });
+
+    await withEnvironment({
+        ...validSecrets,
+        CSRF_AUTO_FILL: undefined,
+        SERVER_URL: 'https://worker.example.test',
+        DB_HOST: 'localhost',
+        DB_SSL: undefined,
+        DB_SSL_REJECT_UNAUTHORIZED: undefined,
+        AUTO_MIGRATE: undefined
+    }, async () => {
+        assert.doesNotThrow(validateServerEnvironment);
+    });
+});
+
+test('administrator step-up accepts the current password without an authenticator code', async () => {
+    const registerAdminRoutes = require('../routes/admin');
+    const registrations = [];
+    const app = {
+        get(routePath, ...handlers) {
+            registrations.push({ method: 'GET', routePath, handlers });
+        },
+        post(routePath, ...handlers) {
+            registrations.push({ method: 'POST', routePath, handlers });
+        },
+        delete(routePath, ...handlers) {
+            registrations.push({ method: 'DELETE', routePath, handlers });
+        }
+    };
+    const middleware = (_req, _res, next) => next?.();
+    const statements = [];
+    let auditDetails = null;
+    let released = false;
+    const client = {
+        async query(sql, values = []) {
+            const normalized = String(sql).trim().replace(/\s+/g, ' ');
+            statements.push(normalized);
+            if (normalized.startsWith('SELECT account.password_hash')) {
+                return { rows: [{ password_hash: 'current-password-hash' }], rowCount: 1 };
+            }
+            if (normalized.startsWith('INSERT INTO admin_audit_log')) {
+                auditDetails = JSON.parse(values[4]);
+            }
+            return { rows: [], rowCount: 1 };
+        },
+        release() {
+            released = true;
+        }
+    };
+    const pool = {
+        async query(sql) {
+            const normalized = String(sql).trim().replace(/\s+/g, ' ');
+            statements.push(normalized);
+            if (normalized.startsWith('SELECT password_hash')) {
+                return { rows: [{ password_hash: 'current-password-hash' }], rowCount: 1 };
+            }
+            throw new Error(`Unexpected pool query: ${normalized}`);
+        },
+        async connect() {
+            return client;
+        }
+    };
+
+    registerAdminRoutes(app, {
+        pool,
+        bcrypt: {
+            async compare(password, hash) {
+                return password === 'correct horse battery staple'
+                    && hash === 'current-password-hash';
+            }
+        },
+        BalanceLogger: {},
+        gameRegistry,
+        generateCSRFToken() {},
+        requireLogin: middleware,
+        requireAdmin: middleware,
+        requireRecentAdminAuth: middleware,
+        requireAuthorized: middleware,
+        requireCSRF: middleware,
+        security: {
+            adminRateLimit: middleware,
+            adminStrictLimit: middleware,
+            readHeavyRateLimit: middleware
+        },
+        scheduleWishInventoryDeliveryOnBind() {},
+        IPManager: {},
+        SessionManager: {},
+        notifySecurityEvent() {},
+        disconnectUserSockets() {},
+        passwordResetTokenSecret: Buffer.alloc(32, 7)
+    });
+
+    const registration = registrations.find(({ method, routePath }) => (
+        method === 'POST' && routePath === '/api/admin/reauthenticate'
+    ));
+    assert.ok(registration);
+    const handler = registration.handlers.at(-1);
+    const startedAt = Date.now();
+    const request = {
+        body: { password: 'correct horse battery staple' },
+        clientIP: '127.0.0.1',
+        requestId: 'admin-reauth-request-1234',
+        sessionID: 'active-admin-session',
+        session: {
+            user: { username: 'admin-user', is_admin: true },
+            lastAuthenticatedAt: 0,
+            save(callback) { callback(); }
+        }
+    };
+    const response = {
+        statusCode: 200,
+        status(statusCode) {
+            this.statusCode = statusCode;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        }
+    };
+
+    await handler(request, response);
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.body, { success: true });
+    assert.equal(request.session.lastAuthenticatedAt >= startedAt, true);
+    assert.equal(released, true);
+    assert.equal(statements.some((statement) => statement.includes('FOR SHARE OF account, active')), true);
+    assert.equal(statements.some((statement) => /totp|mfa|last_admin/i.test(statement)), false);
+    assert.equal(auditDetails?.authStrength, 'password');
 });
 
 test('test fault injection is isolated to an explicitly configured test process', async () => {
@@ -954,16 +1080,6 @@ test('worker configuration rejects unconfirmed browser-click delivery', async ()
     });
 });
 
-test('TOTP verification follows the RFC test vector and rejects malformed codes', () => {
-    const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
-    assert.equal(decodeBase32(secret).toString(), '12345678901234567890');
-    assert.equal(generateTotp(secret, 1), '287082');
-    assert.equal(verifyTotp(secret, '287082', { now: 30_000, window: 0 }), true);
-    assert.equal(verifyTotp(secret, '287083', { now: 30_000, window: 0 }), false);
-    assert.equal(verifyTotp(secret, 'abc', { now: 30_000 }), false);
-    assert.equal(matchTotpCounter(secret, '287082', { now: 30_000, window: 0 }), 1);
-});
-
 test('worker credentials bind independent secrets to an immutable worker id', () => {
     const credentials = parseWorkerCredentials(JSON.stringify({
         'worker-prod-01': { apiKey: 'a'.repeat(32), hmacSecret: 'b'.repeat(32) },
@@ -975,16 +1091,6 @@ test('worker credentials bind independent secrets to an immutable worker id', ()
         credentials.get('worker-prod-02').hmacSecret
     );
     assert.throws(() => parseWorkerCredentials('{invalid'), /valid JSON/);
-});
-
-test('administrator MFA secrets are isolated per account', () => {
-    const raw = JSON.stringify({
-        admin_one: 'JBSWY3DPEHPK3PXP',
-        admin_two: 'GEZDGNBVGY3TQOJQ'
-    });
-    const secrets = parseAdminTotpSecrets(raw);
-    assert.notEqual(secrets.get('admin_one'), secrets.get('admin_two'));
-    assert.equal(getAdminTotpSecret('admin_two', { ADMIN_TOTP_SECRETS_JSON: raw }), 'GEZDGNBVGY3TQOJQ');
 });
 
 test('redeemable game economics enforce the 98%-99% policy and unsafe boundaries', () => {

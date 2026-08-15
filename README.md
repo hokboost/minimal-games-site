@@ -8,7 +8,7 @@ Express/EJS 小游戏站点，使用 PostgreSQL 保存账户、整数余额、�
 - PostgreSQL 14+
 - Windows 礼物工作器另需 Python 3.10+ 和 `workers/bilibili/requirements.txt`
 
-复制 `.env.example` 中的变量到部署平台或本机未跟踪的 `.env`。生产环境必须提供数据库凭据、各用途独立密钥、强制管理员 TOTP、readiness token，以及 `WORKER_CREDENTIALS_JSON` 中逐 worker 的独立凭证。Windows worker 只配置自己的 `WORKER_CREDENTIAL_ID`、`WORKER_API_KEY` 和 `WORKER_HMAC_SECRET`。所有密钥至少使用 32 字节随机值，不能提交到 Git。
+复制 `.env.example` 中的变量到部署平台或本机未跟踪的 `.env`。生产环境必须提供数据库凭据、各用途独立密钥、readiness token，以及 `WORKER_CREDENTIALS_JSON` 中逐 worker 的独立凭证。管理员应使用独立强密码；高风险操作会要求在近期重新输入密码。Windows worker 只配置自己的 `WORKER_CREDENTIAL_ID`、`WORKER_API_KEY` 和 `WORKER_HMAC_SECRET`。所有密钥至少使用 32 字节随机值，不能提交到 Git。
 
 ```bash
 npm ci

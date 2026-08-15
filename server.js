@@ -27,8 +27,6 @@ const BalanceLogger = require('./balance-logger');
 const { parseMoney } = require('./lib/integer-money');
 const gameRegistry = require('./domain/games');
 const { parseWorkerCredentials } = require('./lib/worker-credentials');
-const { matchTotpCounter } = require('./lib/totp');
-const { getAdminTotpSecret } = require('./lib/admin-mfa');
 
 // 礼物配置
 const fs = require('fs');
@@ -897,19 +895,14 @@ const requireAdmin = (req, res, next) => {
 };
 
 const ADMIN_RECENT_AUTH_MS = 10 * 60 * 1000;
-const ADMIN_MFA_WINDOW_MS = 5 * 60 * 1000;
 const getRecentAdminAuthDenial = (req) => {
     const now = Date.now();
     const lastAuthenticatedAt = Number(req.session?.lastAuthenticatedAt || 0);
-    const mfaRequired = req.session?.user?.is_admin === true;
-    const lastMfaVerifiedAt = Number(req.session?.lastMfaVerifiedAt || 0);
-    if (now - lastAuthenticatedAt > ADMIN_RECENT_AUTH_MS
-        || (mfaRequired && now - lastMfaVerifiedAt > ADMIN_MFA_WINDOW_MS)) {
+    if (now - lastAuthenticatedAt > ADMIN_RECENT_AUTH_MS) {
         return {
             status: 403,
-            message: mfaRequired ? '此操作需要重新验证管理员密码和动态验证码' : '此操作需要重新验证管理员密码',
-            code: 'RECENT_AUTH_REQUIRED',
-            mfaRequired
+            message: '此操作需要重新验证管理员密码',
+            code: 'RECENT_AUTH_REQUIRED'
         };
     }
     return null;
@@ -1480,7 +1473,7 @@ app.post('/register', registerLimiter, async (req, res) => {
 
 // 登录处理 - 集成IP风控和单设备登录
 app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
-    const { password, _csrf, totpCode } = req.body || {};
+    const { password, _csrf } = req.body || {};
     const username = normalizeUsernameInput(req.body?.username);
     const clientIP = req.clientIP;
     const userAgent = req.userAgent;
@@ -1524,7 +1517,7 @@ app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
         // 3. 检查用户是否存在
         const result = await pool.query(
             `SELECT username, password_hash, balance, is_admin, authorized,
-                    login_failures, locked_until, deactivated, last_admin_totp_counter
+                    login_failures, locked_until, deactivated
              FROM users WHERE username = $1`,
             [username]
         );
@@ -1609,33 +1602,16 @@ app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
             });
         }
 
-        let adminTotpCounter = null;
-        if (user.is_admin === true) {
-            adminTotpCounter = matchTotpCounter(getAdminTotpSecret(username), totpCode);
-            if (adminTotpCounter === null
-                || (user.last_admin_totp_counter !== null
-                    && adminTotpCounter <= Number(user.last_admin_totp_counter))) {
-                await IPManager.recordIPActivity(clientIP, username, userAgent, 'login_mfa_failed');
-                return res.status(401).render('login', {
-                    title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
-                    error: uiText(res, '用户名、密码或动态验证码错误！', 'Invalid username, password, or authenticator code!'),
-                    csrfToken: generateCSRFToken(req)
-                });
-            }
-        }
-
         // 5. 登录成功处理
         const loginStateReset = await pool.query(`
             UPDATE users
-            SET login_failures = 0, last_failure_time = NULL, locked_until = NULL,
-                last_admin_totp_counter = CASE WHEN is_admin THEN $3 ELSE last_admin_totp_counter END
+            SET login_failures = 0, last_failure_time = NULL, locked_until = NULL
             WHERE username = $1
               AND password_hash = $2
               AND deactivated = false
               AND (locked_until IS NULL OR locked_until <= NOW())
-              AND (is_admin = false OR last_admin_totp_counter IS NULL OR last_admin_totp_counter < $3)
             RETURNING username
-        `, [username, user.password_hash, adminTotpCounter]);
+        `, [username, user.password_hash]);
         if (loginStateReset.rowCount !== 1) {
             return res.status(401).render('login', {
                 title: uiText(res, '登录 - Minimal Games', 'Login - Minimal Games'),
@@ -1686,7 +1662,6 @@ app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
             req.session.user = sessionResult.user;
             req.session.username = sessionResult.user.username;
             req.session.lastAuthenticatedAt = Date.now();
-            req.session.lastMfaVerifiedAt = sessionResult.user.is_admin ? Date.now() : 0;
             await new Promise((resolve, reject) => {
                 req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
             });
@@ -2515,7 +2490,6 @@ async function checkReadiness() {
                 typeof process.env.SESSION_SECRET === 'string'
                 && process.env.SESSION_SECRET.length >= 32
                 && workerCredentialsReady
-                && Boolean(process.env.ADMIN_TOTP_SECRETS_JSON)
             );
             const backgroundReady = Boolean(
                 applicationLifecycle.state === 'running'
@@ -2533,9 +2507,6 @@ async function checkReadiness() {
                         database: true,
                         schema: schemaReady,
                         configuration: configurationReady,
-                        adminMfa: {
-                            configured: Boolean(process.env.ADMIN_TOTP_SECRETS_JSON)
-                        },
                         backgroundLoops: backgroundReady,
                         socketEventBus: socketEventBus.isReady(),
                         giftWorker: {
@@ -2797,7 +2768,6 @@ registerAdminRoutes(app, {
     SessionManager,
     notifySecurityEvent,
     disconnectUserSockets,
-    getAdminTotpSecret,
     passwordResetTokenSecret: resetTokenSecret
 });
 

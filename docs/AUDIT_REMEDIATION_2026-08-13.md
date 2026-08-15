@@ -13,7 +13,7 @@ This repository was remediated against `minimal-games-site-security-audit-2026-0
 - Game configuration, catalog metadata, exact economics, public projections, profile/history adapters, and mutation-route policy metadata now have central registries under `domain/games/` and `routes/manifest.js`.
 - Long-running cleanup and recovery work is owned by an explicit application lifecycle with ordered startup, reverse shutdown, failure rollback, non-overlapping jobs, and in-flight draining.
 - New-user balance defaults to zero and the signup award is an explicit, source-labelled ledger posting.
-- Admin MFA is mandatory in production, configured per username, checked at login and step-up, and protected against TOTP counter replay. Sessions have absolute 24-hour user / 8-hour admin lifetimes, and admin sessions can be force-revoked.
+- Administrator login and step-up use the account password; TOTP is no longer a required production setting. High-risk writes require a password verification within ten minutes. Sessions retain absolute 24-hour user / 8-hour administrator lifetimes and can be force-revoked.
 - Account login throttling is global by canonicalized username rather than IP-plus-username.
 - Language redirects are same-origin only; language cookies have explicit SameSite/Secure behavior.
 - Proxy trust is an explicit address allowlist. Public health responses are generic; detailed readiness requires a token.
@@ -30,7 +30,7 @@ Code cannot revoke credentials or rewrite remote history. Keep both external-sen
 2. Reconcile every existing `processing`/`uncertain` gift and PK record against authoritative Bilibili history. Do not auto-refund or resend.
 3. Rewrite reachable Git history and remove old tags, releases, CI caches, archives, support uploads, and stale clones containing secrets.
 4. Create separate migrator, runtime, and audit database roles; prove the runtime role cannot alter schema objects or disable triggers.
-5. Configure exact trusted ingress addresses, individual administrator MFA entries, individual worker credentials, spend limits, and the readiness token.
+5. Configure exact trusted ingress addresses, strong individual administrator passwords, individual worker credentials, spend limits, and the readiness token.
 6. Establish an independent provider reconciliation feed and immutable external audit-root export. A sender-provided transaction ID is necessary but is not by itself independent reconciliation.
 7. Run PostgreSQL migration/privilege, browser DAST, load, crash-boundary, backup-restore, and provider-sandbox tests in the deployment environment.
 

@@ -18,7 +18,6 @@ module.exports = function registerAdminRoutes(app, deps) {
         SessionManager,
         notifySecurityEvent,
         disconnectUserSockets,
-        getAdminTotpSecret,
         passwordResetTokenSecret,
         gameRegistry
     } = deps;
@@ -335,16 +334,14 @@ module.exports = function registerAdminRoutes(app, deps) {
         let client;
         let sessionStamped = false;
         const previousAuthenticatedAt = req.session.lastAuthenticatedAt;
-        const previousMfaVerifiedAt = req.session.lastMfaVerifiedAt;
         try {
             const password = typeof req.body?.password === 'string' ? req.body.password : '';
-            const totpCode = typeof req.body?.totpCode === 'string' ? req.body.totpCode : '';
             if (!password || Buffer.byteLength(password, 'utf8') > 72) {
                 return res.status(400).json({ success: false, message: '密码格式无效' });
             }
 
             const userResult = await pool.query(
-                `SELECT password_hash, last_admin_totp_counter
+                `SELECT password_hash
                  FROM users
                  WHERE username = $1 AND is_admin = true AND deactivated = false`,
                 [req.session.user.username]
@@ -355,19 +352,10 @@ module.exports = function registerAdminRoutes(app, deps) {
                 return res.status(401).json({ success: false, message: '管理员密码错误' });
             }
 
-            const totpSecret = getAdminTotpSecret(req.session.user.username);
-            const { matchTotpCounter } = require('../lib/totp');
-            const totpCounter = totpSecret ? matchTotpCounter(totpSecret, totpCode) : null;
-            if (totpCounter === null
-                || (userResult.rows[0].last_admin_totp_counter !== null
-                    && totpCounter <= Number(userResult.rows[0].last_admin_totp_counter))) {
-                return res.status(401).json({ success: false, message: '动态验证码错误或已过期' });
-            }
-
             client = await pool.connect();
             await client.query('BEGIN');
             const stillCurrent = await client.query(`
-                SELECT account.password_hash, account.last_admin_totp_counter
+                SELECT account.password_hash
                 FROM users AS account
                 JOIN active_sessions AS active ON active.username = account.username
                 WHERE account.username = $1
@@ -378,22 +366,9 @@ module.exports = function registerAdminRoutes(app, deps) {
                 FOR SHARE OF account, active
             `, [req.session.user.username, req.sessionID]);
             if (stillCurrent.rows.length !== 1
-                || stillCurrent.rows[0].password_hash !== userResult.rows[0].password_hash
-                || (stillCurrent.rows[0].last_admin_totp_counter !== null
-                    && totpCounter <= Number(stillCurrent.rows[0].last_admin_totp_counter))) {
+                || stillCurrent.rows[0].password_hash !== userResult.rows[0].password_hash) {
                 await client.query('ROLLBACK');
                 return res.status(409).json({ success: false, message: '管理员凭据或会话已发生变化，请重新登录' });
-            }
-            const consumedTotp = await client.query(`
-                UPDATE users
-                SET last_admin_totp_counter = $2
-                WHERE username = $1
-                  AND (last_admin_totp_counter IS NULL OR last_admin_totp_counter < $2)
-                RETURNING username
-            `, [req.session.user.username, totpCounter]);
-            if (consumedTotp.rowCount !== 1) {
-                await client.query('ROLLBACK');
-                return res.status(409).json({ success: false, message: '动态验证码已使用，请等待下一组验证码' });
             }
 
             await auditAdminAction({
@@ -402,23 +377,21 @@ module.exports = function registerAdminRoutes(app, deps) {
                 action: 'admin_reauthenticated',
                 clientIP: req.clientIP,
                 requestId: req.requestId,
-                authStrength: 'password_totp'
+                authStrength: 'password'
             });
             await client.query('COMMIT');
 
             const verifiedAt = Date.now();
-            req.session.lastMfaVerifiedAt = verifiedAt;
             req.session.lastAuthenticatedAt = verifiedAt;
             sessionStamped = true;
             await new Promise((resolve, reject) => {
                 req.session.save((error) => (error ? reject(error) : resolve()));
             });
-            return res.json({ success: true, mfaRequired: true });
+            return res.json({ success: true });
         } catch (error) {
             if (client) await client.query('ROLLBACK').catch(() => {});
             if (sessionStamped) {
                 req.session.lastAuthenticatedAt = previousAuthenticatedAt;
-                req.session.lastMfaVerifiedAt = previousMfaVerifiedAt;
                 await new Promise((resolve) => req.session.save(() => resolve()));
             }
             console.error('管理员重新认证失败:', error);
@@ -517,7 +490,6 @@ module.exports = function registerAdminRoutes(app, deps) {
                 latestRecords: recentRecordData.byUsername,
                 dictationSubmissions: dictationSubmissions,
                 dictationLatest: dictationLatest,
-                adminMfaConfigured: Boolean(getAdminTotpSecret(req.session.user.username)),
                 csrfToken: req.session.csrfToken
             });
         } catch (err) {
@@ -632,7 +604,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: getAdminTotpSecret(adminUsername) ? 'password_totp' : 'password'
+                authStrength: 'password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -1010,7 +982,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { oldBalance: currentBalance, newBalance: balance, delta },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: getAdminTotpSecret(adminUsername) ? 'password_totp' : 'password'
+                authStrength: 'password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -1719,7 +1691,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { terminatedSessions: otherSessionIds.length },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: getAdminTotpSecret(adminUsername) ? 'password_totp' : 'password'
+                authStrength: 'password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -2535,8 +2507,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { authorizationId, outcome, refundAmount, reason },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: getAdminTotpSecret(req.session.user.username)
-                    ? 'recent_password_totp' : 'recent_password'
+                authStrength: 'recent_password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -2688,8 +2659,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { taskId, outcome, deliveredQuantity, refundAmount, reason, providerTransactionId },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: getAdminTotpSecret(req.session.user.username)
-                    ? 'recent_password_totp' : 'recent_password'
+                authStrength: 'recent_password'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');

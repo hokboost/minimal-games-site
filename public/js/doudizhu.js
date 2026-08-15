@@ -372,6 +372,8 @@
     }
 
     function toggleCard(cardId) {
+        if (actionInFlight || state?.phase !== 'playing' || !state?.legal?.canAct) return;
+        if (!(state.hand || []).some((card) => String(card.id) === cardId)) return;
         if (selectedCardIds.has(cardId)) selectedCardIds.delete(cardId);
         else selectedCardIds.add(cardId);
         renderHand();
@@ -384,6 +386,10 @@
             elements.status.classList.remove('is-error');
             elements.status.textContent = message;
         }
+        // render() can run while a request is still marked busy. Re-render the
+        // hand whenever busy changes so those freshly-created buttons do not
+        // retain a stale disabled property after the request settles.
+        renderHand();
         renderControls();
     }
 
@@ -445,8 +451,7 @@
             showError(null, t('网络异常，请重试以核对牌局状态。', 'Network error. Retry to confirm the match state.'));
             return null;
         } finally {
-            actionInFlight = false;
-            renderControls();
+            setBusy(false);
         }
     }
 
