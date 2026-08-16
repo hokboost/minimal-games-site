@@ -14,10 +14,12 @@
     let memorySelection = [];
     let memoryHidden = false;
     let memoryTimer = null;
+    let selectedSeason = 1;
 
     const elements = {
         board: document.getElementById('missionBoard'),
         cards: document.getElementById('missionCards'),
+        seasonTabs: document.getElementById('missionSeasonTabs'),
         active: document.getElementById('activeAdventure'),
         title: document.getElementById('active-chapter-title'),
         icon: document.getElementById('activeChapterIcon'),
@@ -76,6 +78,7 @@
                 throw new Error(data.message || t('操作失败，请重试', 'Action failed. Please try again.'));
             }
             state = data.state;
+            syncSeasonToActive();
             if (data.rewardEarned > 0) {
                 elements.message.textContent = t(
                     `章节首次通关，${data.rewardEarned} 积分已经到账！`,
@@ -101,7 +104,20 @@
     function renderMissions() {
         const complete = new Set(state.completedChapterIds || []);
         const activeId = state.active?.chapter?.id;
-        const nodes = (state.missions || []).map((mission) => {
+        const seasons = [...new Set((state.missions || []).map((mission) => mission.season))];
+        elements.seasonTabs.replaceChildren(...seasons.map((season) => {
+            const start = (season - 1) * 10 + 1;
+            const end = Math.min(season * 10, state.missions.length);
+            const tab = button(
+                t(`篇章 ${season} · ${start}–${end}章`, `Act ${season} · Ch. ${start}–${end}`),
+                season === selectedSeason ? 'is-selected' : '',
+                () => { selectedSeason = season; renderMissions(); }
+            );
+            tab.setAttribute('role', 'tab');
+            tab.setAttribute('aria-selected', String(season === selectedSeason));
+            return tab;
+        }));
+        const nodes = (state.missions || []).filter((mission) => mission.season === selectedSeason).map((mission) => {
             const locked = Boolean(mission.prerequisiteChapterId && !complete.has(mission.prerequisiteChapterId));
             const article = document.createElement('article');
             article.className = `mission-card mission-card--${mission.id}`;
@@ -157,6 +173,12 @@
             return article;
         });
         elements.cards.replaceChildren(...nodes);
+    }
+
+    function syncSeasonToActive() {
+        const activeId = state.active?.chapter?.id;
+        const activeMission = (state.missions || []).find((mission) => mission.id === activeId);
+        if (activeMission) selectedSeason = activeMission.season;
     }
 
     const stageKindLabel = (kind) => ({
@@ -510,5 +532,6 @@
     });
     document.getElementById('closeLeaderboardBtn').addEventListener('click', () => elements.leaderboard.close());
 
+    syncSeasonToActive();
     render();
 })();

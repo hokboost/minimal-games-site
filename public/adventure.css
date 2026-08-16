@@ -36,6 +36,9 @@
 
 .adventure-message { min-height: 28px; margin: 18px 8px; color: #8a4d12; font-weight: 750; text-align: center; }
 .mission-board, .active-adventure { margin-top: 42px; }
+.mission-season-tabs { display: flex; gap: 9px; margin-top: 22px; padding-bottom: 5px; overflow-x: auto; }
+.mission-season-tabs button { flex: 0 0 auto; padding: 10px 14px; border: 1px solid #cfd0d7; border-radius: 99px; color: #5a6074; background: rgba(255,255,255,.8); font-weight: 750; cursor: pointer; }
+.mission-season-tabs button.is-selected { color: white; border-color: var(--adventure-night); background: var(--adventure-night); }
 .adventure-section-heading, .adventure-run-header, .adventure-run-header > div { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .adventure-section-heading h2, .adventure-run-header h2 { margin: 0; font-size: clamp(1.8rem, 4vw, 3rem); letter-spacing: -.035em; }
 .mission-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 22px; }

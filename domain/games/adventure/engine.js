@@ -367,6 +367,7 @@ function projectState(inputState) {
         rulesVersion: state.rulesVersion,
         chapter: {
             id: chapter.id,
+            order: chapter.order,
             titleZh: chapter.titleZh,
             titleEn: chapter.titleEn,
             summaryZh: chapter.summaryZh,

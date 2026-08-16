@@ -35,8 +35,10 @@ function clearChapter(chapter) {
 test('adventure content is stable, varied, and valid', () => {
     assert.equal(adventure.validateContent(), true);
     const catalog = adventure.getMissionCatalog();
-    assert.equal(catalog.length, 8);
-    assert.equal(catalog.reduce((sum, chapter) => sum + chapter.stageCount, 0), 103);
+    assert.equal(catalog.length, 50);
+    assert.equal(catalog.reduce((sum, chapter) => sum + chapter.stageCount, 0), 607);
+    assert.deepEqual(catalog.map((mission) => mission.order), Array.from({ length: 50 }, (_, index) => index + 1));
+    assert.deepEqual([...new Set(catalog.map((mission) => mission.season))], [1, 2, 3, 4, 5]);
     for (const mission of catalog) {
         assert.ok(mission.gameModes.length >= 7);
         assert.ok(mission.reward > 0);
@@ -44,6 +46,8 @@ test('adventure content is stable, varied, and valid', () => {
     assert.deepEqual([...new Set(catalog.flatMap((mission) => mission.gameModes))].sort(), [
         'boss', 'choice', 'cipher', 'matching', 'memory', 'multi', 'narrative', 'order', 'path', 'quiz', 'resource'
     ]);
+    assert.equal(catalog[8].prerequisiteChapterId, 'star-core-court');
+    assert.equal(catalog[49].reward, 6320);
 });
 
 test('all chapters can be cleared through legal actions and finish exactly once', () => {

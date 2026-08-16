@@ -112,6 +112,14 @@ never trusted. A run uses an owner-bound revision compare-and-swap; the partial
 unique index permits one active run per user, while completion uniqueness makes
 first-clear settlement replay-safe.
 
+The campaign contains 50 contiguous chapters. Chapters 1–8 are handcrafted;
+chapters 9–50 are generated from validated immutable theme descriptors, with
+globally unique stage IDs and deterministic puzzles. This is content
+generation, not runtime randomness: a deployed content version always produces
+the same 607 stages, prerequisite chain, answers, and rewards. The browser
+paginates the campaign into five acts but the server independently enforces
+every prerequisite.
+
 ## Transaction rules
 
 For any value-bearing action, preserve this boundary:
