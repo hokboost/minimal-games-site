@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-16T22:53:03Z`
+Last updated: `2026-08-16T23:17:13Z`
 
 ## Pre-existing working-tree changes
 
@@ -72,13 +72,13 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 1 — Creator foundation
 
-- [ ] Complete.
-- Features:
-- Migrations:
-- Routes:
-- Tests:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Features: Versioned creator profile; normalized task/game/evidence/communication preferences; hard `all_messages` mute; consent history; IANA timezone; independent quiet hours and preferred interaction windows; configurable owner identity; non-monetary relationship XP/levels; immutable deduplicated relationship events; private/pinnable/archivable/hideable shared memories; persistent expiring inbox with read/archive state; owner-scoped JSON export; room-binding request/cancel state reconciled only by the existing safe administrator binding transaction; bilingual creator home/profile pages; default-off Creator Director read view.
+- Migrations: `migrations/add_creator_foundation.sql` adds ten bounded creator tables, active-request uniqueness, append-only consent/relationship triggers, immutable memory provenance and inbox content triggers, and no financial/provider table mutation. It is the final tracked migration in `lib/database-migrations.js`.
+- Routes: Creator pages at `GET /creator` and `GET /creator/profile`; state/export reads at `GET /api/creator/state` and `GET /api/creator/export`; nine fixed-path idempotent mutations for profile, preferences, quiet hours, preferred windows, room request/cancel, memory state, and inbox read/archive; safe read-only `GET /admin/creator-director`. IDs for writes are carried in bounded JSON bodies so the existing exact-path idempotency middleware protects every declared mutation.
+- Tests: 26 Creator Foundation subtests cover validation, default-off/strict flag parsing, semantic relationship dedupe, concurrent stale profile writes, same-source relationship concurrency, transaction rollback at consent/relationship/idempotency failure points, room-binding non-bypass/reconciliation, fixed route policy chains, migration immutability, export privacy, bilingual escaped UI, mobile controls, and read-only administration. `npm run test:all` passed with 181 Node test subtests plus all security-regression assertions. `npm run release:stage` passed and included repositories/services. `git diff --check` passed.
+- Credited added lines: 3,141 before this progress update (backend 1,509; frontend 848; tests 612; Phase 0 docs 158; other/tooling 14). Exact current totals are recorded below.
+- Risks or decisions: All seven Streamer World feature switches remain off by default and Creator Foundation requires both `STREAMER_WORLD_ENABLED=true` and `CREATOR_PROFILE_ENABLED=true`. The disposable PostgreSQL migration suite was not run because it requires explicit database-create authorization; no production database was touched. Inbox Socket.IO push/replay, live invitations, presence, and Director mutations remain explicitly deferred to Phase 4. No real gift send occurred; no creator module imports the provider, balance logger, gift exchange, or wish inventory code.
 
 ### Phase 2 — Quest Engine V2
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after the ADRs is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 1 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +0 / -0
-  frontend  +0 / -0
+  backend   +1,509 / -4
+  frontend  +848 / -0
   content   +0 / -0
-  tests     +0 / -0
+  tests     +612 / -0
   docs      +158 / -0
-  tooling   +0 / -0
-  other     +0 / -0
+  tooling   +2 / -1
+  other     +12 / -1
 
-Credited additions: 158
-Meaningful deletions: 0
-Credited net growth: 158
-Backend + frontend + content: 0
+Credited additions: 3,141
+Meaningful deletions: 6
+Credited net growth: 3,135
+Backend + frontend + content: 2,357
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 158 / 50,000
-  [FAIL] net growth: 158 / 40,000
-  [FAIL] backend additions: 0 / 12,000
-  [FAIL] frontend additions: 0 / 8,000
+  [FAIL] total meaningful additions: 3,141 / 50,000
+  [FAIL] net growth: 3,135 / 40,000
+  [FAIL] backend additions: 1,509 / 12,000
+  [FAIL] frontend additions: 848 / 8,000
   [FAIL] authored-content additions: 0 / 16,000
-  [FAIL] test additions: 0 / 10,000
-  [FAIL] backend + frontend + content: 0 / 36,000
+  [FAIL] test additions: 612 / 10,000
+  [FAIL] backend + frontend + content: 2,357 / 36,000
 
 Overall: FAIL
 ```
 
-The overall failure is expected in Phase 0; no production subsystem has been implemented yet.
+The overall threshold failure remains expected after Phase 1; later phases supply the required quest, story, game, frontend, test, and authored-content volume.
 
 ## Current acceptance status
 

@@ -14,6 +14,9 @@
         <% if (typeof user !== 'undefined' && user && user.authorized) { %>
             <a href="/gifts"><%= lang === 'zh' ? '礼物' : 'Gifts' %></a>
             <a href="/profile"><%= lang === 'zh' ? '记录' : 'Activity' %></a>
+            <% if (typeof streamerWorldFlags !== 'undefined' && streamerWorldFlags.creatorFoundationEnabled) { %>
+                <a href="/creator" class="<%= active === 'creator' ? 'active' : '' %>"><%= lang === 'zh' ? '主播世界' : 'Creator World' %></a>
+            <% } %>
         <% } %>
     </nav>
 

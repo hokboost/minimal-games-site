@@ -15,6 +15,9 @@
             <div class="nav-links">
                 <span><%= lang === 'zh' ? '欢迎，' : 'Welcome, ' %><%= user.username %></span>
                 <a href="/admin/analytics"><%= lang === 'zh' ? 'UX 分析' : 'UX analytics' %></a>
+                <% if (typeof streamerWorldFlags !== 'undefined' && streamerWorldFlags.creatorFoundationEnabled) { %>
+                    <a href="/admin/creator-director"><%= lang === 'zh' ? '主播导演台' : 'Creator Director' %></a>
+                <% } %>
                 <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
                 <form method="POST" action="/logout" class="logout-form">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">

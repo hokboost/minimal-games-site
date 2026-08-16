@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/redesign.css">
+    <link rel="stylesheet" href="/creator-world.css">
+</head>
+<body class="app-redesign creator-world">
+    <%- include('partials/language-switcher') %>
+    <div class="site-layout">
+        <%- include('partials/site-header', { active: 'admin' }) %>
+        <main class="creator-shell">
+            <header class="creator-hero">
+                <div>
+                    <span class="creator-eyebrow"><%= lang === 'zh' ? '管理员 · 只读' : 'Admin · Read only' %></span>
+                    <h1><%= title %></h1>
+                    <p><%= lang === 'zh' ? '这里只显示互动安全摘要。房间审批仍在原管理员安全流程中完成。' : 'This view exposes interaction safety summaries only. Room approval remains in the existing secure admin flow.' %></p>
+                    <p><%= ownerUsername ? (lang === 'zh' ? `已配置站主账号：${ownerUsername}` : `Configured owner account: ${ownerUsername}`) : (lang === 'zh' ? '尚未配置专属站主账号；管理员操作会标记为管理员来源。' : 'No dedicated owner account is configured; administrator actions are marked as admin-authored.') %></p>
+                </div>
+                <a class="creator-button creator-button-secondary" href="/admin"><%= lang === 'zh' ? '返回管理后台' : 'Back to admin' %></a>
+            </header>
+            <section class="creator-panel">
+                <div class="creator-table-wrap">
+                    <table class="creator-table">
+                        <thead><tr>
+                            <th><%= lang === 'zh' ? '账号' : 'Account' %></th>
+                            <th><%= lang === 'zh' ? '互动同意' : 'Consent' %></th>
+                            <th><%= lang === 'zh' ? '关系' : 'Relationship' %></th>
+                            <th><%= lang === 'zh' ? '当前房间' : 'Current room' %></th>
+                            <th><%= lang === 'zh' ? '最近申请' : 'Latest request' %></th>
+                        </tr></thead>
+                        <tbody>
+                            <% summary.creators.forEach((creator) => { %>
+                                <tr>
+                                    <td><strong><%= creator.displayName || creator.username %></strong><br><small><%= creator.username %> · <%= creator.timezone || 'UTC' %></small></td>
+                                    <td><%= creator.liveInteractionOptIn ? (lang === 'zh' ? '实时互动：允许' : 'Live: allowed') : (lang === 'zh' ? '实时互动：关闭' : 'Live: off') %><br><small><%= creator.profileVisibility || 'private' %></small></td>
+                                    <td>Lv.<%= creator.level %> · <%= creator.totalXp %> XP<br><small><%= creator.milestone.replaceAll('_', ' ') %></small></td>
+                                    <td><%= creator.bilibiliRoomId || '—' %></td>
+                                    <td>
+                                        <% if (creator.roomRequest) { %>
+                                            <strong><%= creator.roomRequest.requestedRoomId %></strong><br><small><%= creator.roomRequest.status %></small>
+                                        <% } else { %>—<% } %>
+                                    </td>
+                                </tr>
+                            <% }); %>
+                        </tbody>
+                    </table>
+                </div>
+                <% if (summary.creators.length === 0) { %><p class="creator-muted"><%= lang === 'zh' ? '暂无已建立资料或申请绑定的主播。' : 'No creators have a profile or room request yet.' %></p><% } %>
+                <nav class="creator-pagination" aria-label="<%= lang === 'zh' ? '分页' : 'Pagination' %>">
+                    <% if (summary.page > 1) { %><a href="?page=<%= summary.page - 1 %>"><%= lang === 'zh' ? '上一页' : 'Previous' %></a><% } %>
+                    <span><%= lang === 'zh' ? `第 ${summary.page} 页` : `Page ${summary.page}` %></span>
+                    <% if (summary.creators.length === summary.pageSize) { %><a href="?page=<%= summary.page + 1 %>"><%= lang === 'zh' ? '下一页' : 'Next' %></a><% } %>
+                </nav>
+            </section>
+        </main>
+        <%- include('partials/app-footer') %>
+    </div>
+</body>
+</html>

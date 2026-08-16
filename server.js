@@ -97,7 +97,18 @@ const registerDoudizhuRoutes = require('./routes/doudizhu');
 const registerAdventureRoutes = require('./routes/adventure');
 const registerTaskRoutes = require('./routes/tasks');
 const registerAnalyticsRoutes = require('./routes/analytics');
+const registerCreatorRoutes = require('./routes/creators');
+const registerAdminCreatorDirectorRoutes = require('./routes/admin-creator-director');
+const { CreatorRepository } = require('./repositories/creator-repository');
+const { CreatorProfileService } = require('./services/creator-profile-service');
+const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
 const questService = new QuestService({ BalanceLogger });
+const streamerWorldFlags = readStreamerWorldFlags();
+const creatorRepository = new CreatorRepository({ pool });
+const creatorService = new CreatorProfileService({
+    repository: creatorRepository,
+    gameIds: gameRegistry.GAME_DEFINITIONS.map((game) => game.id)
+});
 
 // 导入i18n国际化
 const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
@@ -123,6 +134,7 @@ app.locals.gameCatalog = gameRegistry.GAME_DEFINITIONS;
 app.locals.gameCatalogGroups = gameRegistry.GAME_GROUPS;
 app.locals.gameRecordViews = gameRegistry.presentation.RECORD_VIEWS;
 app.locals.gamePublicWishConfigs = gameRegistry.getPublicWishConfigs();
+app.locals.streamerWorldFlags = streamerWorldFlags;
 const server = http.createServer(app);
 
 // WebSocket session认证中间件
@@ -2788,6 +2800,8 @@ registerAdminRoutes(app, {
     SessionManager,
     notifySecurityEvent,
     disconnectUserSockets,
+    creatorRepository,
+    creatorOwnerUsername: streamerWorldFlags.ownerUsername,
     passwordResetTokenSecret: resetTokenSecret
 });
 
@@ -2883,6 +2897,25 @@ registerTaskRoutes(app, {
     requireCSRF,
     security,
     questService
+});
+
+registerCreatorRoutes(app, {
+    creatorService,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireCSRF,
+    security
+});
+
+registerAdminCreatorDirectorRoutes(app, {
+    creatorService,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAdmin,
+    security
 });
 
 // 404 处理（必须在所有API路由之后）

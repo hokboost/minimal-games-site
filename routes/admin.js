@@ -18,7 +18,9 @@ module.exports = function registerAdminRoutes(app, deps) {
         notifySecurityEvent,
         disconnectUserSockets,
         passwordResetTokenSecret,
-        gameRegistry
+        gameRegistry,
+        creatorRepository,
+        creatorOwnerUsername
     } = deps;
     if (!Buffer.isBuffer(passwordResetTokenSecret) || passwordResetTokenSecret.length < 32) {
         throw new Error('passwordResetTokenSecret must be a Buffer of at least 32 bytes');
@@ -1838,7 +1840,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 [normalizedRoomId]
             );
             const target = await client.query(
-                `SELECT username, bilibili_room_id, deactivated
+                `SELECT id, username, bilibili_room_id, deactivated
                  FROM users
                  WHERE username = $1
                  FOR UPDATE`,
@@ -1907,6 +1909,15 @@ module.exports = function registerAdminRoutes(app, deps) {
             if (updated.rowCount !== 1) {
                 throw new Error('Room binding target changed concurrently');
             }
+            const creatorRoomRequestResolution = creatorRepository?.resolveRoomRequestsOnExistingBind
+                ? await creatorRepository.resolveRoomRequestsOnExistingBind(client, {
+                    userId: Number(target.rows[0].id),
+                    roomId: normalizedRoomId,
+                    reviewerUsername: adminUsername,
+                    actorType: creatorOwnerUsername === adminUsername ? 'owner' : 'admin',
+                    requestId: req.idempotencyKey
+                })
+                : [];
             const hasUnresolved = transition.unresolvedGiftCount + transition.unresolvedPkCount > 0;
             const responseBody = {
                 success: true,
@@ -1916,6 +1927,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 roomId: normalizedRoomId,
                 targetUser: usernameToUpdate,
                 roomChanged,
+                creatorRoomRequestResolution,
                 ...transition
             };
             const scheduledInventoryCount = await scheduleWishInventoryDeliveryOnBind(
@@ -1933,6 +1945,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                     roomId: normalizedRoomId,
                     roomChanged,
                     scheduledInventoryCount,
+                    creatorRoomRequestResolution,
                     ...transition
                 },
                 clientIP: req.clientIP,

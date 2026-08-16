@@ -9,7 +9,7 @@
     "preview": "node scripts/preview-ui.js",
     "test:syntax": "node scripts/check-syntax.js",
     "test:secrets": "node scripts/check-secrets.js",
-    "test": "node scripts/security-regression.js && node tests/security-unit.test.js && node tests/game-registry.test.js && node tests/doudizhu-engine.test.js && node tests/doudizhu-api.test.js && node tests/doudizhu-ui.test.js && node tests/adventure-engine.test.js && node tests/adventure-api.test.js && node tests/task-cards.test.js && node tests/quest-v2.test.js && node tests/route-manifest.test.js && node tests/admin-records.test.js && node tests/application-lifecycle.test.js",
+    "test": "node scripts/security-regression.js && node tests/security-unit.test.js && node tests/game-registry.test.js && node tests/doudizhu-engine.test.js && node tests/doudizhu-api.test.js && node tests/doudizhu-ui.test.js && node tests/adventure-engine.test.js && node tests/adventure-api.test.js && node tests/task-cards.test.js && node tests/quest-v2.test.js && node tests/creator-foundation.test.js && node tests/route-manifest.test.js && node tests/admin-records.test.js && node tests/application-lifecycle.test.js",
     "test:all": "npm run test:syntax && npm run test:secrets && npm test",
     "test:migrations": "node scripts/test-fresh-migrations.js",
     "test:resilience": "node scripts/test-runtime-resilience.js",

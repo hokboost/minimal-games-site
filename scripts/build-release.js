@@ -14,7 +14,8 @@ const allowlist = [
     'README.md', 'SECURITY.md', 'render.yaml',
     'docs/ARCHITECTURE.md', 'docs/DATABASE_ROLES.md', 'docs/GAME_ECONOMICS.md',
     'docs/THIRD_PARTY_NOTICES.md',
-    'app', 'data', 'domain', 'lib', 'middleware', 'migrations', 'public', 'routes', 'views',
+    'app', 'data', 'domain', 'lib', 'middleware', 'migrations', 'public', 'repositories',
+    'routes', 'services', 'views',
     'workers/bilibili', 'scripts/run-migrations.js', 'scripts/check-secrets.js'
 ];
 

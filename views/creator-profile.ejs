@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/redesign.css">
+    <link rel="stylesheet" href="/creator-world.css">
+</head>
+<body class="app-redesign creator-world" data-csrf-token="<%= csrfToken %>">
+    <% const profile = dashboard.profile || {}; %>
+    <% const pref = (type, key) => dashboard.preferences.find((item) => item.type === type && item.key === key)?.value || 'neutral'; %>
+    <% const minuteTime = (value, fallback) => { const minute = Number.isInteger(value) ? value : fallback; return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`; }; %>
+    <% const days = lang === 'zh' ? ['周日','周一','周二','周三','周四','周五','周六'] : ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; %>
+    <%- include('partials/language-switcher') %>
+    <div class="site-layout">
+        <%- include('partials/site-header', { active: 'creator' }) %>
+        <main class="creator-shell creator-form-shell">
+            <header class="creator-hero">
+                <div>
+                    <span class="creator-eyebrow"><%= lang === 'zh' ? '可撤回 · 不影响奖励' : 'Reversible · Reward neutral' %></span>
+                    <h1><%= title %></h1>
+                    <p><%= lang === 'zh' ? '拒绝邀请、屏蔽类别或关闭实时互动不会降低亲密度，也不会影响礼物兑换资格。' : 'Declining invites, blocking categories, or disabling live interaction never lowers relationship level or gift eligibility.' %></p>
+                </div>
+                <a class="creator-button creator-button-secondary" href="/creator"><%= lang === 'zh' ? '返回主播世界' : 'Back to Creator World' %></a>
+            </header>
+
+            <form id="creator-profile-form" class="creator-panel creator-form" data-version="<%= profile.version || 0 %>">
+                <div class="creator-panel-heading"><div><span class="creator-eyebrow">1</span><h2><%= lang === 'zh' ? '你的资料' : 'Your profile' %></h2></div></div>
+                <div class="creator-form-grid">
+                    <label><span><%= lang === 'zh' ? '显示名称' : 'Display name' %></span><input name="displayName" maxlength="80" required value="<%= profile.displayName || user.username %>"></label>
+                    <label><span><%= lang === 'zh' ? '称谓 / 代词（可选）' : 'Pronouns (optional)' %></span><input name="pronouns" maxlength="80" value="<%= profile.pronouns || '' %>"></label>
+                    <label><span><%= lang === 'zh' ? '时区' : 'Time zone' %></span><input name="timezone" maxlength="80" required value="<%= profile.timezone || 'UTC' %>" placeholder="Asia/Shanghai"></label>
+                    <label><span><%= lang === 'zh' ? '游戏难度' : 'Game difficulty' %></span><select name="difficulty">
+                        <% [['relaxed','轻松 / Relaxed'],['guided','引导 / Guided'],['balanced','均衡 / Balanced'],['challenging','挑战 / Challenging']].forEach(([value,label]) => { %><option value="<%= value %>" <%= (profile.difficulty || 'guided') === value ? 'selected' : '' %>><%= label %></option><% }); %>
+                    </select></label>
+                    <label><span><%= lang === 'zh' ? '剧情基调' : 'Story tone' %></span><select name="storyTone">
+                        <% [['gentle','温柔 / Gentle'],['mystery','悬疑 / Mystery'],['adventure','冒险 / Adventure'],['dramatic','戏剧 / Dramatic']].forEach(([value,label]) => { %><option value="<%= value %>" <%= (profile.storyTone || 'gentle') === value ? 'selected' : '' %>><%= label %></option><% }); %>
+                    </select></label>
+                    <label><span><%= lang === 'zh' ? '沟通节奏' : 'Communication pace' %></span><select name="communicationStyle">
+                        <% [['async','异步 / Async'],['live','实时 / Live'],['low_frequency','低频 / Low frequency']].forEach(([value,label]) => { %><option value="<%= value %>" <%= (profile.communicationStyle || 'async') === value ? 'selected' : '' %>><%= label %></option><% }); %>
+                    </select></label>
+                    <label><span><%= lang === 'zh' ? '资料可见范围' : 'Profile visibility' %></span><select name="profileVisibility"><option value="private" <%= (profile.profileVisibility || 'private') === 'private' ? 'selected' : '' %>><%= lang === 'zh' ? '仅自己' : 'Private' %></option><option value="owner" <%= profile.profileVisibility === 'owner' ? 'selected' : '' %>><%= lang === 'zh' ? '自己与站主' : 'Creator and owner' %></option></select></label>
+                    <label><span><%= lang === 'zh' ? '证据保留' : 'Evidence retention' %></span><select name="evidenceRetention"><option value="minimum" <%= (profile.evidenceRetention || 'minimum') === 'minimum' ? 'selected' : '' %>><%= lang === 'zh' ? '最少' : 'Minimum' %></option><option value="standard" <%= profile.evidenceRetention === 'standard' ? 'selected' : '' %>><%= lang === 'zh' ? '标准' : 'Standard' %></option><option value="extended" <%= profile.evidenceRetention === 'extended' ? 'selected' : '' %>><%= lang === 'zh' ? '延长' : 'Extended' %></option></select></label>
+                </div>
+                <label class="creator-wide"><span><%= lang === 'zh' ? '简介' : 'Bio' %></span><textarea name="bio" maxlength="500" rows="4"><%= profile.bio || '' %></textarea></label>
+                <fieldset><legend><%= lang === 'zh' ? '互动身份（最多三个）' : 'Interaction roles (up to three)' %></legend><div class="creator-choice-grid">
+                    <% [['friend','朋友 / Friend'],['co_creator','共创者 / Co-creator'],['mentor','导师 / Mentor'],['playful_rival','友好对手 / Playful rival'],['story_partner','故事搭档 / Story partner'],['quiet_support','安静支持 / Quiet support']].forEach(([value,label]) => { %><label class="creator-check"><input type="checkbox" name="interactionTones" value="<%= value %>" <%= (profile.interactionTones || []).includes(value) ? 'checked' : '' %>><span><%= label %></span></label><% }); %>
+                </div></fieldset>
+                <label class="creator-toggle"><input type="checkbox" name="liveInteractionOptIn" <%= profile.liveInteractionOptIn ? 'checked' : '' %>><span><strong><%= lang === 'zh' ? '允许实时互动' : 'Allow live interaction' %></strong><small><%= lang === 'zh' ? '默认关闭；以后可以随时关闭。' : 'Off by default; you can turn it off at any time.' %></small></span></label>
+                <button class="creator-button" type="submit"><%= lang === 'zh' ? '保存资料' : 'Save profile' %></button>
+            </form>
+
+            <form id="creator-preferences-form" class="creator-panel creator-form">
+                <div class="creator-panel-heading"><div><span class="creator-eyebrow">2</span><h2><%= lang === 'zh' ? '允许、避开与屏蔽' : 'Allow, avoid, and block' %></h2></div></div>
+                <p class="creator-muted"><%= lang === 'zh' ? '“屏蔽”是硬边界；后续任务与邀请不得越过。' : '“Block” is a hard boundary future quests and invitations must respect.' %></p>
+                <div class="creator-preference-list">
+                    <% const preferenceGroups = [
+                        ['quest_category', [['exploration','探索'],['creativity','创作'],['streaming_practice','直播练习'],['game_mastery','游戏精通'],['story','剧情'],['coop','合作'],['community','社区'],['collection','收集'],['wellbeing','身心舒适']]],
+                        ['communication', [['all_messages','全部消息'],['owner_notes','站主消息'],['quest_invites','任务邀请'],['game_invites','游戏邀请'],['celebrations','庆祝消息']]],
+                        ['evidence', [['screenshot','截图'],['text','文字'],['checklist','清单']]],
+                        ['game', (dashboard.gameIds || []).map((id) => [id,id])]
+                    ]; %>
+                    <% preferenceGroups.forEach(([type, entries]) => { entries.forEach(([key,label]) => { %>
+                        <label class="creator-preference" data-preference-type="<%= type %>" data-preference-key="<%= key %>"><span><%= label %></span><select>
+                            <% [['allow','允许 / Allow'],['neutral','中立 / Neutral'],['avoid','避开 / Avoid'],['block','屏蔽 / Block']].forEach(([value,text]) => { %><option value="<%= value %>" <%= pref(type,key) === value ? 'selected' : '' %>><%= text %></option><% }); %>
+                        </select></label>
+                    <% }); }); %>
+                </div>
+                <button class="creator-button" type="submit"><%= lang === 'zh' ? '保存偏好' : 'Save preferences' %></button>
+            </form>
+
+            <form id="creator-quiet-form" class="creator-panel creator-form">
+                <div class="creator-panel-heading"><div><span class="creator-eyebrow">3</span><h2><%= lang === 'zh' ? '安静时间' : 'Quiet hours' %></h2></div></div>
+                <p class="creator-muted"><%= lang === 'zh' ? '跨午夜时段也受支持，例如 22:00–08:00。' : 'Overnight windows are supported, such as 22:00–08:00.' %></p>
+                <div class="creator-quiet-list">
+                    <% days.forEach((day, weekday) => { const window = dashboard.quietHours.find((item) => item.weekday === weekday); %>
+                        <div class="creator-quiet-row" data-weekday="<%= weekday %>"><label class="creator-check"><input class="quiet-enabled" type="checkbox" <%= window?.enabled ? 'checked' : '' %>><span><%= day %></span></label><label><span><%= lang === 'zh' ? '开始' : 'Start' %></span><input class="quiet-start" type="time" value="<%= minuteTime(window?.startMinute,1320) %>"></label><label><span><%= lang === 'zh' ? '结束' : 'End' %></span><input class="quiet-end" type="time" value="<%= minuteTime(window?.endMinute,480) %>"></label></div>
+                    <% }); %>
+                </div>
+                <button class="creator-button" type="submit"><%= lang === 'zh' ? '保存安静时间' : 'Save quiet hours' %></button>
+            </form>
+
+            <form id="creator-interaction-form" class="creator-panel creator-form">
+                <div class="creator-panel-heading"><div><span class="creator-eyebrow">4</span><h2><%= lang === 'zh' ? '偏好互动窗口' : 'Preferred interaction windows' %></h2></div></div>
+                <p class="creator-muted"><%= lang === 'zh' ? `时间按资料时区 ${profile.timezone || 'UTC'} 解释。每个窗口为 30 分钟至 12 小时，偏好窗口永远不会覆盖安静时间。` : `Times use your profile timezone, ${profile.timezone || 'UTC'}. Each window is 30 minutes to 12 hours and never overrides quiet hours.` %></p>
+                <div class="creator-quiet-list">
+                    <% days.forEach((day, weekday) => { const window = (dashboard.interactionWindows || []).find((item) => item.weekday === weekday); %>
+                        <div class="creator-quiet-row creator-interaction-row" data-weekday="<%= weekday %>"><label class="creator-check"><input class="interaction-enabled" type="checkbox" <%= window?.enabled ? 'checked' : '' %>><span><%= day %></span></label><label><span><%= lang === 'zh' ? '开始' : 'Start' %></span><input class="interaction-start" type="time" value="<%= minuteTime(window?.startMinute,1080) %>"></label><label><span><%= lang === 'zh' ? '结束 / 模式' : 'End / mode' %></span><span class="creator-combined-controls"><input class="interaction-end" type="time" value="<%= minuteTime(window?.endMinute,1320) %>"><select class="interaction-mode"><option value="either" <%= (window?.mode || 'either') === 'either' ? 'selected' : '' %>><%= lang === 'zh' ? '均可' : 'Either' %></option><option value="async" <%= window?.mode === 'async' ? 'selected' : '' %>><%= lang === 'zh' ? '异步' : 'Async' %></option><option value="live" <%= window?.mode === 'live' ? 'selected' : '' %>><%= lang === 'zh' ? '实时' : 'Live' %></option></select></span></label></div>
+                    <% }); %>
+                </div>
+                <button class="creator-button" type="submit" <%= profile.version ? '' : 'disabled' %>><%= lang === 'zh' ? '保存偏好窗口' : 'Save preferred windows' %></button>
+            </form>
+
+            <section class="creator-panel creator-form">
+                <div class="creator-panel-heading"><div><span class="creator-eyebrow">5</span><h2><%= lang === 'zh' ? 'B站房间绑定申请' : 'Bilibili room binding request' %></h2></div></div>
+                <div class="creator-safety-note"><strong><%= lang === 'zh' ? '申请不会直接绑定房间。' : 'A request never binds the room directly.' %></strong><p><%= lang === 'zh' ? '管理员仍须在原有安全页面核验并执行绑定；礼物与 PK 工作器状态机不会被这里绕过。' : 'An administrator must verify and bind it through the existing secure screen; this cannot bypass gift or PK worker state machines.' %></p></div>
+                <% if (dashboard.roomRequest) { %>
+                    <div class="creator-active-request"><p><strong><%= dashboard.roomRequest.requestedRoomId %></strong> · <%= dashboard.roomRequest.status %></p><button id="cancel-room-request" class="creator-button creator-button-secondary" type="button" data-request-id="<%= dashboard.roomRequest.id %>"><%= lang === 'zh' ? '撤回申请' : 'Cancel request' %></button></div>
+                <% } else { %>
+                    <form id="creator-room-form" class="creator-inline-form"><label><span><%= lang === 'zh' ? '房间号' : 'Room ID' %></span><input name="roomId" inputmode="numeric" pattern="[1-9][0-9]{0,11}" maxlength="12" required></label><label><span><%= lang === 'zh' ? '备注（可选）' : 'Note (optional)' %></span><input name="note" maxlength="300"></label><button class="creator-button" type="submit"><%= lang === 'zh' ? '提交核验申请' : 'Request verification' %></button></form>
+                <% } %>
+            </section>
+            <p id="creator-message" class="creator-message" role="status" aria-live="polite"></p>
+        </main>
+        <%- include('partials/app-footer') %>
+    </div>
+    <script src="/js/i18n-helpers.js"></script>
+    <script src="/js/creator-profile.js"></script>
+</body>
+</html>

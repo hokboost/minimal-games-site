@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/redesign.css">
+    <link rel="stylesheet" href="/creator-world.css">
+</head>
+<body class="app-redesign creator-world" data-csrf-token="<%= csrfToken %>">
+    <%- include('partials/language-switcher') %>
+    <div class="site-layout">
+        <%- include('partials/site-header', { active: 'creator' }) %>
+        <main class="creator-shell">
+            <header class="creator-hero">
+                <div>
+                    <span class="creator-eyebrow"><%= lang === 'zh' ? '共同世界 · 私密空间' : 'Shared world · Private space' %></span>
+                    <h1><%= dashboard.profile ? dashboard.profile.displayName : (lang === 'zh' ? '建立你的主播世界资料' : 'Create your Creator World profile') %></h1>
+                    <p><%= lang === 'zh' ? '你的边界、共同记忆和关系里程碑都在这里。它们不影响积分或礼物资格。' : 'Your boundaries, shared memories, and relationship milestones live here. They never affect points or gift eligibility.' %></p>
+                </div>
+                <a class="creator-button" href="/creator/profile"><%= lang === 'zh' ? '编辑互动偏好' : 'Edit preferences' %></a>
+                <a class="creator-button" href="/api/creator/export"><%= lang === 'zh' ? '导出我的数据' : 'Export my data' %></a>
+            </header>
+
+            <section class="creator-grid creator-overview" aria-label="<%= lang === 'zh' ? '关系概览' : 'Relationship overview' %>">
+                <article class="creator-card creator-level-card">
+                    <span class="creator-card-label"><%= lang === 'zh' ? '关系等级' : 'Relationship level' %></span>
+                    <strong class="creator-level"><%= dashboard.relationship.level %></strong>
+                    <p><%= dashboard.relationship.milestone.replaceAll('_', ' ') %> · <%= dashboard.relationship.totalXp %> XP</p>
+                    <% if (dashboard.relationship.nextLevelXp) { %>
+                        <progress value="<%= dashboard.relationship.progressToNext %>" max="<%= dashboard.relationship.requiredForNext %>"></progress>
+                    <% } %>
+                </article>
+                <article class="creator-card">
+                    <span class="creator-card-label"><%= lang === 'zh' ? '直播互动' : 'Live interaction' %></span>
+                    <strong><%= dashboard.profile?.liveInteractionOptIn ? (lang === 'zh' ? '已主动开启' : 'Opted in') : (lang === 'zh' ? '保持关闭' : 'Kept off') %></strong>
+                    <p><%= lang === 'zh' ? '关闭时不会收到实时合作邀请。' : 'No real-time collaboration invitations while off.' %></p>
+                </article>
+                <article class="creator-card">
+                    <span class="creator-card-label"><%= lang === 'zh' ? 'B站房间' : 'Bilibili room' %></span>
+                    <strong><%= dashboard.account.bilibiliRoomId || (lang === 'zh' ? '未绑定' : 'Not bound') %></strong>
+                    <p>
+                        <% if (dashboard.roomRequest) { %>
+                            <%= lang === 'zh' ? `申请 ${dashboard.roomRequest.requestedRoomId} · ${dashboard.roomRequest.status}` : `Request ${dashboard.roomRequest.requestedRoomId} · ${dashboard.roomRequest.status}` %>
+                        <% } else { %>
+                            <%= lang === 'zh' ? '新申请必须由管理员通过原安全流程核验。' : 'New requests require the existing secure admin verification flow.' %>
+                        <% } %>
+                    </p>
+                </article>
+            </section>
+
+            <% if (!dashboard.profile) { %>
+                <section class="creator-empty">
+                    <h2><%= lang === 'zh' ? '从边界开始' : 'Start with boundaries' %></h2>
+                    <p><%= lang === 'zh' ? '创建资料后才会生成第一条共享记忆。' : 'Your first shared memory is created only after you save a profile.' %></p>
+                    <a class="creator-button" href="/creator/profile"><%= lang === 'zh' ? '创建资料' : 'Create profile' %></a>
+                </section>
+            <% } %>
+
+            <div class="creator-columns">
+                <section class="creator-panel" aria-labelledby="memory-title">
+                    <div class="creator-panel-heading">
+                        <div>
+                            <span class="creator-eyebrow"><%= lang === 'zh' ? '可追溯' : 'Traceable' %></span>
+                            <h2 id="memory-title"><%= lang === 'zh' ? '共享记忆' : 'Shared memories' %></h2>
+                        </div>
+                        <span><%= dashboard.memories.length %></span>
+                    </div>
+                    <% if (dashboard.memories.length === 0) { %>
+                        <p class="creator-muted"><%= lang === 'zh' ? '还没有共同记忆。' : 'No shared memories yet.' %></p>
+                    <% } %>
+                    <% dashboard.memories.forEach((memory) => { %>
+                        <article class="creator-entry <%= memory.archived ? 'is-archived' : '' %>">
+                            <div>
+                                <h3><%= memory.title %></h3>
+                                <p><%= memory.body %></p>
+                            </div>
+                            <div class="creator-entry-actions">
+                                <button type="button" data-memory-id="<%= memory.id %>" data-pinned="<%= !memory.pinned %>" data-archived="<%= memory.archived %>" data-visibility="<%= memory.visibility %>"><%= memory.pinned ? (lang === 'zh' ? '取消置顶' : 'Unpin') : (lang === 'zh' ? '置顶' : 'Pin') %></button>
+                                <button type="button" data-memory-id="<%= memory.id %>" data-pinned="<%= memory.pinned %>" data-archived="<%= !memory.archived %>" data-visibility="<%= memory.visibility %>"><%= memory.archived ? (lang === 'zh' ? '恢复' : 'Restore') : (lang === 'zh' ? '归档' : 'Archive') %></button>
+                                <button type="button" data-memory-id="<%= memory.id %>" data-pinned="<%= memory.pinned %>" data-archived="<%= memory.archived %>" data-hidden="true" data-visibility="<%= memory.visibility %>"><%= lang === 'zh' ? '隐藏' : 'Hide' %></button>
+                            </div>
+                        </article>
+                    <% }); %>
+                </section>
+
+                <section class="creator-panel" aria-labelledby="inbox-title">
+                    <div class="creator-panel-heading">
+                        <div>
+                            <span class="creator-eyebrow"><%= lang === 'zh' ? '持久消息' : 'Persistent messages' %></span>
+                            <h2 id="inbox-title"><%= lang === 'zh' ? '收件箱' : 'Inbox' %></h2>
+                        </div>
+                        <span><%= dashboard.inbox.filter((message) => !message.readAt).length %></span>
+                    </div>
+                    <% if (dashboard.inbox.length === 0) { %>
+                        <p class="creator-muted"><%= lang === 'zh' ? '收件箱是空的。' : 'Your inbox is empty.' %></p>
+                    <% } %>
+                    <% dashboard.inbox.forEach((message) => { %>
+                        <article class="creator-entry <%= message.readAt ? 'is-read' : 'is-unread' %>">
+                            <div>
+                                <h3><%= message.title %></h3>
+                                <p><%= message.body %></p>
+                                <% if (message.actionPath) { %><a href="<%= message.actionPath %>"><%= lang === 'zh' ? '查看' : 'Open' %></a><% } %>
+                            </div>
+                            <div class="creator-entry-actions">
+                                <% if (!message.readAt) { %><button type="button" data-inbox-id="<%= message.id %>" data-inbox-action="read"><%= lang === 'zh' ? '标为已读' : 'Mark read' %></button><% } %>
+                                <button type="button" data-inbox-id="<%= message.id %>" data-inbox-action="archive"><%= lang === 'zh' ? '归档' : 'Archive' %></button>
+                            </div>
+                        </article>
+                    <% }); %>
+                </section>
+            </div>
+            <p id="creator-message" class="creator-message" role="status" aria-live="polite"></p>
+        </main>
+        <%- include('partials/app-footer') %>
+    </div>
+    <script src="/js/i18n-helpers.js"></script>
+    <script src="/js/creator-home.js"></script>
+</body>
+</html>
