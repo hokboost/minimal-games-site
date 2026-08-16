@@ -56,6 +56,7 @@ const {
     createAdminFailureAuditMiddleware,
     scopedAuditRequestId
 } = require('../lib/admin-audit-failure');
+const PostgresRateLimitStore = require('../lib/postgres-rate-limit-store');
 const GameLogic = require('../data/gameLogic');
 const {
     WindowsGiftListener,
@@ -167,6 +168,16 @@ test('failed admin mutations are audited once without request body data', async 
     assert.equal(queries.length, 1);
     assert.equal(queries[0].values[0], scopedAuditRequestId('admin-user', 'idempotency-key'));
     assert.equal(queries[0].values.join(' ').includes('must-not-be-audited'), false);
+    assert.equal(queries[0].values[4], '203.0.113.2');
+});
+
+test('PostgreSQL rate-limit stores declare their namespaced keys as instance-local', () => {
+    const pool = { query: async () => ({ rows: [] }) };
+    const admin = new PostgresRateLimitStore(pool, 'security:admin');
+    const strict = new PostgresRateLimitStore(pool, 'security:admin-strict');
+    assert.equal(admin.localKeys, true);
+    assert.equal(strict.localKeys, true);
+    assert.notEqual(admin.hashKey('user:hokboost'), strict.hashKey('user:hokboost'));
 });
 
 test('paid action concurrency guard caps requests and releases every terminal response once', () => {
