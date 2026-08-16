@@ -54,6 +54,9 @@ test('adventure content is stable, varied, and valid', () => {
     assert.equal(new Set(authored.map((chapter) => chapter.summaryZh)).size, 42);
     assert.equal(new Set(authored.map((chapter) => chapter.stages[0].text)).size, 42);
     assert.equal(new Set(authored.map((chapter) => chapter.stages.at(-1).text)).size, 42);
+    assert.equal(new Set(authored.flatMap((chapter) => chapter.stages.map((stage) => stage.title))).size, 504);
+    const promptedStages = authored.flatMap((chapter) => chapter.stages.filter((stage) => stage.prompt));
+    assert.equal(new Set(promptedStages.map((stage) => stage.prompt)).size, promptedStages.length);
     assert.ok(authored.every((chapter) => chapter.stages.some((stage) => stage.kind === 'choice')));
     assert.ok(authored.every((chapter) => chapter.stages.some((stage) => stage.kind === 'boss')));
     assert.doesNotMatch(JSON.stringify(authored), /十二道相互关联的验证|新的航线在星图上亮起/);

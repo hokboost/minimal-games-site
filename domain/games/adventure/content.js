@@ -417,6 +417,8 @@ function validateContent(chapters = CHAPTERS) {
     const authoredSummaries = new Set();
     const authoredArrivals = new Set();
     const authoredFinales = new Set();
+    const authoredStageTitles = new Set();
+    const authoredStagePrompts = new Set();
     for (const chapter of chapters) {
         if (!/^[a-z][a-z0-9-]{2,48}$/.test(chapter.id) || chapterIds.has(chapter.id)) {
             throw new Error(`Invalid adventure chapter: ${chapter.id}`);
@@ -493,6 +495,15 @@ function validateContent(chapters = CHAPTERS) {
                     || !Number.isSafeInteger(stage.maxSteps) || stage.maxSteps < stage.moves.length
                     || stage.maxSteps > ADVENTURE_CONFIG.maximumSequenceLength)) {
                 throw new Error(`Invalid adventure path trial: ${stage.id}`);
+            }
+            if (chapter.order >= 9
+                && (authoredStageTitles.has(stage.title)
+                    || (stage.prompt && authoredStagePrompts.has(stage.prompt)))) {
+                throw new Error(`Adventure stage content is duplicated: ${stage.id}`);
+            }
+            if (chapter.order >= 9) {
+                authoredStageTitles.add(stage.title);
+                if (stage.prompt) authoredStagePrompts.add(stage.prompt);
             }
             stageIds.add(stage.id);
         }
