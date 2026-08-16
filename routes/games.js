@@ -1,5 +1,6 @@
 module.exports = function registerGameRoutes(app, deps) {
     const requireFunction = require('../lib/require-function');
+    const { isTaskCardPilotUser } = require('../domain/quests/eligibility');
     const {
         pool,
         BalanceLogger,
@@ -23,10 +24,16 @@ module.exports = function registerGameRoutes(app, deps) {
         saveFlipState,
         logFlipAction,
         paidActionConcurrencyGuard,
-        giftConfig
+        giftConfig,
+        questService
     } = deps;
     if (!gameRegistry?.random || typeof gameRegistry.createBlindboxRuntime !== 'function') {
         throw new TypeError('Game routes require the game registry');
+    }
+    if (!questService
+        || typeof questService.ensurePilotAssignments !== 'function'
+        || typeof questService.recordProgressEvent !== 'function') {
+        throw new TypeError('Game routes require the quest application service');
     }
     const {
         DUEL_CONFIG,
@@ -916,7 +923,7 @@ module.exports = function registerGameRoutes(app, deps) {
                     username, score, submitted_at, result_trace, quiz_session_id,
                     cost_points, reward_points
                  ) VALUES ($1, $2, NOW(), $3, $4, $5, 0)
-                 RETURNING id`,
+                 RETURNING id, submitted_at::timestamptz AS submitted_at`,
                 [username, correctCount, resultTrace, quizSessionId, QUIZ_CONFIG.roundCost]
             );
             const submissionId = submissionResult.rows[0].id;
@@ -1007,13 +1014,34 @@ module.exports = function registerGameRoutes(app, deps) {
             if (settledSession.rowCount !== 1) {
                 throw new Error('Quiz session state changed concurrently');
             }
+            await questService.ensurePilotAssignments(client, username, isTaskCardPilotUser(username));
+            const questProgress = await questService.recordProgressEvent(client, {
+                sourceType: 'quiz',
+                sourceEventId: `quiz-submission:${Number(submissionId)}`,
+                username,
+                eventType: 'quiz.round.completed',
+                eventVersion: 1,
+                occurredAt: submissionResult.rows[0].submitted_at,
+                payload: {
+                    submissionId: Number(submissionId),
+                    sessionId: String(quizSessionId),
+                    correct: correctCount,
+                    total: normalizedAnswers.length
+                }
+            }, {
+                requestId: req.idempotencyKey || req.requestId,
+                ipAddress: req.clientIP,
+                userAgent: req.get('User-Agent')
+            });
+            if (questProgress.balance !== null) newBalance = questProgress.balance;
             const responseBody = {
                 success: true,
                 score: correctCount,
                 total: normalizedAnswers.length,
                 reward,
                 newBalance,
-                resultTrace
+                resultTrace,
+                questProgress
             };
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');

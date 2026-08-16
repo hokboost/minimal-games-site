@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -45,6 +46,74 @@ function progressEvent(id = 33, chapterId = 'clockwork-library') {
             chapterId,
             runId: '84d58aa4-bfe6-48a4-9f71-48e39b686c73',
             completionId: id
+        }
+    };
+}
+
+function quizDefinition() {
+    return {
+        ...definition(),
+        id: 2,
+        slug: 'quiz-three-strong-rounds',
+        reward_points: 600,
+        objective: {
+            type: 'event_count',
+            event: 'quiz.round.completed',
+            target: 3,
+            filters: { minimumCorrect: 8 }
+        }
+    };
+}
+
+function quizProgressEvent(id = 71, correct = 8) {
+    return {
+        sourceType: 'quiz',
+        sourceEventId: `quiz-submission:${id}`,
+        username: 'hokboost',
+        eventType: 'quiz.round.completed',
+        eventVersion: 1,
+        occurredAt: '2026-08-16T12:30:00.000Z',
+        payload: {
+            submissionId: id,
+            sessionId: '0123456789abcdef0123456789abcdef',
+            correct,
+            total: 10
+        }
+    };
+}
+
+function doudizhuDefinition() {
+    return {
+        ...definition(),
+        id: 3,
+        slug: 'doudizhu-first-win',
+        reward_points: 500,
+        objective: {
+            type: 'event_threshold',
+            event: 'doudizhu.match.won',
+            field: 'scoreDelta',
+            operator: '>=',
+            value: 1
+        }
+    };
+}
+
+function doudizhuProgressEvent(scoreDelta = 6) {
+    const gameId = '3bc697b1-f256-43a7-a62a-930f6f7fc329';
+    return {
+        sourceType: 'doudizhu',
+        sourceEventId: `doudizhu-game:${gameId}`,
+        username: 'hokboost',
+        eventType: 'doudizhu.match.won',
+        eventVersion: 1,
+        occurredAt: '2026-08-16T12:45:00.000Z',
+        payload: {
+            gameId,
+            rulesVersion: 'classic-jj-v1',
+            humanRole: 'farmer',
+            scoreDelta,
+            baseScore: 3,
+            multiplier: 2
         }
     };
 }
@@ -114,6 +183,7 @@ class MemoryRepository {
     }
 
     async updateProgress(id, revision, progress) {
+        if (this.state.failProgressUpdate) return null;
         const row = this.state.assignments.find((entry) => entry.id === id && entry.status === 'active' && entry.revision === revision);
         if (!row) return null;
         row.progress_value = progress;
@@ -167,18 +237,18 @@ class MemoryRepository {
     }
 }
 
-function stateWithAssignment(progress = 2) {
-    const questDefinition = definition();
+function stateWithAssignment(progress = 2, questDefinition = definition()) {
+    const normalizedObjective = validateObjective(questDefinition.objective, Number(questDefinition.objective_version));
     return {
         definitions: [questDefinition],
         assignments: [{
             id: 10,
             username: 'hokboost',
-            definition_id: 1,
+            definition_id: questDefinition.id,
             status: 'active',
             progress_value: progress,
-            target_value: 3,
-            reward_points: 1200,
+            target_value: normalizedObjective.target,
+            reward_points: questDefinition.reward_points,
             revision: progress,
             objective_version: 1,
             objective_snapshot: structuredClone(questDefinition.objective),
@@ -219,9 +289,37 @@ test('objective schema is versioned, allowlisted, and evaluates only matching ad
         ...progressEvent(),
         payload: { ...progressEvent().payload, campaignId: 'another-campaign' }
     }).matched, false);
-    assert.throws(() => validateObjective({ ...objective, target: 0 }, 1), /target/);
-    assert.throws(() => validateObjective({ ...objective, script: 'return true' }, 1), /type/);
+    assert.throws(() => validateObjective({ ...objective, target: 0 }, 1), /objective/);
+    assert.throws(() => validateObjective({ ...objective, script: 'return true' }, 1), /objective/);
     assert.throws(() => validateProgressEvent({ ...progressEvent(), payload: { ...progressEvent().payload, trustedReward: 999999 } }), /payload/);
+});
+
+test('quiz completion contract validates trusted settlement data and applies the score filter', () => {
+    const objective = validateObjective(quizDefinition().objective, 1);
+    const qualifying = validateProgressEvent(quizProgressEvent(71, 8));
+    const lowScore = validateProgressEvent(quizProgressEvent(72, 7));
+    assert.deepEqual(evaluateObjective(objective, qualifying), { matched: true, increment: 1, target: 3 });
+    assert.deepEqual(evaluateObjective(objective, lowScore), { matched: false, increment: 0, target: 3 });
+    assert.throws(() => validateProgressEvent({
+        ...quizProgressEvent(),
+        payload: { ...quizProgressEvent().payload, reward: 999999 }
+    }), /quiz quest event payload/);
+    assert.throws(() => validateProgressEvent({
+        ...quizProgressEvent(),
+        sourceEventId: 'adventure-completion:71'
+    }), /Unsupported quest progress event/);
+});
+
+test('doudizhu win contract uses a fixed scoreDelta threshold and rejects client-shaped results', () => {
+    const objective = validateObjective(doudizhuDefinition().objective, 1);
+    const event = validateProgressEvent(doudizhuProgressEvent());
+    assert.deepEqual(evaluateObjective(objective, event), { matched: true, increment: 1, target: 1 });
+    assert.throws(() => validateObjective({ ...doudizhuDefinition().objective, field: 'balance' }, 1), /threshold/);
+    assert.throws(() => validateProgressEvent(doudizhuProgressEvent(-1)), /doudizhu quest event payload/);
+    assert.throws(() => validateProgressEvent({
+        ...doudizhuProgressEvent(),
+        sourceEventId: 'doudizhu-game:not-a-uuid'
+    }), /Unsupported quest progress event/);
 });
 
 test('pilot assignment is reachable, snapshots the published version, and projects real progress', async () => {
@@ -255,6 +353,36 @@ test('concurrent duplicate event calls replay one durable result and post one re
     assert.ok([...state.events.values()][0].result);
 });
 
+test('concurrent duplicate quiz settlements advance once and replay the durable reward response', async () => {
+    const questDefinition = quizDefinition();
+    const state = stateWithAssignment(2, questDefinition);
+    const service = serviceFor(state);
+    const event = quizProgressEvent();
+    const [first, replay] = await Promise.all([
+        service.recordProgressEvent({}, event, { requestId: 'quiz-request' }),
+        service.recordProgressEvent({}, structuredClone(event), { requestId: 'quiz-request' })
+    ]);
+    assert.deepEqual(replay, first);
+    assert.equal(first.rewardEarned, 600);
+    assert.equal(state.balance, 1100);
+    assert.equal(state.ledger.length, 1);
+    assert.equal(state.postings.length, 1);
+    assert.equal(state.assignments[0].status, 'completed');
+});
+
+test('a server-authoritative doudizhu win completes once with its snapshotted reward', async () => {
+    const state = stateWithAssignment(0, doudizhuDefinition());
+    const service = serviceFor(state);
+    const first = await service.recordProgressEvent({}, doudizhuProgressEvent(), { requestId: 'ddz-request' });
+    const replay = await service.recordProgressEvent({}, doudizhuProgressEvent(), { requestId: 'ddz-request' });
+    assert.deepEqual(replay, first);
+    assert.equal(first.rewardEarned, 500);
+    assert.equal(state.balance, 1000);
+    assert.equal(state.ledger.length, 1);
+    assert.equal(state.assignments[0].status, 'completed');
+    assert.equal(state.postings[0].postingId, 'quest:10:completion:1');
+});
+
 test('duplicate source identity with changed payload fails closed', async () => {
     const state = stateWithAssignment(0);
     const service = serviceFor(state);
@@ -281,6 +409,20 @@ test('ledger failure rolls the event, posting, audit, assignment, and balance ba
     assert.equal(durable.events.size, 0);
 });
 
+test('assignment CAS failure is surfaced so the caller transaction can roll back the event', async () => {
+    const durable = stateWithAssignment(0, quizDefinition());
+    const draft = structuredClone(durable);
+    draft.events = new Map();
+    draft.failProgressUpdate = true;
+    const service = serviceFor(draft);
+    await assert.rejects(service.recordProgressEvent({}, quizProgressEvent(91)), /progress raced/);
+    assert.equal(durable.assignments[0].progress_value, 0);
+    assert.equal(durable.balance, 500);
+    assert.equal(durable.events.size, 0);
+    assert.equal(durable.audit.length, 0);
+    assert.equal(durable.ledger.length, 0);
+});
+
 test('migration and adventure transaction enforce immutable versions, dedupe, row locks, and atomic ordering', () => {
     const migration = source('migrations/add_quest_v2_foundation.sql');
     const adventure = source('routes/adventure.js');
@@ -301,6 +443,35 @@ test('migration and adventure transaction enforce immutable versions, dedupe, ro
     assert.ok(action.indexOf('INSERT INTO adventure_completions') < action.indexOf('questService.recordProgressEvent'));
     assert.ok(action.indexOf('questService.recordProgressEvent') < action.indexOf('finalizeIdempotency'));
     assert.ok(action.indexOf('finalizeIdempotency') < action.indexOf("client.query('COMMIT')"));
+});
+
+test('Phase 2 uses an append-only migration and hooks authoritative game settlements before idempotency finalization', () => {
+    const foundation = source('migrations/add_quest_v2_foundation.sql');
+    const extension = source('migrations/extend_quest_v2_game_events.sql');
+    const migrations = source('lib/database-migrations.js');
+    const quiz = source('routes/games.js').slice(source('routes/games.js').indexOf("app.post('/api/quiz/submit'"));
+    const doudizhu = source('routes/doudizhu.js').slice(source('routes/doudizhu.js').indexOf("app.post('/api/doudizhu/action'"));
+    assert.equal(
+        crypto.createHash('sha256').update(foundation).digest('hex'),
+        '3da26508d97380d97e6895f8bdca30cf1d90c5e36c732a82be1535cd533f9e24'
+    );
+    assert.match(migrations, /'add_quest_v2_foundation\.sql',\s*'extend_quest_v2_game_events\.sql'/);
+    assert.match(extension, /conname = 'quest_definitions_objective_check'/);
+    assert.match(extension, /DROP CONSTRAINT quest_definitions_objective_check/);
+    assert.match(extension, /ADD CONSTRAINT quest_definitions_objective_v1_check/);
+    assert.match(extension, /NOT VALID/);
+    assert.match(extension, /VALIDATE CONSTRAINT quest_definitions_objective_v1_check/);
+    assert.match(extension, /'quiz-three-strong-rounds', 1, 'published'/);
+    assert.match(extension, /'doudizhu-first-win', 1, 'published'/);
+    assert.match(extension, /Quiz Quest v1 conflicts with an existing definition/);
+    assert.match(extension, /Dou Dizhu Quest v1 conflicts with an existing definition/);
+    assert.ok(quiz.indexOf('UPDATE quiz_sessions SET status = \'settled\'') < quiz.indexOf('questService.recordProgressEvent'));
+    assert.ok(quiz.indexOf('questService.recordProgressEvent') < quiz.indexOf('finalizeIdempotency'));
+    assert.ok(quiz.indexOf('finalizeIdempotency') < quiz.indexOf("client.query('COMMIT')"));
+    assert.match(doudizhu, /fields\.status === 'finished' && fields\.outcome === 'win'/);
+    assert.ok(doudizhu.indexOf('UPDATE doudizhu_games') < doudizhu.indexOf('questService.recordProgressEvent'));
+    assert.ok(doudizhu.indexOf('questService.recordProgressEvent') < doudizhu.indexOf('finalizeIdempotency'));
+    assert.ok(doudizhu.indexOf('finalizeIdempotency') < doudizhu.indexOf("client.query('COMMIT')"));
 });
 
 test('legacy task-card routes and response fields remain backward compatible', () => {

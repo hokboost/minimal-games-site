@@ -17,6 +17,14 @@ function asJsonObject(value, label) {
     return parsed;
 }
 
+function canonicalJson(value) {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
 function samePersistedEvent(row, event) {
     const payload = asJsonObject(row.payload, 'persisted quest event payload');
     return row.source_type === event.sourceType
@@ -25,11 +33,7 @@ function samePersistedEvent(row, event) {
         && row.event_type === event.eventType
         && Number(row.event_version) === event.eventVersion
         && new Date(row.occurred_at).toISOString() === event.occurredAt
-        && payload.campaignId === event.payload.campaignId
-        && payload.chapterId === event.payload.chapterId
-        && payload.runId === event.payload.runId
-        && Number(payload.completionId) === event.payload.completionId
-        && Object.keys(payload).length === Object.keys(event.payload).length;
+        && canonicalJson(payload) === canonicalJson(event.payload);
 }
 
 class QuestService {
@@ -95,7 +99,11 @@ class QuestService {
         let balance = null;
         const assignments = await repository.listCandidateAssignments(event.username, event.eventType);
         for (const assignment of assignments) {
-            const evaluation = evaluateObjective(assignment.objective_snapshot, event);
+            const evaluation = evaluateObjective(
+                assignment.objective_snapshot,
+                event,
+                Number(assignment.objective_version)
+            );
             if (!evaluation.matched) continue;
             const currentProgress = asSafeInteger(assignment.progress_value, 'assignment progress');
             const target = asSafeInteger(assignment.target_value, 'assignment target', 1);

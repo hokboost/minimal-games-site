@@ -122,7 +122,11 @@ function createRouteHarness({ pool: poolOverride } = {}) {
             readHeavyRateLimit: middleware.readHeavyRateLimit,
             userActionRateLimit: middleware.userActionRateLimit
         },
-        paidActionConcurrencyGuard: middleware.rejectWhenOverloaded
+        paidActionConcurrencyGuard: middleware.rejectWhenOverloaded,
+        questService: {
+            async ensurePilotAssignments() { return []; },
+            async recordProgressEvent() { return { matches: [], rewardEarned: 0, balance: null }; }
+        }
     });
 
     function route(method, routePath) {

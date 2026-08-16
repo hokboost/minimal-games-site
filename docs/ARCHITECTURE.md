@@ -158,6 +158,25 @@ posting identity for reconciliation. Database triggers additionally make
 processed events, posted rewards, and Quest audit entries append-only, while
 bounded JSON checks keep durable replay and audit payloads within fixed limits.
 
+Phase 2 extends the same event contract without adding a browser progress
+endpoint. Quiz settlement emits `quiz.round.completed` only after its owned
+question tokens, submission, reward, and session transition have succeeded;
+its durable source identity is `quiz-submission:<submission_id>`. A round moves
+the pilot objective only when the server-calculated score is at least eight,
+and three qualifying rounds complete the assignment. Dou Dizhu emits
+`doudizhu.match.won` only when the owner-bound revision update changes an
+active game to a finished human win; its source identity is
+`doudizhu-game:<game_uuid>`, and its threshold uses the engine's persisted
+`scoreDelta`. Losses never manufacture win events.
+
+Both hooks run before the gameplay request's durable idempotency response and
+COMMIT. A Quest ledger failure therefore rolls back the authoritative gameplay
+settlement too, while a retried request cannot post a second reward. The new
+append-only migration replaces the original narrow objective CHECK by its
+known Phase 1 constraint name, validates all existing rows, and seeds new
+immutable definition versions. The applied Phase 1 migration remains
+checksum-identical.
+
 ## Transaction rules
 
 For any value-bearing action, preserve this boundary:

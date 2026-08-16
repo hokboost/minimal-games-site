@@ -2844,7 +2844,8 @@ registerGameRoutes(app, {
     saveFlipState,
     logFlipAction,
     paidActionConcurrencyGuard,
-    giftConfig
+    giftConfig,
+    questService
 });
 
 registerDoudizhuRoutes(app, {
@@ -2855,7 +2856,8 @@ registerDoudizhuRoutes(app, {
     requireAuthorized,
     requireCSRF,
     security,
-    paidActionConcurrencyGuard
+    paidActionConcurrencyGuard,
+    questService
 });
 
 registerAdventureRoutes(app, {

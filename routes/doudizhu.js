@@ -1,6 +1,7 @@
 'use strict';
 
 const { randomInt, randomUUID } = require('node:crypto');
+const { isTaskCardPilotUser } = require('../domain/quests/eligibility');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CSRF_BODY_KEYS = Object.freeze(['csrfToken', '_csrf']);
@@ -56,7 +57,8 @@ module.exports = function registerDoudizhuRoutes(app, deps) {
         requireAuthorized,
         requireCSRF,
         security,
-        paidActionConcurrencyGuard
+        paidActionConcurrencyGuard,
+        questService
     } = deps;
 
     if (!pool || typeof pool.query !== 'function' || typeof pool.connect !== 'function') {
@@ -66,6 +68,11 @@ module.exports = function registerDoudizhuRoutes(app, deps) {
         || typeof gameRegistry.getPublicDoudizhuConfig !== 'function'
         || !gameRegistry.DOUDIZHU_CONFIG) {
         throw new TypeError('Doudizhu routes require the game registry');
+    }
+    if (!questService
+        || typeof questService.ensurePilotAssignments !== 'function'
+        || typeof questService.recordProgressEvent !== 'function') {
+        throw new TypeError('Doudizhu routes require the quest application service');
     }
     requireFunction({ generateCSRFToken }, 'generateCSRFToken', 'route dependency');
     requireFunction({ requireLogin }, 'requireLogin', 'route dependency');
@@ -523,7 +530,7 @@ module.exports = function registerDoudizhuRoutes(app, deps) {
                   AND username = $2
                   AND status = 'active'
                   AND revision = $3
-                RETURNING id
+                RETURNING id, finished_at
             `, [
                 game.id,
                 username,
@@ -543,6 +550,32 @@ module.exports = function registerDoudizhuRoutes(app, deps) {
                 const current = await findGameById(username, game.id, client);
                 return staleResponse(res, current);
             }
+
+            let questProgress = null;
+            if (fields.status === 'finished' && fields.outcome === 'win') {
+                await questService.ensurePilotAssignments(client, username, isTaskCardPilotUser(username));
+                questProgress = await questService.recordProgressEvent(client, {
+                    sourceType: 'doudizhu',
+                    sourceEventId: `doudizhu-game:${String(game.id)}`,
+                    username,
+                    eventType: 'doudizhu.match.won',
+                    eventVersion: 1,
+                    occurredAt: updated.rows[0].finished_at,
+                    payload: {
+                        gameId: String(game.id),
+                        rulesVersion,
+                        humanRole: fields.humanRole,
+                        scoreDelta: fields.scoreDelta,
+                        baseScore: fields.baseScore,
+                        multiplier: fields.multiplier
+                    }
+                }, {
+                    requestId: req.idempotencyKey || req.requestId,
+                    ipAddress: req.clientIP,
+                    userAgent: req.get('User-Agent')
+                });
+            }
+            responseBody.questProgress = questProgress;
 
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
