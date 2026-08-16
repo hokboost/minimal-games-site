@@ -99,11 +99,18 @@ const registerTaskRoutes = require('./routes/tasks');
 const registerAnalyticsRoutes = require('./routes/analytics');
 const registerCreatorRoutes = require('./routes/creators');
 const registerAdminCreatorDirectorRoutes = require('./routes/admin-creator-director');
+const registerQuestV2Routes = require('./routes/quest-v2');
+const registerAdminQuestStudioRoutes = require('./routes/admin-quest-studio');
 const { CreatorRepository } = require('./repositories/creator-repository');
 const { CreatorProfileService } = require('./services/creator-profile-service');
 const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
-const questService = new QuestService({ BalanceLogger });
+const { QuestV2Service } = require('./services/quest-v2-service');
 const streamerWorldFlags = readStreamerWorldFlags();
+const questV2Service = new QuestV2Service({ pool, BalanceLogger });
+const questService = new QuestService({
+    BalanceLogger,
+    streamerQuestService: streamerWorldFlags.questEngineV2Enabled ? questV2Service : null
+});
 const creatorRepository = new CreatorRepository({ pool });
 const creatorService = new CreatorProfileService({
     repository: creatorRepository,
@@ -2371,6 +2378,12 @@ function registerRuntimeLifecycle() {
         },
         async stop() {}
     });
+    applicationLifecycle.registerComponent('quest-v2-catalog', {
+        async start() {
+            if (streamerWorldFlags.questEngineV2Enabled) await questV2Service.initialize();
+        },
+        async stop() {}
+    });
     applicationLifecycle.registerComponent('socket-event-bus', {
         start: () => socketEventBus.start(),
         stop: () => socketEventBus.close()
@@ -2407,6 +2420,14 @@ function registerRuntimeLifecycle() {
         run: runDatabaseMaintenance,
         intervalMs: 6 * 60 * 60 * 1000,
         runOnStart: true,
+        unref: true
+    });
+    applicationLifecycle.registerRecurringJob('quest-evidence-retention', {
+        run: () => streamerWorldFlags.questEngineV2Enabled
+            ? questV2Service.redactExpiredEvidence()
+            : Promise.resolve(0),
+        intervalMs: 60 * 60 * 1000,
+        runOnStart: false,
         unref: true
     });
 }
@@ -2915,6 +2936,26 @@ registerAdminCreatorDirectorRoutes(app, {
     generateCSRFToken,
     requireLogin,
     requireAdmin,
+    security
+});
+
+registerQuestV2Routes(app, {
+    questV2Service,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireCSRF,
+    security
+});
+
+registerAdminQuestStudioRoutes(app, {
+    questV2Service,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAdmin,
+    requireCSRF,
     security
 });
 

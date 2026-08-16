@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-16T23:17:13Z`
+Last updated: `2026-08-16T23:47:00Z`
 
 ## Pre-existing working-tree changes
 
@@ -82,14 +82,14 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 2 — Quest Engine V2
 
-- [ ] Complete.
-- Features:
-- Content counts:
-- Migrations:
-- Routes:
-- Tests:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Features: Immutable/versioned quest definitions; closed and bounded rule AST; explicit per-event `eq`/`gte`/`lte` filters; occurrence-based repeatability with one-active-cycle uniqueness and cooldown; offer/accept/neutral-decline/postpone/submit/review/expiry-ready assignment lifecycle; parallel/dependency step schema; registered trusted-event ingestion bridged from the existing Adventure, Quiz, and Dou Dizhu settlement hooks; canonical semantic replay and source-collision rejection; bounded text/checklist/normalized-PNG evidence; row-locked per-user evidence quotas; retention tombstones preserving canonical hashes and audits; transactional manual review and automatic settlement using the compatible `quest_auto_reward` ledger operation; non-financial unlock-hook definitions; persistent assignment events and audits; legacy task-card read/import with zero duplicate reward; startup catalog seeding; weekly rotation schedules; creator journal; and administrator draft/review studio. Browser claims never settle a reward and no quest module calls a gift provider.
+- Content counts: 60 distinct original bilingual quest definitions across nine safe categories; 10 three-step bilingual chains; 12 bilingual weekly boards with eight curated slots each; 12 persisted weekly rotation schedules. The `quiz-steady-eight` rule requires one server event with `correct >= 8`; multiple lower-scoring rounds cannot be summed into a qualifying round.
+- Migrations: `migrations/add_streamer_quest_engine_v2.sql` is the sole new append-only migration after the two already-published pilot migrations. It adds definitions/versions/steps, boards/slots, chains/nodes, schedules, occurrence assignments/step projections, trusted and assignment events, evidence/reviews, reward settlements, audit, and legacy import mapping. Published versions and catalog membership are frozen, lifecycle transitions are one-way, evidence permits only expired content/media redaction, and settlements/events remain append-only or one-way. No historical migration was edited and no production database was touched.
+- Routes: Creator journal at `GET /quests` and private JSON at `GET /api/quests/v2/journal`; seven fixed-path, CSRF/rate-limit/idempotency protected creator mutations for claim, accept, decline, postpone, evidence, submit, and legacy import; administrator studio at `GET /admin/quest-studio`; three fixed-path audited/idempotent admin mutations for draft, publish, and review. All are default-off behind `STREAMER_WORLD_ENABLED=true`, `CREATOR_PROFILE_ENABLED=true`, and `QUEST_ENGINE_V2_ENABLED=true`.
+- Tests: 23 new focused subtests cover authored content counts/uniqueness, threshold semantics, closed AST and registered events, evidence/PNG bounds, neutral transitions, strict flags, exact-path route policy, migration immutability, retention tombstones, evidence and reward rollback, 7/30/90-day retention mapping, completed-state privacy, quota concurrency, canonical event replay/collision, concurrent stale assignment commands, atomic review settlement, legacy zero-reward compatibility, startup/read-only behavior, current-week scheduling, response-loss key reuse, feature-off registrar behavior, bilingual/mobile/Studio UI, and gift-provider isolation. `npm run test:all` passed (all legacy and expansion suites); `npm run release:stage` passed with the new `content` layer; EJS compilation and `git diff --check` passed.
+- Credited added lines: 6,209 cumulative after Phase 2 (backend 3,936; frontend 962; authored content 148; tests 991; docs 158; tooling 2; other 12), with nine meaningful deletions and 6,200 net growth. Backend + frontend + content is 5,046.
+- Risks or decisions: The disposable PostgreSQL migration suite was not run because it requires explicit database-create authorization; SQL contracts are covered by focused static/behavior tests, but the new migration still needs an operator-authorized disposable PostgreSQL run before production. The new feature flags remain off by default. Catalog initialization is a readiness-blocking lifecycle component only when all three gates are enabled. Evidence cleanup is a bounded lifecycle job and keeps hashes/review/settlement/audit tombstones. Existing task-card, pilot Quest V2, balance, gift inventory/outbox, worker, and provider-send semantics remain unchanged. No real gift send occurred.
 
 ### Phase 3 — Story engine and Season One
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 1 is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 2 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +1,509 / -4
-  frontend  +848 / -0
-  content   +0 / -0
-  tests     +612 / -0
+  backend   +3,936 / -7
+  frontend  +962 / -0
+  content   +148 / -0
+  tests     +991 / -0
   docs      +158 / -0
   tooling   +2 / -1
   other     +12 / -1
 
-Credited additions: 3,141
-Meaningful deletions: 6
-Credited net growth: 3,135
-Backend + frontend + content: 2,357
+Credited additions: 6,209
+Meaningful deletions: 9
+Credited net growth: 6,200
+Backend + frontend + content: 5,046
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 3,141 / 50,000
-  [FAIL] net growth: 3,135 / 40,000
-  [FAIL] backend additions: 1,509 / 12,000
-  [FAIL] frontend additions: 848 / 8,000
-  [FAIL] authored-content additions: 0 / 16,000
-  [FAIL] test additions: 612 / 10,000
-  [FAIL] backend + frontend + content: 2,357 / 36,000
+  [FAIL] total meaningful additions: 6,209 / 50,000
+  [FAIL] net growth: 6,200 / 40,000
+  [FAIL] backend additions: 3,936 / 12,000
+  [FAIL] frontend additions: 962 / 8,000
+  [FAIL] authored-content additions: 148 / 16,000
+  [FAIL] test additions: 991 / 10,000
+  [FAIL] backend + frontend + content: 5,046 / 36,000
 
 Overall: FAIL
 ```
 
-The overall threshold failure remains expected after Phase 1; later phases supply the required quest, story, game, frontend, test, and authored-content volume.
+The overall threshold failure remains expected after Phase 2; later story, game, hardening, frontend, test, and full-content phases supply the remaining volume.
 
 ## Current acceptance status
 

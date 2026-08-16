@@ -23,6 +23,8 @@ const mutationFiles = [
     'routes/games.js',
     'routes/gifts.js',
     'routes/creators.js',
+    'routes/quest-v2.js',
+    'routes/admin-quest-studio.js',
     'routes/tasks.js',
     'routes/wish.js'
 ];

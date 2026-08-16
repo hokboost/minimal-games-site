@@ -37,13 +37,14 @@ function samePersistedEvent(row, event) {
 }
 
 class QuestService {
-    constructor({ BalanceLogger, repositoryFactory = (client) => new PostgresQuestRepository(client) }) {
+    constructor({ BalanceLogger, repositoryFactory = (client) => new PostgresQuestRepository(client), streamerQuestService = null }) {
         if (!BalanceLogger || typeof BalanceLogger.updateBalance !== 'function') {
             throw new TypeError('Quest service requires BalanceLogger');
         }
         if (typeof repositoryFactory !== 'function') throw new TypeError('Quest service requires a repository factory');
         this.BalanceLogger = BalanceLogger;
         this.repositoryFactory = repositoryFactory;
+        this.streamerQuestService = streamerQuestService;
     }
 
     async ensurePilotAssignments(client, username, eligible) {
@@ -93,6 +94,10 @@ class QuestService {
             }
             return asJsonObject(replay.result, 'persisted quest event result');
         }
+
+        const streamerWorld = this.streamerQuestService
+            ? await this.streamerQuestService.recordTrustedEvent(client, event, context)
+            : null;
 
         const matches = [];
         let rewardEarned = 0;
@@ -186,7 +191,8 @@ class QuestService {
             eventType: event.eventType,
             matches,
             rewardEarned,
-            balance
+            balance,
+            ...(streamerWorld ? { streamerWorld } : {})
         };
         await repository.finalizeProgressEvent(inserted.id, matches.length > 0 ? 'processed' : 'ignored', resultBody);
         return resultBody;
