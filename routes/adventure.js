@@ -1,6 +1,8 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
+const { QuestService } = require('../domain/quests/service');
+const { isTaskCardPilotUser } = require('../domain/quests/eligibility');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CSRF_KEYS = new Set(['csrfToken', '_csrf']);
@@ -55,6 +57,7 @@ module.exports = function registerAdventureRoutes(app, deps) {
         'route dependency'
     );
     requireFunction({ generateCSRFToken }, 'generateCSRFToken', 'route dependency');
+    const questService = deps.questService || new QuestService({ BalanceLogger });
 
     const noStore = (res) => {
         res.set('Cache-Control', 'private, no-store');
@@ -367,6 +370,7 @@ module.exports = function registerAdventureRoutes(app, deps) {
 
             let rewardEarned = 0;
             let balance = null;
+            let questProgress = null;
             if (completed && row.reward_eligible) {
                 const chapter = engine.getChapter(next.chapterId);
                 const completion = await client.query(`
@@ -375,7 +379,7 @@ module.exports = function registerAdventureRoutes(app, deps) {
                         insight, mistakes, rewinds, completed_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
                     ON CONFLICT (username, chapter_id, rules_version) DO NOTHING
-                    RETURNING id
+                    RETURNING id, completed_at
                 `, [
                     row.id,
                     username,
@@ -403,11 +407,35 @@ module.exports = function registerAdventureRoutes(app, deps) {
                     rewardEarned = chapter.reward;
                     balance = balanceResult.balance;
                 }
+                if (completion.rowCount === 1) {
+                    const completionId = Number(completion.rows[0].id);
+                    await questService.ensurePilotAssignments(client, username, isTaskCardPilotUser(username));
+                    questProgress = await questService.recordProgressEvent(client, {
+                        sourceType: 'adventure',
+                        sourceEventId: `adventure-completion:${completionId}`,
+                        username,
+                        eventType: 'adventure.chapter.completed',
+                        eventVersion: 1,
+                        occurredAt: completion.rows[0].completed_at,
+                        payload: {
+                            campaignId: next.rulesVersion,
+                            chapterId: next.chapterId,
+                            runId: String(row.id),
+                            completionId
+                        }
+                    }, {
+                        requestId: req.idempotencyKey || req.requestId,
+                        ipAddress: req.clientIP,
+                        userAgent: req.get('User-Agent')
+                    });
+                    if (questProgress.balance !== null) balance = questProgress.balance;
+                }
             }
             const responseBody = {
                 success: true,
                 rewardEarned,
                 balance,
+                questProgress,
                 completion: completed ? { ...engine.projectState(next), gameId: row.id } : null,
                 state: await statePayload(username, client)
             };

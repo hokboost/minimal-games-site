@@ -1,27 +1,20 @@
 'use strict';
 
 const { randomInt } = require('node:crypto');
+const { QuestService } = require('../domain/quests/service');
+const {
+    isTaskCardPilotUser,
+    normalizeUsername,
+    USERNAME_PATTERN
+} = require('../domain/quests/eligibility');
 
-const USERNAME_PATTERN = /^[\p{L}\p{N}_-]{3,32}$/u;
 const INTEGER_PATTERN = /^\d+$/;
-
-function normalizeUsername(value) {
-    return typeof value === 'string' ? value.normalize('NFKC').trim() : '';
-}
 
 function parseId(value) {
     const normalized = typeof value === 'number' ? String(value) : String(value || '').trim();
     if (!INTEGER_PATTERN.test(normalized)) return null;
     const parsed = Number(normalized);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function enabledUsers() {
-    const configured = String(process.env.TASK_CARDS_ENABLED_USERS || 'hokboost')
-        .split(',')
-        .map(normalizeUsername)
-        .filter((username) => USERNAME_PATTERN.test(username));
-    return new Set(configured.length > 0 ? configured : ['hokboost']);
 }
 
 module.exports = function registerTaskRoutes(app, deps) {
@@ -57,7 +50,8 @@ module.exports = function registerTaskRoutes(app, deps) {
         adminStrictLimit
     ];
 
-    const isEnabled = (username) => enabledUsers().has(normalizeUsername(username));
+    const questService = deps.questService || new QuestService({ BalanceLogger });
+    const isEnabled = (username) => isTaskCardPilotUser(username);
     const localized = (row, key, lang) => row[`${key}_${lang === 'zh' ? 'zh' : 'en'}`];
 
     function mapCard(row, lang) {
@@ -170,36 +164,9 @@ module.exports = function registerTaskRoutes(app, deps) {
             await client.query('BEGIN');
             await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`task-cards:${username}`]);
             await normalizeExpirations(client, username);
-            const [cards, events] = await Promise.all([
-                client.query(`
-                    SELECT a.*, t.title_zh, t.title_en,
-                           t.complete_label_zh, t.complete_label_en,
-                           t.progress_label_zh, t.progress_label_en,
-                           t.abandon_label_zh, t.abandon_label_en,
-                           t.encouragement_zh, t.encouragement_en
-                    FROM task_card_assignments a
-                    JOIN task_card_templates t ON t.id = a.template_id
-                    WHERE a.username = $1
-                      AND a.status IN ('offered', 'claimed', 'pending_approval')
-                    ORDER BY CASE a.status WHEN 'claimed' THEN 0 WHEN 'pending_approval' THEN 0 ELSE 1 END,
-                             a.assigned_at, a.id
-                `, [username]),
-                client.query(`
-                    SELECT id, title, description, reward_points, status,
-                           assigned_at, due_at, submitted_at
-                    FROM event_task_assignments
-                    WHERE username = $1 AND status IN ('active', 'pending_approval')
-                    ORDER BY due_at, id
-                `, [username])
-            ]);
+            const state = await loadStateWithin(client, username, lang);
             await client.query('COMMIT');
-            const mappedCards = cards.rows.map((row) => mapCard(row, lang));
-            return {
-                featureEnabled: isEnabled(username),
-                canClaim: !mappedCards.some((card) => ['claimed', 'pending_approval'].includes(card.status)),
-                cards: isEnabled(username) ? mappedCards : [],
-                eventTasks: events.rows.map(mapEvent)
-            };
+            return state;
         } catch (error) {
             await client.query('ROLLBACK').catch(() => {});
             throw error;
@@ -301,6 +268,7 @@ module.exports = function registerTaskRoutes(app, deps) {
     });
 
     async function loadStateWithin(client, username, lang) {
+        const quests = await questService.listUserQuests(client, username, lang, isEnabled(username));
         const [cards, events] = await Promise.all([
             client.query(`
                 SELECT a.*, t.title_zh, t.title_en,
@@ -324,7 +292,8 @@ module.exports = function registerTaskRoutes(app, deps) {
             featureEnabled: isEnabled(username),
             canClaim: !mappedCards.some((card) => ['claimed', 'pending_approval'].includes(card.status)),
             cards: isEnabled(username) ? mappedCards : [],
-            eventTasks: events.rows.map(mapEvent)
+            eventTasks: events.rows.map(mapEvent),
+            quests
         };
     }
 
@@ -433,7 +402,7 @@ module.exports = function registerTaskRoutes(app, deps) {
 
     app.get('/api/admin/tasks', ...adminReadGuards, async (req, res) => {
         try {
-            const [templates, pendingCards, pendingEvents] = await Promise.all([
+            const [templates, pendingCards, pendingEvents, questCompletions] = await Promise.all([
                 pool.query(`SELECT id, slug, title_zh, title_en, reward_points FROM task_card_templates WHERE active = TRUE ORDER BY id`),
                 pool.query(`
                     SELECT a.id, a.username, a.reward_points, a.submitted_at, t.title_zh, t.title_en
@@ -444,10 +413,29 @@ module.exports = function registerTaskRoutes(app, deps) {
                     SELECT id, username, title, description, reward_points, submitted_at
                     FROM event_task_assignments WHERE status = 'pending_approval'
                     ORDER BY submitted_at, id LIMIT 100
+                `),
+                pool.query(`
+                    SELECT a.id, a.username, a.completed_at, a.reward_points,
+                           d.slug, d.version, d.title_zh, d.title_en,
+                           p.posting_id, p.operation_type, p.balance_before, p.balance_after, p.posted_at,
+                           e.source_type, e.source_event_id, e.event_type, e.payload
+                    FROM quest_assignments a
+                    JOIN quest_definitions d ON d.id = a.definition_id
+                    JOIN quest_reward_postings p ON p.posting_id = a.reward_posting_id AND p.status = 'posted'
+                    JOIN quest_progress_events e ON e.id = p.progress_event_id
+                    WHERE a.status = 'completed'
+                    ORDER BY a.completed_at DESC, a.id DESC
+                    LIMIT 100
                 `)
             ]);
             res.set('Cache-Control', 'private, no-store');
-            return res.json({ success: true, templates: templates.rows, pendingCards: pendingCards.rows, pendingEvents: pendingEvents.rows });
+            return res.json({
+                success: true,
+                templates: templates.rows,
+                pendingCards: pendingCards.rows,
+                pendingEvents: pendingEvents.rows,
+                questCompletions: questCompletions.rows
+            });
         } catch (error) {
             console.error('管理员读取任务失败:', error);
             return res.status(503).json({ success: false, message: '任务管理暂不可用' });

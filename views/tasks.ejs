@@ -23,6 +23,17 @@
                 <a class="hero-action-secondary" href="/"><%= lang === 'zh' ? '返回主页' : 'Back home' %></a>
             </header>
 
+            <section id="quest-section" class="quest-section" hidden aria-labelledby="quest-title">
+                <div class="task-section-heading">
+                    <div>
+                        <span class="eyebrow"><%= lang === 'zh' ? '服务器自动验证' : 'Server verified' %></span>
+                        <h2 id="quest-title"><%= lang === 'zh' ? '闯关目标' : 'Adventure quests' %></h2>
+                        <p><%= lang === 'zh' ? '完成符合条件的剧情章节后，进度和奖励会自动更新。' : 'Eligible story chapters update progress and rewards automatically.' %></p>
+                    </div>
+                </div>
+                <div id="quest-list" class="quest-list"></div>
+            </section>
+
             <section id="event-task-section" class="event-task-section" hidden aria-labelledby="event-task-title">
                 <h2 id="event-task-title"><%= lang === 'zh' ? '限时活动' : 'Limited-time events' %></h2>
                 <div id="event-task-list" class="event-task-list"></div>

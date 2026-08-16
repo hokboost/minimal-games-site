@@ -153,6 +153,7 @@ async function lookupIpIntelligence(form) {
 async function loadTaskManagement() {
     const templateContainer = document.getElementById('task-template-options');
     const pendingContainer = document.getElementById('pending-task-reviews');
+    const questAuditContainer = document.getElementById('quest-reward-audit');
     if (!templateContainer || !pendingContainer) return;
     try {
         const response = await adminFetch('/api/admin/tasks');
@@ -171,6 +172,28 @@ async function loadTaskManagement() {
             return label;
         });
         templateContainer.replaceChildren(...templateNodes);
+
+        if (questAuditContainer) {
+            const completions = Array.isArray(data.questCompletions) ? data.questCompletions : [];
+            if (completions.length === 0) {
+                questAuditContainer.textContent = t('还没有自动任务奖励记录。', 'No automatic quest rewards yet.');
+            } else {
+                questAuditContainer.replaceChildren(...completions.map((entry) => {
+                    const row = document.createElement('div');
+                    row.className = 'admin-task-review-row';
+                    const copy = document.createElement('div');
+                    const title = document.createElement('strong');
+                    title.textContent = `${entry.username} · ${lang === 'zh' ? entry.title_zh : entry.title_en}`;
+                    const source = document.createElement('span');
+                    source.textContent = `${entry.event_type} · ${entry.source_event_id}`;
+                    const posting = document.createElement('span');
+                    posting.textContent = `${entry.posting_id} · +${Number(entry.reward_points).toLocaleString()} ${t('积分', 'points')}`;
+                    copy.append(title, source, posting);
+                    row.append(copy);
+                    return row;
+                }));
+            }
+        }
 
         const pending = [
             ...data.pendingCards.map((task) => ({ ...task, taskType: 'card', title: lang === 'zh' ? task.title_zh : task.title_en })),

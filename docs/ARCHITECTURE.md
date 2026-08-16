@@ -122,6 +122,42 @@ summaries, openings, finales, or incomplete chapter structures. The browser
 paginates all 607 stages into five acts, while the server independently enforces
 every prerequisite.
 
+## Quest V2 compatibility foundation
+
+Quest V2 is the canonical, versioned objective domain layered beside the
+existing task-card tables and routes. Published definitions are immutable in
+PostgreSQL (retiring is the only permitted transition); an assignment stores
+its objective, target, and reward snapshot so a later definition version
+cannot change an accepted goal. Phase 1 deliberately supports one allowlisted
+objective shape: a bounded `event_count` over
+`adventure.chapter.completed`, optionally filtered by campaign and chapter.
+No administrator-authored JavaScript, expression, or SQL is evaluated.
+
+The first published pilot objective is reachable through the existing task
+page for `TASK_CARDS_ENABLED_USERS` (default `hokboost`). Visiting `/tasks`
+creates its active assignment if absent; the authoritative adventure
+completion transaction also creates it before processing, so visiting the page
+first is not required. The assignment targets three distinct first-clear
+chapters in `star-archive-v1`, snapshots a 1,200 point reward, and is displayed
+as real `progress / target` on the task page. Existing manual task cards remain
+in their original tables and only their administrator approval path emits
+`task_card_reward` or `event_task_reward`; those transitions do not generate
+Quest events and therefore cannot double-post the automatic reward.
+
+An adventure first-clear writes the append-only progress event with identity
+`(adventure, adventure-completion:<completion_id>)`. The same transaction row
+locks the active Quest assignment, advances progress, creates the unique
+`quest:<assignment_id>:completion:1` reward posting, calls `BalanceLogger` with
+`quest_auto_reward`, completes the assignment, appends verification audit
+information, stores the replayable event result, finalizes HTTP idempotency,
+and commits. A duplicate event returns the stored result; a duplicate identity
+with different version, timestamp, or payload fails closed. Any ledger,
+posting, audit, assignment, or response failure rolls the entire transaction
+back. The administrator task read model exposes the verification source and
+posting identity for reconciliation. Database triggers additionally make
+processed events, posted rewards, and Quest audit entries append-only, while
+bounded JSON checks keep durable replay and audit payloads within fixed limits.
+
 ## Transaction rules
 
 For any value-bearing action, preserve this boundary:

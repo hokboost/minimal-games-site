@@ -24,6 +24,7 @@ const {
 const questions = require('./data/questions');
 const GameLogic = require('./data/gameLogic');
 const BalanceLogger = require('./balance-logger');
+const { QuestService } = require('./domain/quests/service');
 const { parseMoney } = require('./lib/integer-money');
 const gameRegistry = require('./domain/games');
 const { parseWorkerCredentials } = require('./lib/worker-credentials');
@@ -96,6 +97,7 @@ const registerDoudizhuRoutes = require('./routes/doudizhu');
 const registerAdventureRoutes = require('./routes/adventure');
 const registerTaskRoutes = require('./routes/tasks');
 const registerAnalyticsRoutes = require('./routes/analytics');
+const questService = new QuestService({ BalanceLogger });
 
 // 导入i18n国际化
 const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
@@ -2865,7 +2867,8 @@ registerAdventureRoutes(app, {
     requireCSRF,
     security,
     paidActionConcurrencyGuard,
-    adventureConfig: gameRegistry.ADVENTURE_CONFIG
+    adventureConfig: gameRegistry.ADVENTURE_CONFIG,
+    questService
 });
 
 registerTaskRoutes(app, {
@@ -2876,7 +2879,8 @@ registerTaskRoutes(app, {
     requireAuthorized,
     requireAdmin,
     requireCSRF,
-    security
+    security,
+    questService
 });
 
 // 404 处理（必须在所有API路由之后）

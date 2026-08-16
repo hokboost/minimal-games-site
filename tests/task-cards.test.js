@@ -127,6 +127,7 @@ test('lifetime earnings use game net plus approved credits and gift value', asyn
     assert.deepEqual(result, { gameNet: -12, adminEarned: 100, taskEarned: 50, giftValue: 20, total: 158 });
     assert.equal(calls[0].params[0], 'hokboost');
     assert.match(calls[0].sql, /GREATEST\(amount, 0\)/);
+    assert.match(calls[0].sql, /quest_auto_reward/);
     assert.equal(parseAggregateMoney('0.000', 'aggregate'), 0);
     assert.throws(() => parseAggregateMoney('1.50', 'aggregate'), /must be an integer/);
 });

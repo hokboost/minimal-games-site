@@ -6,6 +6,8 @@
     const guidance = document.getElementById('task-card-guidance');
     const eventSection = document.getElementById('event-task-section');
     const eventList = document.getElementById('event-task-list');
+    const questSection = document.getElementById('quest-section');
+    const questList = document.getElementById('quest-list');
     const message = document.getElementById('task-card-message');
     if (!cardSection || !cardList || !eventSection || !eventList) return;
 
@@ -154,7 +156,45 @@
         eventList.replaceChildren(...nodes);
     }
 
+    function renderQuests() {
+        if (!questSection || !questList) return;
+        const quests = Array.isArray(state?.quests) ? state.quests : [];
+        questSection.hidden = quests.length === 0;
+        const nodes = quests.map((quest) => {
+            const article = document.createElement('article');
+            article.className = `quest-card quest-card--${quest.status}`;
+            const heading = document.createElement('div');
+            heading.className = 'task-card-top';
+            const title = document.createElement('h3');
+            title.textContent = quest.title;
+            const reward = document.createElement('span');
+            reward.className = 'task-reward';
+            reward.textContent = `+${quest.rewardPoints.toLocaleString()} ${t('积分', 'points')}`;
+            heading.append(title, reward);
+            const description = document.createElement('p');
+            description.textContent = quest.description;
+            const progress = document.createElement('progress');
+            progress.className = 'quest-progress';
+            progress.max = quest.target;
+            progress.value = quest.progress;
+            progress.setAttribute('aria-label', t('任务进度', 'Quest progress'));
+            const detail = document.createElement('div');
+            detail.className = 'quest-progress-detail';
+            const count = document.createElement('strong');
+            count.textContent = `${quest.progress} / ${quest.target}`;
+            const verification = document.createElement('span');
+            verification.textContent = quest.status === 'completed'
+                ? t('已自动验证，奖励已到账', 'Verified automatically — reward posted')
+                : t('通关后自动记录，无需手动提交', 'Recorded after each clear — no submission needed');
+            detail.append(count, verification);
+            article.append(heading, description, progress, detail);
+            return article;
+        });
+        questList.replaceChildren(...nodes);
+    }
+
     function render() {
+        renderQuests();
         renderCards();
         renderEvents();
     }
