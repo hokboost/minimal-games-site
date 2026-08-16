@@ -135,7 +135,9 @@ async function testProviderTimeout() {
         assert.equal(result.success, false);
         assert.equal(result.reachable, false);
         assert.match(result.error, /timeout|aborted/i);
-        assert.ok(elapsedMs >= 2500 && elapsedMs < 6000, `Unexpected provider timeout: ${elapsedMs}ms`);
+        // Production intentionally waits 25 seconds so threeserver's 20-second
+        // provider-confirmation window can finish before the transport aborts.
+        assert.ok(elapsedMs >= 24000 && elapsedMs < 35000, `Unexpected provider timeout: ${elapsedMs}ms`);
     } finally {
         for (const socket of sockets) socket.destroy();
         await new Promise((resolve) => provider.close(resolve));
