@@ -85,6 +85,22 @@ test('task approval posts its reward and idempotency result before commit', () =
     assert.match(review, /operationType: taskType === 'card' \? 'task_card_reward' : 'event_task_reward'/);
 });
 
+test('task assignment permits the staged rollout account even when it is an administrator', () => {
+    const tasks = source('routes/tasks.js');
+    const offers = tasks.slice(
+        tasks.indexOf("app.post('/api/admin/tasks/assign-offers'"),
+        tasks.indexOf("app.post('/api/admin/tasks/assign-event'")
+    );
+    const event = tasks.slice(
+        tasks.indexOf("app.post('/api/admin/tasks/assign-event'"),
+        tasks.indexOf("app.post('/api/admin/tasks/review'")
+    );
+    assert.doesNotMatch(offers, /target\.rows\[0\]\.is_admin/);
+    assert.doesNotMatch(event, /target\.rows\[0\]\.is_admin/);
+    assert.match(offers, /target\.rows\[0\]\.deactivated/);
+    assert.match(event, /target\.rows\[0\]\.deactivated/);
+});
+
 test('lifetime earnings use game net plus approved credits and gift value', async () => {
     assert.ok(GAME_OPERATIONS.includes('slot_bet'));
     assert.ok(GAME_OPERATIONS.includes('slot_win'));

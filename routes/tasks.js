@@ -460,10 +460,10 @@ module.exports = function registerTaskRoutes(app, deps) {
         try {
             await client.query('BEGIN');
             await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`task-cards:${username}`]);
-            const target = await client.query('SELECT is_admin, deactivated FROM users WHERE username = $1 FOR UPDATE', [username]);
-            if (target.rowCount !== 1 || target.rows[0].deactivated || target.rows[0].is_admin) {
+            const target = await client.query('SELECT deactivated FROM users WHERE username = $1 FOR UPDATE', [username]);
+            if (target.rowCount !== 1 || target.rows[0].deactivated) {
                 await client.query('ROLLBACK');
-                return res.status(404).json({ success: false, message: '用户不存在或不可分配任务' });
+                return res.status(404).json({ success: false, message: '用户不存在或已停用' });
             }
             const active = await client.query("SELECT 1 FROM task_card_assignments WHERE username = $1 AND status IN ('claimed', 'pending_approval') FOR UPDATE", [username]);
             if (active.rowCount > 0) {
@@ -511,10 +511,10 @@ module.exports = function registerTaskRoutes(app, deps) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            const target = await client.query('SELECT is_admin, deactivated FROM users WHERE username = $1 FOR UPDATE', [username]);
-            if (target.rowCount !== 1 || target.rows[0].deactivated || target.rows[0].is_admin) {
+            const target = await client.query('SELECT deactivated FROM users WHERE username = $1 FOR UPDATE', [username]);
+            if (target.rowCount !== 1 || target.rows[0].deactivated) {
                 await client.query('ROLLBACK');
-                return res.status(404).json({ success: false, message: '用户不存在或不可分配任务' });
+                return res.status(404).json({ success: false, message: '用户不存在或已停用' });
             }
             const inserted = await client.query(`
                 INSERT INTO event_task_assignments (
