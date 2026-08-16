@@ -93,6 +93,7 @@ const registerGiftRoutes = require('./routes/gifts');
 const registerWishRoutes = require('./routes/wish');
 const registerGameRoutes = require('./routes/games');
 const registerDoudizhuRoutes = require('./routes/doudizhu');
+const registerAdventureRoutes = require('./routes/adventure');
 const registerTaskRoutes = require('./routes/tasks');
 const registerAnalyticsRoutes = require('./routes/analytics');
 
@@ -2853,6 +2854,18 @@ registerDoudizhuRoutes(app, {
     requireCSRF,
     security,
     paidActionConcurrencyGuard
+});
+
+registerAdventureRoutes(app, {
+    pool,
+    BalanceLogger,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireCSRF,
+    security,
+    paidActionConcurrencyGuard,
+    adventureConfig: gameRegistry.ADVENTURE_CONFIG
 });
 
 registerTaskRoutes(app, {

@@ -2801,4 +2801,48 @@ const questions = [
   }
 ];
 
+// 2026-08 冒险季扩展题库。保持稳定 ID，已经开始的答题会话继续使用自己的快照。
+questions.push(
+  { id: 401, question: "一个完整的星期有多少天？", options: ["5", "6", "7", "8"], correct: 2, category: "常识" },
+  { id: 402, question: "25 × 4 = ?", options: ["80", "90", "100", "120"], correct: 2, category: "数学" },
+  { id: 403, question: "1 千米等于多少米？", options: ["10", "100", "1000", "10000"], correct: 2, category: "数学" },
+  { id: 404, question: "下列哪个数是质数？", options: ["9", "15", "17", "21"], correct: 2, category: "数学" },
+  { id: 405, question: "直角是多少度？", options: ["45°", "60°", "90°", "180°"], correct: 2, category: "数学" },
+  { id: 406, question: "0.5 与下面哪个分数相等？", options: ["1/3", "1/2", "2/3", "3/4"], correct: 1, category: "数学" },
+  { id: 407, question: "圆周率通常用哪个希腊字母表示？", options: ["α", "β", "π", "Ω"], correct: 2, category: "数学" },
+  { id: 408, question: "数列 3、6、12、24 的下一项是？", options: ["30", "36", "42", "48"], correct: 3, category: "数学" },
+  { id: 409, question: "“一日之计在于晨”强调的是什么？", options: ["珍惜时间", "增加睡眠", "避免计划", "等待机会"], correct: 0, category: "语文" },
+  { id: 410, question: "“亡羊补牢”的下一句是？", options: ["为时未晚", "不进则退", "水滴石穿", "熟能生巧"], correct: 0, category: "语文" },
+  { id: 411, question: "下面哪个词是“迅速”的近义词？", options: ["缓慢", "快捷", "犹豫", "安静"], correct: 1, category: "语文" },
+  { id: 412, question: "“春风又绿江南岸”中的“绿”主要是什么用法？", options: ["名词", "动词", "数量词", "代词"], correct: 1, category: "语文" },
+  { id: 413, question: "《西游记》中护送唐僧取经的大徒弟是？", options: ["猪八戒", "沙悟净", "孙悟空", "白龙马"], correct: 2, category: "文学" },
+  { id: 414, question: "“但愿人长久，千里共婵娟”中的“婵娟”常指什么？", options: ["太阳", "月亮", "星星", "云朵"], correct: 1, category: "文学" },
+  { id: 415, question: "《小王子》的作者来自哪个国家？", options: ["法国", "英国", "德国", "意大利"], correct: 0, category: "文学" },
+  { id: 416, question: "植物的根通常主要从土壤吸收什么？", options: ["光和热", "水和无机盐", "氧气和声音", "糖和脂肪"], correct: 1, category: "科学" },
+  { id: 417, question: "水在标准大气压下的沸点约为？", options: ["0℃", "50℃", "100℃", "150℃"], correct: 2, category: "科学" },
+  { id: 418, question: "地球的天然卫星是？", options: ["太阳", "月球", "火星", "金星"], correct: 1, category: "科学" },
+  { id: 419, question: "磁铁通常有几个磁极？", options: ["1 个", "2 个", "3 个", "4 个"], correct: 1, category: "科学" },
+  { id: 420, question: "声音的高低主要与振动的什么有关？", options: ["频率", "颜色", "形状", "气味"], correct: 0, category: "科学" },
+  { id: 421, question: "人体进行气体交换的主要器官是？", options: ["心脏", "肺", "胃", "肾"], correct: 1, category: "科学" },
+  { id: 422, question: "彩虹通常可见的颜色数量是？", options: ["5", "6", "7", "8"], correct: 2, category: "科学" },
+  { id: 423, question: "中国最长的河流是？", options: ["黄河", "长江", "珠江", "黑龙江"], correct: 1, category: "地理" },
+  { id: 424, question: "赤道把地球大致分为哪两个半球？", options: ["东西半球", "南北半球", "水陆半球", "昼夜半球"], correct: 1, category: "地理" },
+  { id: 425, question: "世界最高峰珠穆朗玛峰位于哪条山脉？", options: ["阿尔卑斯山脉", "安第斯山脉", "喜马拉雅山脉", "落基山脉"], correct: 2, category: "地理" },
+  { id: 426, question: "地图上通常用什么方向作为上方？", options: ["东", "南", "西", "北"], correct: 3, category: "地理" },
+  { id: 427, question: "日本的首都是？", options: ["大阪", "京都", "东京", "札幌"], correct: 2, category: "地理" },
+  { id: 428, question: "古代丝绸之路主要促进了什么？", options: ["文化与贸易交流", "海洋结冰", "文字消失", "昼夜变化"], correct: 0, category: "历史" },
+  { id: 429, question: "郑和下西洋发生在哪个朝代？", options: ["唐朝", "宋朝", "明朝", "清朝"], correct: 2, category: "历史" },
+  { id: 430, question: "活字印刷术的发明者通常认为是？", options: ["张衡", "毕昇", "祖冲之", "李时珍"], correct: 1, category: "历史" },
+  { id: 431, question: "奥林匹克五环标志由几个环组成？", options: ["4", "5", "6", "7"], correct: 1, category: "体育" },
+  { id: 432, question: "足球比赛中守门员在本方哪个区域可用手触球？", options: ["中圈", "角球区", "罚球区", "对方半场"], correct: 2, category: "体育" },
+  { id: 433, question: "标准乒乓球单局通常先到多少分并领先两分获胜？", options: ["7", "11", "15", "21"], correct: 1, category: "体育" },
+  { id: 434, question: "羽毛球比赛中使用的球拍击打对象是？", options: ["网球", "羽毛球", "壁球", "棒球"], correct: 1, category: "体育" },
+  { id: 435, question: "如果所有蓝鸟都会唱歌，小蓝是蓝鸟，可以推出？", options: ["小蓝会唱歌", "会唱歌的都是蓝鸟", "小蓝不会飞", "蓝鸟都是小蓝"], correct: 0, category: "逻辑" },
+  { id: 436, question: "找规律：A、C、E、G，下一项是？", options: ["H", "I", "J", "K"], correct: 1, category: "逻辑" },
+  { id: 437, question: "四个人排队，小明前面有两人，他可能排第几？", options: ["第一", "第二", "第三", "第五"], correct: 2, category: "逻辑" },
+  { id: 438, question: "收到陌生链接要求输入密码时，最安全的做法是？", options: ["立即输入", "转发给朋友", "核实来源且不输入密码", "关闭杀毒软件"], correct: 2, category: "安全" },
+  { id: 439, question: "一个网站地址使用 HTTPS，主要表示什么？", options: ["内容一定真实", "连接经过加密保护", "网站没有广告", "访问完全匿名"], correct: 1, category: "安全" },
+  { id: 440, question: "为不同网站设置密码时，更安全的习惯是？", options: ["全部使用同一密码", "使用独立强密码", "只用生日", "把密码公开保存"], correct: 1, category: "安全" }
+);
+
 module.exports = questions;

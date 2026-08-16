@@ -93,6 +93,7 @@ test('game registry definitions and configuration are immutable and internally v
     assert.equal(new Set(indexes).size, indexes.length);
 
     for (const [name, config] of Object.entries({
+        ADVENTURE_CONFIG: gameRegistry.ADVENTURE_CONFIG,
         WISH_CONFIGS: gameRegistry.WISH_CONFIGS,
         BLINDBOX_CONFIG: gameRegistry.BLINDBOX_CONFIG,
         DOUDIZHU_CONFIG: gameRegistry.DOUDIZHU_CONFIG,

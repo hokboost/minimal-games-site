@@ -2,6 +2,7 @@
 
 const { GAME_DEFINITIONS, GAME_GROUPS } = require('./catalog');
 const {
+    ADVENTURE_CONFIG,
     BLINDBOX_CONFIG,
     DOUDIZHU_CONFIG,
     DUEL_CONFIG,
@@ -34,6 +35,7 @@ const SUPPORTED_ECONOMICS_KINDS = new Set([
     'free',
     'guaranteed-geometric',
     'optimal-stopping',
+    'progression-reward',
     'weighted-multiplier',
     'weighted-value'
 ]);
@@ -346,6 +348,7 @@ function getPublicDoudizhuConfig() {
 }
 
 module.exports = {
+    ADVENTURE_CONFIG,
     BLINDBOX_CONFIG,
     DOUDIZHU_CONFIG,
     DUEL_CONFIG,

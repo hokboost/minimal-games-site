@@ -13,6 +13,15 @@ const QUIZ_CONFIG = deepFreeze({
     dailyRewardCap: 5
 });
 
+const ADVENTURE_CONFIG = deepFreeze({
+    contentVersion: 'star-archive-v1',
+    maximumHearts: 5,
+    maximumHistoryEntries: 80,
+    maximumActionValueLength: 160,
+    maximumSequenceLength: 12,
+    runExpiryDays: 30
+});
+
 const DOUDIZHU_CONFIG = deepFreeze({
     rulesVersion: 'classic-jj-v1',
     playerCount: 3,
@@ -317,6 +326,7 @@ const SPIN_CONFIG = deepFreeze({
 });
 
 module.exports = {
+    ADVENTURE_CONFIG,
     BLINDBOX_CONFIG,
     DOUDIZHU_CONFIG,
     DUEL_CONFIG,

@@ -913,6 +913,7 @@ body.app-redesign {
 .game-card--duel,
 .game-card--spin { --accent: #9a6617; }
 .game-card--doudizhu { --accent: #217a4c; }
+.game-card--adventure { --accent: #7064bd; }
 
 .game-card--quiz .catalog-media { background-position: 50% 4%; }
 .game-card--dictation .catalog-media { background-position: 1% 12%; }

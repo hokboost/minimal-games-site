@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+    ADVENTURE_CONFIG,
     BLINDBOX_CONFIG,
     DOUDIZHU_CONFIG,
     FLIP_CONFIG,
@@ -309,6 +310,29 @@ const GAME_DEFINITIONS = deepFreeze([
         costEn: 'Free',
         metaZh: `${DOUDIZHU_CONFIG.playerCount} 人经典叫分`,
         metaEn: `${DOUDIZHU_CONFIG.playerCount}-player classic bidding`
+    }),
+    defineGame({
+        id: 'adventure',
+        index: '12',
+        group: 'points',
+        href: '/adventure',
+        actions: [
+            action('/api/adventure/start', CAPACITY_USER_ACTION_POLICIES),
+            action('/api/adventure/action', CAPACITY_USER_ACTION_POLICIES),
+            action('/api/adventure/abandon', CAPACITY_USER_ACTION_POLICIES)
+        ],
+        assetKind: 'points',
+        category: 'challenge',
+        economicsKind: 'progression-reward',
+        recordView: null,
+        titleZh: '星图闯关',
+        titleEn: 'Star Map Adventure',
+        descZh: '领取章节任务，在剧情、答题、密码、记忆与策略挑战中推进冒险。',
+        descEn: 'Claim a chapter and advance through story, trivia, ciphers, memory, and strategy trials.',
+        costZh: '免费领取',
+        costEn: 'Free to claim',
+        metaZh: `${ADVENTURE_CONFIG.contentVersion} 剧情季`,
+        metaEn: `${ADVENTURE_CONFIG.contentVersion} story season`
     })
 ]);
 

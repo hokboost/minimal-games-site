@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#172444">
+    <title><%= lang === 'zh' ? '星图闯关 · Minimal Games' : 'Star Map Adventure · Minimal Games' %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/redesign.css">
+    <link rel="stylesheet" href="/adventure.css">
+</head>
+<body class="app-redesign page-adventure"
+      data-username="<%= username %>"
+      data-csrf-token="<%= csrfToken %>"
+      data-adventure-state="<%= encodeURIComponent(JSON.stringify(initialAdventure || {})) %>"
+      data-adventure-config="<%= encodeURIComponent(JSON.stringify(adventureConfig || {})) %>">
+    <%- include('partials/language-switcher') %>
+
+    <div class="adventure-shell">
+        <header class="adventure-topbar">
+            <a href="/" class="adventure-back">← <%= lang === 'zh' ? '游戏大厅' : 'Game room' %></a>
+            <span><%= lang === 'zh' ? '冒险者' : 'Adventurer' %> · <strong><%= username %></strong></span>
+        </header>
+
+        <main>
+            <section class="adventure-hero" aria-labelledby="adventure-title">
+                <div>
+                    <span class="adventure-kicker"><%= lang === 'zh' ? '第一季 · 星图档案' : 'Season One · The Star Archive' %></span>
+                    <h1 id="adventure-title"><%= lang === 'zh' ? '领取任务，走进会记住你的故事' : 'Claim a mission and enter a story that remembers you' %></h1>
+                    <p><%= lang === 'zh'
+                        ? '剧情选择、知识问答、密码推理、记忆顺序和资源路线组成完整章节。进度自动保存，首次通关会结算积分奖励。'
+                        : 'Story choices, trivia, ciphers, memory trials, and resource routes form complete chapters. Progress saves automatically and first clears award points.' %></p>
+                </div>
+                <div class="adventure-hero-orbit" aria-hidden="true">
+                    <span>✦</span><span>⌛</span><span>🚂</span><span>🌌</span>
+                </div>
+            </section>
+
+            <p id="adventureMessage" class="adventure-message" role="status" aria-live="polite"></p>
+
+            <section id="missionBoard" class="mission-board" aria-labelledby="mission-title">
+                <div class="adventure-section-heading">
+                    <div>
+                        <span class="adventure-kicker"><%= lang === 'zh' ? '任务板' : 'Mission board' %></span>
+                        <h2 id="mission-title"><%= lang === 'zh' ? '选择一个章节' : 'Choose a chapter' %></h2>
+                    </div>
+                    <button type="button" id="leaderboardBtn" class="adventure-ghost"><%= lang === 'zh' ? '冒险榜' : 'Leaderboard' %></button>
+                </div>
+                <div id="missionCards" class="mission-grid"></div>
+            </section>
+
+            <section id="activeAdventure" class="active-adventure" hidden aria-labelledby="active-chapter-title">
+                <div class="adventure-run-header">
+                    <div>
+                        <span id="activeChapterIcon" class="active-chapter-icon" aria-hidden="true"></span>
+                        <div>
+                            <span class="adventure-kicker"><%= lang === 'zh' ? '进行中的任务' : 'Active mission' %></span>
+                            <h2 id="active-chapter-title"></h2>
+                        </div>
+                    </div>
+                    <button type="button" id="abandonAdventureBtn" class="adventure-danger"><%= lang === 'zh' ? '放弃本章' : 'Abandon' %></button>
+                </div>
+
+                <div class="adventure-progress-track" aria-label="<%= lang === 'zh' ? '章节进度' : 'Chapter progress' %>">
+                    <span id="adventureProgressBar"></span>
+                </div>
+                <div class="adventure-stats">
+                    <span>♥ <strong id="heartCount">0</strong></span>
+                    <span>⚡ <strong id="energyCount">0</strong></span>
+                    <span>✦ <strong id="insightCount">0</strong></span>
+                    <span><strong id="stageCount">0/0</strong></span>
+                </div>
+
+                <div class="adventure-play-layout">
+                    <article class="adventure-scene" id="adventureScene">
+                        <div class="scene-meta">
+                            <span id="stageKind"></span>
+                            <span id="stageCategory"></span>
+                        </div>
+                        <h3 id="stageTitle"></h3>
+                        <p id="stageSpeaker" class="stage-speaker"></p>
+                        <p id="stagePrompt" class="stage-prompt"></p>
+                        <div id="stageControls" class="stage-controls"></div>
+                        <p id="stageFeedback" class="stage-feedback" aria-live="polite"></p>
+                    </article>
+
+                    <aside class="adventure-journal">
+                        <h3><%= lang === 'zh' ? '冒险日志' : 'Adventure journal' %></h3>
+                        <div id="adventureInventory" class="adventure-inventory"></div>
+                        <ol id="adventureHistory"></ol>
+                    </aside>
+                </div>
+            </section>
+
+            <dialog id="leaderboardDialog" class="adventure-dialog">
+                <div class="dialog-heading">
+                    <h2><%= lang === 'zh' ? '冒险榜' : 'Adventure leaderboard' %></h2>
+                    <button type="button" id="closeLeaderboardBtn" aria-label="<%= lang === 'zh' ? '关闭' : 'Close' %>">×</button>
+                </div>
+                <div id="leaderboardList"></div>
+            </dialog>
+        </main>
+    </div>
+
+    <script src="/js/i18n-helpers.js"></script>
+    <script src="/js/adventure.js"></script>
+</body>
+</html>

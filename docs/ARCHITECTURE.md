@@ -57,6 +57,10 @@ the HTTP server becomes ready.
   fixed-probability RTP game.
 - Dou Dizhu is a free competitive-skill game. It uses match scoring only and is
   deliberately outside the redeemable-value RTP policy.
+- Star Map Adventure is a progression-reward game rather than an RTP game. Its
+  content is immutable and versioned, each user/chapter/version receives at
+  most one first-clear reward, and the completion row, balance ledger entry,
+  public response, and run transition share one transaction.
 
 Do not add a second copy of costs, probabilities, multipliers, or gift weights
 to a route, browser script, EJS template, preview script, or test. Browser code
@@ -98,6 +102,15 @@ strategy game: `domain/games/doudizhu/` has no Express or database dependency,
 `routes/doudizhu.js` owns projection and compare-and-swap persistence, and the
 browser submits only a game ID, expected revision, action type, bid, or owned
 card IDs. Private hands and random state never enter the public projection.
+
+The Adventure implementation follows the same boundary with content separated
+from mechanics: `domain/games/adventure/content.js` defines versioned chapters,
+`engine.js` owns pure state transitions and projection, and
+`routes/adventure.js` owns authenticated persistence. Quiz answers, cipher
+codes, choice effects, rewards, hearts, and progress submitted by a browser are
+never trusted. A run uses an owner-bound revision compare-and-swap; the partial
+unique index permits one active run per user, while completion uniqueness makes
+first-clear settlement replay-safe.
 
 ## Transaction rules
 
