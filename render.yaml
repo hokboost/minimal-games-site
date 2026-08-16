@@ -49,3 +49,5 @@ services:
         value: "50000"
       - key: DAILY_USER_GIFT_SPEND_LIMIT
         value: "10000"
+      - key: TASK_CARDS_ENABLED_USERS
+        value: "hokboost"

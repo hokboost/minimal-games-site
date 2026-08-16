@@ -42,6 +42,11 @@
                     <label><%= lang === 'zh' ? '积分余额' : 'Point Balance' %>:</label>
                     <span class="balance-count"><%= user.balance || 0 %> <%= lang === 'zh' ? '积分' : 'points' %></span>
                 </div>
+                <div class="info-item lifetime-earnings">
+                    <label><%= lang === 'zh' ? '终身净收益' : 'Lifetime net earnings' %>:</label>
+                    <span class="balance-count <%= lifetimeEarnings.total < 0 ? 'negative' : 'positive' %>"><%= lifetimeEarnings.total > 0 ? '+' : '' %><%= lifetimeEarnings.total %> <%= lang === 'zh' ? '积分等值' : 'point equivalent' %></span>
+                    <small><%= lang === 'zh' ? `游戏净收益 ${lifetimeEarnings.gameNet} · 管理员增加 ${lifetimeEarnings.adminEarned} · 任务 ${lifetimeEarnings.taskEarned} · 礼物价值 ${lifetimeEarnings.giftValue}` : `Games ${lifetimeEarnings.gameNet} · Admin credits ${lifetimeEarnings.adminEarned} · Tasks ${lifetimeEarnings.taskEarned} · Gift value ${lifetimeEarnings.giftValue}` %></small>
+                </div>
             </div>
         </div>
 

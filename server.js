@@ -27,6 +27,7 @@ const BalanceLogger = require('./balance-logger');
 const { parseMoney } = require('./lib/integer-money');
 const gameRegistry = require('./domain/games');
 const { parseWorkerCredentials } = require('./lib/worker-credentials');
+const { getLifetimeEarnings } = require('./lib/earnings');
 
 // 礼物配置
 const fs = require('fs');
@@ -92,6 +93,7 @@ const registerGiftRoutes = require('./routes/gifts');
 const registerWishRoutes = require('./routes/wish');
 const registerGameRoutes = require('./routes/games');
 const registerDoudizhuRoutes = require('./routes/doudizhu');
+const registerTaskRoutes = require('./routes/tasks');
 const registerAnalyticsRoutes = require('./routes/analytics');
 
 // 导入i18n国际化
@@ -840,6 +842,7 @@ const requireLogin = async (req, res, next) => {
               AND active.is_active = true
               AND account.deactivated = false
             RETURNING account.id, account.username, account.authorized, account.is_admin,
+                      account.account_locked,
                       account.deactivated, active.is_active, active.termination_reason
         `, [username, req.sessionID]);
         const current = result.rows[0];
@@ -862,7 +865,8 @@ const requireLogin = async (req, res, next) => {
             id: current.id,
             username: current.username,
             authorized: current.authorized === true,
-            is_admin: current.is_admin === true
+            is_admin: current.is_admin === true,
+            account_locked: current.account_locked === true
         };
         req.sessionValidated = true;
         return next();
@@ -882,6 +886,36 @@ const requireAuthorized = (req, res, next) => {
     }
     next();
 };
+
+const accountLockGate = async (req, res, next) => {
+    if (!req.session?.user?.username) return next();
+    if (req.method === 'POST' && req.path === '/logout') return next();
+    try {
+        const result = await pool.query(
+            'SELECT account_locked FROM users WHERE username = $1 AND deactivated = FALSE',
+            [req.session.user.username]
+        );
+        if (result.rowCount !== 1) return next();
+        const locked = result.rows[0].account_locked === true;
+        req.session.user.account_locked = locked;
+        if (!locked) return next();
+        const allowed = req.method === 'GET' && req.path === '/account-locked';
+        if (allowed) return next();
+        if (req.path.startsWith('/api/')) {
+            return res.status(423).json({
+                success: false,
+                code: 'ACCOUNT_LOCKED',
+                message: '账户已被锁定，请联系管理员'
+            });
+        }
+        return res.redirect('/account-locked');
+    } catch (error) {
+        console.error('账户锁定状态检查失败:', error);
+        return res.status(503).send(uiText(res, '账户状态检查暂不可用', 'Account status check is temporarily unavailable'));
+    }
+};
+
+app.use(accountLockGate);
 
 const requireAdmin = (req, res, next) => {
     if (!req.session.user || !req.session.user.is_admin) {
@@ -1148,6 +1182,16 @@ app.get('/login', (req, res) => {
     });
 });
 
+app.get('/account-locked', (req, res) => {
+    if (!req.session?.user) return res.redirect('/login');
+    if (req.session.user.account_locked !== true) return res.redirect('/');
+    res.status(423).render('account-locked', {
+        title: uiText(res, '账户已锁定', 'Account locked'),
+        user: req.session.user,
+        csrfToken: generateCSRFToken(req)
+    });
+});
+
 app.get('/reset-password', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.set('Referrer-Policy', 'no-referrer');
@@ -1371,13 +1415,17 @@ app.get('/profile', requireLogin, (req, res, next) => {
             return res.status(404).send(uiText(res, '用户不存在', 'User not found'));
         }
         
-        const stats = await gameRegistry.records.loadProfileStats(pool, username);
+        const [stats, lifetimeEarnings] = await Promise.all([
+            gameRegistry.records.loadProfileStats(pool, username),
+            getLifetimeEarnings(pool, username)
+        ]);
         
         const user = userResult.rows[0];
         
         res.render('profile', {
             title: uiText(res, '个人资料 - Minimal Games', 'Profile - Minimal Games'),
             user: user,
+            lifetimeEarnings,
             gameStats: stats,
             csrfToken: req.session.csrfToken
         });
@@ -2836,6 +2884,18 @@ registerDoudizhuRoutes(app, {
     requireCSRF,
     security,
     paidActionConcurrencyGuard
+});
+
+registerTaskRoutes(app, {
+    pool,
+    BalanceLogger,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireAdmin,
+    requireRecentAdminAuth,
+    requireCSRF,
+    security
 });
 
 // 404 处理（必须在所有API路由之后）

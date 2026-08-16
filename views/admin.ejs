@@ -132,6 +132,12 @@
                                     <span class="self-indicator"><%= lang === 'zh' ? '自己' : 'You' %></span>
                                 <% } else { %>
                                     <button class="btn-delete" data-action="delete-account" data-username="<%= user.username %>"><%= lang === 'zh' ? '注销账号' : 'Delete account' %></button>
+                                    <% if (user.account_locked) { %>
+                                        <button class="btn-unlock" data-action="permanent-unlock" data-username="<%= user.username %>"><%= lang === 'zh' ? '解除永久锁定' : 'Remove lock' %></button>
+                                        <small class="status-locked"><%= user.account_lock_reason %></small>
+                                    <% } else { %>
+                                        <button class="btn-delete" data-action="permanent-lock" data-username="<%= user.username %>"><%= lang === 'zh' ? '锁定账号' : 'Lock account' %></button>
+                                    <% } %>
                                 <% } %>
                             </td>
                             <td>
@@ -165,6 +171,43 @@
                     </a>
                 </p>
             <% } %>
+
+            <section class="admin-task-management" aria-labelledby="admin-task-title">
+                <h2 id="admin-task-title"><%= lang === 'zh' ? '任务卡管理' : 'Task card management' %></h2>
+                <div class="admin-task-grid">
+                    <form id="assign-task-offers-form" class="admin-task-panel">
+                        <h3><%= lang === 'zh' ? '分配三张候选卡' : 'Assign three card choices' %></h3>
+                        <label><%= lang === 'zh' ? '测试用户名' : 'Test username' %>
+                            <input name="username" value="hokboost" required>
+                        </label>
+                        <div id="task-template-options"><%= lang === 'zh' ? '正在加载模板…' : 'Loading templates…' %></div>
+                        <button type="submit"><%= lang === 'zh' ? '分配选中的三张' : 'Assign selected three' %></button>
+                    </form>
+                    <form id="assign-event-task-form" class="admin-task-panel">
+                        <h3><%= lang === 'zh' ? '直接分配限时活动' : 'Assign limited-time event' %></h3>
+                        <label><%= lang === 'zh' ? '用户名' : 'Username' %><input name="username" required></label>
+                        <label><%= lang === 'zh' ? '任务标题' : 'Title' %><input name="title" maxlength="240" required></label>
+                        <label><%= lang === 'zh' ? '任务说明' : 'Description' %><textarea name="description" maxlength="2000" required></textarea></label>
+                        <label><%= lang === 'zh' ? '奖励积分' : 'Reward points' %><input name="rewardPoints" type="number" min="1" max="100000000" required></label>
+                        <label><%= lang === 'zh' ? '期限（天）' : 'Days' %><input name="days" type="number" min="1" max="90" value="7" required></label>
+                        <button type="submit"><%= lang === 'zh' ? '立即分配并开始倒计时' : 'Assign and start countdown' %></button>
+                    </form>
+                </div>
+                <div class="admin-task-panel">
+                    <h3><%= lang === 'zh' ? '等待审核' : 'Pending review' %></h3>
+                    <div id="pending-task-reviews"><%= lang === 'zh' ? '正在加载…' : 'Loading…' %></div>
+                </div>
+            </section>
+
+            <section class="admin-task-management" aria-labelledby="ip-intel-title">
+                <h2 id="ip-intel-title"><%= lang === 'zh' ? 'IP / VPN 查询' : 'IP / VPN lookup' %></h2>
+                <form id="ip-intel-form" class="admin-task-panel">
+                    <label><%= lang === 'zh' ? 'IP 地址' : 'IP address' %><input name="ip" placeholder="142.122.111.63" required></label>
+                    <button type="submit"><%= lang === 'zh' ? '查看风险与 VPN 情报' : 'Check risk and VPN intelligence' %></button>
+                    <small><%= lang === 'zh' ? '结果仅供后台参考，不会自动锁号或封禁。' : 'Display only; this never automatically locks or bans an account.' %></small>
+                </form>
+                <div id="ip-intel-result" class="admin-task-panel" hidden></div>
+            </section>
 
             <div class="recent-records">
                 <h2><%= lang === 'zh' ? '最近游戏记录' : 'Recent game records' %></h2>

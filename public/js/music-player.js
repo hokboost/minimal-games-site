@@ -1,15 +1,4 @@
 (() => {
-    if (window.self !== window.top) {
-        document.documentElement.classList.add('music-shell-child');
-        document.getElementById('persistent-music-audio')?.remove();
-        document.querySelectorAll('[data-featured-track-toggle]').forEach((button) => {
-            button.addEventListener('click', () => {
-                window.parent.postMessage({ type: 'minimal-games:music-toggle' }, window.location.origin);
-            });
-        });
-        return;
-    }
-
     const audio = document.getElementById('persistent-music-audio');
     if (!audio) return;
 
@@ -17,9 +6,6 @@
     const toggleButtons = document.querySelectorAll('[data-featured-track-toggle]');
     let unloading = false;
     let desiredPlaying = false;
-    let siteFrame = null;
-    const initialUrl = new URL(window.location.href);
-    const initialPath = `${initialUrl.pathname}${initialUrl.search}${initialUrl.hash}`;
 
     function readState() {
         try {
@@ -55,46 +41,6 @@
             if (label) label.textContent = isPlaying ? (zh ? '暂停' : 'Pause') : (zh ? '播放' : 'Play');
             if (icon) icon.textContent = isPlaying ? '❚❚' : '▶';
         });
-    }
-
-    function currentPath(url) {
-        return `${url.pathname}${url.search}${url.hash}`;
-    }
-
-    function closeSiteFrame() {
-        siteFrame?.remove();
-        siteFrame = null;
-        document.body.classList.remove('music-shell-active');
-        document.querySelector('.site-layout')?.removeAttribute('inert');
-        window.UXAnalytics?.resumePage();
-    }
-
-    function openInSiteFrame(url, pushHistory = true) {
-        window.UXAnalytics?.pausePage('shell_covered');
-        if (!siteFrame) {
-            siteFrame = document.createElement('iframe');
-            siteFrame.className = 'music-site-frame';
-            siteFrame.title = document.documentElement.lang.startsWith('zh') ? '网站内容' : 'Site content';
-            siteFrame.addEventListener('load', () => {
-                let loadedUrl;
-                try {
-                    loadedUrl = new URL(siteFrame.contentWindow.location.href);
-                } catch {
-                    return;
-                }
-                if (loadedUrl.origin === window.location.origin && currentPath(loadedUrl) !== currentPath(new URL(window.location.href))) {
-                    history.pushState({ musicShell: true }, '', currentPath(loadedUrl));
-                }
-            });
-            document.body.appendChild(siteFrame);
-            document.body.classList.add('music-shell-active');
-            document.querySelector('.site-layout')?.setAttribute('inert', '');
-        }
-        if (pushHistory && currentPath(url) !== currentPath(new URL(window.location.href))) {
-            history.pushState({ musicShell: true }, '', currentPath(url));
-        }
-        siteFrame.src = url.href;
-        siteFrame.focus();
     }
 
     async function restorePlayback() {
@@ -172,43 +118,6 @@
             audio.play().catch(() => {});
         }
     }, { capture: true });
-
-    document.addEventListener('click', (event) => {
-        if (
-            event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
-            event.shiftKey || event.altKey || audio.paused ||
-            !document.body.matches('.page-home, .page-games')
-        ) return;
-
-        const link = event.target.closest('a[href]');
-        if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
-
-        const url = new URL(link.href, window.location.href);
-        if (url.origin !== window.location.origin || url.protocol !== window.location.protocol) return;
-        if (url.pathname === window.location.pathname && url.search === window.location.search && url.hash) return;
-
-        event.preventDefault();
-        openInSiteFrame(url);
-    });
-
-    window.addEventListener('popstate', () => {
-        if (!siteFrame) return;
-        const url = new URL(window.location.href);
-        if (currentPath(url) === initialPath) {
-            closeSiteFrame();
-            return;
-        }
-        openInSiteFrame(url, false);
-    });
-
-    window.addEventListener('message', async (event) => {
-        if (event.origin !== window.location.origin || event.data?.type !== 'minimal-games:music-toggle') return;
-        if (audio.paused) {
-            await audio.play().catch(() => {});
-        } else {
-            audio.pause();
-        }
-    });
 
     if ('mediaSession' in navigator) {
         try {

@@ -91,6 +91,10 @@ document.addEventListener('click', (event) => {
                 return deleteAccount(username, actionButton);
             case 'unlock':
                 return unlockAccount(username, actionButton);
+            case 'permanent-lock':
+                return permanentLock(username, actionButton);
+            case 'permanent-unlock':
+                return permanentUnlock(username, actionButton);
             case 'clear-failures':
                 return clearFailures(username, actionButton);
             case 'edit-balance':
@@ -121,7 +125,174 @@ document.addEventListener('submit', (event) => {
         event.preventDefault();
         bindUserRoom();
     }
+    if (event.target.matches('#assign-task-offers-form')) {
+        event.preventDefault();
+        assignTaskOffers(event.target);
+    }
+    if (event.target.matches('#assign-event-task-form')) {
+        event.preventDefault();
+        assignEventTask(event.target);
+    }
+    if (event.target.matches('#ip-intel-form')) {
+        event.preventDefault();
+        lookupIpIntelligence(event.target);
+    }
 });
+
+async function lookupIpIntelligence(form) {
+    const output = document.getElementById('ip-intel-result');
+    const ip = form.elements.ip.value.trim();
+    output.hidden = false;
+    output.textContent = t('正在查询…', 'Looking up…');
+    try {
+        const response = await adminFetch(`/api/admin/ip/${encodeURIComponent(ip)}`);
+        const data = await readJsonResponse(response);
+        if (!response.ok || !data.success) throw new Error(data.message || t('查询失败', 'Lookup failed'));
+        const rows = [
+            [t('风险等级', 'Risk level'), `${data.riskData.level} (${data.riskData.score})`],
+            [t('风险原因', 'Risk reasons'), (data.riskData.reasons || []).join('；') || t('无', 'None')],
+            ['VPN', data.vpn.available ? (data.vpn.isVpn ? t('检测到', 'Detected') : t('未检测到', 'Not detected')) : t('暂不可用', 'Unavailable')],
+            [t('代理', 'Proxy'), data.vpn.available ? String(data.vpn.isProxy) : '-'],
+            ['Tor', data.vpn.available ? String(data.vpn.isTor) : '-'],
+            [t('数据中心', 'Datacenter'), data.vpn.available ? String(data.vpn.isDatacenter) : '-'],
+            [t('VPN 服务', 'VPN service'), data.vpn.vpnService || '-'],
+            [t('网络组织', 'Network organization'), data.vpn.organization || '-'],
+            [t('历史请求', 'Historical requests'), data.stats.total_requests || 0],
+            [t('关联用户数', 'Associated users'), data.stats.unique_users || 0]
+        ];
+        output.replaceChildren(...rows.map(([label, value]) => {
+            const row = document.createElement('div');
+            row.className = 'status-detail';
+            const strong = document.createElement('strong');
+            strong.textContent = `${label}: `;
+            row.append(strong, document.createTextNode(String(value)));
+            return row;
+        }));
+    } catch (error) {
+        output.textContent = String(error.message || error);
+    }
+}
+
+async function loadTaskManagement() {
+    const templateContainer = document.getElementById('task-template-options');
+    const pendingContainer = document.getElementById('pending-task-reviews');
+    if (!templateContainer || !pendingContainer) return;
+    try {
+        const response = await adminFetch('/api/admin/tasks');
+        const data = await readJsonResponse(response);
+        if (!response.ok || !data.success) throw new Error(data.message || t('加载失败', 'Load failed'));
+        const templateNodes = data.templates.map((template) => {
+            const label = document.createElement('label');
+            label.className = 'admin-task-template';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = 'templateId';
+            input.value = String(template.id);
+            const text = document.createElement('span');
+            text.textContent = `${lang === 'zh' ? template.title_zh : template.title_en} · ${Number(template.reward_points).toLocaleString()} ${t('积分', 'points')}`;
+            label.append(input, text);
+            return label;
+        });
+        templateContainer.replaceChildren(...templateNodes);
+
+        const pending = [
+            ...data.pendingCards.map((task) => ({ ...task, taskType: 'card', title: lang === 'zh' ? task.title_zh : task.title_en })),
+            ...data.pendingEvents.map((task) => ({ ...task, taskType: 'event' }))
+        ];
+        if (pending.length === 0) {
+            pendingContainer.textContent = t('目前没有待审核任务。', 'No task is awaiting review.');
+            return;
+        }
+        pendingContainer.replaceChildren(...pending.map((task) => {
+            const row = document.createElement('div');
+            row.className = 'admin-task-review-row';
+            const copy = document.createElement('div');
+            const title = document.createElement('strong');
+            title.textContent = `${task.username} · ${task.title}`;
+            const reward = document.createElement('span');
+            reward.textContent = `+${Number(task.reward_points).toLocaleString()} ${t('积分', 'points')}`;
+            copy.append(title, reward);
+            const actions = document.createElement('div');
+            const approve = document.createElement('button');
+            approve.type = 'button';
+            approve.textContent = t('通过并发奖', 'Approve & reward');
+            approve.addEventListener('click', () => reviewTask(task.taskType, task.id, 'approve', approve));
+            const returned = document.createElement('button');
+            returned.type = 'button';
+            returned.className = 'btn-clear';
+            returned.textContent = t('退回并延长3天', 'Return + 3 days');
+            returned.addEventListener('click', () => reviewTask(task.taskType, task.id, 'return', returned));
+            actions.append(approve, returned);
+            row.append(copy, actions);
+            return row;
+        }));
+    } catch (error) {
+        pendingContainer.textContent = String(error.message || error);
+    }
+}
+
+async function assignTaskOffers(form) {
+    const templateIds = [...form.querySelectorAll('input[name="templateId"]:checked')].map((input) => Number(input.value));
+    if (templateIds.length !== 3) return alert(t('请正好选择三张任务卡。', 'Select exactly three task cards.'));
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+        const response = await adminFetch('/api/admin/tasks/assign-offers', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: form.elements.username.value.trim(), templateIds })
+        });
+        const data = await readJsonResponse(response);
+        if (!response.ok || !data.success) throw new Error(data.message || t('分配失败', 'Assignment failed'));
+        alert(data.message);
+        await loadTaskManagement();
+    } catch (error) {
+        alert(String(error.message || error));
+    } finally {
+        submit.disabled = false;
+    }
+}
+
+async function assignEventTask(form) {
+    const values = Object.fromEntries(new FormData(form).entries());
+    values.rewardPoints = Number(values.rewardPoints);
+    values.days = Number(values.days);
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+        const response = await adminFetch('/api/admin/tasks/assign-event', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
+        });
+        const data = await readJsonResponse(response);
+        if (!response.ok || !data.success) throw new Error(data.message || t('分配失败', 'Assignment failed'));
+        alert(data.message);
+        form.reset();
+        form.elements.days.value = '7';
+    } catch (error) {
+        alert(String(error.message || error));
+    } finally {
+        submit.disabled = false;
+    }
+}
+
+async function reviewTask(taskType, assignmentId, decision, button) {
+    const note = prompt(t('审核备注（可留空）：', 'Review note (optional):')) || '';
+    button.disabled = true;
+    try {
+        const response = await adminFetch('/api/admin/tasks/review', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskType, assignmentId: Number(assignmentId), decision, note })
+        });
+        const data = await readJsonResponse(response);
+        if (!response.ok || !data.success) throw new Error(data.message || t('审核失败', 'Review failed'));
+        alert(data.message);
+        await loadTaskManagement();
+    } catch (error) {
+        alert(String(error.message || error));
+        button.disabled = false;
+    }
+}
+
+loadTaskManagement();
 
 function addElectricCoin(username, btn) {
         const amount = prompt(t(
@@ -409,6 +580,49 @@ function addElectricCoin(username, btn) {
             btn.disabled = false;
             btn.textContent = t('解锁', 'Unlock');
         });
+    }
+
+    async function permanentLock(username, btn) {
+        const reason = prompt(t(
+            `请输入永久锁定 "${username}" 的原因（用户登录后只能看到锁定提示）：`,
+            `Enter the reason for locking "${username}" (they can still sign in but only see the lock screen):`
+        ));
+        if (!reason?.trim()) return;
+        if (!confirm(t(`确认锁定账号 "${username}"？`, `Lock account "${username}"?`))) return;
+        btn.disabled = true;
+        try {
+            const response = await adminFetch('/api/admin/lock-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, reason: reason.trim() })
+            });
+            const data = await readJsonResponse(response);
+            if (!response.ok || !data.success) throw new Error(data.message || t('锁定失败', 'Lock failed'));
+            alert(translateServerMessage(data.message));
+            location.reload();
+        } catch (error) {
+            alert(String(error.message || error));
+            btn.disabled = false;
+        }
+    }
+
+    async function permanentUnlock(username, btn) {
+        if (!confirm(t(`确认解除 "${username}" 的永久锁定？`, `Remove the permanent lock from "${username}"?`))) return;
+        btn.disabled = true;
+        try {
+            const response = await adminFetch('/api/admin/unlock-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            const data = await readJsonResponse(response);
+            if (!response.ok || !data.success) throw new Error(data.message || t('解除失败', 'Unlock failed'));
+            alert(translateServerMessage(data.message));
+            location.reload();
+        } catch (error) {
+            alert(String(error.message || error));
+            btn.disabled = false;
+        }
     }
 
     function clearFailures(username, btn) {

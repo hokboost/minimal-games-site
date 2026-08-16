@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/redesign.css">
+</head>
+<body class="app-redesign page-tasks"
+      data-csrf-token="<%= csrfToken %>"
+      data-task-state="<%= encodeURIComponent(JSON.stringify(initialTaskState || {})) %>">
+    <%- include('partials/language-switcher') %>
+    <div class="site-layout">
+        <%- include('partials/site-header', { active: 'tasks' }) %>
+        <main class="task-page-shell">
+            <header class="task-page-hero">
+                <div>
+                    <span class="eyebrow"><%= lang === 'zh' ? '给今天一点小目标' : 'A little goal for today' %></span>
+                    <h1><%= lang === 'zh' ? '任务卡片' : 'Task Cards' %></h1>
+                    <p><%= lang === 'zh' ? '一次专心完成一张。完成后提交给管理员确认，奖励就会到账。' : 'Focus on one card at a time. Submit it for review and receive the reward after approval.' %></p>
+                </div>
+                <a class="hero-action-secondary" href="/"><%= lang === 'zh' ? '返回主页' : 'Back home' %></a>
+            </header>
+
+            <section id="event-task-section" class="event-task-section" hidden aria-labelledby="event-task-title">
+                <h2 id="event-task-title"><%= lang === 'zh' ? '限时活动' : 'Limited-time events' %></h2>
+                <div id="event-task-list" class="event-task-list"></div>
+            </section>
+
+            <section id="task-card-section" class="task-card-section" hidden aria-labelledby="task-card-title">
+                <div class="task-section-heading">
+                    <div>
+                        <h2 id="task-card-title"><%= lang === 'zh' ? '你的三张候选卡' : 'Your three choices' %></h2>
+                        <p id="task-card-guidance"></p>
+                    </div>
+                    <span id="task-card-status" class="task-status-pill" aria-live="polite"></span>
+                </div>
+                <div id="task-card-list" class="task-card-grid"></div>
+            </section>
+
+            <p id="task-card-message" class="task-card-message" role="status" aria-live="polite"></p>
+        </main>
+        <%- include('partials/app-footer') %>
+    </div>
+    <script src="/js/idempotent-fetch.js"></script>
+    <script src="/js/task-cards.js"></script>
+</body>
+</html>

@@ -424,6 +424,7 @@ module.exports = function registerWishRoutes(app, deps) {
             }
             const result = await pool.query(`
                 SELECT wi.id,
+                       wi.gift_type,
                        wi.gift_name,
                        wi.status,
                        wi.gift_exchange_id,

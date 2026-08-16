@@ -7,7 +7,7 @@
     <title><%= lang === 'zh' ? 'Minimal Games 轻量游戏厅' : 'Minimal Games — Pocket Game Room' %></title>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="app-redesign page-home" data-authorized="<%= user && user.authorized ? 'true' : 'false' %>" data-username="<%= user ? user.username : '' %>">
+<body class="app-redesign page-home" data-authorized="<%= user && user.authorized ? 'true' : 'false' %>" data-username="<%= user ? user.username : '' %>" data-csrf-token="<%= csrfToken %>">
     <%- include('partials/language-switcher') %>
 
     <div class="site-layout">
@@ -37,6 +37,38 @@
             </section>
 
             <%- include('partials/featured-track') %>
+
+            <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+                <section id="event-task-section" class="event-task-section home-event-tasks" hidden aria-labelledby="event-task-title">
+                    <h2 id="event-task-title"><%= lang === 'zh' ? '你的限时活动' : 'Your limited-time events' %></h2>
+                    <div id="event-task-list" class="event-task-list"></div>
+                </section>
+                <section id="task-card-section" class="task-card-section home-task-cards" hidden aria-labelledby="task-card-title">
+                    <div class="task-section-heading">
+                        <div>
+                            <span class="eyebrow"><%= lang === 'zh' ? '今天的小目标' : 'Today’s little goal' %></span>
+                            <h2 id="task-card-title"><%= lang === 'zh' ? '任务卡片' : 'Task cards' %></h2>
+                            <p id="task-card-guidance"></p>
+                        </div>
+                        <span id="task-card-status" class="task-status-pill" aria-live="polite"></span>
+                    </div>
+                    <div id="task-card-list" class="task-card-grid"></div>
+                    <a class="hero-action-secondary" href="/tasks"><%= lang === 'zh' ? '打开任务卡页面' : 'Open task card page' %></a>
+                </section>
+                <p id="task-card-message" class="task-card-message" role="status" aria-live="polite"></p>
+
+                <section class="home-backpack" aria-labelledby="home-backpack-title">
+                    <div class="task-section-heading">
+                        <div>
+                            <span class="eyebrow"><%= lang === 'zh' ? '一眼就能看到' : 'Right at hand' %></span>
+                            <h2 id="home-backpack-title"><%= lang === 'zh' ? '我的礼物背包' : 'My gift backpack' %></h2>
+                            <p><%= lang === 'zh' ? '点击一下就能把礼物加入发送队列。' : 'Send a gift with one click.' %></p>
+                        </div>
+                        <a class="hero-action-secondary" href="/profile"><%= lang === 'zh' ? '查看完整背包' : 'View full backpack' %></a>
+                    </div>
+                    <div id="home-backpack-list" class="home-backpack-grid" aria-live="polite"><%= lang === 'zh' ? '正在打开背包…' : 'Opening backpack…' %></div>
+                </section>
+            <% } %>
 
             <% if (!(typeof user !== 'undefined' && user && user.authorized)) { %>
                 <section class="access-banner <%= user ? 'pending' : '' %>" aria-labelledby="access-title">
@@ -94,6 +126,9 @@
     </div>
 
     <% if (typeof user !== 'undefined' && user && user.authorized) { %>
+        <script src="/js/idempotent-fetch.js"></script>
+        <script src="/js/task-cards.js"></script>
+        <script src="/js/home-backpack.js"></script>
         <script src="/socket.io/socket.io.js"></script>
         <script src="/security-alerts.js"></script>
         <script src="/js/index.js"></script>

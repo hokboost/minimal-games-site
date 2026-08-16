@@ -208,25 +208,6 @@ body.app-redesign {
     border-color: rgba(232, 91, 74, 0.48);
 }
 
-.music-site-frame {
-    position: fixed;
-    inset: 0;
-    z-index: 9000;
-    width: 100%;
-    height: 100%;
-    border: 0;
-    background: var(--paper);
-}
-
-body.music-shell-active {
-    overflow: hidden;
-}
-
-html.music-shell-child .language-switcher,
-html.music-shell-child .persistent-music-player {
-    display: none !important;
-}
-
 /* Shared site shell */
 .site-layout {
     width: min(calc(100% - 36px), var(--content));

@@ -913,10 +913,11 @@ module.exports = function registerGameRoutes(app, deps) {
             const resultTrace = randomBytes(24).toString('hex');
             const submissionResult = await client.query(
                 `INSERT INTO submissions (
-                    username, score, submitted_at, result_trace, quiz_session_id
-                 ) VALUES ($1, $2, NOW(), $3, $4)
+                    username, score, submitted_at, result_trace, quiz_session_id,
+                    cost_points, reward_points
+                 ) VALUES ($1, $2, NOW(), $3, $4, $5, 0)
                  RETURNING id`,
-                [username, correctCount, resultTrace, quizSessionId]
+                [username, correctCount, resultTrace, quizSessionId, QUIZ_CONFIG.roundCost]
             );
             const submissionId = submissionResult.rows[0].id;
 
@@ -986,6 +987,11 @@ module.exports = function registerGameRoutes(app, deps) {
                 }
                 newBalance = parseMoney(balanceResult.rows[0].balance, 'user balance', { min: 0 });
             }
+
+            await client.query(
+                'UPDATE submissions SET reward_points = $2 WHERE id = $1',
+                [submissionId, reward]
+            );
 
             const consumedTokens = await client.query(
                 'UPDATE quiz_question_tokens SET consumed_at = NOW() WHERE session_id = $1 AND token = ANY($2::text[])',

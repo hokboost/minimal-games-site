@@ -417,7 +417,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                 : '';
             const usersResult = await pool.query(
                 `SELECT username, balance, spins_allowed, authorized, is_admin,
-                        login_failures, last_failure_time, locked_until
+                        login_failures, last_failure_time, locked_until,
+                        account_locked, account_locked_at, account_lock_reason
                  FROM users
                  WHERE deactivated = false AND username > $1
                  ORDER BY username
@@ -1512,7 +1513,98 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
-    // 解锁账户
+    // 永久锁定账户（与登录失败产生的临时锁定相互独立）
+    app.post('/api/admin/lock-user', ...highRiskAdminGuards, requireCSRF, async (req, res) => {
+        const username = normalizeUsername(req.body?.username);
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
+        if (!usernamePattern.test(username) || !reason) {
+            return res.status(400).json({ success: false, message: '用户名和锁定原因不能为空' });
+        }
+        let client;
+        try {
+            client = await pool.connect();
+            await client.query('BEGIN');
+            const result = await client.query(`
+                UPDATE users
+                SET account_locked = TRUE,
+                    account_locked_at = NOW(),
+                    account_locked_by = $2,
+                    account_lock_reason = $3
+                WHERE username = $1 AND is_admin = FALSE AND deactivated = FALSE
+                RETURNING username
+            `, [username, req.session.user.username, reason]);
+            if (result.rowCount !== 1) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ success: false, message: '用户不存在、已停用或属于管理员' });
+            }
+            const responseBody = { success: true, message: '账户已锁定；该用户登录后只会看到锁定提示' };
+            await auditAdminAction({
+                client,
+                adminUsername: req.session.user.username,
+                action: 'permanent_account_lock',
+                targetUsername: username,
+                details: { reason },
+                clientIP: req.clientIP,
+                requestId: req.idempotencyKey
+            });
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            notifyAdminAction(req.session.user.username, 'permanent_account_lock', username, { reason });
+            return res.json(responseBody);
+        } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
+            console.error('永久锁定账户失败:', error);
+            return res.status(500).json({ success: false, message: '锁定账户失败' });
+        } finally {
+            client?.release();
+        }
+    });
+
+    app.post('/api/admin/unlock-user', ...highRiskAdminGuards, requireCSRF, async (req, res) => {
+        const username = normalizeUsername(req.body?.username);
+        if (!usernamePattern.test(username)) {
+            return res.status(400).json({ success: false, message: '用户名格式无效' });
+        }
+        let client;
+        try {
+            client = await pool.connect();
+            await client.query('BEGIN');
+            const result = await client.query(`
+                UPDATE users
+                SET account_locked = FALSE,
+                    account_locked_at = NULL,
+                    account_locked_by = NULL,
+                    account_lock_reason = NULL
+                WHERE username = $1 AND is_admin = FALSE
+                RETURNING username
+            `, [username]);
+            if (result.rowCount !== 1) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ success: false, message: '用户不存在或属于管理员' });
+            }
+            const responseBody = { success: true, message: '永久账户锁定已解除' };
+            await auditAdminAction({
+                client,
+                adminUsername: req.session.user.username,
+                action: 'permanent_account_unlock',
+                targetUsername: username,
+                clientIP: req.clientIP,
+                requestId: req.idempotencyKey
+            });
+            await req.finalizeIdempotency?.(client, 200, responseBody);
+            await client.query('COMMIT');
+            notifyAdminAction(req.session.user.username, 'permanent_account_unlock', username);
+            return res.json(responseBody);
+        } catch (error) {
+            if (client) await client.query('ROLLBACK').catch(() => {});
+            console.error('解除永久账户锁定失败:', error);
+            return res.status(500).json({ success: false, message: '解除锁定失败' });
+        } finally {
+            client?.release();
+        }
+    });
+
+    // 解锁登录失败造成的临时账户锁定
     app.post('/api/admin/unlock-account', ...highRiskAdminGuards, requireCSRF, async (req, res) => {
         let client;
         try {
@@ -2090,16 +2182,18 @@ module.exports = function registerAdminRoutes(app, deps) {
             if (!net.isIP(ip)) {
                 return res.status(400).json({ success: false, message: 'IP格式无效' });
             }
-            const [riskData, stats] = await Promise.all([
+            const [riskData, stats, vpn] = await Promise.all([
                 IPManager.getIPRiskScore(ip),
-                IPManager.getIPStats(ip)
+                IPManager.getIPStats(ip),
+                IPManager.getVPNInfo(ip)
             ]);
 
             res.json({
                 success: true,
                 ip,
                 riskData,
-                stats
+                stats,
+                vpn
             });
         } catch (error) {
             console.error('获取IP信息失败:', error);

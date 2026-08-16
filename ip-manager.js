@@ -1,9 +1,12 @@
 const pool = require('./db');
+const axios = require('axios');
+const net = require('node:net');
 
 class IPManager {
     constructor() {
         this.riskCache = new Map(); // IP风险缓存
         this.locationCache = new Map(); // IP地理位置缓存
+        this.vpnCache = new Map();
         this.activityWriteCache = new Map();
         this.cleanupInterval = 60 * 60 * 1000; // 1小时清理一次缓存
         this.cleanupTimer = null;
@@ -46,6 +49,9 @@ class IPManager {
             if (now - data.timestamp > this.cleanupInterval * 24) { // 地理位置缓存24小时
                 this.locationCache.delete(ip);
             }
+        }
+        for (const [ip, data] of this.vpnCache) {
+            if (now - data.timestamp > this.cleanupInterval * 24) this.vpnCache.delete(ip);
         }
         for (const [key, entry] of this.activityWriteCache) {
             if (now - Number(entry?.lastWrite || 0) > 5 * 60 * 1000 && Number(entry?.pending || 0) === 0) {
@@ -272,6 +278,81 @@ class IPManager {
 
         // No geolocation provider is configured. Unknown data must not become a risk signal.
         return null;
+    }
+
+    isPublicIP(ip) {
+        const version = net.isIP(ip);
+        if (version === 4) {
+            const parts = ip.split('.').map(Number);
+            return !(parts[0] === 10
+                || parts[0] === 127
+                || (parts[0] === 169 && parts[1] === 254)
+                || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+                || (parts[0] === 192 && parts[1] === 168)
+                || parts[0] === 0
+                || parts[0] >= 224);
+        }
+        if (version === 6) {
+            const normalized = ip.toLowerCase();
+            return normalized !== '::1'
+                && normalized !== '::'
+                && !normalized.startsWith('fc')
+                && !normalized.startsWith('fd')
+                && !/^fe[89ab]/.test(normalized)
+                && !normalized.startsWith('ff');
+        }
+        return false;
+    }
+
+    // Passive administrator-only intelligence. This result is deliberately not
+    // included in getIPRiskScore and can never lock or blacklist an account.
+    async getVPNInfo(ip) {
+        if (!net.isIP(ip)) throw new Error('Invalid IP address');
+        if (!this.isPublicIP(ip)) {
+            return {
+                available: false,
+                reason: 'private_or_reserved_ip',
+                provider: 'ipapi.is'
+            };
+        }
+        const cached = this.vpnCache.get(ip);
+        if (cached && Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) return cached.result;
+        const params = { q: ip };
+        if (process.env.IPAPI_IS_KEY) params.key = process.env.IPAPI_IS_KEY;
+        try {
+            const response = await axios.get('https://api.ipapi.is', {
+                params,
+                timeout: 4500,
+                maxContentLength: 256 * 1024,
+                responseType: 'json',
+                validateStatus: (status) => status === 200
+            });
+            const data = response.data;
+            if (!data || typeof data !== 'object' || data.error
+                || !['boolean', 'undefined'].includes(typeof data.is_vpn)) {
+                throw new Error('VPN intelligence provider returned an invalid response');
+            }
+            const result = {
+                available: true,
+                provider: 'ipapi.is',
+                checkedAt: new Date().toISOString(),
+                isVpn: data.is_vpn === true,
+                isProxy: data.is_proxy === true,
+                isTor: data.is_tor === true,
+                isDatacenter: data.is_datacenter === true,
+                isAbuser: data.is_abuser === true,
+                vpnService: typeof data.vpn?.service === 'string' ? data.vpn.service.slice(0, 120) : null,
+                organization: typeof data.company?.name === 'string'
+                    ? data.company.name.slice(0, 160)
+                    : typeof data.asn?.org === 'string' ? data.asn.org.slice(0, 160) : null,
+                country: typeof data.location?.country === 'string' ? data.location.country.slice(0, 100) : null
+            };
+            this.vpnCache.set(ip, { result, timestamp: Date.now() });
+            return result;
+        } catch (error) {
+            console.error('VPN情报查询失败:', error);
+            return { available: false, reason: 'provider_unavailable', provider: 'ipapi.is' };
+        }
     }
 
     // 缓存风险评分

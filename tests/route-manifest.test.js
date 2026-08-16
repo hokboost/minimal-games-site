@@ -21,6 +21,7 @@ const mutationFiles = [
     'routes/doudizhu.js',
     'routes/games.js',
     'routes/gifts.js',
+    'routes/tasks.js',
     'routes/wish.js'
 ];
 

@@ -251,7 +251,11 @@ check('wish migration upgrades legacy production columns',
     && wishMigration.includes('RENAME COLUMN wish_type TO gift_type')
     && wishMigration.includes('RENAME COLUMN reward_name TO reward')
     && wishMigration.includes('RENAME COLUMN wish_name TO gift_name'));
-check('music playback persists across page navigation', languageSwitcher.includes("include('persistent-music-player')") && musicPlayer.includes("window.addEventListener('pagehide'") && musicPlayer.includes('sessionStorage.setItem') && musicPlayer.includes('openInSiteFrame(url)') && musicPlayer.includes('music-shell-child'));
+check('music playback resumes across safe top-level navigation', languageSwitcher.includes("include('persistent-music-player')")
+    && musicPlayer.includes("window.addEventListener('pagehide'")
+    && musicPlayer.includes('sessionStorage.setItem')
+    && !musicPlayer.includes('openInSiteFrame')
+    && !musicPlayer.includes("document.createElement('iframe')"));
 check('PK report charging is keyed by a unique report ID', gifts.includes('ON CONFLICT (report_id) DO NOTHING') && pkReportMigration.includes('UNIQUE INDEX'));
 check('completed gift callbacks durably queue blindbox continuation',
     gifts.includes("INSERT INTO delivery_outbox (event_type, aggregate_id, payload)")

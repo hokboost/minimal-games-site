@@ -308,6 +308,13 @@ app.get('/profile', (req, res) => {
         title: pageTitle(res, '个人资料 - Minimal Games', 'Profile - Minimal Games'),
         user: previewUser,
         gameStats: profileStats,
+        lifetimeEarnings: {
+            gameNet: 4380,
+            adminEarned: 5000,
+            taskEarned: 15000,
+            giftValue: 2860,
+            total: 27240
+        },
         csrfToken
     });
 });
@@ -318,6 +325,33 @@ app.get('/gifts', (req, res) => {
         user: previewUser,
         balance: previewBalance,
         giftPrices: previewGiftPrices,
+        csrfToken
+    });
+});
+
+app.get('/tasks', (req, res) => {
+    const dueAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+    res.render('tasks', {
+        title: pageTitle(res, '任务卡片', 'Task Cards'),
+        user: previewUser,
+        csrfToken,
+        initialTaskState: {
+            featureEnabled: true,
+            canClaim: false,
+            cards: [
+                { id: 1, templateId: 1, status: 'claimed', title: '学会《我以为我可以》', rewardPoints: 15000, completeLabel: '我完全学会啦，都唱对了！', progressLabel: '我基本都会啦，就差几个小地方～', abandonLabel: '这首先放一放，换个任务抱抱', encouragement: '已经很接近啦！', dueAt, progressExtensions: 0 },
+                { id: 2, templateId: 2, status: 'offered', title: '演唱《那些你说过的话》', rewardPoints: 2000, completeLabel: '', progressLabel: '', abandonLabel: '', encouragement: '', dueAt: null, progressExtensions: 0 },
+                { id: 3, templateId: 3, status: 'offered', title: '演唱《没有意外的分开》', rewardPoints: 2888, completeLabel: '', progressLabel: '', abandonLabel: '', encouragement: '', dueAt: null, progressExtensions: 0 }
+            ],
+            eventTasks: [{ id: 10, title: '周末限定小挑战', description: '在周日之前完成这张特别任务卡。', rewardPoints: 5000, status: 'active', dueAt }]
+        }
+    });
+});
+
+app.get('/account-locked', (req, res) => {
+    res.status(423).render('account-locked', {
+        title: pageTitle(res, '账户已锁定', 'Account locked'),
+        user: previewUser,
         csrfToken
     });
 });

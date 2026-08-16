@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="account-locked-page">
+    <main class="account-locked-panel">
+        <span class="account-locked-icon" aria-hidden="true">🔒</span>
+        <h1><%= lang === 'zh' ? '账户已被锁定' : 'Account locked' %></h1>
+        <p><%= lang === 'zh' ? '此账户目前无法使用网站功能，请联系管理员。' : 'This account cannot use site features right now. Please contact an administrator.' %></p>
+        <p class="account-locked-user"><%= user.username %></p>
+        <form method="POST" action="/logout">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button type="submit"><%= lang === 'zh' ? '退出登录' : 'Sign out' %></button>
+        </form>
+    </main>
+</body>
+</html>

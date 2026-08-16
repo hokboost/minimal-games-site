@@ -75,6 +75,15 @@ function formatSignedAmount(cost, reward) {
     return '0';
 }
 
+function localizedNet(cost, reward) {
+    if (cost === null || cost === undefined || reward === null || reward === undefined) {
+        return localized('历史记录暂无盈亏数据', 'Unavailable for legacy record');
+    }
+    const net = (Number(reward) || 0) - (Number(cost) || 0);
+    const signed = net > 0 ? `+${net}` : String(net);
+    return localized(`${signed} 积分`, `${signed} points`);
+}
+
 function validatePresentation(presentation, label) {
     if (!presentation || !Array.isArray(presentation.columns)
         || typeof presentation.mapRow !== 'function') {
@@ -131,7 +140,7 @@ function defineProvider(config) {
 const PROVIDERS = Object.freeze({
     quiz: defineProvider({
         listSql: `
-            SELECT id, score,
+            SELECT id, score, cost_points, reward_points,
                    to_char(submitted_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS played_at
             FROM submissions
             WHERE username = $1
@@ -153,10 +162,11 @@ const PROVIDERS = Object.freeze({
             `${row.played_at} | Score ${displayValue(row.score, '0')}`
         ),
         profile: {
-            columns: [column('playedAt', '游戏时间', 'Time'), column('score', '得分', 'Score')],
+            columns: [column('playedAt', '游戏时间', 'Time'), column('score', '得分', 'Score'), column('net', '本次盈亏', 'Win / Loss')],
             mapRow: (row) => ({
                 playedAt: row.played_at,
-                score: localized(`${displayValue(row.score, '0')} 分`, `${displayValue(row.score, '0')} pts`)
+                score: localized(`${displayValue(row.score, '0')} 分`, `${displayValue(row.score, '0')} pts`),
+                net: localizedNet(row.cost_points, row.reward_points)
             })
         },
         admin: {
@@ -195,6 +205,7 @@ const PROVIDERS = Object.freeze({
                 column('playedAt', '游戏时间', 'Time'),
                 column('result', '结果', 'Result'),
                 column('payout', '获得积分', 'Points Earned'),
+                column('net', '本次盈亏', 'Win / Loss'),
                 column('panel', '转动结果', 'Reels')
             ],
             mapRow: (row) => {
@@ -207,6 +218,7 @@ const PROVIDERS = Object.freeze({
                         `${displayValue(row.payout, '0')} 积分`,
                         `${displayValue(row.payout, '0')} points`
                     ),
+                    net: localizedNet(row.bet_amount, row.payout),
                     panel: `[${panel.map((item) => displayValue(item, '')).join(', ')}]`
                 };
             }
@@ -259,7 +271,8 @@ const PROVIDERS = Object.freeze({
                 column('playedAt', '游戏时间', 'Time'),
                 column('result', '结果', 'Result'),
                 column('tier', '档位', 'Tier'),
-                column('matches', '匹配数', 'Matches')
+                column('matches', '匹配数', 'Matches'),
+                column('net', '本次盈亏', 'Win / Loss')
             ],
             mapRow: (row) => ({
                 playedAt: row.played_at,
@@ -271,7 +284,8 @@ const PROVIDERS = Object.freeze({
                 matches: localized(
                     `${displayValue(row.matches_count, '0')} 个`,
                     displayValue(row.matches_count, '0')
-                )
+                ),
+                net: localizedNet(row.tier_cost, row.result)
             })
         },
         admin: {
@@ -328,7 +342,8 @@ const PROVIDERS = Object.freeze({
                 column('playedAt', '祈愿时间', 'Wish Time'),
                 column('count', '次数', 'Count'),
                 column('cost', '消耗积分', 'Cost'),
-                column('result', '结果', 'Result')
+                column('result', '结果', 'Result'),
+                column('net', '本次盈亏', 'Win / Loss')
             ],
             mapRow: (row) => {
                 const successCount = Number(row.success_count) || 0;
@@ -344,7 +359,8 @@ const PROVIDERS = Object.freeze({
                     ),
                     result: successCount > 0
                         ? localized(`${giftZh} x${successCount}`, `${giftEn} x${successCount}`)
-                        : localized('未中奖', 'No Win')
+                        : localized('未中奖', 'No Win'),
+                    net: localizedNet(row.total_cost, row.total_reward_value)
                 };
             }
         },
@@ -404,7 +420,8 @@ const PROVIDERS = Object.freeze({
                 column('tier', '档位', 'Tier'),
                 column('count', '数量', 'Count'),
                 column('cost', '消耗积分', 'Cost'),
-                column('value', '总价值', 'Total Value')
+                column('value', '总价值', 'Total Value'),
+                column('net', '本次盈亏', 'Win / Loss')
             ],
             mapRow: (row) => {
                 const tier = BLINDBOX_CONFIG.tiers[row.tier_key];
@@ -419,7 +436,8 @@ const PROVIDERS = Object.freeze({
                     value: localized(
                         `${displayValue(row.total_reward_value, '0')} 积分`,
                         `${displayValue(row.total_reward_value, '0')} points`
-                    )
+                    ),
+                    net: localizedNet(row.total_cost, row.total_reward_value)
                 };
             }
         },
@@ -469,6 +487,7 @@ const PROVIDERS = Object.freeze({
                 column('playedAt', '操作时间', 'Time'),
                 column('action', '操作', 'Action'),
                 column('amount', '花费', 'Change'),
+                column('net', '本次盈亏', 'Win / Loss'),
                 column('change', '变化', 'Slots')
             ],
             mapRow: (row) => {
@@ -485,6 +504,7 @@ const PROVIDERS = Object.freeze({
                     playedAt: row.played_at,
                     action: actions[row.action_type] || row.action_type,
                     amount: localized(`${amount} 积分`, `${amount} points`),
+                    net: localizedNet(row.cost, row.reward),
                     change: localized(`${before.zh} → ${after.zh}`, `${before.en} → ${after.en}`)
                 };
             }
@@ -510,14 +530,15 @@ const PROVIDERS = Object.freeze({
     }),
     flip: defineProvider({
         listSql: `
-            SELECT id, action_type, reward, good_count, bad_count, ended,
+            SELECT id, action_type, COALESCE(cost, 0) AS cost, COALESCE(reward, 0) AS reward,
+                   good_count, bad_count, ended,
                    to_char(created_at::timestamptz AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS played_at
             FROM flip_logs
-            WHERE username = $1 AND action_type = 'end'
+            WHERE username = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
         `,
-        countSql: "SELECT COUNT(*) FROM flip_logs WHERE username = $1 AND action_type = 'end'",
+        countSql: 'SELECT COUNT(*) FROM flip_logs WHERE username = $1',
         summarySql: 'SELECT COUNT(*) AS count FROM flip_logs WHERE username = $1',
         mapSummary: (row) => ({ total: Number.parseInt(row.count, 10) || 0 }),
         latestSql: `
@@ -536,6 +557,7 @@ const PROVIDERS = Object.freeze({
                 column('playedAt', '操作时间', 'Time'),
                 column('action', '动作', 'Action'),
                 column('amount', '成本/奖励', 'Cost/Reward'),
+                column('net', '本次盈亏', 'Win / Loss'),
                 column('result', '结果', 'Result')
             ],
             mapRow: (row) => {
@@ -547,6 +569,7 @@ const PROVIDERS = Object.freeze({
                     playedAt: row.played_at,
                     action,
                     amount: localized(`${amount} 积分`, `${amount} points`),
+                    net: localizedNet(row.cost, row.reward),
                     result: localized(
                         `好牌${displayValue(row.good_count, '0')}，坏牌${displayValue(row.bad_count, '0')}`,
                         `Good ${displayValue(row.good_count, '0')}, Bad ${displayValue(row.bad_count, '0')}`
@@ -616,7 +639,8 @@ const PROVIDERS = Object.freeze({
                 column('gift', '礼物', 'Gift'),
                 column('power', '功力', 'Power'),
                 column('cost', '消耗', 'Cost'),
-                column('result', '结果', 'Result')
+                column('result', '结果', 'Result'),
+                column('net', '本次盈亏', 'Win / Loss')
             ],
             mapRow: (row) => {
                 const reward = DUEL_CONFIG.rewards[row.gift_type];
@@ -634,7 +658,8 @@ const PROVIDERS = Object.freeze({
                             `成功 +${displayValue(row.reward, '0')}`,
                             `Success +${displayValue(row.reward, '0')}`
                         )
-                        : localized('失败', 'Failed')
+                        : localized('失败', 'Failed'),
+                    net: localizedNet(row.cost, row.reward)
                 };
             }
         },

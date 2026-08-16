@@ -48,7 +48,7 @@ class SessionManager {
             await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`session:${username}`]);
 
             const userResult = await client.query(
-                `SELECT id, username, authorized, is_admin, password_hash, deactivated
+                `SELECT id, username, authorized, is_admin, password_hash, deactivated, account_locked
                  FROM users
                  WHERE username = $1
                  FOR UPDATE`,
@@ -133,7 +133,8 @@ class SessionManager {
                     id: currentUser.id,
                     username: currentUser.username,
                     authorized: currentUser.authorized === true,
-                    is_admin: currentUser.is_admin === true
+                    is_admin: currentUser.is_admin === true,
+                    account_locked: currentUser.account_locked === true
                 }
             };
 

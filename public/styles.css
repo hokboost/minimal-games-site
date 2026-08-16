@@ -412,3 +412,51 @@ button:disabled {
     font-size: 0.9rem;
     font-weight: normal;
 }
+/* Task cards */
+.account-locked-page { min-height: 100vh; display: grid; place-items: center; margin: 0; background: #090b10; color: #fff; font-family: system-ui, sans-serif; }
+.account-locked-panel { width: min(620px, calc(100% - 2rem)); padding: 3rem 2rem; text-align: center; border: 1px solid rgba(255,255,255,.16); border-radius: 24px; background: #141824; box-shadow: 0 24px 80px rgba(0,0,0,.45); }
+.account-locked-icon { font-size: 4rem; }
+.account-locked-panel h1 { font-size: clamp(2rem, 7vw, 4rem); margin: .7rem 0; }
+.account-locked-user { color: #aab1c5; }
+.task-page-shell { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 5rem; }
+.task-page-hero, .task-section-heading, .event-task-banner { display: flex; justify-content: space-between; align-items: center; gap: 1.25rem; }
+.task-page-hero { margin-bottom: 2rem; }
+.task-page-hero h1 { margin: .25rem 0; }
+.task-card-section, .event-task-section { margin: 1.5rem 0; padding: 1.35rem; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: rgba(14,18,28,.88); }
+.task-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1rem; margin-top: 1rem; }
+.task-card { min-height: 245px; display: flex; flex-direction: column; gap: .85rem; padding: 1.15rem; border-radius: 18px; background: linear-gradient(145deg, rgba(255,255,255,.11), rgba(255,255,255,.035)); border: 1px solid rgba(255,255,255,.12); }
+.task-card--claimed { border-color: #ffc857; box-shadow: 0 0 0 1px rgba(255,200,87,.18); }
+.task-card--pending_approval { border-color: #81d4fa; }
+.task-card-top, .task-card-actions, .event-task-side { display: flex; align-items: center; gap: .65rem; }
+.task-card-top { justify-content: space-between; }
+.task-card-actions { margin-top: auto; flex-direction: column; align-items: stretch; }
+.task-reward, .task-status-pill, .task-card-state { display: inline-flex; align-items: center; width: fit-content; padding: .35rem .65rem; border-radius: 999px; background: rgba(255,200,87,.16); color: #ffe29a; font-weight: 700; }
+.task-card-state, .task-status-pill { background: rgba(129,212,250,.14); color: #b9e9ff; }
+.task-countdown { color: #ffd166; }
+.task-action { border: 0; border-radius: 12px; padding: .72rem .9rem; cursor: pointer; font-weight: 700; }
+.task-action--claim, .task-action--complete { background: #ffd166; color: #2b2105; }
+.task-action--almost { background: #7bdff2; color: #10262b; }
+.task-action--abandon { background: rgba(255,255,255,.1); color: #eee; }
+.task-action:disabled { opacity: .45; cursor: not-allowed; }
+.task-card-message { min-height: 1.5rem; color: #ffe29a; }
+.event-task-list { display: grid; gap: .85rem; }
+.event-task-banner { padding: 1rem 1.15rem; border-radius: 16px; background: linear-gradient(120deg, rgba(128,0,255,.24), rgba(255,94,147,.16)); border: 1px solid rgba(230,180,255,.28); }
+.event-task-banner h3 { margin: .3rem 0; }
+.event-task-side { flex-direction: column; align-items: flex-end; min-width: 180px; }
+@media (max-width: 820px) { .task-card-grid { grid-template-columns: 1fr; } .task-page-hero, .task-section-heading, .event-task-banner { align-items: stretch; flex-direction: column; } .event-task-side { align-items: stretch; min-width: 0; } }
+.admin-task-management { margin: 2rem 0; padding: 1.25rem; border-radius: 16px; background: rgba(255,255,255,.06); }
+.home-task-cards, .home-event-tasks, .home-backpack { margin: 2rem 0; }
+.home-backpack { padding: 1.35rem; border-radius: 20px; background: linear-gradient(135deg, rgba(255,209,102,.14), rgba(123,223,242,.1)); border: 1px solid rgba(255,255,255,.16); }
+.home-backpack-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 1rem; }
+.home-backpack-item { display: flex; align-items: center; gap: .7rem; padding: .85rem; border-radius: 14px; background: rgba(8,12,20,.72); }
+.home-backpack-item > div { display: grid; flex: 1; }
+.home-backpack-item > div span { color: #aeb8cc; font-size: .85rem; }
+.home-backpack-item button { border: 0; border-radius: 10px; padding: .55rem .7rem; background: #ffd166; color: #2b2105; font-weight: 700; cursor: pointer; }
+.home-backpack-icon { font-size: 1.5rem; }
+.admin-task-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; }
+.admin-task-panel { display: grid; gap: .75rem; padding: 1rem; border: 1px solid rgba(255,255,255,.14); border-radius: 12px; margin-top: 1rem; }
+.admin-task-panel label { display: grid; gap: .3rem; }
+.admin-task-template { grid-template-columns: auto 1fr; align-items: center; }
+.admin-task-review-row { display: flex; justify-content: space-between; gap: 1rem; padding: .8rem; border-bottom: 1px solid rgba(255,255,255,.1); }
+.admin-task-review-row > div { display: flex; gap: .6rem; align-items: center; }
+@media (max-width: 820px) { .admin-task-grid, .home-backpack-grid { grid-template-columns: 1fr; } .admin-task-review-row { flex-direction: column; } }
