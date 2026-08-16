@@ -112,12 +112,14 @@ never trusted. A run uses an owner-bound revision compare-and-swap; the partial
 unique index permits one active run per user, while completion uniqueness makes
 first-clear settlement replay-safe.
 
-The campaign contains 50 contiguous chapters. Chapters 1–8 are handcrafted;
-chapters 9–50 are generated from validated immutable theme descriptors, with
-globally unique stage IDs and deterministic puzzles. This is content
-generation, not runtime randomness: a deployed content version always produces
-the same 607 stages, prerequisite chain, answers, and rewards. The browser
-paginates the campaign into five acts but the server independently enforces
+The campaign contains 50 contiguous, independently handcrafted chapters.
+Chapters 9–50 live in `handcrafted-expeditions.js`; every entry explicitly owns
+its premise, character, evidence trail, puzzle data, dilemma, boss, and finale.
+`content.js` compiles that authored data into the engine's stable stage schema,
+but does not synthesize plots or answers from chapter numbers. Stable chapter
+and stage IDs preserve existing progress while validation rejects duplicate
+summaries, openings, finales, or incomplete chapter structures. The browser
+paginates all 607 stages into five acts, while the server independently enforces
 every prerequisite.
 
 ## Transaction rules

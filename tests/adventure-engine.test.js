@@ -48,6 +48,15 @@ test('adventure content is stable, varied, and valid', () => {
     ]);
     assert.equal(catalog[8].prerequisiteChapterId, 'star-core-court');
     assert.equal(catalog[49].reward, 6320);
+    const authored = adventure.CHAPTERS.slice(8);
+    assert.equal(authored.length, 42);
+    assert.ok(authored.every((chapter) => chapter.authorship === 'handcrafted' && chapter.stages.length === 12));
+    assert.equal(new Set(authored.map((chapter) => chapter.summaryZh)).size, 42);
+    assert.equal(new Set(authored.map((chapter) => chapter.stages[0].text)).size, 42);
+    assert.equal(new Set(authored.map((chapter) => chapter.stages.at(-1).text)).size, 42);
+    assert.ok(authored.every((chapter) => chapter.stages.some((stage) => stage.kind === 'choice')));
+    assert.ok(authored.every((chapter) => chapter.stages.some((stage) => stage.kind === 'boss')));
+    assert.doesNotMatch(JSON.stringify(authored), /十二道相互关联的验证|新的航线在星图上亮起/);
 });
 
 test('all chapters can be cleared through legal actions and finish exactly once', () => {

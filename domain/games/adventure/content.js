@@ -1,6 +1,7 @@
 'use strict';
 
 const { ADVENTURE_CONFIG, deepFreeze } = require('../configuration');
+const HANDCRAFTED_EXPEDITIONS = require('./handcrafted-expeditions');
 
 const n = (id, speaker, text, title = '剧情') => ({ id, kind: 'narrative', title, speaker, text });
 const q = (id, title, prompt, options, answer, category, points = 2) => ({
@@ -343,114 +344,79 @@ const HANDCRAFTED_CHAPTERS = [
     }
 ];
 
-const EXPEDITION_THEMES = [
-    ['aurora-valley', '极光峡谷', 'Aurora Valley', '🌈', '#5279b8', '极光脉冲让整座峡谷失去方向', '向导阿澈'],
-    ['desert-observatory', '沙海天文台', 'Desert Observatory', '🔭', '#b77b37', '移动沙丘掩埋了观测阵列', '观测员沙音'],
-    ['crystal-caverns', '水晶洞窟', 'Crystal Caverns', '💎', '#6c70bd', '共振水晶正在制造错误回声', '矿物师晶棱'],
-    ['floating-gardens', '浮空花园', 'Floating Gardens', '🌿', '#4f956f', '花园岛屿之间的引力桥已经断开', '园丁风芽'],
-    ['thunder-foundry', '雷鸣铸造厂', 'Thunder Foundry', '⚡', '#8b6749', '无人铸炉吸收了整片天空的雷电', '技师铜鸣'],
-    ['snowbound-post', '雪原信号站', 'Snowbound Signal Post', '❄️', '#6a8fa8', '暴雪覆盖了最后一条求救频率', '信号员白栎'],
-    ['coral-kingdom', '珊瑚王国', 'Coral Kingdom', '🪸', '#c26472', '海水温度异常让珊瑚失去颜色', '守礁人珊宁'],
-    ['ember-mountain', '余烬火山', 'Ember Mountain', '🌋', '#ad5a3b', '岩浆压力逼近山腹的古老闸门', '地质员烬石'],
-    ['windmill-isles', '风车群岛', 'Windmill Isles', '🌬️', '#4d91a7', '风向紊乱令所有岛屿停止供电', '领航员青帆'],
-    ['ancient-canals', '古运河城', 'City of Ancient Canals', '🛶', '#588579', '错开的水闸让历史城区逐渐干涸', '闸门师洛水'],
-    ['dream-workshop', '梦境工坊', 'Dream Workshop', '🫧', '#8d65a1', '未完成的梦境正在覆盖现实街道', '造梦师眠星'],
-    ['meteor-camp', '流星营地', 'Meteor Camp', '☄️', '#725e9e', '密集流星雨切断了营地通信', '营长远岚'],
-    ['bamboo-labyrinth', '竹海迷宫', 'Bamboo Labyrinth', '🎋', '#4c895d', '快速生长的竹墙改变了全部路径', '巡竹人青节'],
-    ['glacier-vault', '冰川密库', 'Glacier Vault', '🧊', '#4f87a9', '融水正渗入保存千年的种子库', '冰芯学者霜禾'],
-    ['sunset-bazaar', '落日集市', 'Sunset Bazaar', '🏮', '#b96a45', '一批会改写标签的货物混入市场', '商会记录员橘弦'],
-    ['robot-academy', '机器人学院', 'Robot Academy', '🤖', '#66758c', '课程主机把所有答案判为错误', '助教单元七号'],
-    ['cloud-farm', '云端农场', 'Cloud Farm', '☁️', '#6995a8', '雨量程序失控威胁天空作物', '农艺师禾云'],
-    ['fossil-museum', '化石博物馆', 'Fossil Museum', '🦕', '#87745d', '展品年代标签在午夜互换', '馆员岩页'],
-    ['river-of-time', '时间之河', 'River of Time', '⌚', '#517d9d', '上游与下游开始同时发生', '摆渡人刻舟'],
-    ['paper-city', '纸上城市', 'Paper City', '📜', '#a4825f', '一场墨雨正在擦除建筑轮廓', '折纸师白页'],
-    ['sound-cathedral', '声音教堂', 'Cathedral of Sound', '🎼', '#795f94', '失控和声把每句提示变成噪声', '调律师和弦'],
-    ['gravity-circus', '重力马戏团', 'Gravity Circus', '🎪', '#a35672', '表演场的重力方向随掌声翻转', '团长旋铃'],
-    ['ink-ocean', '墨色海洋', 'Ocean of Ink', '🖋️', '#43526f', '扩散的墨潮遮住了全部航标', '绘图师黛蓝'],
-    ['lantern-festival', '灯火庆典', 'Lantern Festival', '🏮', '#c07a35', '主灯熄灭使庆典陷入循环夜晚', '灯匠暖穗'],
-    ['quantum-station', '量子车站', 'Quantum Station', '🚉', '#5967a4', '每列车同时出现在两条轨道', '站长叠影'],
-    ['forgotten-zoo', '遗忘动物园', 'Forgotten Zoo', '🦒', '#72834e', '记忆雾让饲养员忘记动物习性', '兽医木铃'],
-    ['volcano-kitchen', '火山厨房', 'Volcano Kitchen', '🍲', '#b2583d', '地热灶台不断升温且无法关闭', '主厨焰勺'],
-    ['maze-university', '迷宫大学', 'Maze University', '🏫', '#596f91', '教学楼每天重新排列走廊', '校长方格'],
-    ['rainbow-factory', '彩虹工厂', 'Rainbow Factory', '🎨', '#9a62a1', '光谱机器丢失了三段关键颜色', '配色师虹砂'],
-    ['midnight-orchard', '午夜果园', 'Midnight Orchard', '🍎', '#6d7145', '果实只在错误的季节成熟', '果农夜露'],
-    ['compass-archipelago', '罗盘群岛', 'Compass Archipelago', '🧭', '#3f7d88', '所有罗盘同时指向一座移动岛屿', '岛图师南针'],
-    ['archive-zero', '零号档案', 'Archive Zero', '🗄️', '#6f687b', '被删除的记录正在返回现实', '档案员空白'],
-    ['eclipse-palace', '日蚀宫殿', 'Eclipse Palace', '🌘', '#625579', '永恒阴影封住了宫殿能源', '守曜人晨环'],
-    ['comet-harbor', '彗星港', 'Comet Harbor', '🚀', '#526f9d', '彗星碎片堵塞了所有起航窗口', '港务官尾光'],
-    ['clockwork-ocean', '发条海', 'Clockwork Ocean', '⚙️', '#497b8a', '海底主发条改变了潮汐节拍', '机械师浪齿'],
-    ['phoenix-sanctuary', '凤凰保护区', 'Phoenix Sanctuary', '🔥', '#b85c45', '重生火焰失去温度只剩强光', '护育员赤羽'],
-    ['invisible-city', '隐形城市', 'Invisible City', '🏙️', '#687b91', '城市坐标仍在但所有街道不可见', '测绘师显影'],
-    ['nebula-laboratory', '星云实验室', 'Nebula Laboratory', '🧪', '#765b9c', '星尘样本突破了磁场容器', '研究员微光'],
-    ['four-season-tower', '四季塔', 'Tower of Four Seasons', '🗼', '#75874e', '四个季节被困在同一层楼', '守塔人候风'],
-    ['memory-planet', '记忆行星', 'Planet of Memory', '🧠', '#8a5e8c', '居民的共同记忆出现大片空洞', '记录者回声'],
-    ['edge-of-map', '地图尽头', 'Edge of the Map', '🗺️', '#866f54', '未知区域正在吞没已经绘制的边界', '探险家界碑'],
-    ['gate-of-tomorrow', '明日之门', 'Gate of Tomorrow', '🚪', '#9a7838', '未来之门拒绝任何没有完整证据的旅者', '门卫新昼']
-];
+const listItems = (entries) => entries.map(([id, label]) => ({ id, label }));
 
-function createExpeditionChapter(theme, index) {
-    const [slug, titleZh, titleEn, icon, color, crisis, guide] = theme;
+function compileHandcraftedChapter(spec, index) {
     const order = index + 9;
     const prefix = `expedition-${String(order).padStart(2, '0')}`;
-    const previousId = order === 9 ? 'star-core-court' : EXPEDITION_THEMES[index - 1][0];
-    const addend = 3 + (order % 7);
-    const sum = order + addend;
-    const cipherAnswer = String(order * 7 + 13);
-    const signals = ['alpha', 'beta', 'gamma', 'delta'];
-    const memorySequence = Array.from({ length: 6 }, (_, position) => signals[(order + position * 3) % signals.length]);
-    const directions = ['north', 'east', 'south', 'west'];
-    const pathMoves = Array.from({ length: 6 }, (_, position) => directions[(order + position * 2 + (position > 2 ? 1 : 0)) % 4]);
+    const previousId = order === 9 ? 'star-core-court' : HANDCRAFTED_EXPEDITIONS[index - 1].id;
+    const [quizTitle, quizPrompt, quizOptions, quizAnswer, quizCategory] = spec.quiz;
+    const [multiTitle, multiPrompt, multiOptions, multiAnswers, multiCategory] = spec.multi;
+    const [orderTitle, orderItems, orderSequence] = spec.order;
+    const [matchingTitle, matchingLeft, matchingRight, matchingPairs] = spec.matching;
+    const [cipherTitle, cipherPrompt, cipherCode, cipherHint] = spec.cipher;
+    const [memoryTitle, memorySequence, memoryLabels] = spec.memory;
+    const [pathTitle, pathMoves] = spec.path;
+    const [choiceTitle, choicePrompt, choiceOptions] = spec.choice;
+    const [resourceTitle, resourcePrompt, resourceOptions] = spec.resource;
+    const [bossTitle, bossPrompt, bossOptions, bossAnswer, bossCategory] = spec.boss;
+    const [arrivalTitle, arrivalText] = spec.arrival;
+    const [finishTitle, finishText] = spec.finish;
+
     return {
-        id: slug,
+        id: spec.id,
         order,
         prerequisiteChapterId: previousId,
-        titleZh: `第${order}章：${titleZh}`,
-        titleEn: `Chapter ${order}: ${titleEn}`,
-        summaryZh: `${crisis}。与${guide}一起修复当地系统并取得下一段航线。`,
-        summaryEn: `${titleEn} faces a system-wide anomaly. Restore it and recover the next route segment.`,
+        titleZh: `第${order}章：${spec.titleZh}`,
+        titleEn: `Chapter ${order}: ${spec.titleEn}`,
+        summaryZh: spec.summaryZh,
+        summaryEn: spec.summaryEn,
         difficulty: Math.min(10, 5 + Math.floor((order - 9) / 7)),
         reward: 1280 + (order - 8) * 120,
-        color,
-        icon,
+        color: spec.color,
+        icon: spec.icon,
+        authorship: 'handcrafted',
         stages: [
-            n(`${prefix}-arrival`, guide, `${crisis}。星图显示这里有十二道相互关联的验证，任何一步都不能只靠猜测。`, `${titleZh}·抵达`),
-            q(`${prefix}-numbers`, '坐标校验', `${order} + ${addend} = ?`, [String(sum - 2), String(sum + 1), String(sum), String(sum + 3)], 2, '数学', 3),
-            u(`${prefix}-evidence`, '现场调查', `处理“${crisis}”时，哪些属于可靠的调查步骤？（可多选）`, ['记录现象', '核对多个来源', '随意修改原始数据', '保留可复查证据'], [0, 1, 3], '信息素养', 4),
-            o(`${prefix}-workflow`, '修复流程', '把系统修复步骤排列成合理顺序。', [
-                { id: 'verify', label: '复核结果' }, { id: 'observe', label: '观察现象' }, { id: 'repair', label: '实施修复' }, { id: 'diagnose', label: '定位原因' }
-            ], ['observe', 'diagnose', 'repair', 'verify'], 4),
-            g(`${prefix}-tools`, '工具配对', '把调查工具与用途配对。',
-                [{ id: 'map', label: '地图' }, { id: 'timer', label: '计时器' }, { id: 'notebook', label: '记录本' }],
-                [{ id: 'duration', label: '测量时长' }, { id: 'position', label: '确认位置' }, { id: 'evidence', label: '保存观察' }],
-                { map: 'position', timer: 'duration', notebook: 'evidence' }, 4),
-            c(`${prefix}-cipher`, '航线密码', `用章节序号 ${order} 乘以 7，再加 13。请输入结果。`, cipherAnswer, '先乘后加。', 4),
-            m(`${prefix}-signals`, '信号重放', '记住控制台的六段信号。', memorySequence, [
-                { id: 'alpha', label: 'α' }, { id: 'beta', label: 'β' }, { id: 'gamma', label: 'γ' }, { id: 'delta', label: 'δ' }
-            ], 4),
-            p(`${prefix}-route`, '区域穿越', `根据${guide}标出的六步箭头规划路线。`, pathMoves, 8, 4),
-            d(`${prefix}-choice`, '关键决定', `${guide}发现两种都可行的方案，你准备如何推进？`, [
-                { id: 'careful', label: '先建立小范围模型再实施', feedback: '模型暴露了隐藏风险，正式修复更加稳妥。', effects: { insight: 4 } },
-                { id: 'teamwork', label: '召集当地成员共同核对', feedback: '不同视角补全了遗漏信息。', effects: { energy: 1, insight: 3 } }
-            ]),
-            r(`${prefix}-power`, '资源分配', '最后一段修复需要在速度和节能之间选择。', [
-                { id: 'boost', label: '投入 2 点能量快速稳定系统', requires: { energy: 2 }, feedback: '系统快速稳定，并留下完整诊断记录。', effects: { energy: -2, insight: 5 } },
-                { id: 'manual', label: '逐项手动复位', feedback: '复位较慢，但没有消耗额外能量。', effects: { insight: 3 } }
-            ]),
-            b(`${prefix}-guardian`, `${titleZh}守卫`, '面对新的证据与原判断冲突时，最合理的行动是？', ['忽略新证据', '检查证据并修正判断', '删除原始记录', '只听最先发言的人'], 1, '逻辑', 6),
-            n(`${prefix}-finish`, guide, `${titleZh}的异常已经解除。新的航线在星图上亮起，第 ${order} 枚远征印记也被安全记录。`, `${titleZh}·完成`)
+            n(`${prefix}-arrival`, spec.guide, arrivalText, arrivalTitle),
+            q(`${prefix}-numbers`, quizTitle, quizPrompt, quizOptions, quizAnswer, quizCategory, 3),
+            u(`${prefix}-evidence`, multiTitle, multiPrompt, multiOptions, multiAnswers, multiCategory, 4),
+            o(`${prefix}-workflow`, orderTitle, `按剧情线索排列“${orderTitle}”的步骤。`,
+                listItems(orderItems), orderSequence, 4),
+            g(`${prefix}-tools`, matchingTitle, `完成“${matchingTitle}”的对应关系。`,
+                listItems(matchingLeft), listItems(matchingRight), matchingPairs, 4),
+            c(`${prefix}-cipher`, cipherTitle, cipherPrompt, cipherCode, cipherHint, 4),
+            m(`${prefix}-signals`, memoryTitle, `记住“${memoryTitle}”中出现的顺序。`,
+                memorySequence, Object.entries(memoryLabels).map(([id, label]) => ({ id, label })), 4),
+            p(`${prefix}-route`, pathTitle, `沿“${pathTitle}”标记的路线前进。`, pathMoves, 8, 4),
+            d(`${prefix}-choice`, choiceTitle, choicePrompt, choiceOptions.map(
+                ([id, label, feedback, effects]) => ({ id, label, feedback, effects })
+            )),
+            r(`${prefix}-power`, resourceTitle, resourcePrompt, resourceOptions.map(
+                ([id, label, energy, feedback, effects]) => ({
+                    id,
+                    label,
+                    ...(energy > 0 ? { requires: { energy } } : {}),
+                    feedback,
+                    effects
+                })
+            )),
+            b(`${prefix}-guardian`, bossTitle, bossPrompt, bossOptions, bossAnswer, bossCategory, 6),
+            n(`${prefix}-finish`, spec.guide, finishText, finishTitle)
         ]
     };
 }
 
 const CHAPTERS = deepFreeze([
     ...HANDCRAFTED_CHAPTERS,
-    ...EXPEDITION_THEMES.map(createExpeditionChapter)
+    ...HANDCRAFTED_EXPEDITIONS.map(compileHandcraftedChapter)
 ]);
-
 function validateContent(chapters = CHAPTERS) {
     const chapterIds = new Set();
     const chapterOrders = new Set();
     const stageIds = new Set();
+    const authoredSummaries = new Set();
+    const authoredArrivals = new Set();
+    const authoredFinales = new Set();
     for (const chapter of chapters) {
         if (!/^[a-z][a-z0-9-]{2,48}$/.test(chapter.id) || chapterIds.has(chapter.id)) {
             throw new Error(`Invalid adventure chapter: ${chapter.id}`);
@@ -462,6 +428,22 @@ function validateContent(chapters = CHAPTERS) {
         }
         chapterIds.add(chapter.id);
         chapterOrders.add(chapter.order);
+        if (chapter.order >= 9) {
+            const arrival = chapter.stages[0];
+            const finale = chapter.stages.at(-1);
+            if (chapter.authorship !== 'handcrafted'
+                || chapter.stages.length !== 12
+                || arrival?.kind !== 'narrative'
+                || finale?.kind !== 'narrative'
+                || authoredSummaries.has(chapter.summaryZh)
+                || authoredArrivals.has(arrival.text)
+                || authoredFinales.has(finale.text)) {
+                throw new Error(`Adventure chapter is not independently authored: ${chapter.id}`);
+            }
+            authoredSummaries.add(chapter.summaryZh);
+            authoredArrivals.add(arrival.text);
+            authoredFinales.add(finale.text);
+        }
         for (const stage of chapter.stages) {
             if (!/^[a-z][a-z0-9-]{2,64}$/.test(stage.id) || stageIds.has(stage.id)) {
                 throw new Error(`Invalid adventure stage: ${stage.id}`);
