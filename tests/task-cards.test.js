@@ -101,6 +101,18 @@ test('task assignment permits the staged rollout account even when it is an admi
     assert.match(event, /target\.rows\[0\]\.deactivated/);
 });
 
+test('task assignment can complete recent-admin verification through an in-page password dialog', () => {
+    const adminClient = source('public/js/admin.js');
+    const adminView = source('views/admin.ejs');
+    assert.match(adminView, /id="admin-reauth-dialog"/);
+    assert.match(adminView, /id="admin-reauth-password"[^>]+type="password"/);
+    assert.match(adminClient, /async function ensureRecentAdminAuthentication\(\)/);
+    assert.match(adminClient, /if \(!await ensureRecentAdminAuthentication\(\)\) return response;/);
+    assert.match(adminClient, /return execute\(\);/);
+    assert.match(adminClient, /dialog\.showModal\(\)/);
+    assert.match(adminClient, /errorOutput\.textContent = translateServerMessage\(result\.message\)/);
+});
+
 test('lifetime earnings use game net plus approved credits and gift value', async () => {
     assert.ok(GAME_OPERATIONS.includes('slot_bet'));
     assert.ok(GAME_OPERATIONS.includes('slot_win'));

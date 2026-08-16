@@ -24,6 +24,112 @@ function showBindingsMessage(container, message, isError = false) {
     container.replaceChildren(row);
 }
 
+let adminReauthenticationPromise = null;
+
+async function submitAdminPassword(password) {
+    const authResponse = await fetch('/api/admin/reauthenticate', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify({ password })
+    });
+    const result = await authResponse.json().catch(() => ({}));
+    return {
+        success: authResponse.ok && result.success === true,
+        message: result.message || t('管理员验证失败', 'Admin verification failed')
+    };
+}
+
+async function openAdminReauthenticationDialog() {
+    const dialog = document.getElementById('admin-reauth-dialog');
+    const form = document.getElementById('admin-reauth-form');
+    const passwordInput = document.getElementById('admin-reauth-password');
+    const errorOutput = document.getElementById('admin-reauth-error');
+    const cancelButton = document.getElementById('admin-reauth-cancel');
+    const submitButton = document.getElementById('admin-reauth-submit');
+
+    if (!dialog || !form || !passwordInput || !errorOutput || !cancelButton || !submitButton
+        || typeof dialog.showModal !== 'function') {
+        const password = window.prompt(t('请输入管理员密码以继续：', 'Enter your admin password to continue:'));
+        if (!password) return false;
+        const result = await submitAdminPassword(password);
+        if (!result.success) window.alert(translateServerMessage(result.message));
+        return result.success;
+    }
+
+    form.reset();
+    errorOutput.hidden = true;
+    errorOutput.textContent = '';
+
+    return new Promise((resolve) => {
+        let settled = false;
+        const cleanup = () => {
+            form.removeEventListener('submit', handleSubmit);
+            cancelButton.removeEventListener('click', handleCancel);
+            dialog.removeEventListener('cancel', handleCancel);
+            dialog.removeEventListener('close', handleClose);
+        };
+        const finish = (verified) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (dialog.open) dialog.close();
+            resolve(verified);
+        };
+        const handleCancel = (event) => {
+            event.preventDefault();
+            finish(false);
+        };
+        const handleClose = () => finish(false);
+        const handleSubmit = async (event) => {
+            event.preventDefault();
+            const password = passwordInput.value;
+            if (!password) {
+                errorOutput.textContent = t('请输入管理员密码。', 'Enter the administrator password.');
+                errorOutput.hidden = false;
+                passwordInput.focus();
+                return;
+            }
+            submitButton.disabled = true;
+            errorOutput.hidden = true;
+            try {
+                const result = await submitAdminPassword(password);
+                if (result.success) {
+                    finish(true);
+                    return;
+                }
+                errorOutput.textContent = translateServerMessage(result.message);
+                errorOutput.hidden = false;
+                passwordInput.select();
+            } catch (error) {
+                errorOutput.textContent = t('验证请求失败，请稍后再试。', 'Verification request failed. Try again.');
+                errorOutput.hidden = false;
+            } finally {
+                submitButton.disabled = false;
+            }
+        };
+
+        form.addEventListener('submit', handleSubmit);
+        cancelButton.addEventListener('click', handleCancel);
+        dialog.addEventListener('cancel', handleCancel);
+        dialog.addEventListener('close', handleClose);
+        dialog.showModal();
+        passwordInput.focus();
+    });
+}
+
+async function ensureRecentAdminAuthentication() {
+    if (adminReauthenticationPromise) return adminReauthenticationPromise;
+    adminReauthenticationPromise = openAdminReauthenticationDialog();
+    try {
+        return await adminReauthenticationPromise;
+    } finally {
+        adminReauthenticationPromise = null;
+    }
+}
+
 async function adminFetch(url, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     const requestOptions = { ...options };
@@ -44,22 +150,7 @@ async function adminFetch(url, options = {}) {
     const denial = await response.clone().json().catch(() => ({}));
     if (denial.code !== 'RECENT_AUTH_REQUIRED') return response;
 
-    const password = prompt(t('请输入管理员密码以继续：', 'Enter your admin password to continue:'));
-    if (!password) return response;
-
-    const authResponse = await fetch('/api/admin/reauthenticate', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
-        },
-        body: JSON.stringify({ password })
-    });
-    const authResult = await authResponse.json().catch(() => ({}));
-    if (!authResponse.ok || !authResult.success) {
-        alert(translateServerMessage(authResult.message || t('管理员验证失败', 'Admin verification failed')));
-        return response;
-    }
+    if (!await ensureRecentAdminAuthentication()) return response;
     return execute();
 }
 
