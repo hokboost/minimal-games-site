@@ -41,8 +41,10 @@ does not claim that the repository is mathematically bug-free.
 - Session revocation is checked transactionally for protected writes; Socket.IO
   sessions are revalidated and cross-instance events use PostgreSQL.
 - Administrator IP restrictions and optional HMAC bypass logic were removed.
-  High-risk writes require recent password verification, and
-  success/failure is audited (P1-28, P1-31, P1-32).
+  The original recent-password requirement was superseded on 2026-08-16 by
+  explicit password-only login plus administrator-session, CSRF, strict
+  rate-limit, idempotency, and success/failure audit controls (P1-28, P1-31,
+  P1-32).
 - Account removal is now deactivation: financial/security evidence is retained,
   sessions are revoked, and unstarted external work is safely released
   (P1-29). Password resets use short-lived hashed one-time tokens (P1-30).

@@ -9,7 +9,6 @@ module.exports = function registerAdminRoutes(app, deps) {
         generateCSRFToken,
         requireLogin,
         requireAdmin,
-        requireRecentAdminAuth,
         requireAuthorized,
         requireCSRF,
         security,
@@ -44,10 +43,10 @@ module.exports = function registerAdminRoutes(app, deps) {
 
     // Read-only dashboard traffic has its own larger budget. A single page load
     // performs several GET requests and must never consume the strict mutation
-    // budget needed by password step-up and high-risk writes.
+    // budget needed by high-risk writes.
     const adminReadGuards = [requireLogin, requireAdmin, readHeavyRateLimit];
     const adminMutationGuards = [requireLogin, requireAdmin, adminRateLimit, adminStrictLimit];
-    const highRiskAdminGuards = [...adminMutationGuards, requireRecentAdminAuth];
+    const highRiskAdminGuards = adminMutationGuards;
 
     const runPostCommitEffect = (label, effect) => {
         Promise.resolve()
@@ -299,7 +298,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         details = {},
         clientIP = null,
         requestId = null,
-        authStrength = 'session_password'
+        authStrength = 'admin_session'
     }) => {
         const auditDetails = { ...details, result: 'success', authStrength };
         const scopedRequestId = scopedAuditRequestId(adminUsername, requestId);
@@ -330,77 +329,6 @@ module.exports = function registerAdminRoutes(app, deps) {
             }));
         }
     };
-
-    app.post('/api/admin/reauthenticate', ...adminMutationGuards, requireCSRF, async (req, res) => {
-        let client;
-        let sessionStamped = false;
-        const previousAuthenticatedAt = req.session.lastAuthenticatedAt;
-        try {
-            const password = typeof req.body?.password === 'string' ? req.body.password : '';
-            if (!password || Buffer.byteLength(password, 'utf8') > 72) {
-                return res.status(400).json({ success: false, message: '密码格式无效' });
-            }
-
-            const userResult = await pool.query(
-                `SELECT password_hash
-                 FROM users
-                 WHERE username = $1 AND is_admin = true AND deactivated = false`,
-                [req.session.user.username]
-            );
-            const validPassword = userResult.rows.length === 1
-                && await bcrypt.compare(password, userResult.rows[0].password_hash);
-            if (!validPassword) {
-                return res.status(401).json({ success: false, message: '管理员密码错误' });
-            }
-
-            client = await pool.connect();
-            await client.query('BEGIN');
-            const stillCurrent = await client.query(`
-                SELECT account.password_hash
-                FROM users AS account
-                JOIN active_sessions AS active ON active.username = account.username
-                WHERE account.username = $1
-                  AND account.is_admin = TRUE
-                  AND account.deactivated = FALSE
-                  AND active.session_id = $2
-                  AND active.is_active = TRUE
-                FOR SHARE OF account, active
-            `, [req.session.user.username, req.sessionID]);
-            if (stillCurrent.rows.length !== 1
-                || stillCurrent.rows[0].password_hash !== userResult.rows[0].password_hash) {
-                await client.query('ROLLBACK');
-                return res.status(409).json({ success: false, message: '管理员凭据或会话已发生变化，请重新登录' });
-            }
-
-            await auditAdminAction({
-                client,
-                adminUsername: req.session.user.username,
-                action: 'admin_reauthenticated',
-                clientIP: req.clientIP,
-                requestId: req.requestId,
-                authStrength: 'password'
-            });
-            await client.query('COMMIT');
-
-            const verifiedAt = Date.now();
-            req.session.lastAuthenticatedAt = verifiedAt;
-            sessionStamped = true;
-            await new Promise((resolve, reject) => {
-                req.session.save((error) => (error ? reject(error) : resolve()));
-            });
-            return res.json({ success: true });
-        } catch (error) {
-            if (client) await client.query('ROLLBACK').catch(() => {});
-            if (sessionStamped) {
-                req.session.lastAuthenticatedAt = previousAuthenticatedAt;
-                await new Promise((resolve) => req.session.save(() => resolve()));
-            }
-            console.error('管理员重新认证失败:', error);
-            return res.status(500).json({ success: false, message: '重新认证服务暂不可用' });
-        } finally {
-            client?.release();
-        }
-    });
 
     // 管理员后台
     app.get('/admin', ...adminReadGuards, async (req, res) => {
@@ -606,7 +534,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: 'password'
+                authStrength: 'admin_session'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -984,7 +912,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { oldBalance: currentBalance, newBalance: balance, delta },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: 'password'
+                authStrength: 'admin_session'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -2602,7 +2530,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { authorizationId, outcome, refundAmount, reason },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: 'recent_password'
+                authStrength: 'admin_session'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');
@@ -2754,7 +2682,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 details: { taskId, outcome, deliveredQuantity, refundAmount, reason, providerTransactionId },
                 clientIP: req.clientIP,
                 requestId: req.idempotencyKey,
-                authStrength: 'recent_password'
+                authStrength: 'admin_session'
             });
             await req.finalizeIdempotency?.(client, 200, responseBody);
             await client.query('COMMIT');

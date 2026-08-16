@@ -26,7 +26,6 @@ test('task route registration keeps user and administrator security middleware e
         requireLogin: named('requireLogin'),
         requireAuthorized: named('requireAuthorized'),
         requireAdmin: named('requireAdmin'),
-        requireRecentAdminAuth: named('requireRecentAdminAuth'),
         requireCSRF: named('requireCSRF'),
         generateCSRFToken: named('generateCSRFToken'),
         basicRateLimit: named('basicRateLimit'),
@@ -47,8 +46,7 @@ test('task route registration keeps user and administrator security middleware e
     ]);
     const review = routes.find((entry) => entry.path === '/api/admin/tasks/review');
     assert.deepEqual(review.handlers.slice(0, -1).map((handler) => handler.name), [
-        'requireLogin', 'requireAdmin', 'adminRateLimit', 'adminStrictLimit',
-        'requireRecentAdminAuth', 'requireCSRF'
+        'requireLogin', 'requireAdmin', 'adminRateLimit', 'adminStrictLimit', 'requireCSRF'
     ]);
     const taskRead = routes.find((entry) => entry.path === '/api/admin/tasks');
     assert.deepEqual(taskRead.handlers.slice(0, -1).map((handler) => handler.name), [
@@ -106,16 +104,13 @@ test('task assignment permits the staged rollout account even when it is an admi
     assert.match(event, /target\.rows\[0\]\.deactivated/);
 });
 
-test('task assignment can complete recent-admin verification through an in-page password dialog', () => {
+test('task assignment does not require a secondary administrator password prompt', () => {
     const adminClient = source('public/js/admin.js');
     const adminView = source('views/admin.ejs');
-    assert.match(adminView, /id="admin-reauth-dialog"/);
-    assert.match(adminView, /id="admin-reauth-password"[^>]+type="password"/);
-    assert.match(adminClient, /async function ensureRecentAdminAuthentication\(\)/);
-    assert.match(adminClient, /if \(!await ensureRecentAdminAuthentication\(\)\) return response;/);
-    assert.match(adminClient, /return execute\(\);/);
-    assert.match(adminClient, /dialog\.showModal\(\)/);
-    assert.match(adminClient, /errorOutput\.textContent = translateServerMessage\(result\.message\)/);
+    const taskRoutes = source('routes/tasks.js');
+    assert.doesNotMatch(adminView, /admin-reauth|重新验证管理员密码/);
+    assert.doesNotMatch(adminClient, /admin\/reauthenticate|RECENT_AUTH_REQUIRED|ensureRecentAdminAuthentication/);
+    assert.doesNotMatch(taskRoutes, /requireRecentAdminAuth|recent_password/);
 });
 
 test('lifetime earnings use game net plus approved credits and gift value', async () => {

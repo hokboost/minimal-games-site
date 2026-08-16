@@ -15,7 +15,6 @@ const POLICY_NAMES = new Set([
     'idempotent',
     'login',
     'paid-rate-limit',
-    'recent-admin-auth',
     'same-site',
     'worker-auth',
     'worker-lease'
@@ -34,7 +33,6 @@ const gameRoutes = GAME_DEFINITIONS.flatMap((game) => game.actions.map((action) 
 )));
 
 const adminPaths = [
-    '/api/admin/reauthenticate',
     '/api/admin/add-electric-coin',
     '/api/admin/authorize-user',
     '/api/admin/unauthorize-user',
@@ -64,14 +62,12 @@ const adminPaths = [
 ];
 
 const nonIdempotentAdminPaths = new Set([
-    '/api/admin/reauthenticate',
     '/api/admin/reset-password'
 ]);
 
 const adminRoutes = adminPaths.map((path) => route('POST', path, [
     'login',
     'admin',
-    ...(path === '/api/admin/reauthenticate' ? [] : ['recent-admin-auth']),
     'csrf',
     'admin-audit',
     ...(nonIdempotentAdminPaths.has(path) ? [] : ['idempotent'])
@@ -116,8 +112,8 @@ const applicationRoutes = [
     route('POST', '/api/gifts/exchange', ['login', 'authorized', 'csrf', 'paid-rate-limit', 'capacity', 'idempotent']),
     route('POST', '/api/pk/start', ['login', 'authorized', 'csrf', 'paid-rate-limit', 'idempotent']),
     route('POST', '/api/pk/stop', ['login', 'authorized', 'csrf', 'paid-rate-limit', 'idempotent']),
-    route('POST', '/api/bilibili/room', ['login', 'admin', 'recent-admin-auth', 'csrf', 'admin-audit', 'idempotent']),
-    route('DELETE', '/api/bilibili/room', ['login', 'admin', 'recent-admin-auth', 'csrf', 'admin-audit']),
+    route('POST', '/api/bilibili/room', ['login', 'admin', 'csrf', 'admin-audit', 'idempotent']),
+    route('DELETE', '/api/bilibili/room', ['login', 'admin', 'csrf', 'admin-audit']),
     ...gameRoutes,
     route('POST', '/api/wish/simulate', ['login', 'authorized', 'csrf', 'admin-only']),
     route('POST', '/api/tasks/claim', ['login', 'authorized', 'basic-rate-limit', 'action-rate-limit', 'csrf', 'idempotent']),

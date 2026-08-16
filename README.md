@@ -8,7 +8,7 @@ Express/EJS 小游戏站点，使用 PostgreSQL 保存账户、整数余额、�
 - PostgreSQL 14+
 - Windows 礼物工作器另需 Python 3.10+ 和 `workers/bilibili/requirements.txt`
 
-复制 `.env.example` 中的变量到部署平台或本机未跟踪的 `.env`。生产环境必须提供数据库凭据、各用途独立密钥、readiness token，以及 `WORKER_CREDENTIALS_JSON` 中逐 worker 的独立凭证。管理员应使用独立强密码；高风险操作会要求在近期重新输入密码。Windows worker 只配置自己的 `WORKER_CREDENTIAL_ID`、`WORKER_API_KEY` 和 `WORKER_HMAC_SECRET`。所有密钥至少使用 32 字节随机值，不能提交到 Git。
+复制 `.env.example` 中的变量到部署平台或本机未跟踪的 `.env`。生产环境必须提供数据库凭据、各用途独立密钥、readiness token，以及 `WORKER_CREDENTIALS_JSON` 中逐 worker 的独立凭证。管理员应使用独立强密码；登录后的后台操作依赖管理员会话、CSRF、严格限流和追加式审计，不要求二次密码或验证码。Windows worker 只配置自己的 `WORKER_CREDENTIAL_ID`、`WORKER_API_KEY` 和 `WORKER_HMAC_SECRET`。所有密钥至少使用 32 字节随机值，不能提交到 Git。
 
 ```bash
 npm ci
@@ -44,7 +44,7 @@ Flip 与 Stone 还会校验所有玩家策略中的最高 RTP，而不只校验�
 - 客户端写操作使用 `Idempotency-Key`；完成响应与业务事务一起持久化。
 - 礼物资金先锁定，再由带租约的工作器领取。外部发送开始后遇到超时只进入 `uncertain`，不会自动退款。
 - PK 先预授权扣款，再发送和结算。回报先写入本地耐久 spool，断网恢复后重试。
-- 管理员只能通过带 step-up 验证的对账接口处理 `uncertain` 记录；处理过程写入追加式审计日志。
+- 管理员只能通过受会话、CSRF、严格限流和幂等保护的对账接口处理 `uncertain` 记录；处理过程写入追加式审计日志。
 
 数据库迁移由 `lib/database-migrations.js` 统一执行，使用 PostgreSQL advisory lock、文件校验和和 `minimal_games_schema_migrations`。已发布的迁移文件不得修改，后续结构变化必须新增迁移。
 

@@ -34,7 +34,6 @@ module.exports = function registerTaskRoutes(app, deps) {
         requireLogin,
         requireAuthorized,
         requireAdmin,
-        requireRecentAdminAuth,
         requireCSRF,
         security
     } = deps;
@@ -55,8 +54,7 @@ module.exports = function registerTaskRoutes(app, deps) {
         requireLogin,
         requireAdmin,
         adminRateLimit,
-        adminStrictLimit,
-        requireRecentAdminAuth
+        adminStrictLimit
     ];
 
     const isEnabled = (username) => enabledUsers().has(normalizeUsername(username));
@@ -221,7 +219,7 @@ module.exports = function registerTaskRoutes(app, deps) {
             adminUsername,
             action,
             targetUsername,
-            JSON.stringify({ ...details, result: 'success', authStrength: 'recent_password' }),
+            JSON.stringify({ ...details, result: 'success', authStrength: 'admin_session' }),
             req.clientIP
         ]);
     }

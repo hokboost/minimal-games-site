@@ -13,7 +13,7 @@ This repository was remediated against `minimal-games-site-security-audit-2026-0
 - Game configuration, catalog metadata, exact economics, public projections, profile/history adapters, and mutation-route policy metadata now have central registries under `domain/games/` and `routes/manifest.js`.
 - Long-running cleanup and recovery work is owned by an explicit application lifecycle with ordered startup, reverse shutdown, failure rollback, non-overlapping jobs, and in-flight draining.
 - New-user balance defaults to zero and the signup award is an explicit, source-labelled ledger posting.
-- Administrator login and step-up use the account password; TOTP is no longer a required production setting. High-risk writes require a password verification within ten minutes. Sessions retain absolute 24-hour user / 8-hour administrator lifetimes and can be force-revoked.
+- Administrator login uses the account password; TOTP and secondary password verification are no longer required. High-risk writes retain administrator-session, CSRF, strict rate-limit, idempotency, and append-only audit controls. Sessions retain absolute 24-hour user / 8-hour administrator lifetimes and can be force-revoked.
 - Account login throttling is global by canonicalized username rather than IP-plus-username.
 - Language redirects are same-origin only; language cookies have explicit SameSite/Secure behavior.
 - Proxy trust is an explicit address allowlist. Public health responses are generic; detailed readiness requires a token.

@@ -103,8 +103,7 @@ check('admin password resets use short-lived hashed one-time tokens',
     && admin.includes("NOW() + INTERVAL '15 minutes'")
     && !admin.includes('temporaryPassword'));
 check('admin routes use CSRF',
-    admin.includes("app.post('/api/admin/reauthenticate', ...adminMutationGuards, requireCSRF")
-    && /app\.post\('\/api\/admin\/[^']+', \.\.\.highRiskAdminGuards, requireCSRF/g.test(admin));
+    /app\.post\('\/api\/admin\/[^']+', \.\.\.highRiskAdminGuards, requireCSRF/g.test(admin));
 check('admin access is not restricted by client IP', !admin.includes('adminIPWhitelist') && !security.includes('ADMIN_IP_REJECTED') && !security.includes('ADMIN_IP_WHITELIST'));
 check('gift exchange uses an allowlist', gifts.includes('redeemableGiftTypes') && gifts.includes("new Set(['heartbox', 'fanlight', 'tiedu_one'])"));
 check('wish simulator uses role authorization', wish.includes('req.session.user.is_admin !== true') && !wish.includes("username !== 'hokboost'"));
@@ -224,21 +223,19 @@ check('balance ledger is append-only and validates new arithmetic', financialAud
 check('account deactivation preserves financial audit history', admin.includes('账户已停用，审计记录已保留') && !admin.includes("DELETE FROM balance_logs"));
 check('spin results are idempotent', games.includes("app.post('/api/spin'") && read('public/js/spin.js').includes("idempotentFetch('/api/spin'"));
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
-check('administrator idempotency replays revalidate recent password authentication',
-    server.includes('getRecentAdminAuthDenial(req)')
-    && server.includes('if (requiresAdmin)')
-    && server.includes('recentAuthDenial'));
-check('administrator authentication has no mandatory TOTP configuration or prompt',
-    !/ADMIN_TOTP|totpCode|lastMfaVerifiedAt|getAdminTotpSecret|matchTotpCounter/.test([
+check('administrator idempotency replays revalidate current administrator authorization',
+    server.includes('requiresAdmin && current.is_admin !== true')
+    && server.includes('account.is_admin = TRUE')
+    && !server.includes('getRecentAdminAuthDenial'));
+check('administrator authentication has no mandatory secondary verification',
+    !/ADMIN_TOTP|totpCode|lastMfaVerifiedAt|getAdminTotpSecret|matchTotpCounter|RECENT_AUTH_REQUIRED|lastAuthenticatedAt|reauthenticate/.test([
         server,
         admin,
         adminClient,
         adminView,
         loginView,
         configValidation
-    ].join('\n'))
-    && adminClient.includes('JSON.stringify({ password })')
-    && admin.includes("authStrength: 'password'"));
+    ].join('\n')));
 check('idempotency migration upgrades the legacy schema',
     idempotencyMigration.includes('RENAME COLUMN idem_key TO idempotency_key')
     && idempotencyMigration.includes("SET status = 'pending'")

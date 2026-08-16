@@ -928,28 +928,6 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-const ADMIN_RECENT_AUTH_MS = 10 * 60 * 1000;
-const getRecentAdminAuthDenial = (req) => {
-    const now = Date.now();
-    const lastAuthenticatedAt = Number(req.session?.lastAuthenticatedAt || 0);
-    if (now - lastAuthenticatedAt > ADMIN_RECENT_AUTH_MS) {
-        return {
-            status: 403,
-            message: '此操作需要重新验证管理员密码',
-            code: 'RECENT_AUTH_REQUIRED'
-        };
-    }
-    return null;
-};
-const requireRecentAdminAuth = (req, res, next) => {
-    const denial = getRecentAdminAuthDenial(req);
-    if (denial) {
-        const { status, ...body } = denial;
-        return res.status(status).json({ success: false, ...body });
-    }
-    return next();
-};
-
 const idempotentWritePaths = IDEMPOTENT_WRITE_PATHS;
 
 async function validateExistingIdempotentRequest(req) {
@@ -979,10 +957,6 @@ async function validateExistingIdempotentRequest(req) {
     if (requiresAdmin && current.is_admin !== true) {
         return { status: 403, message: '无权访问管理员后台' };
     }
-    if (requiresAdmin) {
-        const recentAuthDenial = getRecentAdminAuthDenial(req);
-        if (recentAuthDenial) return recentAuthDenial;
-    }
     return null;
 }
 
@@ -1007,9 +981,6 @@ async function validateTransactionalIdempotentRequest(req, client) {
             status: requiresAdmin ? 403 : 401,
             message: requiresAdmin ? '管理员权限或会话已失效' : '登录会话或授权已失效'
         };
-    }
-    if (requiresAdmin) {
-        return getRecentAdminAuthDenial(req);
     }
     return null;
 }
@@ -1709,7 +1680,6 @@ app.post('/login', loginLimiter, loginAccountLimiter, async (req, res) => {
             disconnectUserSockets(username, sessionResult.terminatedSessionIds);
             req.session.user = sessionResult.user;
             req.session.username = sessionResult.user.username;
-            req.session.lastAuthenticatedAt = Date.now();
             await new Promise((resolve, reject) => {
                 req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
             });
@@ -1790,7 +1760,7 @@ app.post('/api/change-password', requireLogin, requireCSRF, async (req, res) => 
         if (req.session.user.is_admin) {
             return res.status(403).json({
                 success: false,
-                message: '管理员必须在管理后台完成密码修改和二次验证'
+                message: '管理员必须在管理后台完成密码修改'
             });
         }
 
@@ -2807,7 +2777,6 @@ registerAdminRoutes(app, {
     generateCSRFToken,
     requireLogin,
     requireAdmin,
-    requireRecentAdminAuth,
     requireAuthorized,
     requireCSRF,
     security,
@@ -2893,7 +2862,6 @@ registerTaskRoutes(app, {
     requireLogin,
     requireAuthorized,
     requireAdmin,
-    requireRecentAdminAuth,
     requireCSRF,
     security
 });
