@@ -8,6 +8,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const routeSource = fs.readFileSync(path.join(root, 'routes/adventure.js'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'migrations/add_adventure_progression.sql'), 'utf8');
+const clientSource = fs.readFileSync(path.join(root, 'public/js/adventure.js'), 'utf8');
 
 test('adventure mutations use the declared authenticated, capacity, CSRF, and idempotent contract', () => {
     for (const endpoint of ['start', 'action', 'abandon']) {
@@ -44,4 +45,9 @@ test('adventure responses are projected and action bodies reject hidden-state in
     assert.match(routeSource, /allowedByType/);
     assert.doesNotMatch(routeSource, /req\.body\.(?:username|state|reward|insight|hearts)/);
     assert.match(routeSource, /Cache-Control', 'private, no-store/);
+});
+
+test('adventure UI stays inside the production no-inline-style CSP', () => {
+    assert.doesNotMatch(clientSource, /\.style\b|setAttribute\(\s*['"]style/);
+    assert.match(clientSource, /elements\.progress\.value = run\.progress/);
 });

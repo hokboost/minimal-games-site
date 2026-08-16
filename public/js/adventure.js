@@ -103,8 +103,7 @@
         const activeId = state.active?.chapter?.id;
         const nodes = (state.missions || []).map((mission) => {
             const article = document.createElement('article');
-            article.className = 'mission-card';
-            article.style.setProperty('--mission-color', mission.color);
+            article.className = `mission-card mission-card--${mission.id}`;
             if (mission.id === activeId) article.classList.add('is-active');
             if (complete.has(mission.id)) article.classList.add('is-complete');
 
@@ -286,7 +285,8 @@
         const stage = run.stage;
         elements.title.textContent = lang === 'zh' ? run.chapter.titleZh : run.chapter.titleEn;
         elements.icon.textContent = run.chapter.icon;
-        elements.progress.style.width = `${run.progress}%`;
+        elements.progress.value = run.progress;
+        elements.progress.textContent = `${run.progress}%`;
         elements.hearts.textContent = `${run.hearts}/${run.maximumHearts}`;
         elements.energy.textContent = run.energy;
         elements.insight.textContent = run.insight;
