@@ -221,11 +221,16 @@ module.exports = function registerTaskRoutes(app, deps) {
 
     app.get('/tasks', ...userGuards, async (req, res) => {
         try {
-            const state = await loadUserState(req.session.user.username, res.locals.lang);
+            const username = req.session.user.username;
+            const [state, balanceResult] = await Promise.all([
+                loadUserState(username, res.locals.lang),
+                pool.query('SELECT balance FROM users WHERE username = $1', [username])
+            ]);
             res.set('Cache-Control', 'private, no-store');
             return res.render('tasks', {
                 title: res.locals.lang === 'zh' ? '任务卡片' : 'Task Cards',
                 user: req.session.user,
+                balance: balanceResult.rows[0]?.balance ?? null,
                 csrfToken: generateCSRFToken(req),
                 initialTaskState: state
             });

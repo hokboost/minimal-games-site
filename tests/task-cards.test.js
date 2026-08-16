@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const ejs = require('ejs');
 
 const registerTaskRoutes = require('../routes/tasks');
 const { GAME_OPERATIONS, getLifetimeEarnings } = require('../lib/earnings');
@@ -117,4 +118,18 @@ test('permanent account lock remains separate from failed-login throttling', () 
     assert.match(server, /code: 'ACCOUNT_LOCKED'/);
     assert.match(server, /res\.redirect\('\/account-locked'\)/);
     assert.match(server, /login_failures = 0, last_failure_time = NULL, locked_until = NULL/);
+});
+
+test('task page renders when optional header balance is omitted', async () => {
+    const html = await ejs.renderFile(path.join(root, 'views/tasks.ejs'), {
+        lang: 'zh',
+        title: '任务卡片',
+        user: { username: 'hokboost', authorized: true, is_admin: false },
+        csrfToken: 'test-token',
+        initialTaskState: { featureEnabled: true, canClaim: true, cards: [], eventTasks: [] },
+        cspNonce: 'test-nonce',
+        t: { auth: { login: '登录', register: '注册' } }
+    });
+    assert.match(html, /任务卡片/);
+    assert.match(html, /暂不可用/);
 });
