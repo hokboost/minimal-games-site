@@ -47,10 +47,17 @@ module.exports = function registerTaskRoutes(app, deps) {
     const userActionRateLimit = requireFunction(security, 'userActionRateLimit', 'security middleware');
     const adminRateLimit = requireFunction(security, 'adminRateLimit', 'security middleware');
     const adminStrictLimit = requireFunction(security, 'adminStrictLimit', 'security middleware');
+    const readHeavyRateLimit = requireFunction(security, 'readHeavyRateLimit', 'security middleware');
     const csrfProtection = requireFunction({ requireCSRF }, 'requireCSRF', 'route dependency');
     const userGuards = [requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit];
-    const adminGuards = [requireLogin, requireAdmin, adminRateLimit, adminStrictLimit];
-    const adminWriteGuards = [...adminGuards, requireRecentAdminAuth];
+    const adminReadGuards = [requireLogin, requireAdmin, readHeavyRateLimit];
+    const adminWriteGuards = [
+        requireLogin,
+        requireAdmin,
+        adminRateLimit,
+        adminStrictLimit,
+        requireRecentAdminAuth
+    ];
 
     const isEnabled = (username) => enabledUsers().has(normalizeUsername(username));
     const localized = (row, key, lang) => row[`${key}_${lang === 'zh' ? 'zh' : 'en'}`];
@@ -426,7 +433,7 @@ module.exports = function registerTaskRoutes(app, deps) {
         }
     });
 
-    app.get('/api/admin/tasks', ...adminGuards, async (req, res) => {
+    app.get('/api/admin/tasks', ...adminReadGuards, async (req, res) => {
         try {
             const [templates, pendingCards, pendingEvents] = await Promise.all([
                 pool.query(`SELECT id, slug, title_zh, title_en, reward_points FROM task_card_templates WHERE active = TRUE ORDER BY id`),

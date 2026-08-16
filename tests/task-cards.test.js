@@ -31,6 +31,7 @@ test('task route registration keeps user and administrator security middleware e
         generateCSRFToken: named('generateCSRFToken'),
         basicRateLimit: named('basicRateLimit'),
         userActionRateLimit: named('userActionRateLimit'),
+        readHeavyRateLimit: named('readHeavyRateLimit'),
         adminRateLimit: named('adminRateLimit'),
         adminStrictLimit: named('adminStrictLimit')
     };
@@ -48,6 +49,10 @@ test('task route registration keeps user and administrator security middleware e
     assert.deepEqual(review.handlers.slice(0, -1).map((handler) => handler.name), [
         'requireLogin', 'requireAdmin', 'adminRateLimit', 'adminStrictLimit',
         'requireRecentAdminAuth', 'requireCSRF'
+    ]);
+    const taskRead = routes.find((entry) => entry.path === '/api/admin/tasks');
+    assert.deepEqual(taskRead.handlers.slice(0, -1).map((handler) => handler.name), [
+        'requireLogin', 'requireAdmin', 'readHeavyRateLimit'
     ]);
     assert.deepEqual(routes.filter((entry) => entry.method === 'POST').map((entry) => entry.path).sort(), [
         '/api/admin/tasks/assign-event',

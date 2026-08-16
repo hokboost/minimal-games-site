@@ -450,8 +450,7 @@ module.exports = function registerAnalyticsRoutes(app, deps) {
     const adminGuards = [
         requireLogin,
         requireAdmin,
-        security.adminRateLimit,
-        security.adminStrictLimit
+        security.readHeavyRateLimit
     ];
 
     app.get('/admin/analytics', ...adminGuards, async (req, res) => {

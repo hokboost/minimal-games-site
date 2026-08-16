@@ -42,11 +42,12 @@ module.exports = function registerAdminRoutes(app, deps) {
         ? value.normalize('NFKC').trim()
         : '';
 
-    // Page routes require an authenticated admin and rate limits. Admins may
-    // connect from changing addresses, so access is never tied to client IP.
-    const adminGuards = [requireLogin, requireAdmin, adminRateLimit, adminStrictLimit];
-    const adminApiGuards = adminGuards;
-    const highRiskAdminGuards = [...adminApiGuards, requireRecentAdminAuth];
+    // Read-only dashboard traffic has its own larger budget. A single page load
+    // performs several GET requests and must never consume the strict mutation
+    // budget needed by password step-up and high-risk writes.
+    const adminReadGuards = [requireLogin, requireAdmin, readHeavyRateLimit];
+    const adminMutationGuards = [requireLogin, requireAdmin, adminRateLimit, adminStrictLimit];
+    const highRiskAdminGuards = [...adminMutationGuards, requireRecentAdminAuth];
 
     const runPostCommitEffect = (label, effect) => {
         Promise.resolve()
@@ -330,7 +331,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     };
 
-    app.post('/api/admin/reauthenticate', ...adminApiGuards, requireCSRF, async (req, res) => {
+    app.post('/api/admin/reauthenticate', ...adminMutationGuards, requireCSRF, async (req, res) => {
         let client;
         let sessionStamped = false;
         const previousAuthenticatedAt = req.session.lastAuthenticatedAt;
@@ -402,7 +403,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 管理员后台
-    app.get('/admin', ...adminGuards, async (req, res) => {
+    app.get('/admin', ...adminReadGuards, async (req, res) => {
         try {
             // 初始化session
             if (!req.session.initialized) {
@@ -499,7 +500,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
-    app.get('/admin/users/:username/records', ...adminGuards, async (req, res) => {
+    app.get('/admin/users/:username/records', ...adminReadGuards, async (req, res) => {
         try {
             const targetUsername = normalizeUsername(req.params.username);
             if (!usernamePattern.test(targetUsername)) {
@@ -2037,7 +2038,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 检查B站Cookie状态 (仅管理员)
-    app.get('/api/bilibili/cookies/status', ...adminApiGuards, async (req, res) => {
+    app.get('/api/bilibili/cookies/status', ...adminReadGuards, async (req, res) => {
         res.json({
             success: true,
             valid: null,
@@ -2153,7 +2154,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 管理员查看所有余额记录 API
-    app.get('/api/admin/balance/logs', ...adminApiGuards, async (req, res) => {
+    app.get('/api/admin/balance/logs', ...adminReadGuards, async (req, res) => {
         try {
             const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
             const limit = Math.min(200, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
@@ -2176,7 +2177,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取IP风险信息
-    app.get('/api/admin/ip/:ip', ...adminApiGuards, async (req, res) => {
+    app.get('/api/admin/ip/:ip', ...adminReadGuards, async (req, res) => {
         try {
             const ip = req.params.ip;
             if (!net.isIP(ip)) {
@@ -2400,7 +2401,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取活跃会话列表
-    app.get('/api/admin/sessions', ...adminApiGuards, async (req, res) => {
+    app.get('/api/admin/sessions', ...adminReadGuards, async (req, res) => {
         try {
             const stats = await SessionManager.getSessionStats();
 
@@ -2424,7 +2425,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 获取安全事件列表
-    app.get('/api/admin/security-events', ...adminApiGuards, async (req, res) => {
+    app.get('/api/admin/security-events', ...adminReadGuards, async (req, res) => {
         try {
             const events = await pool.query(`
                 SELECT id, event_type, username, ip_address, description, severity, 
@@ -2444,7 +2445,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
-    app.get('/api/admin/audit-log', ...adminApiGuards, async (req, res) => {
+    app.get('/api/admin/audit-log', ...adminReadGuards, async (req, res) => {
         try {
             const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
             const beforeId = Number.parseInt(req.query.beforeId, 10);
@@ -2468,7 +2469,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
-    app.get('/api/admin/gift-reconciliation', ...adminApiGuards, async (req, res) => {
+    app.get('/api/admin/gift-reconciliation', ...adminReadGuards, async (req, res) => {
         try {
             const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
             const result = await pool.query(`
@@ -2489,7 +2490,7 @@ module.exports = function registerAdminRoutes(app, deps) {
         }
     });
 
-    app.get('/api/admin/pk-reconciliation', ...adminApiGuards, async (req, res) => {
+    app.get('/api/admin/pk-reconciliation', ...adminReadGuards, async (req, res) => {
         try {
             const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
             const [authorizationResult, taskResult] = await Promise.all([
@@ -2920,7 +2921,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     });
 
     // 安全监控面板 - 修复后：使用统一的session权限体系
-    app.get('/admin/security', ...adminGuards, (req, res) => {
+    app.get('/admin/security', ...adminReadGuards, (req, res) => {
         // 收集安全统计信息
         const blacklist = security.getBlacklist();
         const behaviorStats = [];

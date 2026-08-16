@@ -102,7 +102,9 @@ check('admin password resets use short-lived hashed one-time tokens',
     admin.includes("crypto.createHash('sha256').update(resetToken)")
     && admin.includes("NOW() + INTERVAL '15 minutes'")
     && !admin.includes('temporaryPassword'));
-check('admin routes use CSRF', /app\.post\('\/api\/admin\/[^']+', \.\.\.adminApiGuards, requireCSRF/g.test(admin));
+check('admin routes use CSRF',
+    admin.includes("app.post('/api/admin/reauthenticate', ...adminMutationGuards, requireCSRF")
+    && /app\.post\('\/api\/admin\/[^']+', \.\.\.highRiskAdminGuards, requireCSRF/g.test(admin));
 check('admin access is not restricted by client IP', !admin.includes('adminIPWhitelist') && !security.includes('ADMIN_IP_REJECTED') && !security.includes('ADMIN_IP_WHITELIST'));
 check('gift exchange uses an allowlist', gifts.includes('redeemableGiftTypes') && gifts.includes("new Set(['heartbox', 'fanlight', 'tiedu_one'])"));
 check('wish simulator uses role authorization', wish.includes('req.session.user.is_admin !== true') && !wish.includes("username !== 'hokboost'"));

@@ -169,6 +169,7 @@ test('failed admin mutations are audited once without request body data', async 
     assert.equal(queries[0].values[0], scopedAuditRequestId('admin-user', 'idempotency-key'));
     assert.equal(queries[0].values.join(' ').includes('must-not-be-audited'), false);
     assert.equal(queries[0].values[4], '203.0.113.2');
+    assert.match(queries[0].sql, /\$1::varchar\(200\)/);
 });
 
 test('PostgreSQL rate-limit stores declare their namespaced keys as instance-local', () => {
