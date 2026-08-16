@@ -51,3 +51,12 @@ test('adventure UI stays inside the production no-inline-style CSP', () => {
     assert.doesNotMatch(clientSource, /\.style\b|setAttribute\(\s*['"]style/);
     assert.match(clientSource, /elements\.progress\.value = run\.progress/);
 });
+
+test('chapter prerequisites are checked before an active run can be abandoned', () => {
+    const prerequisiteCheck = routeSource.indexOf("if (chapter.prerequisiteChapterId)");
+    const abandonExisting = routeSource.indexOf("if (existing) {", prerequisiteCheck);
+    assert.ok(prerequisiteCheck > 0);
+    assert.ok(abandonExisting > prerequisiteCheck);
+    assert.match(routeSource, /'CHAPTER_LOCKED', '请先通关前置章节'/);
+    assert.match(routeSource, /WHERE username = \$1 AND chapter_id = \$2 AND rules_version = \$3/);
+});

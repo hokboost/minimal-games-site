@@ -2845,4 +2845,43 @@ questions.push(
   { id: 440, question: "为不同网站设置密码时，更安全的习惯是？", options: ["全部使用同一密码", "使用独立强密码", "只用生日", "把密码公开保存"], correct: 1, category: "安全" }
 );
 
+questions.push(
+  { id: 441, question: "北极星大致位于天空的哪个方向？", options: ["东", "南", "西", "北"], correct: 3, category: "天文" },
+  { id: 442, question: "月球本身会发出可见光吗？", options: ["会，永远自己发光", "不会，主要反射太阳光", "只在满月发光", "只在白天发光"], correct: 1, category: "天文" },
+  { id: 443, question: "太阳是一颗什么类型的天体？", options: ["行星", "恒星", "卫星", "彗星"], correct: 1, category: "天文" },
+  { id: 444, question: "国际通用求救信号 SOS 通常表示什么？", options: ["需要紧急援助", "天气晴朗", "任务完成", "保持静默"], correct: 0, category: "安全" },
+  { id: 445, question: "发生火灾时，乘坐电梯逃生是否通常安全？", options: ["通常安全", "通常不安全，应走疏散楼梯", "只在晚上安全", "只在高层安全"], correct: 1, category: "安全" },
+  { id: 446, question: "看到有人溺水但自己不会游泳，较安全的做法是？", options: ["立刻独自下水", "呼救并寻找救生设备", "转身离开", "站在水边跳跃"], correct: 1, category: "安全" },
+  { id: 447, question: "下列哪一种材料通常能被磁铁吸引？", options: ["铁", "玻璃", "木头", "塑料"], correct: 0, category: "科学" },
+  { id: 448, question: "冰融化成水属于什么变化？", options: ["物理变化", "核反应", "生物繁殖", "光合作用"], correct: 0, category: "科学" },
+  { id: 449, question: "空气中含量最多的气体是？", options: ["氧气", "氮气", "二氧化碳", "氢气"], correct: 1, category: "科学" },
+  { id: 450, question: "蜜蜂采蜜时也常帮助植物完成什么？", options: ["授粉", "结冰", "发光", "迁徙"], correct: 0, category: "生物" },
+  { id: 451, question: "食物链中绿色植物通常是什么？", options: ["生产者", "消费者", "捕食者", "寄生者"], correct: 0, category: "生物" },
+  { id: 452, question: "鱼类主要使用什么器官在水中呼吸？", options: ["肺", "鳃", "皮毛", "翅膀"], correct: 1, category: "生物" },
+  { id: 453, question: "指南针的红色指针通常指向哪个方向？", options: ["北", "南", "东", "西"], correct: 0, category: "地理" },
+  { id: 454, question: "经线主要连接地球的哪两个区域？", options: ["南北两极", "东西海岸", "赤道两端", "任意两城"], correct: 0, category: "地理" },
+  { id: 455, question: "沙漠地区通常最显著的气候特点是？", options: ["降水少", "终年积雪", "每天台风", "没有昼夜"], correct: 0, category: "地理" },
+  { id: 456, question: "提出观点后补充数据，主要是为了什么？", options: ["提供证据", "改变字体", "增加音量", "隐藏结论"], correct: 0, category: "逻辑" },
+  { id: 457, question: "如果前提不可靠，基于它得出的结论应当怎样？", options: ["一定正确", "需要重新检查", "永远保密", "立刻传播"], correct: 1, category: "逻辑" },
+  { id: 458, question: "对照实验通常只改变几个主要研究条件？", options: ["一个", "全部", "零个", "越多越好"], correct: 0, category: "科学" },
+  { id: 459, question: "音乐中用来表示声音强弱变化的要素是？", options: ["力度", "经度", "密度", "湿度"], correct: 0, category: "艺术" },
+  { id: 460, question: "戏剧中负责扮演角色的人通常称为？", options: ["演员", "观众", "记者", "裁判"], correct: 0, category: "艺术" }
+);
+
+for (let index = 0; index < 40; index += 1) {
+  const left = 12 + index;
+  const right = 3 + (index % 9);
+  const answer = left + right;
+  const correct = index % 4;
+  const options = [String(answer - 2), String(answer - 1), String(answer + 1)];
+  options.splice(correct, 0, String(answer));
+  questions.push({
+    id: 461 + index,
+    question: `${left} + ${right} = ?`,
+    options,
+    correct,
+    category: "数学"
+  });
+}
+
 module.exports = questions;

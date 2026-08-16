@@ -13,6 +13,10 @@ class AdventureRuleError extends Error {
 
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const isoTime = (now) => new Date(now).toISOString();
+const isPlainRecord = (value) => Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 
 function assertPlainObject(value, code = 'INVALID_ACTION') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -98,7 +102,11 @@ function evaluateAction(state, stage, action) {
         ['cipher', 'code'],
         ['memory', 'sequence'],
         ['choice', 'choose'],
-        ['resource', 'choose']
+        ['resource', 'choose'],
+        ['multi', 'multi'],
+        ['order', 'order'],
+        ['matching', 'match'],
+        ['path', 'path']
     ]);
     const expectedType = allowedKinds.get(stage.kind);
     if (command.type !== expectedType) {
@@ -143,6 +151,66 @@ function evaluateAction(state, stage, action) {
         return {
             success,
             feedback: success ? '顺序完全正确，记忆机关停止转动。' : '顺序不对，灯光重新亮起，请再记一次。',
+            points: success ? stage.points : 0
+        };
+    }
+    if (stage.kind === 'multi') {
+        if (!Array.isArray(command.answers) || command.answers.length > stage.options.length
+            || command.answers.some((answer) => !Number.isInteger(answer) || answer < 0 || answer >= stage.options.length)
+            || new Set(command.answers).size !== command.answers.length) {
+            throw new AdventureRuleError('INVALID_MULTI_ANSWER', 'Multi-select answer is invalid');
+        }
+        const submitted = [...command.answers].sort((a, b) => a - b);
+        const expected = [...stage.answers].sort((a, b) => a - b);
+        const success = submitted.length === expected.length
+            && submitted.every((answer, index) => answer === expected[index]);
+        return {
+            success,
+            feedback: success ? '多项判断全部正确。' : '至少有一个选项不符合条件，请重新核对。',
+            points: success ? stage.points : 0
+        };
+    }
+    if (stage.kind === 'order') {
+        if (!Array.isArray(command.sequence) || command.sequence.length > ADVENTURE_CONFIG.maximumSequenceLength
+            || command.sequence.some((entry) => typeof entry !== 'string' || entry.length > 48)
+            || new Set(command.sequence).size !== command.sequence.length) {
+            throw new AdventureRuleError('INVALID_ORDER', 'Ordering answer is invalid');
+        }
+        const success = command.sequence.length === stage.sequence.length
+            && command.sequence.every((entry, index) => entry === stage.sequence[index]);
+        return {
+            success,
+            feedback: success ? '顺序正确，流程已经恢复。' : '顺序还不能形成完整流程。',
+            points: success ? stage.points : 0
+        };
+    }
+    if (stage.kind === 'matching') {
+        if (!isPlainRecord(command.pairs)
+            || Object.keys(command.pairs).length > stage.left.length
+            || Object.entries(command.pairs).some(([left, right]) => (
+                typeof left !== 'string' || typeof right !== 'string'
+                || left.length > 48 || right.length > 48
+            ))) {
+            throw new AdventureRuleError('INVALID_MATCHES', 'Matching answer is invalid');
+        }
+        const success = Object.keys(stage.pairs).length === Object.keys(command.pairs).length
+            && Object.entries(stage.pairs).every(([left, right]) => command.pairs[left] === right);
+        return {
+            success,
+            feedback: success ? '所有配对都已归位。' : '有一组配对不正确，请再检查。',
+            points: success ? stage.points : 0
+        };
+    }
+    if (stage.kind === 'path') {
+        if (!Array.isArray(command.moves) || command.moves.length > stage.maxSteps
+            || command.moves.some((move) => !['north', 'east', 'south', 'west'].includes(move))) {
+            throw new AdventureRuleError('INVALID_PATH', 'Path answer is invalid');
+        }
+        const success = command.moves.length === stage.moves.length
+            && command.moves.every((move, index) => move === stage.moves[index]);
+        return {
+            success,
+            feedback: success ? '路线正确，你安全抵达了出口。' : '这条路线碰到了障碍，请回到起点规划。',
             points: success ? stage.points : 0
         };
     }
@@ -224,7 +292,7 @@ function successfulAttempt(state, chapter, stage, result, now) {
         completedAt: finished ? isoTime(now) : null,
         stats: {
             ...state.stats,
-            correct: state.stats.correct + (['quiz', 'boss', 'cipher', 'memory'].includes(stage.kind) ? 1 : 0),
+            correct: state.stats.correct + (['quiz', 'boss', 'cipher', 'memory', 'multi', 'order', 'matching', 'path'].includes(stage.kind) ? 1 : 0),
             choices: state.stats.choices + (isChoice ? 1 : 0)
         }
     };
@@ -260,6 +328,24 @@ function projectStage(stage, state) {
             preview: stage.sequence,
             tiles: stage.tiles,
             previewSeconds: 4
+        };
+    }
+    if (stage.kind === 'multi') {
+        return { ...base, prompt: stage.prompt, options: stage.options, category: stage.category };
+    }
+    if (stage.kind === 'order') return { ...base, prompt: stage.prompt, items: stage.items };
+    if (stage.kind === 'matching') return { ...base, prompt: stage.prompt, left: stage.left, right: stage.right };
+    if (stage.kind === 'path') {
+        return {
+            ...base,
+            prompt: stage.prompt,
+            maxSteps: stage.maxSteps,
+            directions: [
+                { id: 'north', label: '北' },
+                { id: 'east', label: '东' },
+                { id: 'south', label: '南' },
+                { id: 'west', label: '西' }
+            ]
         };
     }
     return {

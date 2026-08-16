@@ -102,10 +102,12 @@
         const complete = new Set(state.completedChapterIds || []);
         const activeId = state.active?.chapter?.id;
         const nodes = (state.missions || []).map((mission) => {
+            const locked = Boolean(mission.prerequisiteChapterId && !complete.has(mission.prerequisiteChapterId));
             const article = document.createElement('article');
             article.className = `mission-card mission-card--${mission.id}`;
             if (mission.id === activeId) article.classList.add('is-active');
             if (complete.has(mission.id)) article.classList.add('is-complete');
+            if (locked) article.classList.add('is-locked');
 
             const top = document.createElement('div');
             top.className = 'mission-card-top';
@@ -116,7 +118,9 @@
             badge.className = 'mission-status';
             badge.textContent = mission.id === activeId
                 ? t('进行中', 'Active')
-                : (complete.has(mission.id) ? t('已通关', 'Cleared') : t(`难度 ${mission.difficulty}`, `Difficulty ${mission.difficulty}`));
+                : (complete.has(mission.id)
+                    ? t('已通关', 'Cleared')
+                    : (locked ? t('尚未解锁', 'Locked') : t(`难度 ${mission.difficulty}`, `Difficulty ${mission.difficulty}`)));
             top.append(icon, badge);
 
             const title = document.createElement('h3');
@@ -144,6 +148,10 @@
                 claim.disabled = true;
                 claim.dataset.unavailable = 'true';
                 claim.title = t('先完成或放弃当前章节', 'Complete or abandon the current chapter first');
+            } else if (locked) {
+                claim.disabled = true;
+                claim.dataset.unavailable = 'true';
+                claim.textContent = t('先通关上一章', 'Clear previous chapter');
             }
             article.append(top, title, summary, meta, claim);
             return article;
@@ -154,7 +162,11 @@
     const stageKindLabel = (kind) => ({
         narrative: t('剧情', 'Story'), quiz: t('知识问答', 'Trivia'), boss: t('首领挑战', 'Boss trial'),
         cipher: t('密码推理', 'Cipher'), memory: t('记忆机关', 'Memory'), choice: t('剧情选择', 'Story choice'),
-        resource: t('资源策略', 'Resource strategy')
+        resource: t('资源策略', 'Resource strategy'),
+        multi: t('多项判断', 'Multi-select'),
+        order: t('顺序重建', 'Ordering'),
+        matching: t('线索配对', 'Matching'),
+        path: t('路线规划', 'Pathfinding')
     }[kind] || kind);
 
     function actionPayload(action) {
@@ -277,6 +289,134 @@
         elements.controls.append(list);
     }
 
+    function renderMulti(stage) {
+        const selected = new Set();
+        const grid = document.createElement('div');
+        grid.className = 'stage-option-grid';
+        stage.options.forEach((option, answer) => {
+            const node = button(option, 'stage-option', () => {
+                if (selected.has(answer)) selected.delete(answer); else selected.add(answer);
+                node.classList.toggle('is-selected', selected.has(answer));
+                node.setAttribute('aria-pressed', String(selected.has(answer)));
+            });
+            node.setAttribute('aria-pressed', 'false');
+            const mark = document.createElement('span');
+            mark.textContent = '✓';
+            node.prepend(mark);
+            grid.append(node);
+        });
+        elements.controls.append(grid, button(t('提交多选答案', 'Submit selections'), 'stage-primary', () => {
+            if (selected.size === 0) return;
+            post('/api/adventure/action', actionPayload({ type: 'multi', answers: [...selected] }));
+        }));
+    }
+
+    function renderOrder(stage) {
+        const sequence = [];
+        const status = document.createElement('p');
+        status.className = 'structured-status';
+        const grid = document.createElement('div');
+        grid.className = 'structured-grid';
+        const update = () => {
+            status.textContent = sequence.length
+                ? sequence.map((id, index) => `${index + 1}. ${stage.items.find((item) => item.id === id)?.label}`).join(' → ')
+                : t('依次点击项目来排列顺序。', 'Select each item in order.');
+            grid.querySelectorAll('button').forEach((node) => { node.disabled = sequence.includes(node.dataset.itemId) || busy; });
+        };
+        stage.items.forEach((item) => {
+            const node = button(item.label, 'memory-tile', () => { sequence.push(item.id); update(); });
+            node.dataset.itemId = item.id;
+            grid.append(node);
+        });
+        const actions = document.createElement('div');
+        actions.className = 'memory-actions';
+        actions.append(
+            button(t('清空', 'Clear'), 'adventure-ghost', () => { sequence.splice(0); update(); }),
+            button(t('提交顺序', 'Submit order'), 'stage-primary', () => {
+                if (sequence.length !== stage.items.length) return;
+                post('/api/adventure/action', actionPayload({ type: 'order', sequence }));
+            })
+        );
+        update();
+        elements.controls.append(status, grid, actions);
+    }
+
+    function renderMatching(stage) {
+        let selectedLeft = null;
+        const pairs = {};
+        const status = document.createElement('p');
+        status.className = 'structured-status';
+        const layout = document.createElement('div');
+        layout.className = 'matching-grid';
+        const left = document.createElement('div');
+        const right = document.createElement('div');
+        const update = () => {
+            const labels = Object.entries(pairs).map(([leftId, rightId]) => (
+                `${stage.left.find((item) => item.id === leftId)?.label} ↔ ${stage.right.find((item) => item.id === rightId)?.label}`
+            ));
+            status.textContent = labels.length ? labels.join(' · ') : t('先选择左侧项目，再选择右侧答案。', 'Choose a left item, then its match on the right.');
+            left.querySelectorAll('button').forEach((node) => {
+                node.classList.toggle('is-selected', node.dataset.itemId === selectedLeft);
+            });
+        };
+        stage.left.forEach((item) => {
+            const node = button(item.label, 'memory-tile', () => { selectedLeft = item.id; update(); });
+            node.dataset.itemId = item.id;
+            left.append(node);
+        });
+        stage.right.forEach((item) => {
+            const node = button(item.label, 'memory-tile', () => {
+                if (!selectedLeft) return;
+                for (const [leftId, rightId] of Object.entries(pairs)) if (rightId === item.id) delete pairs[leftId];
+                pairs[selectedLeft] = item.id;
+                selectedLeft = null;
+                update();
+            });
+            right.append(node);
+        });
+        layout.append(left, right);
+        const actions = document.createElement('div');
+        actions.className = 'memory-actions';
+        actions.append(
+            button(t('清空', 'Clear'), 'adventure-ghost', () => { for (const key of Object.keys(pairs)) delete pairs[key]; selectedLeft = null; update(); }),
+            button(t('提交配对', 'Submit matches'), 'stage-primary', () => {
+                if (Object.keys(pairs).length !== stage.left.length) return;
+                post('/api/adventure/action', actionPayload({ type: 'match', pairs }));
+            })
+        );
+        update();
+        elements.controls.append(status, layout, actions);
+    }
+
+    function renderPath(stage) {
+        const moves = [];
+        const symbols = { north: '↑', east: '→', south: '↓', west: '←' };
+        const status = document.createElement('p');
+        status.className = 'structured-status path-status';
+        const grid = document.createElement('div');
+        grid.className = 'path-controls';
+        const update = () => {
+            status.textContent = moves.length ? moves.map((move) => symbols[move]).join(' ') : t('规划路线，然后提交。', 'Plan the route, then submit it.');
+        };
+        stage.directions.forEach((direction) => grid.append(button(
+            `${symbols[direction.id]} ${direction.label}`,
+            'memory-tile',
+            () => { if (moves.length < stage.maxSteps) moves.push(direction.id); update(); }
+        )));
+        const actions = document.createElement('div');
+        actions.className = 'memory-actions';
+        actions.append(
+            button(t('退一步', 'Undo'), 'adventure-ghost', () => { moves.pop(); update(); }),
+            button(t('清空', 'Clear'), 'adventure-ghost', () => { moves.splice(0); update(); }),
+            button(t('提交路线', 'Submit path'), 'stage-primary', () => {
+                if (moves.length === 0) return;
+                post('/api/adventure/action', actionPayload({ type: 'path', moves }));
+            })
+        );
+        update();
+        elements.controls.append(status, grid, actions);
+    }
+
     function renderRun() {
         const run = state.active;
         elements.active.hidden = !run;
@@ -305,6 +445,10 @@
         else if (stage.kind === 'quiz' || stage.kind === 'boss') renderQuiz(stage);
         else if (stage.kind === 'cipher') renderCipher(stage);
         else if (stage.kind === 'memory') renderMemory(stage);
+        else if (stage.kind === 'multi') renderMulti(stage);
+        else if (stage.kind === 'order') renderOrder(stage);
+        else if (stage.kind === 'matching') renderMatching(stage);
+        else if (stage.kind === 'path') renderPath(stage);
         else renderChoices(stage);
 
         const history = (run.history || []).slice().reverse().map((entry) => {

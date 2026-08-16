@@ -17,11 +17,24 @@ const r = (id, title, prompt, choices) => ({ id, kind: 'resource', title, prompt
 const b = (id, title, prompt, options, answer, category, points = 5) => ({
     id, kind: 'boss', title, prompt, options, answer, category, points
 });
+const u = (id, title, prompt, options, answers, category, points = 4) => ({
+    id, kind: 'multi', title, prompt, options, answers, category, points
+});
+const o = (id, title, prompt, items, sequence, points = 4) => ({
+    id, kind: 'order', title, prompt, items, sequence, points
+});
+const g = (id, title, prompt, left, right, pairs, points = 4) => ({
+    id, kind: 'matching', title, prompt, left, right, pairs, points
+});
+const p = (id, title, prompt, moves, maxSteps, points = 4) => ({
+    id, kind: 'path', title, prompt, moves, maxSteps, points
+});
 
 const CHAPTERS = deepFreeze([
     {
         id: 'clockwork-library',
         order: 1,
+        prerequisiteChapterId: null,
         titleZh: '第一章：停摆的钟楼图书馆',
         titleEn: 'Chapter I: The Clockwork Library',
         summaryZh: '午夜钟声消失，书页里的时间也停止了。找回三枚齿轮，让故事继续前进。',
@@ -56,6 +69,7 @@ const CHAPTERS = deepFreeze([
     {
         id: 'cloudline-express',
         order: 2,
+        prerequisiteChapterId: 'clockwork-library',
         titleZh: '第二章：云端列车失踪案',
         titleEn: 'Chapter II: Mystery of the Cloudline Express',
         summaryZh: '一列没有终点的列车在云层中循环。追踪车票上的暗号，找到消失的驾驶员。',
@@ -97,6 +111,7 @@ const CHAPTERS = deepFreeze([
     {
         id: 'starlight-lighthouse',
         order: 3,
+        prerequisiteChapterId: 'cloudline-express',
         titleZh: '第三章：熄灭的星海灯塔',
         titleEn: 'Chapter III: The Dark Starlight Lighthouse',
         summaryZh: '迷雾吞没星海航道。集齐光谱、重启镜阵，并面对藏在灯塔里的最终谜题。',
@@ -137,6 +152,194 @@ const CHAPTERS = deepFreeze([
             b('lighthouse-boss-three', '终局·最后一问', '当证据与原先判断冲突时，最好的做法是？', ['忽略证据', '修改判断并继续核实', '责怪提出证据的人', '停止思考'], 1, '逻辑'),
             n('lighthouse-finish', '航海家露卡', '镜阵把三枚碎片合成完整星图，迷雾中的航道重新出现。你的名字被写进守塔人的新一页日志。', '星海重明')
         ]
+    },
+    {
+        id: 'mechanical-forest',
+        order: 4,
+        prerequisiteChapterId: 'starlight-lighthouse',
+        titleZh: '第四章：机械森林的春天',
+        titleEn: 'Chapter IV: Spring in the Mechanical Forest',
+        summaryZh: '钢铁树木停止生长，动物齿轮陷入沉睡。重建生态循环，唤醒森林之心。',
+        summaryEn: 'Steel trees have stopped growing and clockwork animals sleep. Restore the forest cycle.',
+        difficulty: 3,
+        reward: 480,
+        color: '#4d8a62',
+        icon: '🌲',
+        stages: [
+            n('forest-gate', '巡林机器人柯枝', '森林的春季程序没有启动。四条生态链全部断开，而中央主机拒绝接受单一答案。', '生锈的入口'),
+            u('forest-needs', '生长条件', '下列哪些是绿色植物正常生长通常需要的条件？（可多选）', ['光照', '水', '适宜温度', '塑料碎片'], [0, 1, 2], '科学'),
+            o('forest-cycle', '水循环控制台', '按自然水循环的顺序排列。', [
+                { id: 'rain', label: '降水' }, { id: 'evaporation', label: '蒸发' }, { id: 'cloud', label: '凝结成云' }, { id: 'collection', label: '汇入江海' }
+            ], ['evaporation', 'cloud', 'rain', 'collection']),
+            d('forest-fox', '齿轮狐狸', '一只齿轮狐狸的尾轴被藤蔓卡住，你会怎么处理？', [
+                { id: 'careful', label: '停机后慢慢清理藤蔓', feedback: '狐狸安全脱困，送给你一颗「铜松果」。', effects: { item: 'copper-cone', insight: 3 } },
+                { id: 'signal', label: '呼叫巡林机器人协作', feedback: '协作很顺利，你记录了标准救援流程。', effects: { energy: 1, insight: 2 } }
+            ]),
+            g('forest-habitats', '栖息地配对', '把生物与更典型的栖息环境配对。',
+                [{ id: 'camel', label: '骆驼' }, { id: 'penguin', label: '企鹅' }, { id: 'frog', label: '青蛙' }],
+                [{ id: 'wetland', label: '湿地' }, { id: 'desert', label: '沙漠' }, { id: 'polar', label: '极地' }],
+                { camel: 'desert', penguin: 'polar', frog: 'wetland' }),
+            q('forest-rings', '年轮档案', '树木年轮通常可以帮助判断什么？', ['树的大致年龄', '当天风速', '土壤颜色', '月球距离'], 0, '科学'),
+            p('forest-maze', '树根迷宫', '从入口出发：先向东两步，再向北一步，最后向东一步。', ['east', 'east', 'north', 'east'], 6),
+            c('forest-seed', '种子编号', '把单词 SEED 的字母数量乘以 3，密码是多少？', '12', 'SEED 一共有四个字母。'),
+            r('forest-power', '光能分配', '剩余电力只能优先启动一套设施。', [
+                { id: 'nursery', label: '启动幼苗温室', requires: { energy: 2 }, feedback: '幼苗舒展开叶片，生态稳定度大幅提高。', effects: { energy: -2, insight: 4 } },
+                { id: 'pollinator', label: '启动机械蜂群', feedback: '蜂群开始为花朵授粉，森林恢复了声音。', effects: { insight: 3 } }
+            ]),
+            m('forest-birds', '候鸟信号', '记住机械候鸟的鸣叫灯序。', ['chirp', 'trill', 'chirp', 'whistle', 'hum'], [
+                { id: 'hum', label: '嗡' }, { id: 'chirp', label: '啾' }, { id: 'whistle', label: '哨' }, { id: 'trill', label: '颤音' }
+            ]),
+            b('forest-core', '森林之心', '在一条健康食物链中，植物通常扮演什么角色？', ['生产者', '消费者', '分解者', '捕食者'], 0, '生态'),
+            n('forest-finish', '巡林机器人柯枝', '第一片真正的嫩叶从钢铁枝头长出。星图在树冠上投下一条通往深海的光路。', '机械春天')
+        ]
+    },
+    {
+        id: 'abyssal-archive',
+        order: 5,
+        prerequisiteChapterId: 'mechanical-forest',
+        titleZh: '第五章：深海档案馆',
+        titleEn: 'Chapter V: The Abyssal Archive',
+        summaryZh: '沉没的档案馆正被海压撕裂。修复潜航路线，在氧气耗尽前取回潮汐记录。',
+        summaryEn: 'A sunken archive is breaking under pressure. Repair the route and recover the tide records.',
+        difficulty: 4,
+        reward: 620,
+        color: '#24718c',
+        icon: '🐋',
+        stages: [
+            n('abyss-dive', '潜航员岚', '这里的每扇门都记录着一次潮汐。别追逐发光的鱼，它们会把潜艇带向错误年代。', '下潜'),
+            q('abyss-pressure', '压力舱', '潜水越深，周围水压通常会怎样？', ['减小', '增大', '不变', '先消失'], 1, '科学'),
+            g('abyss-tools', '潜航工具', '把工具与主要用途配对。',
+                [{ id: 'sonar', label: '声呐' }, { id: 'compass', label: '罗盘' }, { id: 'tank', label: '气瓶' }],
+                [{ id: 'direction', label: '辨别方向' }, { id: 'breathing', label: '提供呼吸气体' }, { id: 'detect', label: '探测水下目标' }],
+                { sonar: 'detect', compass: 'direction', tank: 'breathing' }),
+            m('abyss-jellyfish', '水母灯阵', '记住水母依次亮起的颜色。', ['cyan', 'violet', 'white', 'cyan', 'gold', 'violet'], [
+                { id: 'white', label: '白' }, { id: 'gold', label: '金' }, { id: 'cyan', label: '青' }, { id: 'violet', label: '紫' }
+            ]),
+            u('abyss-safety', '潜水安全', '下列哪些做法有助于安全潜水？（可多选）', ['检查装备', '遵守上升速度', '独自进入未知洞穴', '关注剩余气量'], [0, 1, 3], '安全'),
+            p('abyss-current', '暗流路线', '避开漩涡：向南、向东、向东、向北、向东。', ['south', 'east', 'east', 'north', 'east'], 7),
+            o('abyss-message', '紧急通信', '把发送求救消息的步骤排成合理顺序。', [
+                { id: 'position', label: '报告位置' }, { id: 'listen', label: '等待并听取回复' }, { id: 'call', label: '发出求救呼号' }, { id: 'situation', label: '说明情况' }
+            ], ['call', 'position', 'situation', 'listen']),
+            c('abyss-tide', '潮汐门', '一天有 24 小时，半天是多少小时？', '12', '输入两位数字也可以。'),
+            d('abyss-whale', '鲸歌回声', '远处传来重复的鲸歌，你要怎样判断方向？', [
+                { id: 'array', label: '比较多个接收器的到达时间', feedback: '时间差指出鲸群在西北方，也暴露了档案馆入口。', effects: { insight: 4 } },
+                { id: 'wait', label: '关闭推进器静静聆听', feedback: '噪声消失后，回声轮廓变得清晰。', effects: { energy: 1, insight: 2 } }
+            ]),
+            q('abyss-salt', '海水样本', '海水具有咸味，主要因为含有较多什么？', ['溶解的盐类', '糖', '氧气泡', '泥沙'], 0, '科学'),
+            b('abyss-guardian', '档案馆守卫', '声呐主要利用哪一种波来探测目标？', ['光波', '声波', '无线电波', '引力波'], 1, '综合'),
+            n('abyss-finish', '潜航员岚', '潮汐记录被安全封存。最深的一页标着月面城市的坐标，像是有人从那里操纵整片海洋。', '浮出深蓝')
+        ]
+    },
+    {
+        id: 'lunar-city',
+        order: 6,
+        prerequisiteChapterId: 'abyssal-archive',
+        titleZh: '第六章：月面失重城',
+        titleEn: 'Chapter VI: The Weightless Lunar City',
+        summaryZh: '月面城市的重力系统反复翻转。穿越失重街区，修复被篡改的轨道程序。',
+        summaryEn: 'Gravity keeps flipping across the lunar city. Cross the weightless district and repair its orbit code.',
+        difficulty: 4,
+        reward: 800,
+        color: '#6d718a',
+        icon: '🌙',
+        stages: [
+            n('lunar-airlock', '工程师赛拉', '抓紧扶手。每隔九十秒，街道就会变成天花板。有人把重力程序改成了一首循环乐谱。', '月港气闸'),
+            q('lunar-gravity', '重力课堂', '与地球相比，月球表面的重力大约是地球的多少？', ['约六分之一', '完全相同', '约六倍', '为零'], 0, '天文'),
+            p('lunar-crossing', '失重街区', '沿安全扶手移动：上、上、右、下、右、上。', ['north', 'north', 'east', 'south', 'east', 'north'], 8),
+            u('lunar-gear', '舱外装备', '进行舱外活动通常需要哪些关键装备？（可多选）', ['密封航天服', '生命保障系统', '普通雨伞', '通信设备'], [0, 1, 3], '航天'),
+            g('lunar-units', '单位校准', '把物理量与常用单位配对。',
+                [{ id: 'time', label: '时间' }, { id: 'mass', label: '质量' }, { id: 'length', label: '长度' }],
+                [{ id: 'meter', label: '米' }, { id: 'second', label: '秒' }, { id: 'kilogram', label: '千克' }],
+                { time: 'second', mass: 'kilogram', length: 'meter' }),
+            o('lunar-launch', '发射序列', '按合理顺序排列任务阶段。', [
+                { id: 'orbit', label: '进入轨道' }, { id: 'check', label: '系统检查' }, { id: 'launch', label: '点火发射' }, { id: 'deploy', label: '展开设备' }
+            ], ['check', 'launch', 'orbit', 'deploy']),
+            c('lunar-crater', '环形山编号', '3 的平方加 4 的平方等于多少？', '25', '先分别平方，再相加。'),
+            m('lunar-notes', '重力乐谱', '记住控制台的音符顺序。', ['do', 'mi', 'sol', 'mi', 'la', 'do'], [
+                { id: 'do', label: 'Do' }, { id: 'mi', label: 'Mi' }, { id: 'sol', label: 'Sol' }, { id: 'la', label: 'La' }
+            ]),
+            r('lunar-reactor', '反应堆旁路', '两条线路都能恢复重力，但资源消耗不同。', [
+                { id: 'shield', label: '消耗 3 点能量启动屏蔽线路', requires: { energy: 3 }, feedback: '线路稳定，城市的上下方向终于固定。', effects: { energy: -3, insight: 5 } },
+                { id: 'manual', label: '手动同步十二个继电器', feedback: '同步完成，你发现篡改代码来自镜像剧场。', effects: { insight: 3 } }
+            ]),
+            q('lunar-orbit', '轨道程序', '地球绕太阳公转一周大约需要多久？', ['一天', '一个月', '一年', '十年'], 2, '天文'),
+            b('lunar-core', '失重核心', '宇航员在月球上质量会怎样变化？', ['变为零', '质量基本不变', '变为六倍', '每天变化'], 1, '综合'),
+            n('lunar-finish', '工程师赛拉', '城市重新拥有了稳定的地面。篡改者留下的签名不是名字，而是一张通往镜像剧场的双面票。', '重力归位')
+        ]
+    },
+    {
+        id: 'mirror-theatre',
+        order: 7,
+        prerequisiteChapterId: 'lunar-city',
+        titleZh: '第七章：镜像剧场',
+        titleEn: 'Chapter VII: The Mirror Theatre',
+        summaryZh: '每句台词都有真假两个版本。辨认证据、排列演出，找到藏在观众席里的导演。',
+        summaryEn: 'Every line has a true and false version. Test the evidence and find the hidden director.',
+        difficulty: 5,
+        reward: 1000,
+        color: '#a14f72',
+        icon: '🎭',
+        stages: [
+            n('theatre-curtain', '提词员鸢尾', '演出已经重复了 999 次。镜中的演员总比真人早说半句，除非你能让剧本回到正确顺序。', '第千场演出'),
+            q('theatre-evidence', '真假台词', '判断一条消息是否可靠，最重要的依据通常是？', ['说话音量', '可核实的来源和证据', '转发数量', '文字颜色'], 1, '信息素养'),
+            u('theatre-sources', '资料审查', '哪些特征通常能提高资料可信度？（可多选）', ['注明来源', '可重复验证', '只有夸张标题', '数据与结论对应'], [0, 1, 3], '信息素养'),
+            g('theatre-roles', '幕后职位', '把剧场职位与职责配对。',
+                [{ id: 'director', label: '导演' }, { id: 'actor', label: '演员' }, { id: 'lighting', label: '灯光师' }],
+                [{ id: 'perform', label: '表演角色' }, { id: 'lights', label: '控制舞台照明' }, { id: 'vision', label: '统筹创作呈现' }],
+                { director: 'vision', actor: 'perform', lighting: 'lights' }),
+            o('theatre-story', '叙事顺序', '把一个基本故事结构排列正确。', [
+                { id: 'ending', label: '结局' }, { id: 'conflict', label: '冲突发展' }, { id: 'beginning', label: '人物与背景' }, { id: 'turn', label: '关键转折' }
+            ], ['beginning', 'conflict', 'turn', 'ending']),
+            d('theatre-mask', '两副面具', '一副面具会让人只说事实，另一副会让人只说愿望。', [
+                { id: 'observe', label: '先观察两位演员的可验证陈述', feedback: '你用舞台记录核对台词，找到了事实面具。', effects: { insight: 4 } },
+                { id: 'question', label: '询问两副面具共同知道的事', feedback: '共同信息排除了夸张的愿望台词。', effects: { energy: 1, insight: 3 } }
+            ]),
+            p('theatre-backstage', '后台追踪', '沿脚印走：西、北、北、东、北、西。', ['west', 'north', 'north', 'east', 'north', 'west'], 8),
+            c('theatre-seat', '座位暗号', '第 2 排第 5 座与第 3 排第 4 座，排数与座号分别相加，连写答案。', '59', '2+3，5+4。'),
+            m('theatre-lights', '追光灯', '记住舞台灯光的切换顺序。', ['left', 'center', 'right', 'center', 'left', 'right'], [
+                { id: 'left', label: '左侧' }, { id: 'center', label: '中央' }, { id: 'right', label: '右侧' }
+            ]),
+            q('theatre-logic', '导演的悖论', '“这句话是假的”主要展示了什么问题？', ['测量误差', '自指悖论', '地理坐标', '化学反应'], 1, '逻辑'),
+            b('theatre-director', '最后谢幕', '发现自己的推理有漏洞时，最合理的做法是？', ['隐藏漏洞', '重新检查前提和证据', '坚持原答案', '停止收集信息'], 1, '逻辑'),
+            n('theatre-finish', '提词员鸢尾', '镜面一块块熄灭，真正的导演席却空无一人。椅背刻着四个字：星核法庭。', '真实谢幕')
+        ]
+    },
+    {
+        id: 'star-core-court',
+        order: 8,
+        prerequisiteChapterId: 'mirror-theatre',
+        titleZh: '第八章：星核法庭',
+        titleEn: 'Chapter VIII: Court of the Star Core',
+        summaryZh: '所有旅程成为证据。完成最终审理，决定星图应由谁保管。',
+        summaryEn: 'Every journey becomes evidence. Complete the final hearing and decide who keeps the star map.',
+        difficulty: 5,
+        reward: 1280,
+        color: '#b27d2e',
+        icon: '⚖️',
+        stages: [
+            n('court-arrival', '书记官零', '你被指控擅自改变八个世界的既定结局。法庭不会询问你是否勇敢，只检查每一步是否有理由。', '星核传票'),
+            u('court-proof', '证据标准', '哪些属于更可靠的论证方式？（可多选）', ['给出可检查证据', '区分事实和观点', '只重复结论', '考虑反例'], [0, 1, 3], '逻辑'),
+            g('court-worlds', '旅程证物', '把章节与取回的关键成果配对。',
+                [{ id: 'library', label: '钟楼图书馆' }, { id: 'forest', label: '机械森林' }, { id: 'abyss', label: '深海档案馆' }],
+                [{ id: 'spring', label: '生态春季程序' }, { id: 'tide', label: '潮汐记录' }, { id: 'gear', label: '校时齿轮' }],
+                { library: 'gear', forest: 'spring', abyss: 'tide' }),
+            o('court-argument', '陈述顺序', '把清晰论证的步骤排列正确。', [
+                { id: 'conclusion', label: '得出结论' }, { id: 'question', label: '明确问题' }, { id: 'evidence', label: '检查证据' }, { id: 'alternatives', label: '比较其他解释' }
+            ], ['question', 'evidence', 'alternatives', 'conclusion']),
+            p('court-chambers', '证言长廊', '依次拜访四个证人：东、北、西、北、东、东。', ['east', 'north', 'west', 'north', 'east', 'east'], 8),
+            q('court-probability', '概率证人', '掷一枚均匀硬币，出现正面的概率是？', ['0', '1/4', '1/2', '1'], 2, '数学'),
+            c('court-seal', '法庭印章', '八个章节分成两组，每组章节数相同，每组有几章？', '4', '8 ÷ 2。'),
+            m('court-testimony', '证言回放', '记住证人席亮起的顺序。', ['archive', 'forest', 'moon', 'theatre', 'library', 'ocean', 'court'], [
+                { id: 'library', label: '书库' }, { id: 'archive', label: '档案' }, { id: 'forest', label: '森林' }, { id: 'ocean', label: '海洋' }, { id: 'moon', label: '月城' }, { id: 'theatre', label: '剧场' }, { id: 'court', label: '法庭' }
+            ]),
+            r('court-choice', '星图归属', '法庭允许你先提出一种保管方案。', [
+                { id: 'shared', label: '建立公开、可核验的共同档案', feedback: '书记官记录了透明规则，多个世界可以互相监督。', effects: { insight: 5 } },
+                { id: 'guardians', label: '由各世界选出轮值守护者', feedback: '轮值降低了权力长期集中的风险。', effects: { energy: -1, insight: 4 } }
+            ]),
+            b('court-boss-one', '终审·证据', '两个来源说法冲突时，下一步最合理的是？', ['任选喜欢的', '比较原始证据与方法', '两个都转发', '忽略冲突'], 1, '信息素养'),
+            b('court-boss-two', '终审·责任', '拥有影响他人的信息时，最负责任的做法是？', ['先核实再传播', '抢先发布', '删除所有异议', '只看是否有趣'], 0, '信息素养'),
+            n('court-finish', '书记官零', '法槌落下：无罪。星图不再属于某一个人，而成为所有世界都能核验的共同档案。新的空白航线正在等待下一季。', '第一季终章')
+        ]
     }
 ]);
 
@@ -156,7 +359,7 @@ function validateContent(chapters = CHAPTERS) {
             if (!/^[a-z][a-z0-9-]{2,64}$/.test(stage.id) || stageIds.has(stage.id)) {
                 throw new Error(`Invalid adventure stage: ${stage.id}`);
             }
-            if (!['narrative', 'quiz', 'cipher', 'memory', 'choice', 'resource', 'boss'].includes(stage.kind)) {
+            if (!['narrative', 'quiz', 'cipher', 'memory', 'choice', 'resource', 'boss', 'multi', 'order', 'matching', 'path'].includes(stage.kind)) {
                 throw new Error(`Unknown adventure stage kind: ${stage.kind}`);
             }
             if ((stage.kind === 'quiz' || stage.kind === 'boss')
@@ -173,7 +376,44 @@ function validateContent(chapters = CHAPTERS) {
                     || stage.sequence.some((entry) => !stage.tiles.some((tile) => tile.id === entry)))) {
                 throw new Error(`Invalid adventure memory trial: ${stage.id}`);
             }
+            if (stage.kind === 'multi'
+                && (!Array.isArray(stage.options) || stage.options.length < 3
+                    || !Array.isArray(stage.answers) || stage.answers.length < 2
+                    || stage.answers.some((answer) => !Number.isInteger(answer) || !stage.options[answer])
+                    || new Set(stage.answers).size !== stage.answers.length)) {
+                throw new Error(`Invalid adventure multi-select trial: ${stage.id}`);
+            }
+            if (stage.kind === 'order'
+                && (!Array.isArray(stage.items) || stage.items.length < 3
+                    || !Array.isArray(stage.sequence) || stage.sequence.length !== stage.items.length
+                    || new Set(stage.sequence).size !== stage.items.length
+                    || stage.sequence.some((id) => !stage.items.some((item) => item.id === id)))) {
+                throw new Error(`Invalid adventure ordering trial: ${stage.id}`);
+            }
+            if (stage.kind === 'matching'
+                && (!Array.isArray(stage.left) || stage.left.length < 2
+                    || !Array.isArray(stage.right) || stage.right.length !== stage.left.length
+                    || !stage.pairs || Object.keys(stage.pairs).length !== stage.left.length
+                    || stage.left.some((item) => !stage.right.some((right) => right.id === stage.pairs[item.id])))) {
+                throw new Error(`Invalid adventure matching trial: ${stage.id}`);
+            }
+            if (stage.kind === 'path'
+                && (!Array.isArray(stage.moves) || stage.moves.length < 3
+                    || stage.moves.length > ADVENTURE_CONFIG.maximumSequenceLength
+                    || stage.moves.some((move) => !['north', 'east', 'south', 'west'].includes(move))
+                    || !Number.isSafeInteger(stage.maxSteps) || stage.maxSteps < stage.moves.length
+                    || stage.maxSteps > ADVENTURE_CONFIG.maximumSequenceLength)) {
+                throw new Error(`Invalid adventure path trial: ${stage.id}`);
+            }
             stageIds.add(stage.id);
+        }
+    }
+    for (const chapter of chapters) {
+        if (chapter.prerequisiteChapterId !== null) {
+            const prerequisite = chapters.find((candidate) => candidate.id === chapter.prerequisiteChapterId);
+            if (!prerequisite || prerequisite.order >= chapter.order) {
+                throw new Error(`Invalid adventure prerequisite: ${chapter.id}`);
+            }
         }
     }
     return true;
@@ -191,6 +431,7 @@ function getMissionCatalog() {
     return CHAPTERS.map((chapter) => ({
         id: chapter.id,
         order: chapter.order,
+        prerequisiteChapterId: chapter.prerequisiteChapterId,
         titleZh: chapter.titleZh,
         titleEn: chapter.titleEn,
         summaryZh: chapter.summaryZh,

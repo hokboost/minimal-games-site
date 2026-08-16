@@ -145,7 +145,11 @@ module.exports = function registerAdventureRoutes(app, deps) {
             answer: new Set(['type', 'answer']),
             code: new Set(['type', 'code']),
             sequence: new Set(['type', 'sequence']),
-            choose: new Set(['type', 'choiceId'])
+            choose: new Set(['type', 'choiceId']),
+            multi: new Set(['type', 'answers']),
+            order: new Set(['type', 'sequence']),
+            match: new Set(['type', 'pairs']),
+            path: new Set(['type', 'moves'])
         };
         const allowed = allowedByType[type];
         if (!allowed || !onlyKeys(body.action, allowed)) return null;
@@ -249,6 +253,17 @@ module.exports = function registerAdventureRoutes(app, deps) {
                 await req.finalizeIdempotency?.(client, 200, responseBody);
                 await client.query('COMMIT');
                 return res.json(responseBody);
+            }
+            const chapter = engine.getChapter(req.body.chapterId);
+            if (chapter.prerequisiteChapterId) {
+                const prerequisite = await client.query(`
+                    SELECT 1 FROM adventure_completions
+                    WHERE username = $1 AND chapter_id = $2 AND rules_version = $3
+                `, [username, chapter.prerequisiteChapterId, config.contentVersion]);
+                if (prerequisite.rowCount !== 1) {
+                    await client.query('ROLLBACK');
+                    return apiError(res, 409, 'CHAPTER_LOCKED', '请先通关前置章节');
+                }
             }
             if (existing) {
                 await client.query(`

@@ -12,6 +12,10 @@ function correctAction(stage, state) {
     if (stage.kind === 'quiz' || stage.kind === 'boss') return { type: 'answer', answer: stage.answer };
     if (stage.kind === 'cipher') return { type: 'code', code: stage.code };
     if (stage.kind === 'memory') return { type: 'sequence', sequence: [...stage.sequence] };
+    if (stage.kind === 'multi') return { type: 'multi', answers: [...stage.answers] };
+    if (stage.kind === 'order') return { type: 'order', sequence: [...stage.sequence] };
+    if (stage.kind === 'matching') return { type: 'match', pairs: { ...stage.pairs } };
+    if (stage.kind === 'path') return { type: 'path', moves: [...stage.moves] };
     const choice = stage.choices.find((entry) => !entry.requires?.energy || state.energy >= entry.requires.energy);
     assert.ok(choice, `stage ${stage.id} needs an affordable choice`);
     return { type: 'choose', choiceId: choice.id };
@@ -31,14 +35,15 @@ function clearChapter(chapter) {
 test('adventure content is stable, varied, and valid', () => {
     assert.equal(adventure.validateContent(), true);
     const catalog = adventure.getMissionCatalog();
-    assert.equal(catalog.length, 3);
-    assert.equal(catalog.reduce((sum, chapter) => sum + chapter.stageCount, 0), 43);
+    assert.equal(catalog.length, 8);
+    assert.equal(catalog.reduce((sum, chapter) => sum + chapter.stageCount, 0), 103);
     for (const mission of catalog) {
-        assert.deepEqual(mission.gameModes.sort(), [
-            'boss', 'choice', 'cipher', 'memory', 'narrative', 'quiz', 'resource'
-        ]);
+        assert.ok(mission.gameModes.length >= 7);
         assert.ok(mission.reward > 0);
     }
+    assert.deepEqual([...new Set(catalog.flatMap((mission) => mission.gameModes))].sort(), [
+        'boss', 'choice', 'cipher', 'matching', 'memory', 'multi', 'narrative', 'order', 'path', 'quiz', 'resource'
+    ]);
 });
 
 test('all chapters can be cleared through legal actions and finish exactly once', () => {
@@ -80,6 +85,10 @@ test('public adventure projection never exposes quiz answers, cipher codes, or c
             if (stage.kind === 'quiz' || stage.kind === 'boss') assert.equal(Object.hasOwn(projected.stage, 'answer'), false);
             if (stage.kind === 'cipher') assert.equal(Object.hasOwn(projected.stage, 'code'), false);
             if (stage.kind === 'choice' || stage.kind === 'resource') assert.doesNotMatch(json, /effects|insight|item/);
+            if (stage.kind === 'multi') assert.equal(Object.hasOwn(projected.stage, 'answers'), false);
+            if (stage.kind === 'order') assert.equal(Object.hasOwn(projected.stage, 'sequence'), false);
+            if (stage.kind === 'matching') assert.equal(Object.hasOwn(projected.stage, 'pairs'), false);
+            if (stage.kind === 'path') assert.equal(Object.hasOwn(projected.stage, 'moves'), false);
             state = adventure.applyAction(state, correctAction(stage, state));
         }
     }
@@ -107,8 +116,36 @@ test('engine rejects malformed commands and unaffordable resource routes', () =>
     );
 });
 
-test('expanded quiz bank has 440 unique stable questions', () => {
-    assert.equal(questions.length, 440);
+test('new structured game modes reject wrong solutions without changing stages', () => {
+    const wrongAction = {
+        multi: (stage) => ({ type: 'multi', answers: stage.answers.slice(0, 1) }),
+        order: (stage) => ({ type: 'order', sequence: [...stage.sequence].reverse() }),
+        matching: (stage) => ({
+            type: 'match',
+            pairs: Object.fromEntries(stage.left.map((item) => [item.id, stage.right[0].id]))
+        }),
+        path: (stage) => ({ type: 'path', moves: [...stage.moves].reverse() })
+    };
+    const observed = new Set();
+    for (const chapter of adventure.CHAPTERS.slice(3)) {
+        let state = adventure.createRun(chapter.id);
+        while (state.phase === 'active') {
+            const stage = chapter.stages[state.stageIndex];
+            if (wrongAction[stage.kind] && !observed.has(stage.kind)) {
+                const failed = adventure.applyAction(state, wrongAction[stage.kind](stage));
+                assert.equal(failed.stageIndex, state.stageIndex);
+                assert.equal(failed.hearts, state.hearts - 1);
+                assert.equal(failed.feedback.tone, 'warning');
+                observed.add(stage.kind);
+            }
+            state = adventure.applyAction(state, correctAction(stage, state));
+        }
+    }
+    assert.deepEqual([...observed].sort(), ['matching', 'multi', 'order', 'path']);
+});
+
+test('expanded quiz bank has 500 unique stable questions', () => {
+    assert.equal(questions.length, 500);
     assert.equal(new Set(questions.map((question) => question.id)).size, questions.length);
     assert.ok(questions.slice(400).every((question) => (
         typeof question.question === 'string'
