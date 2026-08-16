@@ -7,7 +7,7 @@ const test = require('node:test');
 const ejs = require('ejs');
 
 const registerTaskRoutes = require('../routes/tasks');
-const { GAME_OPERATIONS, getLifetimeEarnings } = require('../lib/earnings');
+const { GAME_OPERATIONS, getLifetimeEarnings, parseAggregateMoney } = require('../lib/earnings');
 
 const root = path.resolve(__dirname, '..');
 const source = (filename) => fs.readFileSync(path.join(root, filename), 'utf8');
@@ -121,12 +121,14 @@ test('lifetime earnings use game net plus approved credits and gift value', asyn
     const result = await getLifetimeEarnings({
         async query(sql, params) {
             calls.push({ sql, params });
-            return { rows: [{ game_net: '-12', admin_earned: '100', task_earned: '50', gift_value: '20', lifetime_earnings: '158' }] };
+            return { rows: [{ game_net: '-12.00', admin_earned: '100.00', task_earned: '50', gift_value: '20', lifetime_earnings: '158.00' }] };
         }
     }, 'hokboost');
     assert.deepEqual(result, { gameNet: -12, adminEarned: 100, taskEarned: 50, giftValue: 20, total: 158 });
     assert.equal(calls[0].params[0], 'hokboost');
     assert.match(calls[0].sql, /GREATEST\(amount, 0\)/);
+    assert.equal(parseAggregateMoney('0.000', 'aggregate'), 0);
+    assert.throws(() => parseAggregateMoney('1.50', 'aggregate'), /must be an integer/);
 });
 
 test('game navigation no longer creates a CSP-blocked iframe', () => {
