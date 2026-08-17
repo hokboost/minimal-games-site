@@ -20,6 +20,7 @@
                     <p><%= lang === 'zh' ? '你的边界、共同记忆和关系里程碑都在这里。它们不影响积分或礼物资格。' : 'Your boundaries, shared memories, and relationship milestones live here. They never affect points or gift eligibility.' %></p>
                 </div>
                 <a class="creator-button" href="/creator/profile"><%= lang === 'zh' ? '编辑互动偏好' : 'Edit preferences' %></a>
+                <% if (storyWorldEnabled) { %><a class="creator-button" href="/story"><%= lang === 'zh' ? '进入分支故事' : 'Enter Story World' %></a><% } %>
                 <a class="creator-button" href="/api/creator/export"><%= lang === 'zh' ? '导出我的数据' : 'Export my data' %></a>
             </header>
 

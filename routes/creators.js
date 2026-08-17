@@ -82,6 +82,7 @@ module.exports = function registerCreatorRoutes(app, deps) {
                 user: req.session.user,
                 balance: null,
                 csrfToken: generateCSRFToken(req),
+                storyWorldEnabled: streamerWorldFlags.storyWorldEnabled,
                 dashboard
             });
         } catch (error) {

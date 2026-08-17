@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-16T23:47:00Z`
+Last updated: `2026-08-17T00:22:31Z`
 
 ## Pre-existing working-tree changes
 
@@ -93,14 +93,14 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 3 — Story engine and Season One
 
-- [ ] Complete.
-- Features:
-- Story counts:
-- Migrations:
-- Routes:
-- Tests:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Features: Separate immutable `/story` campaign engine preserving all legacy `/adventure` behavior; closed/bounded condition and effect ASTs; pure deterministic transitions; version-bound runs and content snapshots; owner-bound locks and revision CAS; canonical command replay/collision rejection; persistent flags, four relationship axes, per-character relationships, clues, inventory, routes, messages, checkpoints, shared memories, first clears, safe unlock intents, event/audit history, and relationship XP; value-free replay; choice-only reversible preview; atomic checkpoint recovery; server-clock timed waits; puzzle/gate/game/achievement/owner/message/memory/checkpoint/conclusion nodes; hidden-state public projections; communication-mute and quiet-hour-safe owner interventions; same-transaction registered Quest V2 events for first choice/episode identities; startup hash-verified catalog seed; read-only administrator audit; bilingual responsive creator UI with preview/confirm/back and disconnect recovery. Story code never awards balance, creates gift inventory, or calls a gift provider.
+- Story counts: One complete 12-episode Season One; 274 reachable compiled nodes across all 15 ADR node kinds; 60 choice nodes with 120 persistent options and distinct authored branches; 1,032 unique localized prose entries (516 bilingual beats); 12 recurring characters, each speaking in multiple episodes; five independently reachable conclusions; 12 shared memories; 12 persistent story letters plus six consent-aware owner notes; eight owner-intervention nodes. A bounded deterministic engine test completes all 12 episodes and the season within 500 transitions.
+- Migrations: `migrations/add_story_world_season_one.sql` is the sole append-only Phase 3 migration. It adds immutable campaigns/content snapshots, version-bound run snapshots, immutable semantic command events, normalized state projections, first clears, memories, safe unlock intents, and audit history. Catalog lifecycle is one-way and published content/timestamps are frozen; event/memory/first-clear/audit records are append-only. Projection rows are atomically reconciled on checkpoint recovery. No historical migration was edited and no production database was touched.
+- Routes: Creator page `GET /story` and private state `GET /api/story/state`; fixed mutations `POST /api/story/runs/start`, `POST /api/story/actions/commit`, and `POST /api/story/runs/recover` use login, authorization, bounded rate limits, CSRF, and exact-path idempotency. `POST /api/story/actions/preview` is CSRF/rate protected but deliberately non-idempotent and performs no write. `GET /admin/story-audit` is read-only. Everything is default-off behind `STREAMER_WORLD_ENABLED=true`, `CREATOR_PROFILE_ENABLED=true`, and `STORY_WORLD_ENABLED=true`.
+- Tests: 42 focused Story World subtests cover whole-graph counts/reachability/uniqueness, all node kinds, handwritten-content safeguards, character recurrence, closed ASTs, hidden projections and puzzle answers, all five endings, full-season completion, server-clock wait, CAS/concurrency, semantic replay/collision, transaction rollback at idempotency/first-clear/relationship/Quest boundaries, first-clear dedupe, preview immutability, checkpoint projection reconcile and monotonic records, old content-version resumption, catalog collision failure, strict inputs/feature flags/route policy, quiet/mute consent, fixed-path feature-off behavior, browser preview-confirm/back and completed replay UX, mobile/bilingual safety, and provider isolation. `npm run test:all` passed with all legacy and expansion suites; `npm run release:stage`, focused EJS compilation, and `git diff --check` passed.
+- Credited added lines: 8,160 cumulative after Phase 3 (backend 5,210; frontend 1,025; authored content 419; tests 1,334; docs 158; tooling 2; other 12), with nine meaningful deletions and 8,151 net growth. Backend + frontend + content is 6,654.
+- Risks or decisions: The disposable PostgreSQL migration suite was not run because it requires explicit database-create authorization; the new SQL is covered by static and repository/service behavior contracts but still needs an operator-authorized disposable PostgreSQL execution before production. Season One intentionally stores unavailable game/achievement/reward-catalog integrations as non-monetary unlock intents only. Owner notes are persisted without live push, deferred during quiet hours, and suppressed by `all_messages`/`owner_notes` blocks; live delivery belongs to Phase 4. Replay and checkpoint recovery cannot duplicate Quest progress, relationship XP, first-clear state, memories, or unlock intents. All feature gates remain off by default. No real gift send occurred.
 
 ### Phase 4 — Live interaction platform
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 2 is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 3 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +3,936 / -7
-  frontend  +962 / -0
-  content   +148 / -0
-  tests     +991 / -0
+  backend   +5,210 / -7
+  frontend  +1,025 / -0
+  content   +419 / -0
+  tests     +1,334 / -0
   docs      +158 / -0
   tooling   +2 / -1
   other     +12 / -1
 
-Credited additions: 6,209
+Credited additions: 8,160
 Meaningful deletions: 9
-Credited net growth: 6,200
-Backend + frontend + content: 5,046
+Credited net growth: 8,151
+Backend + frontend + content: 6,654
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 6,209 / 50,000
-  [FAIL] net growth: 6,200 / 40,000
-  [FAIL] backend additions: 3,936 / 12,000
-  [FAIL] frontend additions: 962 / 8,000
-  [FAIL] authored-content additions: 148 / 16,000
-  [FAIL] test additions: 991 / 10,000
-  [FAIL] backend + frontend + content: 5,046 / 36,000
+  [FAIL] total meaningful additions: 8,160 / 50,000
+  [FAIL] net growth: 8,151 / 40,000
+  [FAIL] backend additions: 5,210 / 12,000
+  [FAIL] frontend additions: 1,025 / 8,000
+  [FAIL] authored-content additions: 419 / 16,000
+  [FAIL] test additions: 1,334 / 10,000
+  [FAIL] backend + frontend + content: 6,654 / 36,000
 
 Overall: FAIL
 ```
 
-The overall threshold failure remains expected after Phase 2; later story, game, hardening, frontend, test, and full-content phases supply the remaining volume.
+The overall threshold failure remains expected after Phase 3; later live, game, reward, hardening, frontend, test, and full-content phases supply the remaining volume.
 
 ## Current acceptance status
 

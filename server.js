@@ -101,12 +101,20 @@ const registerCreatorRoutes = require('./routes/creators');
 const registerAdminCreatorDirectorRoutes = require('./routes/admin-creator-director');
 const registerQuestV2Routes = require('./routes/quest-v2');
 const registerAdminQuestStudioRoutes = require('./routes/admin-quest-studio');
+const registerStoryWorldRoutes = require('./routes/story-world');
+const registerAdminStoryAuditRoutes = require('./routes/admin-story-audit');
 const { CreatorRepository } = require('./repositories/creator-repository');
 const { CreatorProfileService } = require('./services/creator-profile-service');
 const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
 const { QuestV2Service } = require('./services/quest-v2-service');
+const { StoryWorldService } = require('./services/story-world-service');
 const streamerWorldFlags = readStreamerWorldFlags();
 const questV2Service = new QuestV2Service({ pool, BalanceLogger });
+const storyWorldService = new StoryWorldService({
+    pool,
+    questV2Service,
+    questIntegrationEnabled: streamerWorldFlags.questEngineV2Enabled
+});
 const questService = new QuestService({
     BalanceLogger,
     streamerQuestService: streamerWorldFlags.questEngineV2Enabled ? questV2Service : null
@@ -2384,6 +2392,12 @@ function registerRuntimeLifecycle() {
         },
         async stop() {}
     });
+    applicationLifecycle.registerComponent('story-world-catalog', {
+        async start() {
+            if (streamerWorldFlags.storyWorldEnabled) await storyWorldService.initialize();
+        },
+        async stop() {}
+    });
     applicationLifecycle.registerComponent('socket-event-bus', {
         start: () => socketEventBus.start(),
         stop: () => socketEventBus.close()
@@ -2956,6 +2970,24 @@ registerAdminQuestStudioRoutes(app, {
     requireLogin,
     requireAdmin,
     requireCSRF,
+    security
+});
+
+registerStoryWorldRoutes(app, {
+    storyWorldService,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireCSRF,
+    security
+});
+
+registerAdminStoryAuditRoutes(app, {
+    storyWorldService,
+    streamerWorldFlags,
+    requireLogin,
+    requireAdmin,
     security
 });
 

@@ -12,7 +12,8 @@ const pack = require('../content/streamer-world/quests/phase-2-pack');
 
 const ACTIVE = new Set(['offered', 'accepted', 'active', 'submitted', 'under_review', 'returned']);
 const REGISTERED_TRUSTED_EVENTS = new Set([
-    'adventure.chapter.completed', 'quiz.round.completed', 'doudizhu.match.won'
+    'adventure.chapter.completed', 'quiz.round.completed', 'doudizhu.match.won',
+    'story.choice.committed', 'story.episode.completed'
 ]);
 
 class QuestV2ServiceError extends Error {
@@ -83,6 +84,29 @@ function validateRegisteredRule(rule) {
         }
     }
     return normalized;
+}
+
+function validateInternalStoryEvent(raw) {
+    if (!raw || raw.sourceType !== 'story' || !['story.choice.committed', 'story.episode.completed'].includes(raw.eventType)) {
+        throw new QuestV2ServiceError('INVALID_TRUSTED_EVENT', 400, 'Invalid internal story event');
+    }
+    if (Object.keys(raw).some((key) => !['sourceType', 'sourceEventId', 'username', 'eventType', 'occurredAt', 'payload'].includes(key))) {
+        throw new QuestV2ServiceError('INVALID_TRUSTED_EVENT', 400, 'Internal story event contains unsupported fields');
+    }
+    const keys = Object.keys(raw.payload || {}).sort();
+    const expected = raw.eventType === 'story.choice.committed'
+        ? ['choiceId', 'contentVersion', 'episodeSlug', 'runId'] : ['contentVersion', 'episodeSlug', 'runId'];
+    if (stableStringify(keys) !== stableStringify(expected.sort())
+        || !Number.isSafeInteger(raw.payload.runId) || raw.payload.runId < 1
+        || !Number.isSafeInteger(raw.payload.contentVersion) || raw.payload.contentVersion < 1
+        || !/^[a-z][a-z0-9.-]{2,119}$/.test(raw.payload.episodeSlug)
+        || (raw.payload.choiceId !== undefined && !/^[a-z][a-z0-9.-]{2,119}$/.test(raw.payload.choiceId))
+        || !/^story-(event|episode):[A-Za-z0-9:.-]{8,170}$/.test(raw.sourceEventId || '')
+        || !raw.username || !Number.isFinite(Date.parse(raw.occurredAt))) {
+        throw new QuestV2ServiceError('INVALID_TRUSTED_EVENT', 400, 'Malformed internal story event');
+    }
+    return { sourceType: 'story', sourceEventId: raw.sourceEventId, username: raw.username,
+        eventType: raw.eventType, occurredAt: new Date(raw.occurredAt).toISOString(), payload: { ...raw.payload } };
 }
 
 class QuestV2Service {
@@ -357,6 +381,14 @@ class QuestV2Service {
 
     async recordTrustedEvent(client, rawEvent, context = {}) {
         const old = validateProgressEvent(rawEvent);
+        return this._recordValidatedTrustedEvent(client, old, context);
+    }
+
+    async recordInternalTrustedEvent(client, rawEvent, context = {}) {
+        return this._recordValidatedTrustedEvent(client, validateInternalStoryEvent(rawEvent), context);
+    }
+
+    async _recordValidatedTrustedEvent(client, old, context = {}) {
         const runtime = this.runtimeRepositoryFactory(client);
         const creator = await runtime.lockCreator(old.username);
         if (!creator) return { enabled: false, matches: [], rewardEarned: 0 };
@@ -500,4 +532,4 @@ class QuestV2Service {
     }
 }
 
-module.exports = { QuestV2Service, QuestV2ServiceError, REGISTERED_TRUSTED_EVENTS, validateRegisteredRule };
+module.exports = { QuestV2Service, QuestV2ServiceError, REGISTERED_TRUSTED_EVENTS, validateInternalStoryEvent, validateRegisteredRule };
