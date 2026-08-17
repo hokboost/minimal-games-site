@@ -182,7 +182,9 @@ async function run() {
             WHERE user_id = 1 ORDER BY unlocked_at DESC, achievement_id DESC LIMIT 30`)
     ]);
     for (const plan of phaseNinePlans) {
-        assert.equal(plan.rowCount, 1);
+        // PostgreSQL reports EXPLAIN as a utility command, so node-postgres may
+        // leave Result.rowCount null even though the JSON plan row is present.
+        assert.equal(plan.rows.length, 1);
         assert.ok(plan.rows[0]['QUERY PLAN'][0].Plan);
     }
 
