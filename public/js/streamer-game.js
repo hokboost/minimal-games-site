@@ -7,7 +7,9 @@
     let model = bootstrap.state;
     const busyGate = window.StreamerGameUIState.createBusyGate();
     let signalTimer = null;
+    let refreshTimer = null;
     let socket = null;
+    let disposed = false;
     const pending = new Map();
     const unresolvedIdempotencyStatuses = new Set(['pending', 'indeterminate']);
     let mutationRecovery = null;
@@ -17,6 +19,11 @@
     const actions = document.getElementById('sg-actions');
     const status = document.getElementById('sg-status');
     const message = document.getElementById('sg-message');
+    const history = document.getElementById('sg-history');
+    const tutorial = document.getElementById('sg-tutorial');
+    const collection = document.getElementById('sg-collection');
+    const start = document.getElementById('sg-start');
+    const difficulty = document.getElementById('sg-difficulty');
     const text = (zh, en) => lang === 'zh' ? zh : en;
     const localized = (value, key) => value?.[`${key}${lang === 'zh' ? 'Zh' : 'En'}`] || '';
     const commandId = () => globalThis.crypto.randomUUID();
@@ -53,14 +60,16 @@
     }
 
     function applyMutationRecoveryLock() {
+        if (disposed) return;
         const blocked = Boolean(mutationRecovery);
-        document.getElementById('sg-start').disabled = blocked || startInFlight;
+        start.disabled = blocked || startInFlight;
         if (!blocked) return;
         actions.querySelectorAll('button,select').forEach(control => { control.disabled = true; });
         message.textContent = mutationRecovery.message;
     }
 
     async function recoverUnresolvedMutation(error, before) {
+        if (disposed) return false;
         if (!unresolvedIdempotencyStatuses.has(error.idempotencyStatus)) return false;
         error.message = recoveryMessage(error.idempotencyStatus);
         mutationRecovery = { before, message: error.message, idempotencyStatus: error.idempotencyStatus };
@@ -69,6 +78,7 @@
         } catch {
             // Keep the recovery lock when authoritative state cannot be read.
         }
+        if (disposed) return true;
         if (!mutationRecovery) {
             error.message = text('已刷新服务器权威状态，请确认最新对局后继续。',
                 'Authoritative server state was refreshed. Review the latest run before continuing.');
@@ -77,6 +87,7 @@
     }
 
     function publishModel() {
+        if (disposed) return;
         document.dispatchEvent(new CustomEvent('streamer-game:model', {
             detail: {
                 gameId,
@@ -160,8 +171,10 @@
         content.append(node('p', 'sg-meta', text(`速度 ${state.bpm} BPM · 判定窗 ${state.timingWindowMs}ms`, `${state.bpm} BPM · ${state.timingWindowMs}ms window`)), beats);
         const countdown = node('p', 'sg-card', ''); countdown.id = 'sg-countdown'; content.append(countdown);
         clearInterval(signalTimer);
+        signalTimer = null;
         const clientTarget = Date.now() + Math.max(0, state.nextBeatAtMs - state.serverNowMs);
         const update = () => {
+            if (disposed) return;
             const remaining = window.StreamerGameUIState.countdownRemaining(clientTarget, Date.now(), 0);
             countdown.textContent = remaining > 0
                 ? text(`下一拍 ${Math.ceil(remaining / 100) / 10} 秒`, `Next beat in ${Math.ceil(remaining / 100) / 10}s`)
@@ -285,11 +298,12 @@
     }
 
     function render() {
+        if (disposed) return;
         content.replaceChildren(); actions.replaceChildren(); status.replaceChildren(); message.textContent = '';
         const run = model.run;
-        const history = document.getElementById('sg-history'); history.replaceChildren();
+        history.replaceChildren();
         for (const item of model.history || []) history.append(node('li', '', `${item.status} · ${item.difficulty} · ${item.score}`));
-        const tutorial = document.getElementById('sg-tutorial'); tutorial.replaceChildren();
+        tutorial.replaceChildren();
         [text('选择关卡、难度与模式。', 'Choose a challenge, difficulty, and mode.'),
             text('按屏幕控件操作；所有动作也可用 Tab 聚焦与 Enter 确认。', 'Use the controls; every action supports Tab and Enter.'),
             text('刷新页面后从数据库快照继续。', 'Refresh to resume from the database snapshot.')]
@@ -331,7 +345,7 @@
         }
         if (run.status !== 'active') actions.replaceChildren();
         if (model.collection) {
-            const collection = document.getElementById('sg-collection'); collection.replaceChildren(node('h3', '', text('收藏房间', 'Collection room')));
+            collection.replaceChildren(node('h3', '', text('收藏房间', 'Collection room')));
             collection.append(node('p', 'sg-meta', text(`已收藏：${model.collection.items.map(item => item.itemKey).join('、') || '暂无'}`,
                 `Owned: ${model.collection.items.map(item => item.itemKey).join(', ') || 'none'}`)));
             const bySlot = new Map(model.collection.slots.map(slot => [slot.slot, slot.itemKey]));
@@ -343,9 +357,25 @@
     }
 
     async function refresh(runId) {
-        const response = await fetch(`/api/${gameId}/state?runId=${encodeURIComponent(runId || model.run?.id || '')}`, { credentials: 'same-origin' });
+        if (disposed) return false;
+        let response;
+        try {
+            response = await fetch(`/api/${gameId}/state?runId=${encodeURIComponent(runId || model.run?.id || '')}`, { credentials: 'same-origin' });
+        } catch (error) {
+            if (disposed) return false;
+            throw error;
+        }
+        if (disposed) return false;
         if (response.ok) {
-            model = await response.json();
+            let refreshedModel;
+            try {
+                refreshedModel = await response.json();
+            } catch (error) {
+                if (disposed) return false;
+                throw error;
+            }
+            if (disposed) return false;
+            model = refreshedModel;
             reconcileMutationRecovery();
         }
         render();
@@ -353,6 +383,7 @@
     }
 
     async function commit(action) {
+        if (disposed) return;
         if (mutationRecovery) {
             message.textContent = mutationRecovery.message;
             return;
@@ -369,14 +400,18 @@
         const signature = `${run.id}:${run.revision}:${JSON.stringify(action)}`;
         try {
             const result = await post(`/api/${gameId}/action`, { runId: run.id, expectedRevision: run.revision, action }, signature);
+            if (disposed) return;
             model.run = result.run;
             mutationRecovery = null;
             model.history = [{ status: result.run.status, difficulty: result.run.difficulty, score: result.run.score }, ...(model.history || [])];
             if (gameId === 'studio-crafting' && result.run.status === 'completed') await refresh(result.run.id);
             else render();
+            if (disposed) return;
             if (operationId) window.CreatorOperations.finish(operationId, { status: 200 });
         } catch (error) {
+            if (disposed) return;
             const recovering = await recoverUnresolvedMutation(error, before);
+            if (disposed) return;
             if (!recovering && error.code === 'GAME_REVISION_CONFLICT') {
                 try {
                     await refresh(run.id);
@@ -384,23 +419,26 @@
                     // Preserve the original conflict when authoritative refresh fails.
                 }
             }
+            if (disposed) return;
             if (operationId) window.CreatorOperations.fail(operationId, error);
             throw error;
         } finally {
             busyGate.end();
-            render();
+            if (!disposed) render();
         }
     }
 
-    document.getElementById('sg-start').addEventListener('click', async event => {
+    async function handleStart(event) {
+        if (disposed) return;
         if (mutationRecovery || startInFlight) {
-            event.currentTarget.disabled = true;
+            start.disabled = true;
             if (mutationRecovery) message.textContent = mutationRecovery.message;
             return;
         }
         startInFlight = true;
-        event.currentTarget.disabled = true;
+        start.disabled = true;
         const before = runSnapshot();
+        let feedback = null;
         const operationId = window.CreatorOperations?.begin({
             label: text('开始或恢复对局', 'Start or resume game'),
             method: 'POST',
@@ -409,13 +447,17 @@
         try {
             const mode = document.querySelector('input[name=sg-mode]:checked').value;
             const result = await post(`/api/${gameId}/start`, { challengeId: challenge.value,
-                difficulty: document.getElementById('sg-difficulty').value, mode }, `start:${gameId}:${challenge.value}:${mode}`);
-            model.run = result.run; mutationRecovery = null; render();
+                difficulty: difficulty.value, mode }, `start:${gameId}:${challenge.value}:${mode}`);
+            if (disposed) return;
+            model.run = result.run; mutationRecovery = null;
             if (operationId) window.CreatorOperations.finish(operationId, { status: 200 });
         } catch (error) {
+            if (disposed) return;
             const recovering = await recoverUnresolvedMutation(error, before);
+            if (disposed) return;
             if (!recovering && error.code === 'GAME_ACTIVE_RUN_EXISTS') await refresh();
-            message.textContent = error.code === 'GAME_ACTIVE_RUN_EXISTS'
+            if (disposed) return;
+            feedback = error.code === 'GAME_ACTIVE_RUN_EXISTS'
                 ? text('已恢复尚未完成的对局。', 'Resumed your active run.') : error.message;
             if (operationId) {
                 if (error.code === 'GAME_ACTIVE_RUN_EXISTS') window.CreatorOperations.finish(operationId, { status: 200 });
@@ -424,10 +466,15 @@
         }
         finally {
             startInFlight = false;
-            event.currentTarget.disabled = Boolean(mutationRecovery);
+            if (!disposed) {
+                render();
+                if (feedback && !mutationRecovery) message.textContent = feedback;
+            }
         }
-    });
-    actions.addEventListener('click', async event => {
+    }
+
+    async function handleActionClick(event) {
+        if (disposed) return;
         const button = event.target.closest('button[data-type]'); if (!button) return;
         let action = { type: button.dataset.type };
         for (const key of ['x', 'y', 'beatIndex', 'cardIndex', 'suspectIndex', 'slot', 'lane', 'choice', 'prediction']) if (button.dataset[key] !== undefined) action[key] = Number(button.dataset[key]);
@@ -438,18 +485,73 @@
         if (button.dataset.direction) action.direction = button.dataset.direction;
         if (button.dataset.symbol) action.symbol = button.dataset.symbol;
         button.disabled = true;
-        try { await commit(action); } catch (error) { message.textContent = error.message; button.disabled = false; }
-    });
-    document.addEventListener('keydown', event => {
+        try {
+            await commit(action);
+        } catch (error) {
+            if (disposed) return;
+            message.textContent = error.message;
+            button.disabled = false;
+        }
+    }
+
+    function handleKeydown(event) {
+        if (disposed) return;
         const action = window.StreamerGameUIState.keyboardAction(gameId, model.run?.state, event.code);
         if (action) {
-            event.preventDefault(); commit(action).catch(error => { message.textContent = error.message; });
+            event.preventDefault();
+            commit(action).catch(error => {
+                if (!disposed) message.textContent = error.message;
+            });
         }
-    });
-    window.addEventListener('focus', () => model.run && refresh(model.run.id));
-    if (typeof window.io === 'function') {
+    }
+
+    function handleFocus() {
+        if (!disposed && model.run) refreshInBackground(model.run.id);
+    }
+
+    function refreshInBackground(runId) {
+        refresh(runId).catch(error => {
+            if (!disposed) console.error('Streamer game background refresh failed:', error);
+        });
+    }
+
+    start.addEventListener('click', handleStart);
+    actions.addEventListener('click', handleActionClick);
+    document.addEventListener('keydown', handleKeydown);
+    window.addEventListener('focus', handleFocus);
+
+    function dispose() {
+        if (disposed) return;
+        disposed = true;
+        if (signalTimer !== null) {
+            clearInterval(signalTimer);
+            signalTimer = null;
+        }
+        if (refreshTimer !== null) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+        start.removeEventListener?.('click', handleStart);
+        actions.removeEventListener?.('click', handleActionClick);
+        document.removeEventListener?.('keydown', handleKeydown);
+        window.removeEventListener?.('focus', handleFocus);
+        window.removeEventListener?.('pagehide', handlePageHide);
+        socket?.removeAllListeners?.();
+        socket?.disconnect?.();
+        socket = null;
+    }
+
+    function handlePageHide(event) {
+        // A persisted page remains intact in the browser back/forward cache.
+        // Timers are frozen there, so keep the controller usable when restored.
+        if (!event?.persisted) dispose();
+    }
+
+    window.addEventListener('pagehide', handlePageHide);
+    if (!disposed && typeof window.io === 'function') {
         socket = window.io({ transports: ['websocket', 'polling'] });
         const subscribe = () => {
+            if (disposed || !socket) return;
             const run = model.run;
             if (run?.mode === 'coop' && run.relayInteractionId) socket.emit('live:subscribe', {
                 interactionId: run.relayInteractionId,
@@ -459,17 +561,19 @@
         };
         socket.on('connect', subscribe);
         socket.on('live:event', event => {
+            if (disposed) return;
             if (event?.eventType === 'interaction.game_state_changed'
                 && event.payload?.gameId === gameId
                 && (!model.run || event.payload.runId === model.run.id)) {
-                refresh(event.payload.runId);
+                refreshInBackground(event.payload.runId);
             }
         });
         subscribe();
     }
-    setInterval(() => {
+    refreshTimer = setInterval(() => {
+        if (disposed) return;
         if (model.run?.status === 'active' && !busyGate.active()
-            && (model.run.mode === 'coop' || gameId === 'broadcast-bingo')) refresh(model.run.id);
+            && (model.run.mode === 'coop' || gameId === 'broadcast-bingo')) refreshInBackground(model.run.id);
     }, 5000);
     render();
 })();

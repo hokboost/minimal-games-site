@@ -43,9 +43,19 @@ class FakeNode {
         this.listeners.set(type, listeners);
     }
 
+    removeEventListener(type, listener) {
+        const listeners = this.listeners.get(type) || [];
+        this.listeners.set(type, listeners.filter(item => item !== listener));
+    }
+
     async dispatch(type, event = {}) {
         for (const listener of this.listeners.get(type) || []) {
-            await listener({ currentTarget: this, target: this, preventDefault() {}, ...event });
+            const dispatchedEvent = { currentTarget: this, target: this, preventDefault() {}, ...event };
+            const result = listener(dispatchedEvent);
+            // The DOM dispatcher clears currentTarget as soon as the listener
+            // returns, even when an async listener's Promise is still pending.
+            dispatchedEvent.currentTarget = null;
+            await result;
         }
     }
 
@@ -147,6 +157,9 @@ function createBrowser({ gameId, initialRun, mutation, refreshed,
         getElementById: id => elements.get(id) || null,
         querySelector: selector => selector === 'input[name=sg-mode]:checked' ? { value: 'solo' } : null,
         addEventListener(type, listener) { documentListeners.set(type, listener); },
+        removeEventListener(type, listener) {
+            if (documentListeners.get(type) === listener) documentListeners.delete(type);
+        },
         dispatchEvent(event) {
             documentListeners.get(event.type)?.(event);
             return true;
@@ -154,14 +167,21 @@ function createBrowser({ gameId, initialRun, mutation, refreshed,
     };
     const socketHandlers = new Map();
     const socketEmits = [];
+    let socketDisconnects = 0;
     const socket = {
         on(type, listener) { socketHandlers.set(type, listener); },
-        emit(type, payload) { socketEmits.push({ type, payload }); }
+        emit(type, payload) { socketEmits.push({ type, payload }); },
+        removeAllListeners() { socketHandlers.clear(); },
+        disconnect() { socketDisconnects += 1; }
     };
     const mutationCalls = [];
     const refreshCalls = [];
+    const windowListeners = new Map();
     const windowObject = {
-        addEventListener() {},
+        addEventListener(type, listener) { windowListeners.set(type, listener); },
+        removeEventListener(type, listener) {
+            if (windowListeners.get(type) === listener) windowListeners.delete(type);
+        },
         idempotentFetch: async (url, options) => {
             mutationCalls.push({ url, options });
             if (mutation instanceof Error) throw mutation;
@@ -170,6 +190,8 @@ function createBrowser({ gameId, initialRun, mutation, refreshed,
         },
         io: () => socket
     };
+    let nextTimerId = 0;
+    const timers = new Map();
     const context = {
         window: windowObject,
         document,
@@ -179,8 +201,12 @@ function createBrowser({ gameId, initialRun, mutation, refreshed,
             refreshCalls.push(url);
             return response(refreshed || { success: true, gameId, run: initialRun, history: [] });
         },
-        setInterval: () => 1,
-        clearInterval() {},
+        setInterval: callback => {
+            nextTimerId += 1;
+            timers.set(nextTimerId, callback);
+            return nextTimerId;
+        },
+        clearInterval: timerId => { timers.delete(timerId); },
         CustomEvent: FakeCustomEvent,
         Date,
         Map,
@@ -191,12 +217,28 @@ function createBrowser({ gameId, initialRun, mutation, refreshed,
     vm.createContext(context);
     vm.runInContext(source('public/js/streamer-game-ui-state.js'), context);
     vm.runInContext(source('public/js/streamer-game.js'), context);
+    const dispatchWindow = async (type, event = {}) => {
+        const listener = windowListeners.get(type);
+        if (listener) await listener(event);
+    };
     return { documentListeners, elements, mutationCalls, refreshCalls, socketHandlers, socketEmits,
-        window: windowObject };
+        window: windowObject, windowListeners, dispatchWindow, timers,
+        socketDisconnects: () => socketDisconnects };
 }
 
 function buttons(element) {
     return element.querySelectorAll('button');
+}
+
+function installReplacementDocument(browser) {
+    const replacements = new Map();
+    for (const id of browser.elements.keys()) {
+        const replacement = new FakeNode(id === 'sg-start' ? 'button' : 'div', id);
+        replacement.textContent = `replacement:${id}`;
+        replacements.set(id, replacement);
+        browser.elements.set(id, replacement);
+    }
+    return replacements;
 }
 
 test('actual constellation renderer preserves partner-turn and blocker controls after a successful click', async () => {
@@ -334,6 +376,88 @@ test('a revision conflict automatically refreshes the authoritative run', async 
     assert.equal(browser.refreshCalls.length, 1);
     assert.equal(browser.window.StreamerGameModel.get().run.revision, 1);
     assert.ok(buttons(browser.elements.get('sg-actions')).every(button => button.disabled));
+});
+
+test('pagehide disposes refresh, socket, keyboard, focus, and timer callbacks before a deferred GET completes', async () => {
+    const before = stateBase({ width: 1, height: 1, placements: [], yourTurn: true,
+        privateClue: { blockedCells: [], nextColumn: 0 } });
+    const after = stateBase({ width: 1, height: 1,
+        placements: [{ key: '0:0', x: 0, y: 0, role: 'owner' }], yourTurn: false,
+        privateClue: { blockedCells: [], nextColumn: 0 } });
+    const initialRun = run({ gameId: 'constellation-repair', state: before, mode: 'coop' });
+    const refreshedRun = run({ gameId: 'constellation-repair', state: after,
+        mode: 'coop', revision: 1 });
+    let resolveRefresh;
+    const deferredRefresh = new Promise(resolve => { resolveRefresh = resolve; });
+    const browser = createBrowser({ gameId: 'constellation-repair', initialRun,
+        refreshed: deferredRefresh });
+    const oldMessage = browser.elements.get('sg-message');
+    const oldStart = browser.elements.get('sg-start');
+    const queuedLiveEvent = browser.socketHandlers.get('live:event');
+    const queuedFocus = browser.windowListeners.get('focus');
+    const queuedKeydown = browser.documentListeners.get('keydown');
+    const queuedTimer = Array.from(browser.timers.values()).at(-1);
+
+    const refreshRequest = browser.window.StreamerGameModel.refresh(initialRun.id);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(browser.refreshCalls.length, 1);
+    await browser.dispatchWindow('pagehide');
+    assert.equal(browser.socketDisconnects(), 1);
+    assert.equal(browser.timers.size, 0);
+    assert.equal(browser.documentListeners.has('keydown'), false);
+
+    const replacements = installReplacementDocument(browser);
+    resolveRefresh({ success: true, gameId: 'constellation-repair', run: refreshedRun, history: [] });
+    await assert.doesNotReject(refreshRequest);
+    queuedLiveEvent({ eventType: 'interaction.game_state_changed',
+        payload: { gameId: 'constellation-repair', runId: initialRun.id } });
+    queuedFocus();
+    queuedTimer();
+    queuedKeydown({ code: 'Space', preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(browser.refreshCalls.length, 1, 'disposed callbacks must not issue another GET');
+    assert.equal(browser.mutationCalls.length, 0);
+    assert.equal(browser.window.StreamerGameModel.get().run.revision, 0);
+    assert.equal(oldMessage.textContent, '');
+    assert.equal(oldStart.disabled, false);
+    assert.equal(replacements.get('sg-message').textContent, 'replacement:sg-message');
+    assert.equal(replacements.get('sg-start').disabled, false);
+});
+
+test('pagehide prevents a deferred mutation completion from rendering into a replacement document', async () => {
+    const craftingState = stateBase({
+        challengeId: 'paper-moon-lamp', recipe: { paper: 1 },
+        materialLabels: { paper: 'Paper' }, materials: {}, crafted: [],
+        roomSlots: [null, null, null, null, null, null], nextMaterial: 'paper'
+    });
+    const initialRun = run({ gameId: 'studio-crafting', state: craftingState });
+    const nextRun = run({ gameId: 'studio-crafting', state: {
+        ...craftingState, materials: { paper: 1 }, nextMaterial: null
+    }, revision: 1 });
+    let resolveMutation;
+    const browser = createBrowser({
+        gameId: 'studio-crafting',
+        initialRun,
+        mutation: () => new Promise(resolve => { resolveMutation = resolve; })
+    });
+    const oldActions = browser.elements.get('sg-actions');
+    const gather = buttons(oldActions).find(button => button.dataset.material === 'paper');
+    const mutationRequest = oldActions.dispatch('click', { target: gather });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(browser.mutationCalls.length, 1);
+    await browser.dispatchWindow('pagehide');
+    const oldChildren = oldActions.children.slice();
+    const replacements = installReplacementDocument(browser);
+
+    resolveMutation(response({ success: true, run: nextRun }, 200, 'created'));
+    await assert.doesNotReject(mutationRequest);
+
+    assert.equal(browser.window.StreamerGameModel.get().run.revision, 0);
+    assert.deepEqual(oldActions.children, oldChildren);
+    assert.equal(replacements.get('sg-message').textContent, 'replacement:sg-message');
+    assert.equal(replacements.get('sg-actions').children.length, 0);
+    assert.equal(replacements.get('sg-start').disabled, false);
 });
 
 test('signal renderer shows its authoritative countdown and Space commits the current beat', async () => {
