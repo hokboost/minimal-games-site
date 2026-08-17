@@ -147,6 +147,14 @@ test('non-production launch does not mutate Streamer World flags', () => {
     assert.deepEqual(env, { NODE_ENV: 'development' });
 });
 
+test('direct server launch applies production defaults before environment validation', () => {
+    const serverSource = source('server.js');
+    const defaultsOffset = serverSource.indexOf("require('./lib/streamer-world-production-defaults')");
+    const validationOffset = serverSource.indexOf("require('./lib/config-validation').validateServerEnvironment()");
+    assert.ok(defaultsOffset >= 0, 'server must load Streamer World production defaults');
+    assert.ok(validationOffset > defaultsOffset, 'production defaults must precede environment validation');
+});
+
 test('flag parser accepts only exact lowercase true', () => {
     const rejected = ['TRUE', 'True', '1', 'yes', 'on', true, 1, ' true', 'true '];
     for (const value of rejected) {

@@ -1,4 +1,7 @@
 require('dotenv').config();
+// Keep direct `node server.js` deployments equivalent to `npm start`.
+// Existing explicit flag values (including false) are never overwritten.
+require('./lib/streamer-world-production-defaults');
 require('./lib/safe-logger').installSafeConsole();
 require('./lib/config-validation').validateServerEnvironment();
 
