@@ -41,7 +41,7 @@ jobs:
       WORKER_API_KEY: ci-worker-api-key-at-least-32-bytes
       WORKER_HMAC_SECRET: ci-hmac-secret-at-least-32-bytes-long
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
