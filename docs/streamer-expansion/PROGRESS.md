@@ -168,7 +168,7 @@ Overall threshold result: FAIL (expected before expansion implementation)
 - Security/failure injection: Phase 9 and post-audit suites cover accessibility, UI state/recovery, ten-engine invalid input and immutability, route/flag/migration contracts, XSS/privacy/provider isolation, revoked sessions, semantic replay/collision, response loss, CAS, hook/audit rollback, retention boundaries and lock order, fresh authority facts, cross-domain user locks, capacity/idempotency admission, query caps, the required load paths, and production activation/explicit-false rollback. The legacy game browser fixture was updated with the browser-native `CustomEvent`/`dispatchEvent` API required by the new narrator, without changing its assertions. All suites are included in default `npm test`.
 - Feature-flag rollback: All expansion flags accept only exact lowercase `true` and require the root plus Creator foundation. Production startup never supplies missing values; missing flags remain disabled and malformed values stop startup. Disabling the root switch removes all expansion behavior without deleting stored immutable state, and each product gate remains independently reversible by configuration and restart. Enabled modules fail startup/readiness when their tracked schema is absent; Live also requires one active, unlocked configured administrator and Rewards requires its active catalog and budgets.
 - Documentation: `docs/streamer-expansion/FINAL_REPORT.md` records architecture, changed modules, all tables/migrations, route families, content counts, accessibility/load/privacy work, verification commands, activation/rollback, external operator steps, and known limitations.
-- Final verification: the post-audit `npm run test:all` passed; syntax checked 351 JavaScript files and the secret/artifact scan checked 557 repository files. Disposable PostgreSQL fresh and two historical upgrades, resilience, capacity/idempotency, three-context Chromium across all 21 games, and bounded load suites passed. `git diff --check` passed. The final line verifier passed every gate with more than 68,000 meaningful additions and 68,000 net growth.
+- Final verification: the post-audit `npm run test:all` passed; syntax checked 352 JavaScript files and the secret/artifact scan checked 558 repository files. Disposable PostgreSQL fresh and two historical upgrades, resilience, capacity/idempotency, three-context Chromium across all 21 games, and bounded load suites passed. `git diff --check` passed. The final line verifier passed every gate with more than 68,000 meaningful additions and 68,000 net growth.
 - Remaining external operator actions: Recheck the production ledger/readiness; verify production backup/restore; configure the exact owner; and stage a deliberately small feature-flag rollout. Existing uncertain gift exchanges still require independent receipt reconciliation and must never be auto-retried/refunded.
 
 ### Production-safety audit remediation
@@ -210,23 +210,23 @@ Credited additions by category:
   backend   +18,138 / -41
   frontend  +8,359 / -66
   content   +17,559 / -0
-  tests     +22,410 / -12
+  tests     +22,477 / -17
   docs      +990 / -4
   tooling   +1,025 / -39
   other     +72 / -12
 
-Credited additions: 68,553
-Meaningful deletions: 174
-Credited net growth: 68,379
+Credited additions: 68,620
+Meaningful deletions: 179
+Credited net growth: 68,441
 Backend + frontend + content: 44,056
 
 Acceptance gates:
-  [PASS] total meaningful additions: 68,553 / 50,000
-  [PASS] net growth: 68,379 / 40,000
+  [PASS] total meaningful additions: 68,620 / 50,000
+  [PASS] net growth: 68,441 / 40,000
   [PASS] backend additions: 18,138 / 12,000
   [PASS] frontend additions: 8,359 / 8,000
   [PASS] authored-content additions: 17,559 / 16,000
-  [PASS] test additions: 22,410 / 10,000
+  [PASS] test additions: 22,477 / 10,000
   [PASS] backend + frontend + content: 44,056 / 36,000
 
 Overall: PASS

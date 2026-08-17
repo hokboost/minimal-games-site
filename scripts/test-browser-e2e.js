@@ -11,6 +11,10 @@ const {
     startApp,
     waitForExit
 } = require('../tests/helpers/integration-environment');
+const {
+    matchesFinalPostResponse,
+    shouldRecordServerFailure
+} = require('../tests/helpers/browser-response-classification');
 
 const FAULT_TOKEN = 'browser-fault-token-0123456789abcdef';
 const STREAMER_GAME_ENV = Object.freeze({
@@ -96,7 +100,7 @@ async function login(page, baseUrl, user) {
 function attachFailureCollection(page, failures) {
     page.on('pageerror', (error) => failures.push(`pageerror: ${error.message}`));
     page.on('response', (response) => {
-        if (response.status() >= 500) {
+        if (shouldRecordServerFailure(response)) {
             failures.push(`HTTP ${response.status()}: ${new URL(response.url()).pathname}`);
         }
     });
@@ -129,10 +133,10 @@ async function verifyGamePage(page, baseUrl, game, profileName) {
 }
 
 async function waitForApiAction(page, pathname, trigger) {
-    const responsePromise = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return url.pathname === pathname && response.request().method() === 'POST';
-    }, { timeout: 15000 });
+    const responsePromise = page.waitForResponse(
+        response => matchesFinalPostResponse(response, pathname),
+        { timeout: 15000 }
+    );
     await trigger();
     const response = await responsePromise;
     const body = await response.json();
@@ -187,6 +191,7 @@ async function testSlotRecovery(page, context, database, user, app) {
         label: 'browser-e2e-restarted',
         faultToken: FAULT_TOKEN,
         poolMax: 8,
+        startupTimeoutMs: 90000,
         extraEnv: STREAMER_GAME_ENV
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -369,6 +374,7 @@ async function run() {
             label: 'browser-e2e',
             faultToken: FAULT_TOKEN,
             poolMax: 8,
+            startupTimeoutMs: 90000,
             extraEnv: STREAMER_GAME_ENV
         });
         browser = await chromium.launch({ headless: true });

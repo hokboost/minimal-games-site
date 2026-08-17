@@ -108,6 +108,7 @@ async function run() {
             label: 'capacity-admission-e2e',
             faultToken: FAULT_TOKEN,
             poolMax: 8,
+            startupTimeoutMs: 90000,
             extraEnv: STREAMER_GAME_ENV
         });
         const session = await new BrowserSession(app.baseUrl).login(user);

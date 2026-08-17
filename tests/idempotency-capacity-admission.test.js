@@ -10,6 +10,11 @@ const vm = require('node:vm');
 const { createConcurrencyGuard } = require('../lib/concurrency-guard');
 const { createIdempotencyMiddleware, hashRequest } = require('../lib/idempotency');
 const {
+    isRetryableCapacityResponse,
+    matchesFinalPostResponse,
+    shouldRecordServerFailure
+} = require('./helpers/browser-response-classification');
+const {
     CAPACITY_IDEMPOTENT_WRITE_ROUTES,
     ROUTE_MANIFEST
 } = require('../routes/manifest');
@@ -380,4 +385,37 @@ test('browser bounds capacity retry to one attempt and caps Retry-After', async 
     assert.equal(browser.calls.length, 2);
     assert.deepEqual(browser.waits, [5000]);
     assert.notEqual(browser.calls[0].key, browser.calls[1].key);
+});
+
+test('browser E2E ignores only an exact retryable capacity response', () => {
+    const response = (status, idempotencyStatus, pathname = '/api/constellation-repair/start') => ({
+        status: () => status,
+        headers: () => idempotencyStatus === undefined
+            ? {}
+            : { 'idempotency-status': idempotencyStatus },
+        url: () => `http://127.0.0.1${pathname}`,
+        request: () => ({ method: () => 'POST' })
+    });
+
+    const retryable = response(503, 'retryable');
+    assert.equal(isRetryableCapacityResponse(retryable), true);
+    assert.equal(shouldRecordServerFailure(retryable), false);
+    assert.equal(matchesFinalPostResponse(retryable, '/api/constellation-repair/start'), false);
+
+    for (const terminal of [
+        response(503),
+        response(503, 'created'),
+        response(409, 'retryable')
+    ]) {
+        assert.equal(isRetryableCapacityResponse(terminal), false);
+        assert.equal(matchesFinalPostResponse(terminal, '/api/constellation-repair/start'), true);
+    }
+    assert.equal(shouldRecordServerFailure(response(503)), true);
+    assert.equal(shouldRecordServerFailure(response(503, 'created')), true);
+    assert.equal(shouldRecordServerFailure(response(409, 'retryable')), false);
+    assert.equal(matchesFinalPostResponse(
+        response(201, 'created', '/api/signal-duet/start'),
+        '/api/constellation-repair/start'
+    ), false);
+    assert.equal(isRetryableCapacityResponse({ status: 503, headers: new Headers() }), false);
 });
