@@ -76,6 +76,13 @@ class FakeNode {
     }
 }
 
+class FakeCustomEvent {
+    constructor(type, options = {}) {
+        this.type = type;
+        this.detail = options.detail;
+    }
+}
+
 function response(body, status = 200) {
     return {
         ok: status >= 200 && status < 300,
@@ -132,7 +139,11 @@ function createBrowser({ gameId, initialRun, mutation, refreshed }) {
         createElement: tag => new FakeNode(tag),
         getElementById: id => elements.get(id) || null,
         querySelector: selector => selector === 'input[name=sg-mode]:checked' ? { value: 'solo' } : null,
-        addEventListener(type, listener) { documentListeners.set(type, listener); }
+        addEventListener(type, listener) { documentListeners.set(type, listener); },
+        dispatchEvent(event) {
+            documentListeners.get(event.type)?.(event);
+            return true;
+        }
     };
     const socketHandlers = new Map();
     const socketEmits = [];
@@ -162,6 +173,7 @@ function createBrowser({ gameId, initialRun, mutation, refreshed }) {
         },
         setInterval: () => 1,
         clearInterval() {},
+        CustomEvent: FakeCustomEvent,
         Date,
         Map,
         Set,

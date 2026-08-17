@@ -1,14 +1,14 @@
 <!DOCTYPE html><html lang="<%= lang === 'zh' ? 'zh-CN' : 'en' %>"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title><%= title %></title>
-<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/redesign.css"><link rel="stylesheet" href="/creator-achievements.css"></head>
+<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/redesign.css"><link rel="stylesheet" href="/creator-achievements.css"><link rel="stylesheet" href="/creator-shell.css"></head>
 <body class="app-redesign achievement-page"><%- include('partials/language-switcher') %><div class="site-layout">
 <%- include('partials/site-header',{active:'creator'}) %><main class="achievement-shell">
 <header class="achievement-hero"><p><%= lang==='zh'?'主播世界 · 长期成果':'Creator World · Lasting results' %></p><h1><%= title %></h1>
 <p><%= lang==='zh'?'成就只由可信服务端事件推进；隐藏成就在解锁前不会泄露条件。已得收藏不会随赛季轮换消失。':'Achievements advance only from trusted server events. Hidden conditions remain private until unlock, and earned items never expire with seasons.' %></p><a href="/creator"><%= lang==='zh'?'返回主播世界':'Back to Creator World' %></a></header>
-<section><h2><%= lang==='zh'?'成就星图':'Achievement chart' %></h2><div class="achievement-grid">
-<% state.achievements.forEach(item=>{ %><article class="achievement-card <%= item.locked?'is-locked':'is-unlocked' %>">
+<section id="achievement-chart-panel"><h2><%= lang==='zh'?'成就星图':'Achievement chart' %></h2><div class="achievement-grid">
+<% state.achievements.forEach(item=>{ %><article class="achievement-card <%= item.locked?'is-locked':'is-unlocked' %>" data-status="<%= item.locked?'locked':'unlocked' %>" data-hidden="<%= item.hidden?'hidden':'visible' %>" data-progress="<%= item.progress %>">
 <% if(item.hidden&&item.locked){ %><h3><%= lang==='zh'?'隐藏坐标':'Hidden coordinate' %></h3><p><%= lang==='zh'?'条件将在可信解锁后显示。':'Details appear after trusted unlock.' %></p>
 <% }else{ %><h3><%= item.title %></h3><p><%= item.description %></p><p><%= item.progress %> / <%= item.target %></p><progress max="<%= item.target %>" value="<%= item.progress %>"></progress><% } %></article><% }) %></div></section>
 <section><h2><%= lang==='zh'?'永久收藏':'Permanent collection' %></h2><ul><% state.collection.forEach(item=>{ %><li><%= item.itemKey %><% if(item.showcaseSlot){ %> · <%= lang==='zh'?'展柜':'slot' %> <%= item.showcaseSlot %><% } %></li><% }) %></ul></section>
 <section><h2><%= lang==='zh'?'赛季归档':'Season archive' %></h2><ul><% state.seasons.forEach(item=>{ %><li><strong><%= item.slug %></strong> · <%= item.conclusion || (lang==='zh'?'未指定结论':'No selected conclusion') %></li><% }) %></ul></section>
-</main><%- include('partials/app-footer') %></div></body></html>
+</main><%- include('partials/app-footer') %></div><script src="/js/creator-shell.js"></script><script src="/js/creator-operation-center.js"></script><script src="/js/creator-responsive-navigation.js"></script><script src="/js/creator-context-help.js"></script><script src="/js/creator-explorer.js"></script><script src="/js/achievement-browser.js"></script><script src="/js/creator-archive-experience.js"></script></body></html>

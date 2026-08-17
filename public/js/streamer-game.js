@@ -18,6 +18,26 @@
     const localized = (value, key) => value?.[`${key}${lang === 'zh' ? 'Zh' : 'En'}`] || '';
     const commandId = () => globalThis.crypto.randomUUID();
 
+    function publishModel() {
+        document.dispatchEvent(new CustomEvent('streamer-game:model', {
+            detail: {
+                gameId,
+                runId: model.run?.id || null,
+                revision: model.run?.revision ?? null,
+                status: model.run?.status || null
+            }
+        }));
+    }
+
+    window.StreamerGameModel = Object.freeze({
+        get() {
+            return model;
+        },
+        refresh(runId) {
+            return refresh(runId);
+        }
+    });
+
     for (const item of bootstrap.pack.challenges) {
         const option = document.createElement('option');
         option.value = item.id;
@@ -214,7 +234,11 @@
             text('按屏幕控件操作；所有动作也可用 Tab 聚焦与 Enter 确认。', 'Use the controls; every action supports Tab and Enter.'),
             text('刷新页面后从数据库快照继续。', 'Refresh to resume from the database snapshot.')]
             .forEach(line => tutorial.append(node('li', '', line)));
-        if (!run) { content.append(node('p', 'sg-meta', text('选择挑战开始。', 'Choose a challenge to begin.'))); return; }
+        if (!run) {
+            content.append(node('p', 'sg-meta', text('选择挑战开始。', 'Choose a challenge to begin.')));
+            publishModel();
+            return;
+        }
         const state = run.state;
         status.append(node('span', 'sg-chip', run.status), node('span', 'sg-chip', `${text('修订', 'rev')} ${run.revision}`),
             node('span', 'sg-chip', `${text('分数', 'score')} ${run.score}`), node('span', 'sg-chip', run.actorRole));
@@ -253,6 +277,7 @@
             for (let slot = 0; slot < 6; slot += 1) collection.append(node('p', 'sg-meta',
                 `${slot + 1}: ${bySlot.get(slot) || text('空位', 'empty')}`));
         }
+        publishModel();
     }
 
     async function refresh(runId) {
@@ -264,6 +289,11 @@
     async function commit(action) {
         const run = model.run;
         if (!run || !busyGate.begin()) return;
+        const operationId = window.CreatorOperations?.begin({
+            label: text('提交对局动作', 'Submit game action'),
+            method: 'POST',
+            path: `/api/${gameId}/action`
+        });
         actions.querySelectorAll('button,select').forEach(control => { control.disabled = true; });
         const signature = `${run.id}:${run.revision}:${JSON.stringify(action)}`;
         try {
@@ -272,6 +302,10 @@
             model.history = [{ status: result.run.status, difficulty: result.run.difficulty, score: result.run.score }, ...(model.history || [])];
             if (gameId === 'studio-crafting' && result.run.status === 'completed') await refresh(result.run.id);
             else render();
+            if (operationId) window.CreatorOperations.finish(operationId, { status: 200 });
+        } catch (error) {
+            if (operationId) window.CreatorOperations.fail(operationId, error);
+            throw error;
         } finally {
             busyGate.end();
             render();
@@ -280,15 +314,25 @@
 
     document.getElementById('sg-start').addEventListener('click', async event => {
         event.currentTarget.disabled = true;
+        const operationId = window.CreatorOperations?.begin({
+            label: text('开始或恢复对局', 'Start or resume game'),
+            method: 'POST',
+            path: `/api/${gameId}/start`
+        });
         try {
             const mode = document.querySelector('input[name=sg-mode]:checked').value;
             const result = await post(`/api/${gameId}/start`, { challengeId: challenge.value,
                 difficulty: document.getElementById('sg-difficulty').value, mode }, `start:${gameId}:${challenge.value}:${mode}`);
             model.run = result.run; render();
+            if (operationId) window.CreatorOperations.finish(operationId, { status: 200 });
         } catch (error) {
             if (error.code === 'GAME_ACTIVE_RUN_EXISTS') await refresh();
             message.textContent = error.code === 'GAME_ACTIVE_RUN_EXISTS'
                 ? text('已恢复尚未完成的对局。', 'Resumed your active run.') : error.message;
+            if (operationId) {
+                if (error.code === 'GAME_ACTIVE_RUN_EXISTS') window.CreatorOperations.finish(operationId, { status: 200 });
+                else window.CreatorOperations.fail(operationId, error);
+            }
         }
         finally { event.currentTarget.disabled = false; }
     });

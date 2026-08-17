@@ -6,6 +6,8 @@
     <title><%= title %></title>
     <link rel="stylesheet" href="/common.css">
     <link rel="stylesheet" href="/streamer-games.css">
+    <link rel="stylesheet" href="/creator-shell.css">
+    <link rel="stylesheet" href="/game-experience.css">
 </head>
 <body data-lang="<%= lang %>" data-csrf-token="<%= csrfToken %>" data-game-id="<%= gameId %>">
     <header class="sg-header">
@@ -53,6 +55,13 @@
     <script src="/idempotency.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/streamer-game-ui-state.js"></script>
+    <script src="/js/creator-shell.js"></script>
+    <script src="/js/creator-operation-center.js"></script>
+    <script src="/js/creator-responsive-navigation.js"></script>
+    <script src="/js/creator-context-help.js"></script>
     <script src="/js/streamer-game.js"></script>
+    <script src="/js/games/game-state-narrator.js"></script>
+    <script src="/js/games/game-experience.js"></script>
+    <script src="/js/games/<%= gameId %>.js"></script>
 </body>
 </html>

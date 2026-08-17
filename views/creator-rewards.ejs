@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="/redesign.css">
     <link rel="stylesheet" href="/creator-rewards.css">
+    <link rel="stylesheet" href="/creator-shell.css">
 </head>
 <body class="app-redesign reward-world" data-csrf-token="<%= csrfToken %>" data-lang="<%= lang %>">
     <%- include('partials/language-switcher') %>
@@ -20,11 +21,11 @@
                 </div>
                 <a href="/creator"><%= lang === 'zh' ? '返回主播世界' : 'Back to Creator World' %></a>
             </header>
-            <section class="reward-panel">
+            <section id="reward-catalog-panel" class="reward-panel">
                 <h2><%= lang === 'zh' ? '奖励目录' : 'Reward catalog' %></h2>
                 <div class="reward-grid">
                     <% catalog.items.forEach((item) => { %>
-                        <article class="reward-card" data-catalog-version-id="<%= item.id %>">
+                        <article class="reward-card" data-catalog-version-id="<%= item.id %>" data-kind="<%= item.kind %>" data-points="<%= item.pointsPrice %>" data-eligibility="<%= item.eligible ? 'eligible' : 'locked' %>">
                             <small><%= item.kind %> · <%= item.pointsPrice %> points</small>
                             <h3><%= lang === 'zh' ? item.titleZh : item.titleEn %></h3>
                             <p><%= lang === 'zh' ? item.descriptionZh : item.descriptionEn %></p>
@@ -38,11 +39,11 @@
                     <% }); %>
                 </div>
             </section>
-            <section class="reward-panel">
+            <section id="reward-order-panel" class="reward-panel">
                 <h2><%= lang === 'zh' ? '订单与交付状态' : 'Orders and delivery state' %></h2>
                 <div id="reward-orders" class="reward-grid">
                     <% state.orders.forEach((order) => { %>
-                        <article class="reward-card" data-order-id="<%= order.id %>">
+                        <article class="reward-card" data-order-id="<%= order.id %>" data-status="<%= order.status %>">
                             <h3><%= lang === 'zh' ? order.titleZh : order.titleEn %></h3>
                             <p><%= order.status %><% if (order.inventoryStatus) { %> · backpack: <%= order.inventoryStatus %><% } %><% if (order.deliveryStatus) { %> · delivery: <%= order.deliveryStatus %><% } %></p>
                             <% if (order.needsReconciliation) { %><p class="reward-warning"><%= lang === 'zh' ? '交付结果不确定，正在对账；系统不会自动补发或退回。' : 'Delivery is uncertain and awaiting reconciliation. It will not be resent or refunded automatically.' %></p><% } %>
@@ -65,6 +66,12 @@
         <%- include('partials/app-footer') %>
     </div>
     <script src="/js/i18n-helpers.js"></script>
+    <script src="/js/creator-shell.js"></script>
+    <script src="/js/creator-operation-center.js"></script>
+    <script src="/js/creator-responsive-navigation.js"></script>
+    <script src="/js/creator-context-help.js"></script>
+    <script src="/js/creator-explorer.js"></script>
     <script src="/js/creator-rewards.js"></script>
+    <script src="/js/reward-collection-experience.js"></script>
 </body>
 </html>

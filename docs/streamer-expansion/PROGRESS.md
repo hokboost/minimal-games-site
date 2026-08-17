@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-17T02:30:24Z`
+Last updated: `2026-08-17T05:24:29Z`
 
 ## Pre-existing working-tree changes
 
@@ -158,66 +158,66 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 9 — Hardening and release readiness
 
-- [ ] Complete.
-- Accessibility:
-- Performance/load:
-- Migrations:
-- Security/failure injection:
-- Feature-flag rollback:
-- Documentation:
-- Final line report:
-- Remaining external operator actions:
+- [x] Complete.
+- Accessibility: A shared Creator shell, design tokens, responsive navigation, operation center, contextual help, accessible tables/explorers, and loading/error/empty/retry/offline states are mounted on Creator, Quest, Story, Live, reward, achievement, Director, Studio, and all ten game pages. Game UI now provides mechanism-specific help, real keyboard/touch paths, visible focus, `aria-live` state narration, reduced-motion/high-contrast/mobile styles, bounded history, terminal-state suppression, and authoritative reconnect/CAS recovery. Real VM/DOM behavior tests prove input, focus, disabled-role rules, network recovery, live refresh, and hidden-safe narration.
+- Performance/load: `migrations/add_streamer_phase9_hardening.sql` adds bounded-read indexes for creator inbox, Quest journal/review, Story recovery/archive, Live items/reports, reward/game histories, achievements, collections, and season archives. Repository behavior tests verify explicit limits/offsets, newest/latest lateral reads, privacy projections, and connection release. Load tests cover 120 concurrent Quest trusted events, 150 concurrent Story reads, presence persistence/fan-out/revision races, 100 concurrent co-op catch-up requests, parallel Creator/reward/achievement/audit pages, and mixed successful/failing repository transactions.
+- Migrations: The forward-only Phase 9 migration is registered after the newly registered achievement/archive migration. Static fresh/historical ledger, checksum drift, upgrade ordering, SQL binding, and EXPLAIN-friendly query contracts pass. No historical migration was edited and no database migration was executed in this workspace.
+- Security/failure injection: Eleven Phase 9 suites contain 485 behavior tests covering accessibility, UI state/recovery, ten-engine invalid input and immutability, route/flag/migration contracts, XSS/privacy/provider isolation, revoked sessions, semantic replay/collision, response loss, CAS, hook/audit rollback, retention boundaries, query caps, and the four required load paths. The legacy game browser fixture was updated with the browser-native `CustomEvent`/`dispatchEvent` API required by the new narrator, without changing its assertions. All suites are included in default `npm test`.
+- Feature-flag rollback: All expansion flags still accept only exact lowercase `true`, default to false, and require the root plus Creator foundation. Disabling the root switch removes all expansion behavior without deleting stored immutable state; each product gate remains independently reversible by configuration and restart.
+- Documentation: `docs/streamer-expansion/FINAL_REPORT.md` records architecture, changed modules, all tables/migrations, route families, content counts, accessibility/load/privacy work, verification commands, activation/rollback, external operator steps, and known limitations.
+- Final verification: `npm run test:all` passed after all Phase 9 suites were added to the default chain; syntax checked 310 files and the artifact/secret scan checked 494 files. `npm run release:stage` passed and scanned 356 staged files. All 43 EJS files compiled. `git diff --check` passed. The final line verifier passed every gate with 50,996 meaningful additions and 50,985 net growth.
+- Remaining external operator actions: Run `npm run test:migrations` against operator-authorized fresh and historical disposable PostgreSQL databases matching production; review emitted query plans; verify production backup/restore; apply the nine forward migrations with all flags off; run checksum/smoke checks; configure the exact owner; then enable features gradually. Multi-instance and real-browser staging smoke tests remain recommended. Existing uncertain gift exchanges still require independent receipt reconciliation and must never be auto-retried/refunded.
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 8 is:
+The initial zero report above was captured before Phase 0 ADR creation. The final Phase 9 report is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +12,315 / -8
-  frontend  +2,175 / -0
+  backend   +12,346 / -8
+  frontend  +8,036 / -0
   content   +17,524 / -0
-  tests     +4,958 / -0
-  docs      +158 / -0
+  tests     +12,785 / -1
+  docs      +290 / -0
   tooling   +2 / -1
   other     +13 / -1
 
-Credited additions: 37,145
-Meaningful deletions: 10
-Credited net growth: 37,135
-Backend + frontend + content: 32,014
+Credited additions: 50,996
+Meaningful deletions: 11
+Credited net growth: 50,985
+Backend + frontend + content: 37,906
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 37,145 / 50,000
-  [FAIL] net growth: 37,135 / 40,000
-  [PASS] backend additions: 12,315 / 12,000
-  [FAIL] frontend additions: 2,175 / 8,000
+  [PASS] total meaningful additions: 50,996 / 50,000
+  [PASS] net growth: 50,985 / 40,000
+  [PASS] backend additions: 12,346 / 12,000
+  [PASS] frontend additions: 8,036 / 8,000
   [PASS] authored-content additions: 17,524 / 16,000
-  [FAIL] test additions: 4,958 / 10,000
-  [FAIL] backend + frontend + content: 32,014 / 36,000
+  [PASS] test additions: 12,785 / 10,000
+  [PASS] backend + frontend + content: 37,906 / 36,000
 
-Overall: FAIL
+Overall: PASS
 ```
 
-The remaining overall threshold failures are expected before Phase 9 hardening, accessibility, browser coverage, and release work.
+The report excludes generated, vendored, binary, minified, lock, build, coverage, empty, copied, and comment-only filler under the Agent contract.
 
 ## Current acceptance status
 
-- [ ] 50,000 credited meaningful additions.
-- [ ] 40,000 credited net growth.
-- [ ] 12,000 backend additions.
-- [ ] 8,000 frontend additions.
-- [ ] 16,000 authored-content additions.
-- [ ] 10,000 test additions.
-- [ ] 36,000 backend + frontend + content additions.
+- [x] 50,000 credited meaningful additions.
+- [x] 40,000 credited net growth.
+- [x] 12,000 backend additions.
+- [x] 8,000 frontend additions.
+- [x] 16,000 authored-content additions.
+- [x] 10,000 test additions.
+- [x] 36,000 backend + frontend + content additions.
 - [x] 10 distinct new games complete.
 - [x] 5 story seasons complete.
 - [x] 180 quest templates complete.
 - [x] 30 quest chains complete.
 - [x] 60 achievements complete.
-- [x] Old tests pass at the Phase 0 baseline.
+- [x] Old and new tests pass.
 - [x] Real Bilibili sends remain disabled.
-- [ ] Final report written.
+- [x] Final report written.

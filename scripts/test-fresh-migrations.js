@@ -95,7 +95,17 @@ async function verifyLegacyUpgrade(pool, label) {
                 WHERE tgrelid = 'wish_inventory'::regclass
                   AND tgname = 'wish_inventory_transition_guard'
                   AND NOT tgisinternal
-            ) AS inventory_guard_installed
+            ) AS inventory_guard_installed,
+            to_regclass('public.creator_profiles') IS NOT NULL AS creator_foundation_upgraded,
+            to_regclass('public.quest_v2_assignments') IS NOT NULL AS quest_engine_upgraded,
+            to_regclass('public.story_runs') IS NOT NULL AS story_world_upgraded,
+            to_regclass('public.live_interaction_events') IS NOT NULL AS live_platform_upgraded,
+            to_regclass('public.streamer_game_runs') IS NOT NULL AS streamer_games_upgraded,
+            to_regclass('public.reward_orders') IS NOT NULL AS reward_catalog_upgraded,
+            to_regclass('public.streamer_achievement_progress') IS NOT NULL AS achievements_upgraded,
+            to_regclass('public.creator_inbox_user_archive_time_idx') IS NOT NULL AS phase9_inbox_index,
+            to_regclass('public.reward_orders_user_status_cursor_idx') IS NOT NULL AS phase9_reward_index,
+            to_regclass('public.streamer_achievement_progress_user_unlock_cursor_idx') IS NOT NULL AS phase9_achievement_index
     `, [BASE_MIGRATION, MIGRATIONS.length + 1]);
     if (!Object.values(result.rows[0]).every(Boolean)) {
         throw new Error(`${label} schema verification failed: ${JSON.stringify(result.rows[0])}`);
@@ -112,6 +122,21 @@ async function run() {
                to_regclass('public.pk_spend_authorizations') IS NOT NULL AS pk_authorizations,
                to_regclass('public.worker_role_leases') IS NOT NULL AS worker_role_leases,
                to_regclass('public.admin_audit_log') IS NOT NULL AS admin_audit,
+               to_regclass('public.creator_profiles') IS NOT NULL AS creator_profiles,
+               to_regclass('public.quest_v2_assignments') IS NOT NULL AS quest_v2_assignments,
+               to_regclass('public.story_runs') IS NOT NULL AS story_runs,
+               to_regclass('public.live_interaction_events') IS NOT NULL AS live_interaction_events,
+               to_regclass('public.streamer_game_runs') IS NOT NULL AS streamer_game_runs,
+               to_regclass('public.reward_orders') IS NOT NULL AS reward_orders,
+               to_regclass('public.streamer_achievement_definitions') IS NOT NULL AS achievement_definitions,
+               to_regclass('public.streamer_achievement_progress') IS NOT NULL AS achievement_progress,
+               to_regclass('public.streamer_season_archives') IS NOT NULL AS season_archives,
+               to_regclass('public.creator_inbox_user_archive_time_idx') IS NOT NULL AS creator_inbox_cursor,
+               to_regclass('public.quest_v2_assignments_user_updated_cursor_idx') IS NOT NULL AS quest_cursor,
+               to_regclass('public.story_runs_user_campaign_version_cursor_idx') IS NOT NULL AS story_cursor,
+               to_regclass('public.live_interaction_items_room_status_cursor_idx') IS NOT NULL AS live_cursor,
+               to_regclass('public.reward_orders_user_status_cursor_idx') IS NOT NULL AS reward_cursor,
+               to_regclass('public.streamer_achievement_progress_user_unlock_cursor_idx') IS NOT NULL AS achievement_cursor,
                EXISTS (
                    SELECT 1 FROM pg_constraint
                    WHERE conrelid = 'users'::regclass
@@ -130,6 +155,35 @@ async function run() {
     `, [MIGRATIONS.length + 1]);
     if (!Object.values(verification.rows[0]).every(Boolean)) {
         throw new Error(`Fresh schema verification failed: ${JSON.stringify(verification.rows[0])}`);
+    }
+
+    const phaseNinePlans = await Promise.all([
+        testPool.query(`EXPLAIN (FORMAT JSON)
+            SELECT id FROM creator_inbox_messages
+            WHERE user_id = 1 AND archived_at IS NULL
+            ORDER BY sent_at DESC, id DESC LIMIT 20`),
+        testPool.query(`EXPLAIN (FORMAT JSON)
+            SELECT id FROM quest_v2_assignments
+            WHERE user_id = 1 ORDER BY updated_at DESC, id DESC LIMIT 30`),
+        testPool.query(`EXPLAIN (FORMAT JSON)
+            SELECT id FROM story_runs
+            WHERE user_id = 1 AND campaign_id = 1 AND content_version_id = 1
+            ORDER BY updated_at DESC, id DESC LIMIT 1`),
+        testPool.query(`EXPLAIN (FORMAT JSON)
+            SELECT id FROM live_interaction_items
+            WHERE interaction_id = 1 AND status = 'delivered'
+            ORDER BY created_at DESC, id DESC LIMIT 30`),
+        testPool.query(`EXPLAIN (FORMAT JSON)
+            SELECT id FROM reward_orders
+            WHERE user_id = 1 AND status = 'pending_approval'
+            ORDER BY created_at DESC, id DESC LIMIT 30`),
+        testPool.query(`EXPLAIN (FORMAT JSON)
+            SELECT achievement_id FROM streamer_achievement_progress
+            WHERE user_id = 1 ORDER BY unlocked_at DESC, achievement_id DESC LIMIT 30`)
+    ]);
+    for (const plan of phaseNinePlans) {
+        assert.equal(plan.rowCount, 1);
+        assert.ok(plan.rows[0]['QUERY PLAN'][0].Plan);
     }
 
     const firstWorkerLease = await acquireWorkerRoleLease(testPool, {
