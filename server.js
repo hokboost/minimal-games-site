@@ -3085,6 +3085,7 @@ registerStreamerGameRoutes(app, {
     generateCSRFToken,
     requireLogin,
     requireAuthorized,
+    requireAdmin,
     requireCSRF,
     security,
     paidActionConcurrencyGuard

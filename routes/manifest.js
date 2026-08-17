@@ -54,6 +54,7 @@ const adminPaths = [
     '/api/admin/tasks/assign-offers',
     '/api/admin/tasks/assign-event',
     '/api/admin/tasks/review',
+    '/api/admin/streamer-games/bingo-event',
     '/api/admin/lock-user',
     '/api/admin/unlock-user',
     '/admin/security/unblock',

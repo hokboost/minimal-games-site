@@ -110,6 +110,25 @@ class StreamerGameRepository {
         return result.rows[0] || null;
     }
 
+    async findDailyMazeRun(client, creatorUserId, dailyKey) {
+        const result = await client.query(`SELECT id,status FROM streamer_game_runs
+            WHERE creator_user_id=$1 AND game_id='dream-maze' AND daily_key=$2 LIMIT 1 FOR UPDATE`,
+        [creatorUserId, dailyKey]);
+        return result.rows[0] || null;
+    }
+
+    async findTrustedGameEvent(client, sourceType, sourceEventId) {
+        return (await client.query(`SELECT semantic_hash,run_id,response_body FROM streamer_game_trusted_events
+            WHERE source_type=$1 AND source_event_id=$2`, [sourceType, sourceEventId])).rows[0] || null;
+    }
+
+    async insertTrustedGameEvent(client, values) {
+        await client.query(`INSERT INTO streamer_game_trusted_events(creator_user_id,source_type,source_event_id,
+            event_key,semantic_hash,payload,run_id,response_body) VALUES($1,$2,$3,$4,$5,$6::JSONB,$7,$8::JSONB)`,
+        [values.creatorUserId, values.sourceType, values.sourceEventId, values.eventKey,
+            values.semanticHash, JSON.stringify(values.payload), values.runId, JSON.stringify(values.body)]);
+    }
+
     async readRunIdentity(client, runId) {
         return (await client.query(`SELECT creator.username creator_username,owner.username owner_username
             FROM streamer_game_runs run JOIN users creator ON creator.id=run.creator_user_id
@@ -119,10 +138,11 @@ class StreamerGameRepository {
     async createRun(client, values) {
         const result = await client.query(`
             INSERT INTO streamer_game_runs(id,game_id,version_id,creator_user_id,owner_user_id,live_interaction_id,
-                mode,difficulty,status,state,score)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9::JSONB,0) RETURNING *
+                mode,difficulty,status,state,score,daily_key)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9::JSONB,0,$10) RETURNING *
         `, [values.id, values.gameId, values.versionId, values.creatorUserId, values.ownerUserId,
-            values.liveInteractionId, values.mode, values.difficulty, JSON.stringify(values.state)]);
+            values.liveInteractionId, values.mode, values.difficulty, JSON.stringify(values.state),
+            values.gameId === 'dream-maze' ? values.state.dailyKey : null]);
         return runRow({ ...result.rows[0], config_version: values.configVersion,
             creator_username: values.creatorUsername, owner_username: values.ownerUsername });
     }

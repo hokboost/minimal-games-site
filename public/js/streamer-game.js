@@ -129,6 +129,76 @@
         } else for (let slot = 0; slot < 6; slot += 1) actions.append(actionButton(text(`放到位置 ${slot + 1}`, `Place in slot ${slot + 1}`), { type: 'place', slot }));
     }
 
+    function renderMeteor(state) {
+        content.append(node('p', 'sg-meta', text(`防线 ${state.integrity} · 能量 ${state.energy} · 波次 ${state.wave + 1}/${state.waveCount}`,
+            `Integrity ${state.integrity} · energy ${state.energy} · wave ${state.wave + 1}/${state.waveCount}`)));
+        content.append(node('p', 'sg-card', text(`当前情报：航道 ${state.currentThreat?.lane ?? '？'} · 强度 ${state.currentThreat?.strength ?? '？'}`,
+            `Current intel: lane ${state.currentThreat?.lane ?? '?'} · strength ${state.currentThreat?.strength ?? '?'}`)));
+        for (let lane = 0; lane < state.lanes; lane += 1) {
+            const fort = actionButton(text(`加固 ${lane + 1}（${state.forts[lane]}）`, `Fortify ${lane + 1} (${state.forts[lane]})`), { type: 'fortify', lane });
+            fort.disabled = state.yourRole === 'owner' || state.fortifiedThisWave || state.energy < 1;
+            const beacon = actionButton(text(`信标 ${lane + 1}`, `Beacon ${lane + 1}`), { type: 'beacon', lane });
+            beacon.disabled = state.yourRole === 'creator' || state.beacon !== null || state.energy < 1;
+            actions.append(fort, beacon);
+        }
+        const resolve = actionButton(text('结算本波（R）', 'Resolve wave (R)'), { type: 'resolve' });
+        resolve.disabled = state.yourRole === 'owner';
+        actions.append(resolve);
+    }
+
+    function renderMaze(state) {
+        content.append(node('p', 'sg-card', text(`位置 ${state.position.x + 1},${state.position.y + 1} · 剩余提示 ${state.hintsRemaining}`,
+            `Position ${state.position.x + 1},${state.position.y + 1} · ${state.hintsRemaining} hints left`)));
+        if (state.lastHint) content.append(node('p', 'sg-meta', text(`伙伴提示：${state.lastHint}`, `Partner hint: ${state.lastHint}`)));
+        for (const direction of ['up', 'left', 'down', 'right']) {
+            const button = actionButton(direction, { type: 'move', direction });
+            button.disabled = !state.canNavigate || !state.legalDirections.includes(direction);
+            actions.append(button);
+        }
+        const hint = actionButton(text('发送有限提示（H）', 'Send limited hint (H)'), { type: 'hint' });
+        hint.disabled = !state.canHint || state.hintsRemaining < 1;
+        actions.append(hint);
+    }
+
+    function renderBingo(state) {
+        const board = node('div', 'sg-grid');
+        board.style.gridTemplateColumns = 'repeat(5,1fr)';
+        for (const cell of state.cells) board.append(node('div', `sg-cell${cell.marked ? ' placed' : ''}`,
+            lang === 'zh' ? cell.labelZh : cell.labelEn));
+        content.append(node('p', 'sg-meta', text(`完成线：${state.completedLines}。仅经确认的服务端事件会落格。`,
+            `${state.completedLines} lines. Only confirmed server events mark this card.`)), board);
+    }
+
+    function renderEcho(state) {
+        content.append(node('p', 'sg-meta', text(`阶段：${state.phase} · 进度 ${state.recallIndex}/${state.length}`,
+            `Phase: ${state.phase} · ${state.recallIndex}/${state.length}`)));
+        if (state.phase === 'study') {
+            content.append(node('p', 'sg-card', state.privateClue.map(item => `${item.index + 1}:${item.symbol}`).join(' · ')));
+            const study = actionButton(text('记住我的线索', 'I memorized my clue'), { type: 'study' });
+            study.disabled = !state.yourTurn;
+            actions.append(study);
+        } else for (const symbol of state.symbols) {
+            const button = actionButton(symbol, { type: 'echo', symbol });
+            button.disabled = !state.yourTurn;
+            actions.append(button);
+        }
+    }
+
+    function renderPrediction(state) {
+        content.append(node('p', 'sg-meta', text(`回合 ${state.round + 1}/${state.roundCount}`, `Round ${state.round + 1}/${state.roundCount}`)));
+        for (const reveal of state.reveals) content.append(node('p', 'sg-card', text(`第 ${reveal.round + 1} 回合默契 ${reveal.points}/2`,
+            `Round ${reveal.round + 1} match ${reveal.points}/2`)));
+        if (state.submitted) {
+            content.append(node('p', 'sg-meta', state.partnerSubmitted ? text('正在揭示…', 'Revealing…') : text('已封存，等待伙伴。', 'Sealed; waiting for partner.')));
+            return;
+        }
+        for (let choice = 0; choice < 3; choice += 1) for (let prediction = 0; prediction < 3; prediction += 1) {
+            actions.append(actionButton(text(`我选「${state.choicesZh[choice]}」· 猜伙伴选「${state.choicesZh[prediction]}」`,
+                `Choose “${state.choicesEn[choice]}” · predict “${state.choicesEn[prediction]}”`),
+            { type: 'submit', choice, prediction }));
+        }
+    }
+
     function render() {
         content.replaceChildren(); actions.replaceChildren(); status.replaceChildren(); message.textContent = '';
         const run = model.run;
@@ -148,7 +218,12 @@
         else if (gameId === 'signal-duet') renderSignal(state);
         else if (gameId === 'mystery-board') renderMystery(state);
         else if (gameId === 'story-weaver') renderWeaver(state);
-        else renderCrafting(state);
+        else if (gameId === 'studio-crafting') renderCrafting(state);
+        else if (gameId === 'meteor-defense') renderMeteor(state);
+        else if (gameId === 'dream-maze') renderMaze(state);
+        else if (gameId === 'broadcast-bingo') renderBingo(state);
+        else if (gameId === 'echo-memory') renderEcho(state);
+        else renderPrediction(state);
         if (run.status === 'active' && run.actorRole === 'creator') {
             actions.append(actionButton(text('结束当前对局', 'End active run'), { type: 'abandon' }));
         }
@@ -203,18 +278,20 @@
     actions.addEventListener('click', async event => {
         const button = event.target.closest('button[data-type]'); if (!button) return;
         let action = { type: button.dataset.type };
-        for (const key of ['x', 'y', 'beatIndex', 'cardIndex', 'suspectIndex', 'slot']) if (button.dataset[key] !== undefined) action[key] = Number(button.dataset[key]);
+        for (const key of ['x', 'y', 'beatIndex', 'cardIndex', 'suspectIndex', 'slot', 'lane', 'choice', 'prediction']) if (button.dataset[key] !== undefined) action[key] = Number(button.dataset[key]);
         if (button.dataset.left) action.left = button.dataset.left;
         if (button.dataset.right) action.right = button.dataset.right;
         if (action.type === 'link-select') action = { type: 'link', left: document.getElementById('sg-left').value, right: document.getElementById('sg-right').value };
         if (button.dataset.material) action.material = button.dataset.material;
+        if (button.dataset.direction) action.direction = button.dataset.direction;
+        if (button.dataset.symbol) action.symbol = button.dataset.symbol;
         button.disabled = true;
         try { await commit(action); } catch (error) { message.textContent = error.message; button.disabled = false; }
     });
     document.addEventListener('keydown', event => {
         const action = window.StreamerGameUIState.keyboardAction(gameId, model.run?.state, event.code);
         if (action) {
-            event.preventDefault(); commit({ type: 'tap', beatIndex: model.run.state.completedBeats }).catch(error => { message.textContent = error.message; });
+            event.preventDefault(); commit(action).catch(error => { message.textContent = error.message; });
         }
     });
     window.addEventListener('focus', () => model.run && refresh(model.run.id));
@@ -239,7 +316,8 @@
         subscribe();
     }
     setInterval(() => {
-        if (model.run?.mode === 'coop' && model.run.status === 'active' && !busyGate.active()) refresh(model.run.id);
+        if (model.run?.status === 'active' && !busyGate.active()
+            && (model.run.mode === 'coop' || gameId === 'broadcast-bingo')) refresh(model.run.id);
     }, 5000);
     render();
 })();

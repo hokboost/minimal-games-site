@@ -378,6 +378,51 @@ const GAME_DEFINITIONS = deepFreeze([
         descZh: '按确定性配方收集材料、制作摆件并布置自己的六格工作室。',
         descEn: 'Gather deterministic materials, craft keepsakes, and arrange a six-slot personal studio.',
         costZh: '免费', costEn: 'Free', metaZh: '20 件可收藏摆件', metaEn: '20 collectible decorations'
+    }),
+    defineGame({
+        id: 'meteor-defense', index: '18', group: 'free', href: '/meteor-defense',
+        actions: [action('/api/meteor-defense/start', CAPACITY_USER_ACTION_POLICIES), action('/api/meteor-defense/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'coop', economicsKind: 'free', recordView: null,
+        titleZh: '流星守望', titleEn: 'Meteor Defense',
+        descZh: '主播加固主防线，站主用隐藏强度线索放置信标；单人模式提供完整回退。',
+        descEn: 'The creator holds the line while the owner places strength-informed beacons, with full solo fallback.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 张手写防线图', metaEn: '20 authored defense maps'
+    }),
+    defineGame({
+        id: 'dream-maze', index: '19', group: 'free', href: '/dream-maze',
+        actions: [action('/api/dream-maze/start', CAPACITY_USER_ACTION_POLICIES), action('/api/dream-maze/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'brain', economicsKind: 'free', recordView: null,
+        titleZh: '梦境迷航', titleEn: 'Dream Maze',
+        descZh: '服务器按用户与日期生成确定迷宫，地图保持隐藏，并提供严格有限的安全提示。',
+        descEn: 'A deterministic daily maze stays server-hidden and offers a strictly limited hint supply.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 个梦境区域', metaEn: '20 dream regions'
+    }),
+    defineGame({
+        id: 'broadcast-bingo', index: '20', group: 'free', href: '/broadcast-bingo',
+        actions: [action('/api/broadcast-bingo/start', CAPACITY_USER_ACTION_POLICIES), action('/api/broadcast-bingo/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'live', economicsKind: 'free', recordView: null,
+        titleZh: '直播宾果', titleEn: 'Broadcast Bingo',
+        descZh: '卡片只响应站内已确认的安全直播事件，浏览器无法自行声明完成。',
+        descEn: 'Cards respond only to confirmed safe server events; browsers cannot self-report squares.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 套安全主题卡', metaEn: '20 safe themed cards'
+    }),
+    defineGame({
+        id: 'echo-memory', index: '21', group: 'free', href: '/echo-memory',
+        actions: [action('/api/echo-memory/start', CAPACITY_USER_ACTION_POLICIES), action('/api/echo-memory/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'brain', economicsKind: 'free', recordView: null,
+        titleZh: '回声默契', titleEn: 'Echo Memory',
+        descZh: '双方只看见交错序列的一半，轮流复原；单人模式可查看完整学习线索。',
+        descEn: 'Partners study alternating halves and rebuild the sequence; solo study exposes the whole clue.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 组非对称回声', metaEn: '20 asymmetric echoes'
+    }),
+    defineGame({
+        id: 'keeper-prediction', index: '22', group: 'free', href: '/keeper-prediction',
+        actions: [action('/api/keeper-prediction/start', CAPACITY_USER_ACTION_POLICIES), action('/api/keeper-prediction/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'creative', economicsKind: 'free', recordView: null,
+        titleZh: '守望者猜心局', titleEn: 'Keeper Prediction',
+        descZh: '双方封存对虚构场景的游戏选择并预测伙伴答案，不读取任何真实敏感画像。',
+        descEn: 'Seal fictional game choices and predict a partner without reading real sensitive profiles.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 个虚构选择场景', metaEn: '20 fictional choice scenes'
     })
 ]);
 

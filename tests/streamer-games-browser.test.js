@@ -294,3 +294,59 @@ test('a co-op start live event discovers the run from an empty page through auth
     assert.equal(browser.refreshCalls.length, 1);
     assert.match(browser.refreshCalls[0], new RegExp(initialRun.id));
 });
+
+test('meteor renderer preserves role and once-per-wave controls after a mutation', async () => {
+    const before = stateBase({ lanes: 2, wave: 0, waveCount: 3, integrity: 9, energy: 3,
+        forts: [0, 0], beacon: null, modifier: 'crosswind', fortifiedThisWave: false,
+        yourRole: 'creator', currentThreat: { lane: 0, strength: null } });
+    const after = { ...before, forts: [1, 0], fortifiedThisWave: true, energy: 2 };
+    const initialRun = run({ gameId: 'meteor-defense', state: before, mode: 'coop' });
+    const nextRun = run({ gameId: 'meteor-defense', state: after, mode: 'coop', revision: 1 });
+    const browser = createBrowser({ gameId: 'meteor-defense', initialRun, mutation: { success: true, run: nextRun } });
+    const fort = buttons(browser.elements.get('sg-actions')).find(item => item.dataset.type === 'fortify');
+    await browser.elements.get('sg-actions').dispatch('click', { target: fort });
+    const current = buttons(browser.elements.get('sg-actions'));
+    assert.ok(current.filter(item => item.dataset.type === 'fortify').every(item => item.disabled));
+    assert.ok(current.filter(item => item.dataset.type === 'beacon').every(item => item.disabled));
+    assert.equal(current.find(item => item.dataset.type === 'resolve').disabled, false);
+});
+
+test('maze renderer supports arrow-key movement while keeping closed exits disabled', async () => {
+    const before = stateBase({ position: { x: 0, y: 0 }, hintsRemaining: 3, lastHint: null,
+        canNavigate: true, canHint: true, legalDirections: ['right'], visited: ['0:0'], size: 5 });
+    const initialRun = run({ gameId: 'dream-maze', state: before });
+    const browser = createBrowser({ gameId: 'dream-maze', initialRun,
+        mutation: { success: true, run: run({ gameId: 'dream-maze', state: before, revision: 1 }) } });
+    const controls = buttons(browser.elements.get('sg-actions'));
+    assert.equal(controls.find(item => item.dataset.direction === 'up').disabled, true);
+    assert.equal(controls.find(item => item.dataset.direction === 'right').disabled, false);
+    await browser.documentListeners.get('keydown')({ code: 'ArrowRight', preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(JSON.parse(browser.mutationCalls[0].options.body).action, { type: 'move', direction: 'right' });
+});
+
+test('bingo renderer has no client marking control and refreshes an active solo card', () => {
+    const cells = Array.from({ length: 25 }, (_, index) => ({ id: `cell-${index}`, marked: false,
+        eventKey: 'quest.step_completed', labelZh: '任务确认', labelEn: 'Quest confirmed' }));
+    const bingoRun = run({ gameId: 'broadcast-bingo', state: stateBase({ cells, completedLines: 0,
+        trustedEventsOnly: true, interactive: false }) });
+    const browser = createBrowser({ gameId: 'broadcast-bingo', initialRun: bingoRun });
+    assert.equal(buttons(browser.elements.get('sg-actions')).filter(item => item.dataset.type !== 'abandon').length, 0);
+});
+
+test('echo and prediction render only the safe projection supplied to the current role', () => {
+    const echoRun = run({ gameId: 'echo-memory', mode: 'coop', actorRole: 'creator', state: stateBase({
+        phase: 'study', studied: [], recallIndex: 0, length: 4, yourTurn: true,
+        privateClue: [{ index: 0, symbol: 'circle' }, { index: 2, symbol: 'star' }], symbols: ['circle', 'star']
+    }) });
+    const echoBrowser = createBrowser({ gameId: 'echo-memory', initialRun: echoRun });
+    assert.match(echoBrowser.elements.get('sg-content').children.map(item => item.textContent).join(' '), /1:circle/);
+    assert.doesNotMatch(echoBrowser.elements.get('sg-content').children.map(item => item.textContent).join(' '), /2:/);
+
+    const predictionRun = run({ gameId: 'keeper-prediction', mode: 'coop', state: stateBase({
+        round: 0, roundCount: 3, choicesZh: ['甲', '乙', '丙'], choicesEn: ['A', 'B', 'C'],
+        submitted: true, partnerSubmitted: false, reveals: []
+    }) });
+    const predictionBrowser = createBrowser({ gameId: 'keeper-prediction', initialRun: predictionRun });
+    assert.equal(buttons(predictionBrowser.elements.get('sg-actions')).filter(item => item.dataset.type === 'submit').length, 0);
+});

@@ -1,7 +1,7 @@
 'use strict';
 
 const requireFunction = require('../lib/require-function');
-const packs = require('../content/streamer-world/games/batch-one');
+const packs = require('../content/streamer-world/games');
 const { StreamerGameServiceError } = require('../services/streamer-game-service');
 
 const GAME_SPECS = Object.freeze([
@@ -9,12 +9,17 @@ const GAME_SPECS = Object.freeze([
     ['signal-duet', '/signal-duet', '/api/signal-duet/start', '/api/signal-duet/action'],
     ['mystery-board', '/mystery-board', '/api/mystery-board/start', '/api/mystery-board/action'],
     ['story-weaver', '/story-weaver', '/api/story-weaver/start', '/api/story-weaver/action'],
-    ['studio-crafting', '/studio-crafting', '/api/studio-crafting/start', '/api/studio-crafting/action']
+    ['studio-crafting', '/studio-crafting', '/api/studio-crafting/start', '/api/studio-crafting/action'],
+    ['meteor-defense', '/meteor-defense', '/api/meteor-defense/start', '/api/meteor-defense/action'],
+    ['dream-maze', '/dream-maze', '/api/dream-maze/start', '/api/dream-maze/action'],
+    ['broadcast-bingo', '/broadcast-bingo', '/api/broadcast-bingo/start', '/api/broadcast-bingo/action'],
+    ['echo-memory', '/echo-memory', '/api/echo-memory/start', '/api/echo-memory/action'],
+    ['keeper-prediction', '/keeper-prediction', '/api/keeper-prediction/start', '/api/keeper-prediction/action']
 ].map(([gameId, pagePath, startPath, actionPath]) => Object.freeze({ gameId, pagePath, startPath, actionPath })));
 
 module.exports = function registerStreamerGameRoutes(app, deps) {
     const { streamerGameService, streamerWorldFlags, generateCSRFToken, requireLogin,
-        requireAuthorized, requireCSRF, security, paidActionConcurrencyGuard } = deps;
+        requireAuthorized, requireAdmin, requireCSRF, security, paidActionConcurrencyGuard } = deps;
     if (!streamerGameService?.state || !streamerWorldFlags) throw new TypeError('Streamer game routes require service and flags');
     const basicRateLimit = requireFunction(security, 'basicRateLimit', 'security middleware');
     const userActionRateLimit = requireFunction(security, 'userActionRateLimit', 'security middleware');
@@ -104,6 +109,35 @@ module.exports = function registerStreamerGameRoutes(app, deps) {
     app.post('/api/story-weaver/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => actionHandler('story-weaver')(req, res));
     app.post('/api/studio-crafting/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => startHandler('studio-crafting')(req, res));
     app.post('/api/studio-crafting/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => actionHandler('studio-crafting')(req, res));
+    app.post('/api/meteor-defense/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => startHandler('meteor-defense')(req, res));
+    app.post('/api/meteor-defense/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => actionHandler('meteor-defense')(req, res));
+    app.post('/api/dream-maze/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => startHandler('dream-maze')(req, res));
+    app.post('/api/dream-maze/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => actionHandler('dream-maze')(req, res));
+    app.post('/api/broadcast-bingo/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => startHandler('broadcast-bingo')(req, res));
+    app.post('/api/broadcast-bingo/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => actionHandler('broadcast-bingo')(req, res));
+    app.post('/api/echo-memory/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => startHandler('echo-memory')(req, res));
+    app.post('/api/echo-memory/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => actionHandler('echo-memory')(req, res));
+    app.post('/api/keeper-prediction/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => startHandler('keeper-prediction')(req, res));
+    app.post('/api/keeper-prediction/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => actionHandler('keeper-prediction')(req, res));
+    app.post('/api/admin/streamer-games/bingo-event', rejectWhenOverloaded, requireLogin, requireAuthorized,
+        requireAdmin, basicRateLimit, userActionRateLimit, csrfProtection, enabled, async (req, res) => {
+            try {
+                const body = assertAdminBingoBody(req.body);
+                return res.json(await streamerGameService.recordTrustedBingoEvent({ ...body,
+                    sourceType: 'admin_confirmed_live' }, { ...context(req),
+                    actorUsername: req.session.user.username }));
+            } catch (error) {
+                return fail(error, res);
+            }
+        });
 };
 
+function assertAdminBingoBody(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TypeError('Invalid bingo event');
+    const allowed = ['commandId', 'sourceEventId', 'username', 'eventKey', 'payload'];
+    if (Object.keys(raw).some(key => !allowed.includes(key))) throw new TypeError('Unexpected bingo event field');
+    return { sourceEventId: raw.sourceEventId, username: raw.username, eventKey: raw.eventKey, payload: raw.payload || {} };
+}
+
 module.exports.GAME_SPECS = GAME_SPECS;
+module.exports.assertAdminBingoBody = assertAdminBingoBody;

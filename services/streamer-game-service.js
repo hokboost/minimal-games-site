@@ -2,12 +2,17 @@
 
 const crypto = require('node:crypto');
 const { stableStringify } = require('../lib/idempotency');
-const packs = require('../content/streamer-world/games/batch-one');
+const packs = require('../content/streamer-world/games');
 const constellation = require('../domain/constellation-repair/engine');
 const signal = require('../domain/signal-duet/engine');
 const mystery = require('../domain/mystery-board/engine');
 const weaver = require('../domain/story-weaver/engine');
 const crafting = require('../domain/studio-crafting/engine');
+const meteor = require('../domain/meteor-defense/engine');
+const maze = require('../domain/dream-maze/engine');
+const bingo = require('../domain/broadcast-bingo/engine');
+const echo = require('../domain/echo-memory/engine');
+const prediction = require('../domain/keeper-prediction/engine');
 const { DIFFICULTIES, MODES, assertKeys } = require('../domain/streamer-games/shared');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -17,7 +22,12 @@ const ENGINE_REGISTRY = Object.freeze({
     'signal-v1': signal,
     'mystery-v1': mystery,
     'weaver-v1': weaver,
-    'crafting-v1': crafting
+    'crafting-v1': crafting,
+    'meteor-v1': meteor,
+    'maze-v1': maze,
+    'bingo-v1': bingo,
+    'echo-v1': echo,
+    'prediction-v1': prediction
 });
 
 class StreamerGameServiceError extends Error {
@@ -54,6 +64,25 @@ function validateAction(raw, expectedGameId) {
     if (value.gameId !== expectedGameId || !GAME_IDS.includes(value.gameId)) throw new StreamerGameServiceError('INVALID_GAME', 400, 'Unknown game');
     if (!Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0 || value.expectedRevision > 100000) throw new StreamerGameServiceError('INVALID_REVISION', 400, 'Invalid revision');
     if (!value.action || typeof value.action !== 'object' || Array.isArray(value.action)) throw new StreamerGameServiceError('INVALID_INPUT', 400, 'Invalid action');
+    return value;
+}
+
+function validateTrustedBingoEvent(raw, pack) {
+    const value = assertKeys(raw, ['sourceType', 'sourceEventId', 'username', 'eventKey', 'payload'], 'trusted bingo event');
+    if (!['admin_confirmed_live', 'server_observed_live', 'reviewed_evidence'].includes(value.sourceType)) {
+        throw new StreamerGameServiceError('GAME_TRUSTED_SOURCE_REJECTED', 400, 'Untrusted event source');
+    }
+    if (typeof value.sourceEventId !== 'string' || !/^[A-Za-z0-9:_.-]{8,160}$/.test(value.sourceEventId)
+        || typeof value.username !== 'string' || value.username.length > 100) {
+        throw new StreamerGameServiceError('INVALID_INPUT', 400, 'Invalid trusted event identity');
+    }
+    if (!pack.safeEventKinds.some(([key]) => key === value.eventKey)) {
+        throw new StreamerGameServiceError('GAME_TRUSTED_EVENT_REJECTED', 400, 'Event is not on the safe allowlist');
+    }
+    if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)
+        || Buffer.byteLength(stableStringify(value.payload), 'utf8') > 2048) {
+        throw new StreamerGameServiceError('INVALID_INPUT', 400, 'Invalid trusted event payload');
+    }
     return value;
 }
 
@@ -116,13 +145,22 @@ class StreamerGameService {
     async start(username, expectedGameId, raw, context = {}) {
         const command = validateStart(raw, expectedGameId);
         const semanticHash = hash({ type: 'start', ...command });
-        const result = await this.repository.withTransaction(async client => {
+        let result;
+        try {
+            result = await this.repository.withTransaction(async client => {
             const accounts = await this.repository.lockAccounts(client, [username, command.mode === 'coop' ? this.ownerUsername : null]);
             const creator = accounts.get(username);
             if (!creator || creator.authorized !== true || creator.deactivated === true) throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403, 'Creator account unavailable');
             const existing = await this.repository.findStartCommand(client, creator.id, command.gameId, command.commandId);
             const replay = this.replay(existing, semanticHash);
             if (replay) return { body: replay };
+            const startedAt = this.clock();
+            const serverDateKey = startedAt.toISOString().slice(0, 10);
+            if (command.gameId === 'dream-maze'
+                && await this.repository.findDailyMazeRun(client, creator.id, serverDateKey)) {
+                throw new StreamerGameServiceError('GAME_DAILY_ALREADY_PLAYED', 409,
+                    'Today\'s deterministic maze has already been started');
+            }
             const active = await this.repository.findActiveCreatorRun(client, creator.id, command.gameId);
             if (active) throw new StreamerGameServiceError('GAME_ACTIVE_RUN_EXISTS', 409,
                 'Resume the active run before starting another');
@@ -139,8 +177,8 @@ class StreamerGameService {
 
             const version = this.versionFor(command.gameId);
             version.engine.challengeById(command.challengeId, version.pack);
-            const startedAt = this.clock();
-            const state = version.engine.createState({ ...command, serverStartedAtMs: startedAt.getTime(), contentPack: version.pack });
+            const state = version.engine.createState({ ...command, serverStartedAtMs: startedAt.getTime(),
+                serverDateKey, creatorUsername: creator.username, contentPack: version.pack });
             const runId = crypto.randomUUID();
             const versionId = this.versionIds.get(`${command.gameId}:${version.version}`);
             if (!versionId) throw new StreamerGameServiceError('GAME_CATALOG_NOT_READY', 503, 'Game catalog not initialized');
@@ -174,7 +212,14 @@ class StreamerGameService {
                 requestId: context.requestId, details: { gameId: command.gameId, mode: command.mode } });
             await context.finalizeIdempotency?.(client, 201, body);
             return { body, liveEvent, run };
-        });
+            });
+        } catch (error) {
+            if (error?.constraint === 'streamer_game_runs_daily_maze_idx') {
+                throw new StreamerGameServiceError('GAME_DAILY_ALREADY_PLAYED', 409,
+                    'Today\'s deterministic maze has already been started');
+            }
+            throw error;
+        }
         if (result.liveEvent) {
             try {
                 await this.publish(result.liveEvent, result.run, 'both');
@@ -242,7 +287,7 @@ class StreamerGameService {
             } else {
                 try {
                     nextState = version.engine.applyAction(run.state, command.action,
-                        { actorRole, elapsedMs, serverNowMs, contentPack: version.pack });
+                        { actorRole, elapsedMs, serverNowMs, contentPack: version.pack, trusted: false });
                 } catch (error) {
                     throw new StreamerGameServiceError('GAME_ACTION_REJECTED', 400, error.message);
                 }
@@ -325,7 +370,81 @@ class StreamerGameService {
         return { success: true, gameId, run: this.runProjection(resolved.run, resolved.actorRole,
             projection), history, collection };
     }
+
+    async recordTrustedBingoEvent(raw, context = {}) {
+        if (!this.ownerUsername || context.actorUsername !== this.ownerUsername) {
+            throw new StreamerGameServiceError('GAME_OWNER_REQUIRED', 403,
+                'Only the configured owner can confirm a live bingo event');
+        }
+        const command = validateTrustedBingoEvent(raw, this.packs['broadcast-bingo']);
+        const semanticHash = hash(command);
+        return this.repository.withTransaction(async client => {
+            const accounts = await this.repository.lockAccounts(client, [command.username, context.actorUsername]);
+            const creator = accounts.get(command.username);
+            const owner = accounts.get(context.actorUsername);
+            if (!creator || creator.authorized !== true || creator.deactivated === true) {
+                throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403, 'Creator account unavailable');
+            }
+            if (!owner || owner.is_admin !== true || owner.authorized !== true || owner.deactivated === true) {
+                throw new StreamerGameServiceError('GAME_OWNER_REQUIRED', 403,
+                    'Configured owner account unavailable');
+            }
+            const existing = await this.repository.findTrustedGameEvent(client, command.sourceType, command.sourceEventId);
+            if (existing) {
+                if (existing.semantic_hash !== semanticHash) {
+                    throw new StreamerGameServiceError('GAME_TRUSTED_EVENT_COLLISION', 409,
+                        'Trusted event identity collision');
+                }
+                await context.finalizeIdempotency?.(client, 200, existing.response_body);
+                return existing.response_body;
+            }
+            const active = await this.repository.findActiveCreatorRun(client, creator.id, 'broadcast-bingo');
+            if (!active) {
+                const body = { success: true, matched: false, runId: null };
+                await this.repository.insertTrustedGameEvent(client, { creatorUserId: creator.id, ...command,
+                    semanticHash, runId: null, body });
+                await context.finalizeIdempotency?.(client, 200, body);
+                return body;
+            }
+            const locked = await this.repository.lockRun(client, active.id, command.username);
+            const { run, actorUserId } = locked;
+            const version = this.versionFor(run.gameId, run);
+            const nextState = version.engine.applyAction(run.state, { type: 'trusted_event',
+                eventKey: command.eventKey, sourceEventId: command.sourceEventId },
+            { actorRole: 'creator', trusted: true, contentPack: version.pack });
+            const saved = await this.repository.updateRun(client, run, nextState);
+            if (!saved) throw new StreamerGameServiceError('GAME_REVISION_CONFLICT', 409, 'Game changed concurrently');
+            const event = await this.repository.appendEvent(client, { eventId: crypto.randomUUID(), runId: run.id,
+                eventType: nextState.status === 'completed' ? 'game.run.completed' : 'game.action.committed',
+                actorUserId, stateRevision: saved.revision,
+                actionSummary: { actionType: 'trusted_event', sourceType: command.sourceType }, stateHash: hash(nextState) });
+            if (nextState.status === 'completed') {
+                const hookPayload = { runId: run.id, gameId: run.gameId, configVersion: run.configVersion,
+                    challengeId: nextState.challengeId, difficulty: run.difficulty, mode: run.mode, score: nextState.score };
+                for (const [intentType, intentKey] of [['quest_event', 'game:broadcast-bingo:completed'],
+                    ['story_unlock', 'story:game:broadcast-bingo'], ['achievement_progress', 'achievement:game:broadcast-bingo']]) {
+                    await this.repository.insertHookIntent(client, { runId: run.id, intentType, intentKey, payload: hookPayload });
+                }
+                if (this.questV2Service) {
+                    await this.questV2Service.recordInternalTrustedEvent(client, {
+                        sourceType: 'streamer_game', sourceEventId: `game-run:${run.id}`,
+                        username: run.creatorUsername, eventType: 'game.run.completed',
+                        occurredAt: this.clock().toISOString(), payload: hookPayload
+                    }, context);
+                }
+            }
+            await this.repository.insertAudit(client, { runId: run.id, actorUserId,
+                action: 'streamer_game.trusted_bingo_event', requestId: context.requestId,
+                details: { sourceType: command.sourceType, eventKey: command.eventKey, revision: saved.revision } });
+            const body = { success: true, matched: true, runId: run.id, revision: saved.revision,
+                status: nextState.status, eventId: event.eventId };
+            await this.repository.insertTrustedGameEvent(client, { creatorUserId: creator.id, ...command,
+                semanticHash, runId: run.id, body });
+            await context.finalizeIdempotency?.(client, 200, body);
+            return body;
+        });
+    }
 }
 
 module.exports = { ENGINE_REGISTRY, GAME_IDS, StreamerGameService, StreamerGameServiceError, hash,
-    validateAction, validateStart };
+    validateAction, validateStart, validateTrustedBingoEvent };

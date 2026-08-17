@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-17T01:29:59Z`
+Last updated: `2026-08-17T01:53:58Z`
 
 ## Pre-existing working-tree changes
 
@@ -126,14 +126,14 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 6 — New games batch two
 
-- [ ] Complete.
-- Games:
-- Level/content counts:
-- Migrations:
-- Routes:
-- Tests:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Games: Five additional server-authoritative skill games are complete. Meteor Defense gives the creator the primary lane-defense/resolve role and the owner strength-only beacon intel, with a full solo fallback, per-wave action bounds, and 19 validated level modifiers. Dream Maze builds a deterministic perfect DFS maze from creator identity, server UTC date, challenge seed, and difficulty; only local exits/visited cells are projected, while limited hints remain owner-controlled in co-op and creator-controlled in solo. Broadcast Bingo has no browser mark action and accepts only owner-confirmed, allowlisted safe events through an append-only semantic source identity. Echo Memory divides alternating sequence symbols into private role projections before alternating recall. Keeper Prediction seals both players' selections and predictions from closed fictional content choices before reveal, and reads no profile or sensitive preference data.
+- Level/content counts: 100 original bilingual challenges, exactly 20 per game, in recursively frozen `*-v1` packs. Meteor has 20 distinct maps and truthful validated modifier rules; Maze has 20 dream regions combined with daily identity-bound topology; Bingo has 20 themed cards drawn from a closed 12-event safe registry; Echo has 20 independently authored bilingual briefs and asymmetric deterministic sequences; Prediction has 20 fictional scenarios with three closed bilingual choices each. All five engines expose materially different gentle/standard/expert contracts.
+- Migrations: `migrations/add_streamer_games_batch_two.sql` is the sole append-only Phase 6 migration. It adds a scoped daily key and unique creator/game/day index for Dream Maze, plus append-only trusted Bingo events with closed source types, semantic hashes, bounded payloads, canonical response bodies, and unique source identity. It only extends the existing Phase 5 tables; no historical migration was edited.
+- Routes: Five pages, five private state APIs, and ten fixed start/action paths reuse the Phase 5 login/authorization/rate/CSRF/idempotency chain. A fixed audited/idempotent `POST /api/admin/streamer-games/bingo-event` route derives `admin_confirmed_live` server-side, requires an active authorized administrator, and the service additionally requires and row-revalidates the exact configured owner. Normal Bingo action requests cannot set trusted context. All games remain default-off behind the existing Streamer World, creator foundation, and new-games gates.
+- Tests: 24 Phase 6 behavior tests (15 engine/content/service/migration tests plus nine real VM/DOM browser tests across both batches) cover deep freezing and prose uniqueness, all five engines, hidden asymmetric projections, truthful modifiers, finite turn phases, daily seed/date/identity repeatability, branch/dead-end mazes, local-only projection, limited owner hints, trusted-only Bingo input, semantic response replay and collision rejection, concurrent same-day starts, next-day eligibility, idempotency/Quest rollback, three difficulties, fixed route policies, provider isolation, mobile/touch buttons, arrow/R/H keyboard actions, disabled role/phase controls, no browser Bingo marking, sealed predictions, and authoritative polling/reconnect behavior. `npm run test:all`, `npm run release:stage`, EJS compilation, syntax/secrets scans, and `git diff --check` passed.
+- Credited added lines: 17,057 cumulative after Phase 6 (backend 9,878; frontend 1,938; authored content 1,006; tests 4,063; docs 158; tooling 2; other 12), with ten meaningful deletions and 17,047 net growth. Backend + frontend + content is 12,822.
+- Risks or decisions: The disposable PostgreSQL migration suite was not run because it requires explicit database-create authorization; the new migration has static and transaction-behavior coverage but still needs an operator-authorized disposable PostgreSQL execution before deployment. Solo Bingo uses bounded five-second authoritative state polling because trusted events do not originate in its browser; co-op continues to use the existing Phase 4 relay plus REST recovery. Trusted Bingo completion invokes the same Quest V2 event identity and immutable story/achievement intent pattern as other games, and any Quest or idempotency-finalization failure rolls back the run, event, trusted source, hooks, and audit together. No balance logger, gift inventory/outbox, provider receipt, or gift sender is imported or invoked. No production database or real gift send was touched.
 
 ### Phase 7 — Rewards and gift bridge
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 5 is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 6 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +9,263 / -8
-  frontend  +1,859 / -0
-  content   +830 / -0
-  tests     +3,707 / -0
+  backend   +9,878 / -8
+  frontend  +1,938 / -0
+  content   +1,006 / -0
+  tests     +4,063 / -0
   docs      +158 / -0
   tooling   +2 / -1
   other     +12 / -1
 
-Credited additions: 15,831
+Credited additions: 17,057
 Meaningful deletions: 10
-Credited net growth: 15,821
-Backend + frontend + content: 11,952
+Credited net growth: 17,047
+Backend + frontend + content: 12,822
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 15,831 / 50,000
-  [FAIL] net growth: 15,821 / 40,000
-  [FAIL] backend additions: 9,263 / 12,000
-  [FAIL] frontend additions: 1,859 / 8,000
-  [FAIL] authored-content additions: 830 / 16,000
-  [FAIL] test additions: 3,707 / 10,000
-  [FAIL] backend + frontend + content: 11,952 / 36,000
+  [FAIL] total meaningful additions: 17,057 / 50,000
+  [FAIL] net growth: 17,047 / 40,000
+  [FAIL] backend additions: 9,878 / 12,000
+  [FAIL] frontend additions: 1,938 / 8,000
+  [FAIL] authored-content additions: 1,006 / 16,000
+  [FAIL] test additions: 4,063 / 10,000
+  [FAIL] backend + frontend + content: 12,822 / 36,000
 
 Overall: FAIL
 ```
 
-The overall threshold failure remains expected after Phase 5; the second game batch, reward, hardening, frontend, test, and full-content phases supply the remaining volume.
+The overall threshold failure remains expected after Phase 6; reward, hardening, frontend, test, and full-content phases supply the remaining volume.
 
 ## Current acceptance status
 
@@ -213,7 +213,7 @@ The overall threshold failure remains expected after Phase 5; the second game ba
 - [ ] 16,000 authored-content additions.
 - [ ] 10,000 test additions.
 - [ ] 36,000 backend + frontend + content additions.
-- [ ] 10 distinct new games complete.
+- [x] 10 distinct new games complete.
 - [ ] 5 story seasons complete.
 - [ ] 180 quest templates complete.
 - [ ] 30 quest chains complete.
