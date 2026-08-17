@@ -6,8 +6,10 @@ const { createStoryRun, recoverStoryRun, StoryTransitionError, transitionStory }
 const { publicStoryProjection } = require('../domain/story/projection');
 const { hydrateCompiledContent } = require('../domain/story/compiler');
 const { StoryWorldRepository } = require('../repositories/story-world-repository');
+const { buildPublishedStoryProgressionRegistry } = require('../domain/story/progression-registry');
 const seasonOne = require('../content/streamer-world/story/season-one');
 const { seasons: publishedSeasons } = require('../content/streamer-world/story');
+const { sourceGrantForEvent } = require('../domain/rewards/source-grant-policy');
 
 class StoryWorldServiceError extends Error {
     constructor(code, status, message) {
@@ -62,13 +64,18 @@ function isQuietNow(timezone, rows, date = new Date()) {
 }
 
 class StoryWorldService {
-    constructor({ pool, repositoryFactory, questV2Service = null, questIntegrationEnabled = false, achievementService = null, content = null, contents = publishedSeasons, clock = () => new Date() }) {
+    constructor({ pool, repositoryFactory, questV2Service = null, questIntegrationEnabled = false,
+        achievementService = null, rewardGrantIntentWriter = null, content = null,
+        contents = publishedSeasons, progressionRegistry = null, clock = () => new Date() }) {
         if (!pool?.connect) throw new TypeError('Story service requires a database pool');
         this.pool = pool; this.repositoryFactory = repositoryFactory || ((client) => new StoryWorldRepository(client));
         this.questV2Service = questV2Service; this.questIntegrationEnabled = Boolean(questIntegrationEnabled);
         this.achievementService = achievementService;
+        this.rewardGrantIntentWriter = rewardGrantIntentWriter;
         this.contents = Object.freeze(content ? [content] : [...contents]);
         if (!this.contents.length) throw new TypeError('Story service requires published content');
+        this.progressionRegistry = progressionRegistry
+            || buildPublishedStoryProgressionRegistry(this.contents);
         this.contentsBySlug = new Map(this.contents.map((item) => [item.slug, item]));
         if (this.contentsBySlug.size !== this.contents.length) throw new TypeError('Story season slugs must be unique');
         this.content = this.contents[0] || seasonOne;
@@ -87,7 +94,14 @@ class StoryWorldService {
         const catalogs = await this.transaction(async (client) => {
             const repository = this.repositoryFactory(client);
             const seeded = [];
-            for (const content of this.contents) seeded.push([content, await repository.seedContent(content)]);
+            for (const content of this.contents) {
+                const catalog = await repository.seedContent(content);
+                await repository.seedProgressionBindings(
+                    catalog.version.id,
+                    this.progressionRegistry.bindingsFor(content)
+                );
+                seeded.push([content, catalog]);
+            }
             return seeded;
         });
         for (const [content, catalog] of catalogs) {
@@ -210,9 +224,34 @@ class StoryWorldService {
     }
     async persistValue(repository, args) {
         const { creator, contentVersionId, runId, eventId, result, username, client, commandId, content, choiceAlreadyCommitted, ownerMessagesBlocked, quiet } = args;
+        const firstClears = [];
+        const firstClearEpisodes = new Set();
+        for (const episode of result.event.newlyCompletedEpisodes) {
+            const first = await repository.insertFirstClear({
+                userId: creator.id, contentVersionId, episode, runId, eventId
+            });
+            firstClears.push({ episode, first });
+            if (first) firstClearEpisodes.add(episode);
+        }
         for (const effect of result.emitted) {
             if (effect.type === 'unlock_memory') await repository.insertMemory({ userId: creator.id, contentVersionId, runId, eventId, key: effect.key, memory: content.memories[effect.key] });
-            if (effect.type === 'unlock') await repository.insertUnlock({ userId: creator.id, contentVersionId, eventId, unlockType: effect.unlockType, key: effect.key });
+            if (effect.type === 'unlock') {
+                const policy = this.progressionRegistry.resolve(
+                    content, result.event.fromNodeId, effect, firstClearEpisodes
+                );
+                await repository.insertUnlock({
+                    userId: creator.id,
+                    contentVersionId,
+                    eventId,
+                    unlockType: effect.unlockType,
+                    key: effect.key,
+                    progressionScope: policy.progressionScope,
+                    provenanceType: policy.provenanceType,
+                    provenanceKey: policy.provenanceKey,
+                    publishedBindingHash: policy.publishedBindingHash,
+                    economicEligible: policy.economicEligible
+                });
+            }
             if (effect.type === 'deliver_message' && !ownerMessagesBlocked) await repository.insertMessage({ userId: creator.id, key: effect.key, message: content.messages[effect.key], runId });
             if (effect.type === 'deliver_message' && !ownerMessagesBlocked && this.achievementService?.recordTrustedEvent) {
                 await this.achievementService.recordTrustedEvent(client, username, {
@@ -232,8 +271,7 @@ class StoryWorldService {
                 payload:{ runId,season:content.slug,episode:content.nodesById.get(result.event.fromNodeId).episode,choiceId:result.event.selectedChoice }
             }, { requestId:commandId });
         }
-        for (const episode of result.event.newlyCompletedEpisodes) {
-            const first = await repository.insertFirstClear({ userId: creator.id, contentVersionId, episode, runId, eventId });
+        for (const { episode, first } of firstClears) {
             if (first) await repository.appendRelationshipFirstClear({ userId: creator.id, episode, runId, eventId });
             if (first && this.questIntegrationEnabled && this.questV2Service?.recordInternalTrustedEvent) await this.questV2Service.recordInternalTrustedEvent(client, {
                 sourceType: 'story', sourceEventId: `story-episode:${eventId}:${episode}`, username, eventType: 'story.episode.completed', occurredAt: this.clock().toISOString(),
@@ -244,12 +282,20 @@ class StoryWorldService {
                 eventType:'story.episode.completed',occurredAt:this.clock().toISOString(),payload:{runId,season:content.slug,episode}
             }, { requestId:commandId });
         }
-        if (result.run.status === 'completed' && result.event.action === 'finish' && this.achievementService?.recordTrustedEvent) {
-            await this.achievementService.recordTrustedEvent(client, username, {
+        if (result.run.status === 'completed' && result.event.action === 'finish') {
+            const achievementEvent = {
                 sourceType:'story',sourceEventId:`story-achievement-season:${eventId}`,
                 eventType:'story.season.completed',occurredAt:this.clock().toISOString(),
                 payload:{runId,season:content.slug,conclusion:result.event.fromNodeId,contentVersion:content.version}
-            }, { requestId:commandId });
+            };
+            if (this.achievementService?.recordTrustedEvent) {
+                await this.achievementService.recordTrustedEvent(client, username, achievementEvent,
+                    { requestId:commandId });
+            }
+            const reward = sourceGrantForEvent('story', achievementEvent);
+            if (reward && this.rewardGrantIntentWriter?.enqueue) {
+                await this.rewardGrantIntentWriter.enqueue(client, { ...reward, userId: Number(creator.id) });
+            }
         }
     }
     async preview(username, input = {}) {

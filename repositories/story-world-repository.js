@@ -37,6 +37,40 @@ class StoryWorldRepository {
         return result.rows[0] || null;
     }
 
+    async seedProgressionBindings(contentVersionId, bindings) {
+        const versionId = Number(contentVersionId);
+        if (!Number.isSafeInteger(versionId) || versionId < 1) {
+            throw new TypeError('Story progression binding requires a content version');
+        }
+        for (const binding of bindings) {
+            const values = [binding.publishedBindingHash, versionId, binding.nodeId,
+                binding.unlockType, binding.unlockKey, binding.progressionScope,
+                binding.provenanceType, binding.provenanceKey,
+                binding.economicEligible === true];
+            const inserted = await this.client.query(`
+                INSERT INTO story_progression_bindings(
+                    binding_hash,content_version_id,node_id,unlock_type,unlock_key,
+                    progression_scope,provenance_type,provenance_key,economic_eligible
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                ON CONFLICT(binding_hash) DO NOTHING RETURNING *
+            `, values);
+            if (inserted.rowCount) continue;
+            const existing = (await this.client.query(`
+                SELECT binding_hash,content_version_id,node_id,unlock_type,unlock_key,
+                    progression_scope,provenance_type,provenance_key,economic_eligible
+                FROM story_progression_bindings WHERE binding_hash=$1
+            `, [binding.publishedBindingHash])).rows[0];
+            const actual = existing && [existing.binding_hash,Number(existing.content_version_id),
+                existing.node_id,existing.unlock_type,existing.unlock_key,
+                existing.progression_scope,existing.provenance_type,existing.provenance_key,
+                existing.economic_eligible === true];
+            if (!actual || stableStringify(actual) !== stableStringify(values)) {
+                throw new Error('Story progression binding collision');
+            }
+        }
+        return bindings.length;
+    }
+
     async loadContentVersion(contentVersionId) {
         const result = await this.client.query('SELECT id,version,status,content_hash,content_snapshot FROM story_content_versions WHERE id=$1', [contentVersionId]);
         return result.rows[0] || null;
@@ -48,6 +82,7 @@ class StoryWorldRepository {
                    profile.communication_style, profile.live_interaction_opt_in
             FROM users account LEFT JOIN creator_profiles profile ON profile.user_id = account.id
             WHERE account.username = $1 AND account.authorized = TRUE AND account.deactivated = FALSE
+              AND COALESCE(account.account_locked, FALSE) = FALSE
             FOR UPDATE OF account
         `, [username]);
         return result.rows[0] || null;
@@ -59,6 +94,7 @@ class StoryWorldRepository {
                    profile.communication_style,profile.live_interaction_opt_in
             FROM users account LEFT JOIN creator_profiles profile ON profile.user_id=account.id
             WHERE account.username=$1 AND account.authorized=TRUE AND account.deactivated=FALSE
+              AND COALESCE(account.account_locked,FALSE)=FALSE
         `, [username]);
         return result.rows[0] || null;
     }
@@ -188,12 +224,45 @@ class StoryWorldRepository {
         return true;
     }
 
-    async insertUnlock({ userId, contentVersionId, eventId, unlockType, key }) {
-        const result = await this.client.query(`INSERT INTO story_unlock_intents(user_id,content_version_id,unlock_type,unlock_key,source_event_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING unlock_type,unlock_key`, [userId, contentVersionId, unlockType, key, eventId]);
+    async insertUnlock({ userId, contentVersionId, eventId, unlockType, key,
+        progressionScope = 'branch_local', provenanceType = 'branch_effect',
+        provenanceKey = null, publishedBindingHash = null, economicEligible = false }) {
+        const values = [userId, contentVersionId, unlockType, key, eventId,
+            progressionScope, provenanceType, provenanceKey, publishedBindingHash,
+            economicEligible === true];
+        const result = await this.client.query(`
+            INSERT INTO story_unlock_intents(
+                user_id,content_version_id,unlock_type,unlock_key,source_event_id,
+                progression_scope,provenance_type,provenance_key,
+                published_binding_hash,economic_eligible
+            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT DO NOTHING
+            RETURNING unlock_type,unlock_key,source_event_id,progression_scope,
+                provenance_type,provenance_key,published_binding_hash,economic_eligible
+        `, values);
         if (!result.rowCount) {
-            const existing = (await this.client.query(`SELECT unlock_type,unlock_key FROM story_unlock_intents WHERE user_id=$1 AND content_version_id=$2 AND unlock_type=$3 AND unlock_key=$4`, [userId, contentVersionId, unlockType, key])).rows[0];
+            const existing = (await this.client.query(`
+                SELECT unlock_type,unlock_key,source_event_id,progression_scope,
+                    provenance_type,provenance_key,published_binding_hash,economic_eligible
+                FROM story_unlock_intents
+                WHERE user_id=$1 AND content_version_id=$2
+                  AND unlock_type=$3 AND unlock_key=$4
+            `, [userId, contentVersionId, unlockType, key])).rows[0];
             if (!existing || existing.unlock_type !== unlockType || existing.unlock_key !== key) throw new Error('Story unlock identity collision');
+            // First provenance wins. A branch replay or a newly verified event
+            // cannot rewrite an older lineage. If the same source event is
+            // presented with different policy data, fail the transaction.
+            if (existing.source_event_id === eventId
+                && (existing.progression_scope !== progressionScope
+                    || existing.provenance_type !== provenanceType
+                    || (existing.provenance_key || null) !== (provenanceKey || null)
+                    || (existing.published_binding_hash || null) !== (publishedBindingHash || null)
+                    || existing.economic_eligible !== (economicEligible === true))) {
+                throw new Error('Story unlock provenance collision');
+            }
+            return { inserted: false, row: existing };
         }
+        return { inserted: true, row: result.rows[0] };
     }
 
     async insertMessage({ userId, key, message, runId }) {

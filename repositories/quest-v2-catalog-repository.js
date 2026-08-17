@@ -253,9 +253,11 @@ class QuestV2CatalogRepository {
                    version.title_zh, version.title_en, version.description_zh, version.description_en,
                    version.reward_points, version.verification_mode,
                    assignment.id AS assignment_id, assignment.status AS assignment_status
-            FROM quest_v2_boards board
+            FROM creator_profiles profile
+            JOIN quest_v2_boards board ON TRUE
             JOIN quest_v2_schedules schedule ON schedule.board_id = board.id
-              AND schedule.lifecycle IN ('scheduled', 'active')
+              AND schedule.lifecycle = 'active'
+              AND schedule.timezone = profile.timezone
               AND schedule.starts_at <= NOW() AND schedule.ends_at > NOW()
             JOIN quest_v2_board_slots slot ON slot.board_id = board.id
             JOIN quest_v2_versions version ON version.id = slot.version_id
@@ -266,7 +268,8 @@ class QuestV2CatalogRepository {
                 ORDER BY CASE WHEN status IN ('offered','accepted','active','submitted','under_review','returned') THEN 0 ELSE 1 END,
                          occurrence DESC LIMIT 1
             ) assignment ON TRUE
-            WHERE board.lifecycle = 'active' AND version.lifecycle = 'active'
+            WHERE profile.user_id = $1
+              AND board.lifecycle = 'active' AND version.lifecycle = 'active'
               AND (version.starts_at IS NULL OR version.starts_at <= NOW())
               AND (version.ends_at IS NULL OR version.ends_at > NOW())
             ORDER BY board.id, slot.slot_number
@@ -328,34 +331,196 @@ class QuestV2CatalogRepository {
     }
 
     async loadOfferCandidate(userId, versionId, boardId, chainId) {
-        const result = await this.client.query(`
-            SELECT version.id, version.category, version.lifecycle, version.eligibility_rule
-            FROM quest_v2_versions version
-            WHERE version.id = $1 AND version.lifecycle = 'active'
-              AND (version.starts_at IS NULL OR version.starts_at <= NOW())
-              AND (version.ends_at IS NULL OR version.ends_at > NOW())
-              AND (
-                ($2::BIGINT IS NOT NULL AND EXISTS (
-                    SELECT 1 FROM quest_v2_board_slots slot
-                    JOIN quest_v2_boards board ON board.id = slot.board_id
-                    WHERE slot.board_id = $2 AND slot.version_id = version.id AND board.lifecycle = 'active'
-                ))
-                OR ($3::BIGINT IS NOT NULL AND EXISTS (
-                    SELECT 1 FROM quest_v2_chain_nodes node
-                    JOIN quest_v2_chains chain ON chain.id = node.chain_id
-                    WHERE node.chain_id = $3 AND node.version_id = version.id AND chain.lifecycle = 'active'
-                      AND (node.prerequisite_node IS NULL OR EXISTS (
-                          SELECT 1 FROM quest_v2_chain_nodes prior_node
-                          JOIN quest_v2_assignments prior_assignment
-                            ON prior_assignment.version_id = prior_node.version_id
-                           AND prior_assignment.user_id = $4 AND prior_assignment.status = 'completed'
-                          WHERE prior_node.chain_id = node.chain_id
-                            AND prior_node.node_number = node.prerequisite_node
-                      ))
-                ))
-              )
-        `, [versionId, boardId, chainId, userId]);
+        const sharedEligibility = `
+            version.id = $2 AND version.lifecycle = 'active'
+            AND (version.starts_at IS NULL OR version.starts_at <= clock_timestamp())
+            AND (version.ends_at IS NULL OR version.ends_at > clock_timestamp())
+            AND NOT EXISTS (
+                SELECT 1 FROM creator_preferences preference
+                WHERE preference.user_id = $1
+                  AND preference.preference_type = 'quest_category'
+                  AND preference.preference_key = version.category
+                  AND preference.preference_value = 'block'
+            )`;
+        let result;
+        if (boardId !== null) {
+            result = await this.client.query(`
+                SELECT version.id, version.category, version.lifecycle,
+                       version.eligibility_rule
+                FROM quest_v2_versions version
+                JOIN creator_profiles profile ON profile.user_id = $1
+                JOIN quest_v2_board_slots slot
+                  ON slot.version_id = version.id AND slot.board_id = $3
+                JOIN quest_v2_boards board
+                  ON board.id = slot.board_id AND board.lifecycle = 'active'
+                JOIN quest_v2_schedules schedule
+                 ON schedule.board_id = board.id
+                 AND schedule.lifecycle = 'active'
+                 AND schedule.timezone = profile.timezone
+                 AND schedule.starts_at <= clock_timestamp()
+                 AND schedule.ends_at > clock_timestamp()
+                WHERE ${sharedEligibility}
+                ORDER BY schedule.id
+                LIMIT 1
+                FOR SHARE OF version, slot, board, schedule
+            `, [userId, versionId, boardId]);
+        } else {
+            result = await this.client.query(`
+                SELECT version.id, version.category, version.lifecycle,
+                       version.eligibility_rule
+                FROM quest_v2_versions version
+                JOIN quest_v2_chain_nodes node
+                  ON node.version_id = version.id AND node.chain_id = $3
+                JOIN quest_v2_chains chain
+                  ON chain.id = node.chain_id AND chain.lifecycle = 'active'
+                WHERE ${sharedEligibility}
+                  AND (node.prerequisite_node IS NULL OR EXISTS (
+                      SELECT 1 FROM quest_v2_chain_nodes prior_node
+                      JOIN quest_v2_assignments prior_assignment
+                        ON prior_assignment.version_id = prior_node.version_id
+                       AND prior_assignment.user_id = $1
+                       AND prior_assignment.status = 'completed'
+                      WHERE prior_node.chain_id = node.chain_id
+                        AND prior_node.node_number = node.prerequisite_node
+                  ))
+                LIMIT 1
+                FOR SHARE OF version, node, chain
+            `, [userId, versionId, chainId]);
+        }
         return result.rows[0] || null;
+    }
+
+    async listVersionSteps(versionId) {
+        const result = await this.client.query(`
+            SELECT id, step_key, ordinal, evidence_kind, depends_on_keys,
+                   completion_rule, required
+            FROM quest_v2_step_definitions
+            WHERE version_id = $1
+            ORDER BY ordinal, id
+            FOR SHARE
+        `, [versionId]);
+        return result.rows;
+    }
+
+    async listCreatorTimezones() {
+        const result = await this.client.query(`
+            SELECT DISTINCT timezone
+            FROM creator_profiles
+            WHERE timezone IS NOT NULL AND timezone <> ''
+            ORDER BY timezone
+            LIMIT 100
+        `);
+        return result.rows.length > 0 ? result.rows.map((row) => row.timezone) : ['UTC'];
+    }
+
+    async materializeWeeklyBoards({ timezone, horizonWeeks, asOf = null }) {
+        const timezoneToken = crypto.createHash('sha256').update(timezone).digest('hex').slice(0, 24);
+        await this.client.query(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            [`quest-v2-weekly:${timezone}`]
+        );
+        const timestamp = asOf || null;
+
+        // The original twelve one-shot rows are retained for audit but leave
+        // the active scheduler once the rolling materializer owns a timezone.
+        await this.client.query(`
+            UPDATE quest_v2_schedules
+            SET lifecycle = 'cancelled'
+            WHERE rotation_week_start IS NULL
+              AND schedule_key LIKE 'phase-2-week-%'
+              AND lifecycle IN ('scheduled', 'active')
+              AND timezone = $1
+        `, [timezone]);
+        await this.client.query(`
+            UPDATE quest_v2_schedules
+            SET lifecycle = 'finished'
+            WHERE rotation_week_start IS NOT NULL AND timezone = $1
+              AND lifecycle = 'active'
+              AND ends_at <= COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+        `, [timezone, timestamp]);
+        await this.client.query(`
+            UPDATE quest_v2_schedules
+            SET lifecycle = 'cancelled'
+            WHERE rotation_week_start IS NOT NULL AND timezone = $1
+              AND lifecycle = 'scheduled'
+              AND ends_at <= COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+        `, [timezone, timestamp]);
+
+        const inserted = await this.client.query(`
+            WITH active_boards AS (
+                SELECT board.id,
+                       ROW_NUMBER() OVER (
+                           ORDER BY MIN(legacy.schedule_key), board.id
+                       ) AS board_number,
+                       COUNT(*) OVER () AS board_count
+                FROM quest_v2_boards board
+                JOIN quest_v2_schedules legacy ON legacy.board_id = board.id
+                  AND legacy.rotation_week_start IS NULL
+                  AND legacy.schedule_key LIKE 'phase-2-week-%'
+                WHERE board.lifecycle = 'active'
+                GROUP BY board.id
+            ), local_weeks AS (
+                SELECT week_offset,
+                       date_trunc('week',
+                           COALESCE($3::TIMESTAMPTZ, clock_timestamp()) AT TIME ZONE $1
+                       )::DATE + (week_offset * 7) AS week_start
+                FROM generate_series(0, $2::INTEGER) AS generated(week_offset)
+            ), selected AS (
+                SELECT week.week_start, board.id AS board_id
+                FROM local_weeks week
+                JOIN active_boards board
+                  ON board.board_number = 1 + mod(
+                      mod(((week.week_start - DATE '2026-08-17') / 7)::INTEGER,
+                          board.board_count::INTEGER) + board.board_count::INTEGER,
+                      board.board_count::INTEGER)
+            )
+            INSERT INTO quest_v2_schedules(
+                schedule_key, board_id, timezone, starts_at, ends_at,
+                lifecycle, rotation_week_start
+            )
+            SELECT 'weekly-' || $4 || '-' || to_char(selected.week_start, 'YYYY-MM-DD'),
+                   selected.board_id, $1,
+                   selected.week_start::TIMESTAMP AT TIME ZONE $1,
+                   (selected.week_start + 7)::TIMESTAMP AT TIME ZONE $1,
+                   CASE WHEN selected.week_start = date_trunc('week',
+                       COALESCE($3::TIMESTAMPTZ, clock_timestamp()) AT TIME ZONE $1
+                   )::DATE THEN 'active' ELSE 'scheduled' END,
+                   selected.week_start
+            FROM selected
+            ON CONFLICT (timezone, rotation_week_start)
+                WHERE rotation_week_start IS NOT NULL
+            DO NOTHING
+            RETURNING id
+        `, [timezone, horizonWeeks, timestamp, timezoneToken]);
+
+        await this.client.query(`
+            UPDATE quest_v2_schedules
+            SET lifecycle = 'active'
+            WHERE rotation_week_start IS NOT NULL AND timezone = $1
+              AND lifecycle = 'scheduled'
+              AND starts_at <= COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+              AND ends_at > COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+        `, [timezone, timestamp]);
+        const state = await this.client.query(`
+            SELECT COUNT(*) FILTER (
+                       WHERE lifecycle = 'active'
+                         AND starts_at <= COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+                         AND ends_at > COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+                   ) AS current_count,
+                   COUNT(*) FILTER (
+                       WHERE lifecycle = 'scheduled'
+                         AND starts_at > COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+                   ) AS future_count
+            FROM quest_v2_schedules
+            WHERE timezone = $1 AND rotation_week_start IS NOT NULL
+              AND ends_at > COALESCE($2::TIMESTAMPTZ, clock_timestamp())
+        `, [timezone, timestamp]);
+        return {
+            timezone,
+            inserted: inserted.rowCount,
+            current: Number(state.rows[0]?.current_count || 0),
+            future: Number(state.rows[0]?.future_count || 0)
+        };
     }
 
     async listStudioVersions({ limit = 100, offset = 0 } = {}) {
@@ -393,11 +558,12 @@ class QuestV2CatalogRepository {
                 description_zh, description_en, hint_zh, hint_en,
                 completion_zh, completion_en, verification_mode, consent_category,
                 eligibility_rule, completion_rule, reward_policy_version,
-                reward_points, review_policy, cooldown_hours, repeatable, content_hash
+                reward_points, review_policy, cooldown_hours, repeatable,
+                allow_event_reuse, content_hash
             ) VALUES (
                 $1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9,
                 $10, $11, $12, $13, $14, $15, $16, $3,
-                $17::JSONB, $18::JSONB, 1, $19, $20, $21, FALSE, $22
+                $17::JSONB, $18::JSONB, 1, $19, $20, $21, FALSE, $22, $23
             ) RETURNING id
         `, [
             definitionId, input.version, input.category, input.tags, input.difficulty,
@@ -405,15 +571,24 @@ class QuestV2CatalogRepository {
             input.descriptionZh, input.descriptionEn, input.hintZh, input.hintEn,
             input.completionZh, input.completionEn, input.verificationMode,
             JSON.stringify(input.eligibilityRule), JSON.stringify(input.completionRule),
-            input.rewardPoints, input.reviewPolicy, input.cooldownHours, hash
+            input.rewardPoints, input.reviewPolicy, input.cooldownHours,
+            input.allowEventReuse, hash
         ]);
-        await this.client.query(`
-            INSERT INTO quest_v2_step_definitions (
-                version_id, step_key, ordinal, title_zh, title_en,
-                instructions_zh, instructions_en, evidence_kind, completion_rule
-            ) VALUES ($1, 'complete', 1, $2, $3, $4, $5, $6, $7::JSONB)
-        `, [version.rows[0].id, input.titleZh, input.titleEn, input.descriptionZh,
-            input.descriptionEn, input.evidenceKind, JSON.stringify(input.completionRule)]);
+        for (const step of input.steps) {
+            await this.client.query(`
+                INSERT INTO quest_v2_step_definitions (
+                    version_id, step_key, ordinal, title_zh, title_en,
+                    instructions_zh, instructions_en, evidence_kind,
+                    parallel_group, depends_on_keys, completion_rule, required
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::JSONB,$12)
+            `, [
+                version.rows[0].id, step.step_key, step.ordinal,
+                step.title_zh, step.title_en,
+                step.instructions_zh, step.instructions_en,
+                step.evidence_kind, step.parallel_group,
+                step.depends_on_keys, JSON.stringify(step.completion_rule), step.required
+            ]);
+        }
         return { definitionId: Number(definitionId), versionId: Number(version.rows[0].id), contentHash: hash };
     }
 

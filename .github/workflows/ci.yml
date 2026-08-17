@@ -49,7 +49,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: python -m pip install pip-audit
+      - run: python -m pip_audit -r workers/bilibili/requirements.lock
       - run: npm ci
+      - run: npm ls --all
       - run: npm run test:all
       - run: python -m unittest discover -s tests -p 'test_*.py'
       - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
@@ -58,9 +61,17 @@ jobs:
       - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:e2e
       - run: ALLOW_DATABASE_CREATE_TEST=true LOAD_TEST_DURATION_MS=5000 npm run test:load
       - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
       - run: python -m compileall -q bilibili_gift_sender.py workers/bilibili
-      - run: npm sbom --sbom-format=cyclonedx > sbom.cdx.json
+      - run: RELEASE_REQUIRE_CLEAN=true npm run release:stage
+      - run: ALLOW_DATABASE_CREATE_TEST=true npm run release:verify
       - uses: actions/upload-artifact@v4
         with:
-          name: sbom
-          path: sbom.cdx.json
+          name: verified-release
+          path: |
+            build/release/SBOM.cdx.json
+            build/release/RELEASE-METADATA.json
+            build/release/FILE-MANIFEST.json
+            build/release/SHA256SUMS
+            build/artifacts/*
+          if-no-files-found: error

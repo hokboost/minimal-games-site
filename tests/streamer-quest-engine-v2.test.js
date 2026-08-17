@@ -214,7 +214,8 @@ test('trusted source replay is semantic, rewards once, and rejects changed paylo
             return { id: 1 };
         },
         loadTrustedEvent: async () => stored,
-        listTrustedHistory: async () => [], listTrustedCandidates: async () => [],
+        listTrustedHistory: async () => [], listAssignmentTrustedHistory: async () => [],
+        consumeTrustedEvents: async () => [], listTrustedCandidates: async () => [],
         finalizeTrustedEvent: async (_id, result) => { stored.result = result; rewards += result.rewardEarned; }
     };
     const service = new QuestV2Service({
@@ -280,10 +281,17 @@ test('review reward, settlement, terminal event, audit, and idempotency response
     const pool = transactionalPool(state);
     const runtime = {
         client: {},
-        lockAssignmentForReview: async () => ({ id: 5, user_id: 4, username: 'alice', slug: 'review-me', status: state.assignment, revision: 3, reward_policy_version: 1, reward_points: 50, verification_mode: 'manual' }),
+        readAssignmentSubjectId: async () => 4,
+        lockReviewerAndSubject: async () => ({
+            reviewer: { id: 9, username: 'admin', is_admin: true },
+            subject: { id: 4, username: 'alice', is_admin: false }
+        }),
+        lockAssignmentForReview: async () => ({ id: 5, user_id: 4, username: 'alice', slug: 'review-me', status: state.assignment, revision: 3, reward_policy_version: 1, reward_points: 50, verification_mode: 'manual', review_policy: 'owner' }),
         lockLatestEvidence: async () => [{ id: 'evidence-1', step_id: 2 }],
         insertEvidenceReview: async () => {},
-        markStepsReviewed: async () => { state.steps = 'completed'; },
+        markStepsReviewed: async () => { state.steps = 'completed'; return [{ step_definition_id: 2, step_key: 'complete' }]; },
+        unlockEligibleSteps: async () => [],
+        assignmentCompletionReadiness: async () => true,
         insertSettlement: async (item) => { state.settlements.push(item); return { settlement_key: item.key, status: 'pending' }; },
         markSettlementPosted: async () => true,
         transitionAssignment: async () => { state.assignment = 'completed'; return { status: 'completed', revision: 4 }; },
@@ -293,7 +301,8 @@ test('review reward, settlement, terminal event, audit, and idempotency response
     const service = new QuestV2Service({
         pool,
         BalanceLogger: { updateBalance: async ({ amount }) => { state.ledger.push(amount); return { success: true, balanceBefore: 10, balance: 60 }; } },
-        runtimeRepositoryFactory: () => runtime, catalogRepositoryFactory: () => ({})
+        runtimeRepositoryFactory: () => runtime, catalogRepositoryFactory: () => ({}),
+        ownerUsername: 'admin'
     });
     await assert.rejects(service.review('admin', { assignmentId: 5, decision: 'approved', note: '' }, {
         requestId: 'review-command-0001', finalizeIdempotency: async () => { throw new Error('idempotency finalization failed'); }
@@ -325,7 +334,7 @@ test('twelve seeded schedules expose only the current time-bounded weekly board'
     assert.match(repository, /for \(let index = 0; index < boards\.length; index \+= 1\)/);
     assert.match(repository, /phase-2-week-/);
     assert.match(repository, /schedule\.starts_at <= NOW\(\) AND schedule\.ends_at > NOW\(\)/);
-    assert.match(repository, /schedule\.lifecycle IN \('scheduled', 'active'\)/);
+    assert.match(repository, /schedule\.lifecycle = 'active'/);
 });
 
 test('journal uses shared idempotent fetch and response-loss retry reuses its command key', async () => {

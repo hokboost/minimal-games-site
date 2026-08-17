@@ -35,12 +35,16 @@ class AchievementRepository {
     }
 
     async lockUser(username) {
-        const result = await this.client.query(`SELECT id,username FROM users WHERE username=$1 AND authorized=TRUE AND deactivated=FALSE FOR UPDATE`, [username]);
+        const result = await this.client.query(`SELECT id,username FROM users WHERE username=$1
+            AND authorized=TRUE AND deactivated=FALSE
+            AND COALESCE(account_locked,FALSE)=FALSE FOR UPDATE`, [username]);
         return result.rows[0] || null;
     }
 
     async readUser(username) {
-        const result = await this.client.query(`SELECT id,username FROM users WHERE username=$1 AND authorized=TRUE AND deactivated=FALSE`, [username]);
+        const result = await this.client.query(`SELECT id,username FROM users WHERE username=$1
+            AND authorized=TRUE AND deactivated=FALSE
+            AND COALESCE(account_locked,FALSE)=FALSE`, [username]);
         return result.rows[0] || null;
     }
 
@@ -117,11 +121,11 @@ class AchievementRepository {
     async archiveSeason(userId, event) {
         const row = await this.client.query('SELECT id,content_hash FROM story_content_versions WHERE campaign_id=(SELECT id FROM story_campaigns WHERE slug=$1) AND version=$2', [event.payload.season,event.payload.contentVersion || 1]);
         if (!row.rows[0]) return false;
-        await this.client.query(`
+        const inserted = await this.client.query(`
             INSERT INTO streamer_season_archives(user_id,season_slug,content_version_id,state,conclusion_key,snapshot_hash,archived_at)
-            VALUES($1,$2,$3,'archived',$4,$5,NOW()) ON CONFLICT (user_id,content_version_id) DO NOTHING
+            VALUES($1,$2,$3,'archived',$4,$5,NOW()) ON CONFLICT (user_id,content_version_id) DO NOTHING RETURNING id
         `, [userId,event.payload.season,row.rows[0].id,event.payload.conclusion || null,row.rows[0].content_hash]);
-        return true;
+        return inserted.rowCount === 1;
     }
 
     async state(userId) {

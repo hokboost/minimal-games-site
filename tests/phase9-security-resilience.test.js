@@ -9,9 +9,6 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const { FLAG_NAMES, readStreamerWorldFlags } = require('../lib/streamer-world-flags');
 const {
-    applyStreamerWorldProductionDefaults
-} = require('../lib/streamer-world-production-defaults');
-const {
     BASE_MIGRATION,
     MIGRATIONS,
     assertDatabaseSchemaCurrent,
@@ -123,36 +120,14 @@ test('all Streamer World flags remain disabled by default', () => {
     assert.equal(flags.ownerUsername, null);
 });
 
-test('production launcher enables only missing Streamer World flags', () => {
-    const env = { NODE_ENV: 'production', STREAMER_NEW_GAMES_ENABLED: 'false' };
-    applyStreamerWorldProductionDefaults(env);
-    assert.equal(env.STREAMER_NEW_GAMES_ENABLED, 'false');
-    for (const name of FLAG_NAMES.filter(name => name !== 'STREAMER_NEW_GAMES_ENABLED')) {
-        assert.equal(env[name], 'true', name);
-    }
-    assert.equal(readStreamerWorldFlags(env).newGamesEnabled, false);
-});
-
-test('production defaults expose games when no product flag is configured', () => {
-    const env = { NODE_ENV: 'production' };
-    applyStreamerWorldProductionDefaults(env);
-    assert.equal(readStreamerWorldFlags(env).newGamesEnabled, true);
-    assert.equal(readStreamerWorldFlags(env).storyWorldEnabled, true);
-    assert.equal(readStreamerWorldFlags(env).questEngineV2Enabled, true);
-});
-
-test('non-production launch does not mutate Streamer World flags', () => {
-    const env = { NODE_ENV: 'development' };
-    applyStreamerWorldProductionDefaults(env);
-    assert.deepEqual(env, { NODE_ENV: 'development' });
-});
-
-test('direct server launch applies production defaults before environment validation', () => {
+test('production launcher never injects Streamer World feature flags', () => {
+    const packageJson = JSON.parse(source('package.json'));
+    assert.equal(packageJson.scripts.start, 'node server.js');
     const serverSource = source('server.js');
-    const defaultsOffset = serverSource.indexOf("require('./lib/streamer-world-production-defaults')");
-    const validationOffset = serverSource.indexOf("require('./lib/config-validation').validateServerEnvironment()");
-    assert.ok(defaultsOffset >= 0, 'server must load Streamer World production defaults');
-    assert.ok(validationOffset > defaultsOffset, 'production defaults must precede environment validation');
+    assert.doesNotMatch(serverSource, /streamer-world-production-defaults/);
+    assert.match(serverSource, /require\('\.\/lib\/config-validation'\)\.validateServerEnvironment\(\)/);
+    const flags = readStreamerWorldFlags({ NODE_ENV: 'production' });
+    for (const name of FLAG_NAMES) assert.equal(flags[name], false, name);
 });
 
 test('flag parser accepts only exact lowercase true', () => {
@@ -405,8 +380,8 @@ test('new administrator mutations include failure audit and exact fixed paths', 
     }
 });
 
-test('database migration registry ends in all nine streamer expansion migrations', () => {
-    const expectedTail = [
+test('database migration registry contains the streamer expansion migrations in forward order', () => {
+    const expectedOrder = [
         'add_creator_foundation.sql',
         'add_streamer_quest_engine_v2.sql',
         'add_story_world_season_one.sql',
@@ -415,9 +390,19 @@ test('database migration registry ends in all nine streamer expansion migrations
         'add_streamer_games_batch_two.sql',
         'add_streamer_reward_catalog.sql',
         'add_streamer_achievements_and_archives.sql',
-        'add_streamer_phase9_hardening.sql'
+        'add_streamer_phase9_hardening.sql',
+        'add_streamer_security_quest_windows.sql',
+        'add_streamer_security_live_acl.sql',
+        'add_streamer_security_quest_lifecycle.sql',
+        'add_streamer_reward_security_outbox.sql',
+        'add_streamer_achievement_producers.sql',
+        'add_streamer_security_communication_privacy.sql',
+        'add_streamer_story_progression_scopes.sql',
+        'add_streamer_game_daily_calendar.sql'
     ];
-    assert.deepEqual(MIGRATIONS.slice(-expectedTail.length), expectedTail);
+    const positions = expectedOrder.map(filename => MIGRATIONS.indexOf(filename));
+    assert.ok(positions.every(position => position >= 0));
+    assert.deepEqual([...positions].sort((left, right) => left - right), positions);
     assert.equal(new Set(MIGRATIONS).size, MIGRATIONS.length);
 });
 
@@ -572,7 +557,8 @@ test('Quest evidence cleanup is bounded and uses skip-locked ordering', () => {
     const repository = source('repositories/quest-v2-runtime-repository.js');
     assert.match(repository, /redactExpiredEvidenceBatch\(limit = 100\)/);
     assert.match(repository, /retention_until <= NOW\(\)/);
-    assert.match(repository, /ORDER BY retention_until, id LIMIT \$1 FOR UPDATE SKIP LOCKED/);
+    assert.match(repository,
+        /ORDER BY\s+(?:evidence\.)?retention_until\s*,\s*(?:evidence\.)?id\s+LIMIT\s+\$1\s+FOR UPDATE(?:\s+OF\s+evidence)?\s+SKIP LOCKED/);
     assert.match(repository, /redacted_at = NOW\(\)/);
     assert.match(repository, /redaction_reason = 'retention_expired'/);
 });
@@ -616,7 +602,7 @@ test('creator list query binds caller-provided page size and offset parameters',
     await repository.listAdminSummaries({ limit: 25, offset: 50 });
     const call = client.calls.at(-1);
     assert.match(call.sql, /LIMIT \$1 OFFSET \$2/);
-    assert.deepEqual(call.parameters, [25, 50]);
+    assert.deepEqual(call.parameters, [25, 50, false]);
     assert.equal(call.sql.includes('SELECT *'), false);
 });
 
@@ -648,12 +634,19 @@ test('live catch-up query is monotonic, ordered, and parameter bounded', async (
             async connect() {}
         }
     });
-    repository.readMemberRoom = async () => ({ id: 11, memberStatus: 'active' });
+    repository.readMemberRoom = async () => ({
+        id: 11,
+        memberStatus: 'active',
+        memberRole: 'creator',
+        creatorUserId: 7
+    });
     await repository.catchUp(11, 'creator', 39, 50);
-    const call = client.calls.at(-1);
+    const call = client.calls.find(candidate => /sequence>\$2/.test(candidate.sql));
+    assert.ok(call);
     assert.match(call.sql, /interaction_id=\$1 AND sequence>\$2/);
     assert.match(call.sql, /ORDER BY sequence LIMIT \$3/);
-    assert.deepEqual(call.parameters, [11, 39, 51]);
+    assert.deepEqual(call.parameters, [11, 39, 51, 'creator', 7]);
+    assert.match(call.sql, /audience='both' OR audience=\$4/);
     assert.equal(51, 50 + 1);
     assert.doesNotMatch(call.sql, /LIMIT 50/);
 });
@@ -780,6 +773,7 @@ test('stored live envelope exposes actor type but no actor account identity', ()
         event_id: '00000000-0000-4000-a000-000000000001',
         sequence: 2,
         event_type: 'interaction.nudge',
+        audience: 'owner',
         actor_type: 'owner',
         actor_username: 'private-owner',
         subject_user_id: 9,
@@ -801,6 +795,7 @@ test('stored live envelope rejects payload exceeding safe event bus boundary', (
         event_id: '00000000-0000-4000-a000-000000000001',
         sequence: 2,
         event_type: 'interaction.nudge',
+        audience: 'owner',
         actor_type: 'owner',
         subject_user_id: 9,
         created_at: '2026-08-17T00:00:00.000Z',
@@ -816,6 +811,7 @@ test('stored live envelope rejects event type outside closed allowlist', () => {
         event_id: '00000000-0000-4000-a000-000000000001',
         sequence: 2,
         event_type: 'provider.gift.send',
+        audience: 'owner',
         actor_type: 'owner',
         subject_user_id: 9,
         created_at: '2026-08-17T00:00:00.000Z',

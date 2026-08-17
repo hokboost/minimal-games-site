@@ -2,13 +2,13 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 
-This report describes review-ready code. It does not claim that a real Bilibili gift delivery was performed. The production `npm start` launcher enables missing Streamer World product flags for this deployment; an explicitly configured `false` always wins and provides immediate rollback.
+This report describes review-ready code. It does not claim that a real Bilibili gift delivery was performed. Streamer World is fail-closed in production: every product flag must be set explicitly to the exact value `true`; missing flags remain disabled.
 
 ## Delivery boundary
 
 The expansion is modular work inside the existing Express/EJS/PostgreSQL/Socket.IO application. It preserves the current authorization, sessions, CSRF, rate limits, balance ledger, gift inventory, exchange, outbox, worker lease, provider receipt, and uncertain-reconciliation state machines.
 
-Quest, Story, games, achievements, Live Interaction, and rewards never call the gift provider. A provider-backed reward claim creates stored `wish_inventory`; only the creator's existing backpack action can enqueue it through the original delivery state machine. On 2026-08-17 the nine expansion migrations were applied to the configured Render PostgreSQL database and the full 25/25 checksum ledger was verified; no real gift send was used.
+Quest, Story, games, achievements, Live Interaction, and rewards never call the gift provider. A provider-backed reward claim creates stored `wish_inventory`; only the creator's existing backpack action can enqueue it through the original delivery state machine. The complete 33-entry ledger has been verified on disposable PostgreSQL through fresh creation and two historical upgrade shapes. This report does not claim that migrations were applied to Render or any production database; no real gift send was used.
 
 ## Changed modules
 
@@ -96,8 +96,16 @@ Registered expansion migrations, in order:
 7. `add_streamer_reward_catalog.sql`
 8. `add_streamer_achievements_and_archives.sql`
 9. `add_streamer_phase9_hardening.sql`
+10. `add_streamer_security_quest_windows.sql`
+11. `add_streamer_security_live_acl.sql`
+12. `add_streamer_security_quest_lifecycle.sql`
+13. `add_streamer_reward_security_outbox.sql`
+14. `add_streamer_achievement_producers.sql`
+15. `add_streamer_security_communication_privacy.sql`
+16. `add_streamer_story_progression_scopes.sql`
+17. `add_streamer_game_daily_calendar.sql`
 
-Phase 9 adds EXPLAIN-friendly bounded-read indexes for inbox, Quest journal/review, Story recovery/archive, live items/reports, reward/game history, achievements, collections, and archives.
+Phase 9 adds EXPLAIN-friendly bounded-read indexes for inbox, Quest journal/review, Story recovery/archive, live items/reports, reward/game history, achievements, collections, and archives. The eight later security migrations add conservative ACL/window/provenance backfills and do not rewrite any of the first nine expansion migrations.
 
 ## Route changes
 
@@ -127,32 +135,51 @@ The manifest enforces duplicate identity, CSRF, login/authorization, administrat
 - Failure injection covers response loss, semantic collision, CAS, hook rollback, post-commit fan-out failure, retention audit failure, revoked sessions, and provider isolation.
 - Expired evidence clears text/checklist/PNG content only after retention while preserving hash, review, settlement, and audit tombstones.
 - Browser projections omit provider identifiers, semantic hashes, hidden solutions, future branches, partner-only clues, and arbitrary evidence HTML.
-- Flags accept only exact lowercase `true` and require root/Creator prerequisites. This deployment's production launcher enables missing product keys, while any explicitly configured `false` remains authoritative and can disable expansion routes without altering stored state.
+- Flags accept only exact lowercase `true` and require root/Creator prerequisites. The production launcher does not synthesize defaults; missing product keys and explicit `false` both leave expansion routes disabled without altering stored state.
+- A single communication-boundary policy now evaluates account state, global opt-in, all-message and
+  item/game preferences, creator-local quiet/preferred windows, room mute, and unresolved reports
+  for Live, cooperative games, presence/Socket delivery, and configured-owner reward grants.
+  Quiet/outside-preferred messages remain durable without realtime fanout. Owner-only profile fields
+  are database-redacted and read-audited; sensitive reports against the owner require an independent
+  moderator plus later explicit creator reconsent. ADR 0011 records the policy and lock contract.
+- Disposable PostgreSQL tests exercise sensitive-read revocation races, moderation dual control,
+  report freeze/reconsent, durable quiet delivery, game-block neutrality, migrations, and rollback.
+  A real Chromium test uses isolated creator/owner/moderator contexts for UI opt-in/open/send,
+  Socket/REST replay, report/leave/reconsent, quiet durable reload, and hard-boundary revocation.
+  No provider ran.
 
 ## Verification
 
 Default `npm test` includes all legacy suites and all eleven Phase 9 suites. Release verification commands are:
 
 ```bash
+npm ci
 npm run test:all
-npm run release:stage
-npm run test:migrations
+ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
+ALLOW_DATABASE_CREATE_TEST=true npm run test:resilience
+ALLOW_DATABASE_CREATE_TEST=true npm run test:load
+ALLOW_DATABASE_CREATE_TEST=true npm run test:e2e
+npm audit --omit=dev
+npm audit
+npm ls --all
 node scripts/count-streamer-expansion-lines.js --enforce
 git diff --check
+RELEASE_REQUIRE_CLEAN=true npm run release:stage
+ALLOW_DATABASE_CREATE_TEST=true npm run release:verify
 ```
 
 Focused Phase 9 suites cover accessibility browser behavior, game experience/narration/engine failures, page experience/navigation, hardening contracts, security, idempotency failure, service load/rollback, and pagination/load.
 
-The pre-report line enforcement snapshot passed:
+The final security-remediation line enforcement snapshot passed:
 
 ```text
-backend: 12,346 / 12,000
-frontend: 8,036 / 8,000
-content: 17,524 / 16,000
-tests: 12,774 / 10,000
-backend + frontend + content: 37,906 / 36,000
-total: 50,853 / 50,000
-net: 50,842 / 40,000
+backend: 17,928 / 12,000
+frontend: 8,344 / 8,000
+content: 17,559 / 16,000
+tests: 20,671 / 10,000
+backend + frontend + content: 43,831 / 36,000
+total: 66,561 / 50,000
+net: 66,396 / 40,000
 overall: PASS
 ```
 
@@ -160,22 +187,24 @@ Generated, vendored, binary, minified, lock, build, coverage, empty, and comment
 
 ## Feature activation and rollback
 
-Apply migrations and validate before activation. The production launcher supplies `true` only when these keys are absent: `STREAMER_WORLD_ENABLED`, `CREATOR_PROFILE_ENABLED`, `QUEST_ENGINE_V2_ENABLED`, `STORY_WORLD_ENABLED`, `LIVE_INTERACTIONS_ENABLED`, `STREAMER_NEW_GAMES_ENABLED`, `STREAMER_REWARD_CATALOG_ENABLED`, and `STREAMER_ACHIEVEMENTS_ENABLED`. An environment value explicitly set to `false` is never overwritten. Configure one exact active administrator in `STREAMER_WORLD_OWNER_USERNAME` for owner-only collaboration tools.
+Apply migrations and validate before activation. Explicitly set only the intended keys to exact lowercase `true`: `STREAMER_WORLD_ENABLED`, `CREATOR_PROFILE_ENABLED`, `QUEST_ENGINE_V2_ENABLED`, `STORY_WORLD_ENABLED`, `LIVE_INTERACTIONS_ENABLED`, `STREAMER_NEW_GAMES_ENABLED`, `STREAMER_REWARD_CATALOG_ENABLED`, and `STREAMER_ACHIEVEMENTS_ENABLED`. Missing keys remain disabled and malformed values stop startup. Live interactions require one exact active, unlocked administrator in `STREAMER_WORLD_OWNER_USERNAME`; rewards require their active catalog and budgets. See `docs/STREAMER_WORLD_OPERATIONS.md` for activation and kill-switch procedures.
 
 Application rollback sets the relevant product flag false and restarts instances. Stored immutable history remains intact. Database rollback is forward-fix only because audit/provenance records are intentionally append-only.
 
 ## External operator steps
 
-1. Run `npm run test:migrations` against disposable fresh and historical PostgreSQL databases matching production and review emitted query plans.
+1. Apply the 33 tracked migrations with the controlled migration identity, then verify the production ledger and readiness before enabling any product flag.
 2. Verify and periodically exercise the production backup and restore procedure.
 3. Configure the exact owner, then observe latency, event bus, conflicts, retention, outbox lag, and uncertain reconciliation after activation.
 4. Independently reconcile provider receipts before resolving uncertain existing gift exchanges; never auto-retry or auto-refund uncertainty.
 
 ## Known limitations
 
-- Disposable PostgreSQL create/drop was not authorized in this environment; fresh/historical execution remains an operator step. Static migration, checksum, ordering, query, transaction, and upgrade contracts are tested.
-- Multi-instance event delivery and real desktop/mobile browsers still merit staging smoke tests beyond the deterministic bus and VM/DOM harnesses.
+- Disposable PostgreSQL fresh and historical upgrades, two real Node instances, and isolated Chromium contexts were exercised locally. Production migration, backup/restore and hosting-network validation remain operator responsibilities.
+- Desktop Chromium is covered; Safari/WebKit, Firefox and a real mobile device still merit staging smoke tests.
 - Director intentionally supports one configured owner, not arbitrary administrator impersonation.
 - Bingo currently has one owner-confirmed allowlist adapter; another provider needs a new trusted server adapter.
 - Unconsumed Story/game hooks remain immutable non-monetary intents and never become points or gifts automatically.
 - Provider-backed rewards remain stored until the creator uses the existing backpack; uncertain sends require reconciliation and are never auto-refunded or auto-resent.
+
+The finding-by-finding security evidence, backfill policy and residual risks are recorded in `docs/streamer-expansion/SECURITY_AUDIT_REMEDIATION_2026-08-17.md`.

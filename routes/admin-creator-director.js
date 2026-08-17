@@ -26,10 +26,12 @@ module.exports = function registerAdminCreatorDirectorRoutes(app, deps) {
 
     app.get('/admin/creator-director', ...guards, enabled, async (req, res) => {
         try {
-            const liveEnabled=streamerWorldFlags.liveInteractionsEnabled&&Boolean(streamerWorldFlags.ownerUsername)&&req.session.user.username===streamerWorldFlags.ownerUsername;
-            const foundation=await creatorService.adminSummaries(req.query.page);
-            let summary=foundation;
-            if(liveEnabled){const live=await liveInteractionService.director(req.session.user.username,req.query.page);const byUsername=new Map(live.creators.map((creator)=>[creator.username,creator]));summary={...foundation,creators:foundation.creators.map((creator)=>({...creator,...(byUsername.get(creator.username)||{})})),reports:live.reports,templates:live.templates};}
+            const liveFeatureEnabled=streamerWorldFlags.liveInteractionsEnabled&&Boolean(streamerWorldFlags.ownerUsername);
+            const liveEnabled=liveFeatureEnabled&&req.session.user.username===streamerWorldFlags.ownerUsername;
+            const moderationEnabled=liveFeatureEnabled&&!liveEnabled;
+            let summary;
+            if(liveEnabled){summary=await liveInteractionService.director(req.session.user.username,req.query.page,{requestId:req.requestId});}
+            else {const foundation=await creatorService.adminSummaries(req.session.user.username,req.query.page,{requestId:req.requestId});summary=foundation;if(moderationEnabled){const moderation=await liveInteractionService.moderationQueue(req.session.user.username,{requestId:req.requestId});summary={...foundation,reports:moderation.reports,templates:[]};}}
             res.set('Cache-Control', 'private, no-store');
             return res.render('admin-creator-director', {
                 title: res.locals.lang === 'zh' ? '主播互动导演台' : 'Creator Director',
@@ -39,7 +41,8 @@ module.exports = function registerAdminCreatorDirectorRoutes(app, deps) {
                 ownerUsername: streamerWorldFlags.ownerUsername,
                 rewardsEnabled: streamerWorldFlags.rewardsEnabled,
                 summary,
-                liveEnabled
+                liveEnabled,
+                moderationEnabled
             });
         } catch (error) {
             console.error('Creator Director read failed:', error);
@@ -50,9 +53,10 @@ module.exports = function registerAdminCreatorDirectorRoutes(app, deps) {
     const requireConfiguredOwner=(req,res,next)=>streamerWorldFlags.ownerUsername&&req.session.user.username===streamerWorldFlags.ownerUsername
         ?next():res.status(403).json({success:false,code:'LIVE_OWNER_REQUIRED',message:'Configured owner account required'});
     const writes=[requireLogin,requireAdmin,requireConfiguredOwner,basicRateLimit,actionRateLimit,csrfProtection,liveEnabled];
+    const moderationWrites=[requireLogin,requireAdmin,basicRateLimit,actionRateLimit,csrfProtection,liveEnabled];
     const context=req=>({requestId:req.requestId,finalizeIdempotency:req.finalizeIdempotency});
     const fail=(error,res)=>{if(Number.isInteger(error?.status))return res.status(error.status).json({success:false,code:error.code,message:error.message});console.error('Creator Director mutation failed:',error);return res.status(503).json({success:false,code:'LIVE_DIRECTOR_UNAVAILABLE',message:'Creator Director unavailable'});};
     app.post('/api/admin/live/open',...writes,async(req,res)=>{try{return res.status(201).json(await liveInteractionService.open(req.session.user.username,req.body,context(req)));}catch(error){return fail(error,res);}});
     app.post('/api/admin/live/send',...writes,async(req,res)=>{try{return res.status(201).json(await liveInteractionService.send(req.session.user.username,req.body,context(req)));}catch(error){return fail(error,res);}});
-    app.post('/api/admin/live/reports/moderate',...writes,async(req,res)=>{try{return res.json(await liveInteractionService.moderate(req.session.user.username,req.body,context(req)));}catch(error){return fail(error,res);}});
+    app.post('/api/admin/live/reports/moderate',...moderationWrites,async(req,res)=>{try{return res.json(await liveInteractionService.moderate(req.session.user.username,req.body,context(req)));}catch(error){return fail(error,res);}});
 };

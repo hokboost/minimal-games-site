@@ -76,6 +76,7 @@ class CreatorRepository {
             SELECT id, username, bilibili_room_id
             FROM users
             WHERE username = $1 AND authorized = TRUE AND deactivated = FALSE
+              AND COALESCE(account_locked, FALSE) = FALSE
             FOR UPDATE
         `, [username]);
         return result.rows[0] || null;
@@ -419,6 +420,7 @@ class CreatorRepository {
         const userResult = await this.pool.query(`
             SELECT id, username, bilibili_room_id FROM users
             WHERE username = $1 AND authorized = TRUE AND deactivated = FALSE
+              AND COALESCE(account_locked, FALSE) = FALSE
         `, [username]);
         const user = userResult.rows[0];
         if (!user) return null;
@@ -438,15 +440,44 @@ class CreatorRepository {
         };
     }
 
-    async listAdminSummaries({ limit, offset }) {
-        const result = await this.pool.query(`
-            SELECT u.username, u.bilibili_room_id,
-                   CASE WHEN p.profile_visibility = 'owner' THEN p.display_name END AS display_name,
-                   CASE WHEN p.profile_visibility = 'owner' THEN p.timezone END AS timezone,
-                   p.live_interaction_opt_in, p.profile_visibility, p.version,
-                   r.total_xp, r.level, r.milestone,
-                   request.id AS request_id, request.requested_room_id, request.status AS request_status,
-                   request.requested_at
+    async readAdminAccount(queryable, username) {
+        const result = await queryable.query(`SELECT id,username,is_admin,authorized,deactivated,
+            COALESCE(account_locked,FALSE) account_locked FROM users WHERE username=$1
+            FOR SHARE`, [username]);
+        return result.rows[0] || null;
+    }
+
+    async listAdminSummaries(queryable, options) {
+        if (options === undefined) {
+            options = queryable;
+            queryable = this.pool;
+        }
+        const { limit, offset, includeOwnerPrivate = false } = options;
+        const result = await queryable.query(`
+            SELECT u.id user_id,u.username,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN u.bilibili_room_id END AS bilibili_room_id,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN p.display_name END AS display_name,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN p.timezone END AS timezone,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN p.live_interaction_opt_in END AS live_interaction_opt_in,
+                   p.profile_visibility,p.version,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN r.total_xp END AS total_xp,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN r.level END AS level,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN r.milestone END AS milestone,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN request.id END AS request_id,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN request.requested_room_id END AS requested_room_id,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN request.status END AS request_status,
+                   CASE WHEN $3::BOOLEAN AND p.profile_visibility='owner'
+                       THEN request.requested_at END AS requested_at
             FROM users u
             LEFT JOIN creator_profiles p ON p.user_id = u.id
             LEFT JOIN relationship_profiles r ON r.user_id = u.id
@@ -460,18 +491,20 @@ class CreatorRepository {
               AND (p.user_id IS NOT NULL OR request.id IS NOT NULL)
             ORDER BY COALESCE(request.requested_at, p.updated_at) DESC NULLS LAST, u.username
             LIMIT $1 OFFSET $2
-        `, [limit, offset]);
+        `, [limit, offset, includeOwnerPrivate]);
         return result.rows.map((row) => ({
+            userId: Number(row.user_id),
             username: row.username,
             bilibiliRoomId: row.bilibili_room_id,
             displayName: row.display_name,
             timezone: row.timezone,
-            liveInteractionOptIn: row.live_interaction_opt_in === true,
+            liveInteractionOptIn: row.live_interaction_opt_in === null
+                || row.live_interaction_opt_in === undefined ? null : row.live_interaction_opt_in === true,
             profileVisibility: row.profile_visibility,
             profileVersion: row.version ? Number(row.version) : null,
-            totalXp: Number(row.total_xp || 0),
-            level: Number(row.level || 1),
-            milestone: row.milestone || 'new_signal',
+            totalXp: row.total_xp === null ? null : Number(row.total_xp || 0),
+            level: row.level === null ? null : Number(row.level || 1),
+            milestone: row.milestone || null,
             roomRequest: row.request_id ? {
                 id: Number(row.request_id),
                 requestedRoomId: row.requested_room_id,
@@ -481,10 +514,23 @@ class CreatorRepository {
         }));
     }
 
+    async appendSensitiveReadAudit(client, value) {
+        await client.query(`INSERT INTO creator_sensitive_read_audit(
+            actor_user_id,actor_username,target_user_id,interaction_id,report_id,
+            access_kind,decision,fields,request_id,metadata
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8::TEXT[],$9,$10::JSONB)`, [
+            value.actorUserId, value.actorUsername, value.targetUserId || null,
+            value.interactionId || null, value.reportId || null, value.accessKind,
+            value.decision, value.fields || [], value.requestId || null,
+            JSON.stringify(value.metadata || {})
+        ]);
+    }
+
     async exportCreatorData(username) {
         const userResult = await this.pool.query(`
             SELECT id, username, bilibili_room_id FROM users
             WHERE username = $1 AND authorized = TRUE AND deactivated = FALSE
+              AND COALESCE(account_locked, FALSE) = FALSE
         `, [username]);
         const user = userResult.rows[0];
         if (!user) return null;

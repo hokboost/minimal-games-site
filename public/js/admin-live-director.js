@@ -42,9 +42,10 @@
         node.textContent = `${template.type} · ${lang==='zh'?template.titleZh:template.titleEn}`;
         return node;
     }
-    bootstrap.templates.forEach(template => select.append(option(template)));
+    if (select) bootstrap.templates.forEach(template => select.append(option(template)));
 
     function renderFields() {
+        if (!fields || !select) return;
         fields.replaceChildren();
         const template = bootstrap.templates.find(item => item.key === select.value);
         if (!template) return;
@@ -129,8 +130,8 @@
                 await post('/api/admin/live/reports/moderate', {
                     interactionId: Number(card.dataset.interactionId),
                     reportId: Number(card.dataset.reportId),
-                    expectedRevision: Number(document.querySelector(
-                            `tr[data-interaction-id="${card.dataset.interactionId}"]`)
+                    expectedRevision: Number(card.dataset.revision || document.querySelector(
+                        `tr[data-interaction-id="${card.dataset.interactionId}"]`)
                         ?.dataset.revision || 0),
                     resolution: report.dataset.reportAction
                 }, `report:${card.dataset.reportId}:${report.dataset.reportAction}`);
@@ -141,12 +142,12 @@
             }
         }
     });
-    select.addEventListener('change', renderFields);
-    document.getElementById('director-cancel').addEventListener('click', () => {
-        composer.hidden = true;
+    select?.addEventListener('change', renderFields);
+    document.getElementById('director-cancel')?.addEventListener('click', () => {
+        if (composer) composer.hidden = true;
         target = null;
     });
-    document.getElementById('director-send').addEventListener('click', async event => {
+    document.getElementById('director-send')?.addEventListener('click', async event => {
         if (!target) return;
         const template = bootstrap.templates.find(item => item.key === select.value);
         const body = {

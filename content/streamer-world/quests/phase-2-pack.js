@@ -1,6 +1,9 @@
 'use strict';
 
-const { validateRule } = require('../../../domain/quests/v2/rules');
+const {
+    validateEligibilityRule,
+    validateRule
+} = require('../../../domain/quests/v2/rules');
 
 function quest(slug, category, titleZh, titleEn, descriptionZh, descriptionEn, options = {}) {
     const evidenceKind = options.evidenceKind || 'text';
@@ -24,7 +27,7 @@ function quest(slug, category, titleZh, titleEn, descriptionZh, descriptionEn, o
         completionEn: options.completionEn || 'Quest complete. A new coordinate lights up on the star map.',
         verificationMode: evidenceKind === 'trusted_event' ? 'automatic' : 'manual',
         consentCategory: category,
-        eligibilityRule: validateRule({ op: 'relationship_level', minimum: 1 }),
+        eligibilityRule: validateEligibilityRule({ op: 'relationship_level', minimum: 1 }),
         completionRule: validateRule(completionRule),
         evidenceKind,
         rewardPoints: options.rewardPoints ?? 80,

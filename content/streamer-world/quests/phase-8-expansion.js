@@ -1,6 +1,9 @@
 'use strict';
 
-const { validateRule } = require('../../../domain/quests/v2/rules');
+const {
+    validateEligibilityRule,
+    validateRule
+} = require('../../../domain/quests/v2/rules');
 
 function quest(slug, category, titleZh, titleEn, descriptionZh, descriptionEn, evidenceKind = 'text') {
     return Object.freeze({
@@ -13,7 +16,7 @@ function quest(slug, category, titleZh, titleEn, descriptionZh, descriptionEn, e
         completionZh: '成果已进入长期档案，不会随每周轮换消失。',
         completionEn: 'The result enters the lasting archive and will not expire with weekly rotation.',
         verificationMode: 'manual', consentCategory: category,
-        eligibilityRule: validateRule({ op: 'relationship_level', minimum: 1 }),
+        eligibilityRule: validateEligibilityRule({ op: 'relationship_level', minimum: 1 }),
         completionRule: validateRule({ op: 'evidence_approved' }), evidenceKind,
         rewardPoints: 0, cooldownHours: 168, repeatable: false
     });

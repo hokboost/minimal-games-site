@@ -67,6 +67,7 @@ const participantCommands = {
                     eventId: crypto.randomUUID(),
                     interactionId: room.id,
                     eventType: 'interaction.item_expired',
+                    audience: 'both',
                     actorType: 'system',
                     actorUserId: null,
                     subjectUserId: actorId,
@@ -112,6 +113,17 @@ const participantCommands = {
                 });
             }
 
+            if (action === 'accept') {
+                const boundary = await this.boundaries(client, locked.accounts.creator, room, {
+                    itemType: item.itemType,
+                    gameId: item.itemType === 'game_invite' ? item.payload?.referenceId : null
+                });
+                if (!boundary.state.allowDurable) {
+                    throw this.serviceError('LIVE_CONSENT_BLOCKED', 403,
+                        `Creator communication boundary blocks this acceptance (${boundary.state.reason})`);
+                }
+            }
+
             const transition = transitionItem(item, action, command);
             const savedRoom = await this.repository.advanceRoom(client, room, nextRoomState(room, 'item'));
             const savedItem = await this.repository.transitionItem(client, item, transition);
@@ -119,6 +131,7 @@ const participantCommands = {
                 eventId: crypto.randomUUID(),
                 interactionId: room.id,
                 eventType: transition.eventType,
+                audience: 'both',
                 actorType: 'creator',
                 actorUserId: actorId,
                 subjectUserId: actorId,
@@ -197,6 +210,14 @@ const participantCommands = {
             const next = nextRoomState(room, action, values);
             const savedRoom = await this.repository.advanceRoom(client, room, next);
             if (action === 'leave') await this.repository.markMemberLeft(client, room.id, actorId);
+            if (this.consentCoordinator && ['mute', 'leave'].includes(action)) {
+                await this.consentCoordinator.withdrawInteraction(client, room.id,
+                    action === 'mute' ? 'room_muted' : 'participant_left', {
+                        actorUserId: actorId,
+                        actorUsername: username,
+                        requestId: context.requestId
+                    });
+            }
 
             const eventTypes = {
                 availability: 'interaction.availability_changed',
@@ -213,6 +234,7 @@ const participantCommands = {
                 eventId: crypto.randomUUID(),
                 interactionId: room.id,
                 eventType: eventTypes[action],
+                audience: 'both',
                 actorType: 'creator',
                 actorUserId: actorId,
                 subjectUserId: actorId,
@@ -232,7 +254,8 @@ const participantCommands = {
                 body,
                 event,
                 room: savedRoom,
-                audience: 'both',
+                audience: action === 'availability' && !boundary.state.allowRealtime
+                    ? 'creator' : 'both',
                 command: {
                     interactionId: room.id,
                     actorUserId: actorId,
@@ -293,10 +316,19 @@ const participantCommands = {
                 reasonCode: command.reasonCode,
                 detail: command.detail
             });
+            if (this.consentCoordinator) {
+                await this.consentCoordinator.withdrawInteraction(client, room.id, 'unresolved_report', {
+                    actorUserId: actorId,
+                    actorUsername: username,
+                    requestId: context.requestId
+                });
+            }
+            await this.repository.markRoomMembersInactive(client, room.id);
             const event = await this.repository.appendEvent(client, {
                 eventId: crypto.randomUUID(),
                 interactionId: room.id,
                 eventType: 'interaction.reported',
+                audience: 'creator',
                 actorType: 'creator',
                 actorUserId: actorId,
                 subjectUserId: actorId,
@@ -342,22 +374,34 @@ const participantCommands = {
         return this.afterCommit(result);
     },
 
-    async moderate(ownerUsername, input, context = {}) {
+    async moderate(moderatorUsername, input, context = {}) {
         const command = validateModeration(input);
         const hash = semanticHash({ action: 'moderate', ...command });
         const result = await this.repository.withTransaction(async client => {
-            const locked = await this.lockContext(client, command.interactionId, ownerUsername);
+            const locked = await this.repository.lockModerationContext(client, {
+                interactionId: command.interactionId,
+                reportId: command.reportId,
+                moderatorUsername
+            });
             const room = locked?.room;
-            const accounts = locked?.accounts || {};
-            this.assertOwner(ownerUsername, accounts.owner);
-            if (!room || room.memberRole !== 'owner' || room.status !== 'reported') {
+            const moderator = locked?.moderator;
+            if (!locked || !this.ownerUsername || locked.owner?.username !== this.ownerUsername
+                || !moderator || moderator.is_admin !== true || moderator.authorized !== true
+                || moderator.deactivated === true || moderator.account_locked === true
+                || moderator.username === this.ownerUsername
+                || Number(moderator.id) === Number(locked.owner?.id)) {
+                throw this.serviceError('LIVE_INDEPENDENT_MODERATOR_REQUIRED', 403,
+                    'An independent active moderator is required');
+            }
+            if (!room || room.status !== 'reported' || locked.report?.status
+                && !['open', 'reviewing'].includes(locked.report.status)) {
                 throw this.serviceError('LIVE_REPORT_NOT_FOUND', 404, 'Reported interaction not found');
             }
 
             const existing = await this.repository.findCommand(
                 client,
                 room.id,
-                room.ownerUserId,
+                Number(moderator.id),
                 command.commandId
             );
             const replay = this.replay(existing, hash);
@@ -367,7 +411,7 @@ const participantCommands = {
             const resolved = await this.repository.resolveReport(
                 client,
                 command.reportId,
-                room.ownerUserId,
+                Number(moderator.id),
                 command.resolution
             );
             if (!resolved || Number(resolved.report.interaction_id) !== room.id) {
@@ -383,8 +427,9 @@ const participantCommands = {
                 eventId: crypto.randomUUID(),
                 interactionId: room.id,
                 eventType: 'interaction.report_resolved',
-                actorType: 'owner',
-                actorUserId: room.ownerUserId,
+                audience: 'creator',
+                actorType: 'moderator',
+                actorUserId: Number(moderator.id),
                 subjectUserId: room.creatorUserId,
                 correlationId: command.commandId,
                 stateRevision: savedRoom.revision,
@@ -398,6 +443,17 @@ const participantCommands = {
                 reportStatus: command.resolution,
                 event
             };
+            await this.repository.appendSensitiveReadAudit(client, {
+                actorUserId: Number(moderator.id),
+                actorUsername: moderator.username,
+                interactionId: room.id,
+                reportId: command.reportId,
+                accessKind: 'moderation_evidence',
+                decision: 'granted',
+                fields: ['reason_code', 'detail', 'item_id', 'reporter_user_id'],
+                requestId: context.requestId,
+                metadata: { purpose: 'resolution', resolution: command.resolution }
+            });
             return saveParticipantCommand(this, client, {
                 context,
                 body,
@@ -406,7 +462,7 @@ const participantCommands = {
                 audience: 'creator',
                 command: {
                     interactionId: room.id,
-                    actorUserId: room.ownerUserId,
+                    actorUserId: Number(moderator.id),
                     commandId: command.commandId,
                     commandType: 'interaction.report.moderate',
                     semanticHash: hash,
@@ -417,11 +473,12 @@ const participantCommands = {
                 },
                 audit: {
                     interactionId: room.id,
-                    actorUserId: room.ownerUserId,
-                    actorType: 'owner',
+                    actorUserId: Number(moderator.id),
+                    actorType: 'moderator',
                     action: 'live.report.moderated',
                     requestId: context.requestId,
-                    details: { reportId: command.reportId, resolution: command.resolution }
+                    details: { reportId: command.reportId, resolution: command.resolution,
+                        moderatorUsername: moderator.username }
                 }
             });
         });

@@ -352,6 +352,12 @@ async function run() {
         const desktopUser = await database.createUser({ username: 'browser_desktop' });
         const mobileUser = await database.createUser({ username: 'browser_mobile' });
         await database.pool.query(`
+            INSERT INTO creator_profiles (user_id, display_name, timezone)
+            SELECT id, username, 'America/Toronto'
+            FROM users
+            WHERE username = ANY($1::TEXT[])
+        `, [[desktopUser.username, mobileUser.username]]);
+        await database.pool.query(`
             INSERT INTO dictation_allowances (username, attempts)
             VALUES ($1, 5), ($2, 5)
             ON CONFLICT (username) DO UPDATE SET attempts = EXCLUDED.attempts
@@ -401,6 +407,11 @@ async function run() {
         await mobileContext.close();
 
         console.log(`Browser E2E passed for all ${GAME_PAGES.length} games on desktop and mobile`);
+    } catch (error) {
+        if (app?.output?.length) {
+            console.error(`Browser E2E application output:\n${app.output.join('').slice(-20000)}`);
+        }
+        throw error;
     } finally {
         await browser?.close().catch(() => {});
         await app?.stop().catch(() => {});

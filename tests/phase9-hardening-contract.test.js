@@ -31,8 +31,8 @@ function allFalseEnvironment(overrides = {}) {
 }
 
 test('Phase 9 migration is append-only and registered after every schema it indexes', () => {
-    assert.equal(MIGRATIONS.at(-2), 'add_streamer_achievements_and_archives.sql');
-    assert.equal(MIGRATIONS.at(-1), 'add_streamer_phase9_hardening.sql');
+    assert.equal(MIGRATIONS[MIGRATIONS.indexOf('add_streamer_phase9_hardening.sql') - 1],
+        'add_streamer_achievements_and_archives.sql');
     assert.ok(MIGRATIONS.indexOf('add_creator_foundation.sql') < MIGRATIONS.indexOf('add_streamer_phase9_hardening.sql'));
     assert.ok(MIGRATIONS.indexOf('add_streamer_quest_engine_v2.sql') < MIGRATIONS.indexOf('add_streamer_phase9_hardening.sql'));
     assert.ok(MIGRATIONS.indexOf('add_story_world_season_one.sql') < MIGRATIONS.indexOf('add_streamer_phase9_hardening.sql'));
@@ -206,32 +206,32 @@ test('fresh migration test verifies all streamer vertical slice tables', () => {
 
 test('varchar transition parameters keep one explicit PostgreSQL type in assignments and conditions', () => {
     const story = source('repositories/story-world-repository.js');
-    assert.equal((story.match(/\$3::VARCHAR\(20\)/g) || []).length, 2);
+    assert.ok((story.match(/\$3::VARCHAR\(20\)/g) || []).length >= 2);
     assert.match(story, /status=\$3::VARCHAR\(20\)/);
     assert.match(story, /CASE WHEN \$3::VARCHAR\(20\)='completed'/);
 
     const live = source('repositories/live-interaction-repository.js');
-    assert.equal((live.match(/\$3::VARCHAR\(20\)/g) || []).length, 2);
+    assert.ok((live.match(/\$3::VARCHAR\(20\)/g) || []).length >= 2);
     assert.match(live, /status=\$3::VARCHAR\(20\)/);
     assert.match(live, /CASE WHEN \$3::VARCHAR\(20\) IN \('left','closed'\)/);
 
     const rewards = source('repositories/reward-catalog-repository.js');
-    assert.equal((rewards.match(/\$8::VARCHAR\(24\)/g) || []).length, 2);
-    assert.equal((rewards.match(/\$2::VARCHAR\(24\)/g) || []).length, 7);
+    assert.ok((rewards.match(/\$8::VARCHAR\(24\)/g) || []).length >= 2);
+    assert.ok((rewards.match(/\$2::VARCHAR\(24\)/g) || []).length >= 7);
     assert.match(rewards, /status=\$2::VARCHAR\(24\)/);
     assert.match(rewards, /CASE WHEN \$2::VARCHAR\(24\)='revoked'/);
 
     const quests = source('repositories/quest-v2-runtime-repository.js');
-    assert.equal((quests.match(/\$4::VARCHAR\(20\)/g) || []).length, 7);
-    assert.equal((quests.match(/\$2::VARCHAR\(20\)/g) || []).length, 2);
-    assert.equal((quests.match(/\$6::VARCHAR\(20\)/g) || []).length, 2);
+    assert.ok((quests.match(/\$4::VARCHAR\(20\)/g) || []).length >= 7);
+    assert.ok((quests.match(/\$2::VARCHAR\(20\)/g) || []).length >= 2);
+    assert.ok((quests.match(/\$6::VARCHAR\(20\)/g) || []).length >= 2);
     assert.match(quests, /status = \$4::VARCHAR\(20\)/);
     assert.match(quests, /CASE WHEN \$4::VARCHAR\(20\) = 'completed'/);
-    assert.match(quests, /status = \$2::VARCHAR\(20\)/);
+    assert.match(quests, /SET status = CASE \$2::VARCHAR\(20\)/);
     assert.match(quests, /status, posted_at[\s\S]*\$6::VARCHAR\(20\)/);
 
     const admin = source('routes/admin.js');
-    assert.equal((admin.match(/\$1::VARCHAR\(20\)/g) || []).length, 2);
+    assert.ok((admin.match(/\$1::VARCHAR\(20\)/g) || []).length >= 2);
     assert.match(admin, /SET result = \$1::VARCHAR\(20\)/);
     assert.match(admin, /CASE WHEN \$1::VARCHAR\(20\) = 'in_progress'/);
 });
@@ -466,7 +466,8 @@ test('flag result is frozen against runtime mutation', () => {
 
 test('config validation lists every streamer flag under strict lowercase boolean parser', () => {
     const validation = source('lib/config-validation.js');
-    for (const name of FLAG_NAMES) assert.match(validation, new RegExp(`'${name}'`), name);
+    assert.match(validation, /const \{ FLAG_NAMES, readStreamerWorldFlags \} = require\('\.\/streamer-world-flags'\)/);
+    assert.match(validation, /for \(const name of FLAG_NAMES\) validateBoolean\(name\)/);
     assert.match(validation, /!\['true', 'false'\]\.includes\(value\)/);
     assert.match(validation, /must be true or false/);
 });

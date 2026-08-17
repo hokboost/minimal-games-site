@@ -25,7 +25,7 @@ module.exports = function registerAdminQuestStudioRoutes(app, deps) {
         return res.status(503).json({ success: false, code: 'QUEST_STUDIO_UNAVAILABLE', message: 'Quest Studio unavailable' });
     }
     app.get('/admin/quest-studio', requireLogin, requireAdmin, readHeavy, enabled, async (req, res) => {
-        try { const studio = await questV2Service.studio(); res.set('Cache-Control', 'private, no-store'); return res.render('admin-quest-studio', { title: res.locals.lang === 'zh' ? '任务工作室' : 'Quest Studio', user: req.session.user, balance: null, csrfToken: generateCSRFToken(req), versions: studio.versions, reviewQueue: studio.reviewQueue }); }
+        try { const studio = await questV2Service.studio(req.session.user.username); res.set('Cache-Control', 'private, no-store'); return res.render('admin-quest-studio', { title: res.locals.lang === 'zh' ? '任务工作室' : 'Quest Studio', user: req.session.user, balance: null, csrfToken: generateCSRFToken(req), versions: studio.versions, reviewQueue: studio.reviewQueue, appeals: studio.appeals }); }
         catch (error) { console.error('Quest Studio read failed:', error); return res.status(503).send('Quest Studio unavailable'); }
     });
     const writes = [requireLogin, requireAdmin, basic, action, csrf];
@@ -40,5 +40,10 @@ module.exports = function registerAdminQuestStudioRoutes(app, deps) {
     app.post('/api/admin/quests/v2/review', ...writes, enabled, async (req, res) => {
         try { return res.json(await questV2Service.review(req.session.user.username, req.body, context(req))); }
         catch (error) { return fail(error, res); }
+    });
+    app.post('/api/admin/quests/v2/appeals/resolve', ...writes, enabled, async (req, res) => {
+        try { return res.json(await questV2Service.resolveAppeal(
+            req.session.user.username, req.body, context(req)));
+        } catch (error) { return fail(error, res); }
     });
 };

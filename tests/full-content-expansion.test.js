@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const ejs = require('ejs');
 const { counts: storyCounts, seasons } = require('../content/streamer-world/story');
 const questCatalog = require('../content/streamer-world/quests');
 const gameCatalog = require('../content/streamer-world/games');
@@ -13,6 +14,7 @@ const { ACHIEVEMENTS } = require('../content/streamer-world/achievements/catalog
 const { validateFullStoryCatalog, validateStoryAuthorship } = require('../domain/story/authorship-validator');
 const { AchievementRuleError, progressFor, publicAchievement, validateDefinition, validateTrustedEvent } = require('../domain/achievements/rules');
 const { AchievementService } = require('../services/achievement-service');
+const registerCreatorAchievementRoutes = require('../routes/creator-achievements');
 const { readStreamerWorldFlags } = require('../lib/streamer-world-flags');
 const mazeEngine = require('../domain/dream-maze/engine');
 const predictionEngine = require('../domain/keeper-prediction/engine');
@@ -236,12 +238,83 @@ test('distinct progress counts a semantic key once and ordinary progress increme
     assert.deepEqual(replay.keys,['string:signal-duet']);
 });
 
-test('hidden achievement projection leaks no title, condition, progress, or collection before unlock', () => {
+test('hidden achievement projection leaks no identifier, title, condition, progress, or collection before unlock', () => {
     const definition = {slug:'hidden-one',hidden:true,title_zh:'秘密标题',title_en:'Secret title',description_zh:'秘密条件',description_en:'Secret condition',target:5,collection_key:'secret-item'};
-    assert.deepEqual(publicAchievement(definition,null,'en'),{slug:'hidden-one',hidden:true,locked:true});
+    assert.deepEqual(publicAchievement(definition,null,'en'),{hidden:true,locked:true});
     const visible = publicAchievement(definition,{progress:5,unlocked_at:'2026-01-01T00:00:00.000Z'},'en');
+    assert.equal(visible.slug,'hidden-one');
     assert.equal(visible.title,'Secret title');
     assert.equal(visible.collectionKey,'secret-item');
+});
+
+function achievementStateHarness({ unlocked = false } = {}) {
+    const row = {
+        slug:'hidden-one', hidden:true, title_zh:'秘密标题', title_en:'Secret title',
+        description_zh:'秘密条件', description_en:'Secret condition', target:5,
+        collection_key:'secret-item', progress:unlocked ? 5 : 4,
+        unlocked_at:unlocked ? '2026-01-01T00:00:00.000Z' : null
+    };
+    const client = { query:async()=>({ rows:[] }), release(){} };
+    const pool = { connect:async()=>client };
+    const repositoryFactory = () => ({
+        readUser:async username=>username==='creator'?{ id:7, username }:null,
+        state:async()=>({
+            achievements:[row],
+            collection:unlocked ? [{
+                item_key:'secret-item', acquired_at:'2026-01-01T00:00:00.000Z',
+                archived_at:null, showcase_slot:null
+            }] : [],
+            archives:[]
+        })
+    });
+    return new AchievementService({ pool, repositoryFactory });
+}
+
+test('achievement state and JSON route keep every locked hidden identifier off the wire', async () => {
+    const achievementService = achievementStateHarness();
+    const state = await achievementService.state('creator',{ language:'en' });
+    assert.deepEqual(state.achievements,[{ hidden:true, locked:true }]);
+    assert.doesNotMatch(JSON.stringify(state),/hidden-one|Secret title|Secret condition|secret-item/);
+
+    const routes = new Map();
+    const app = { get(pathname,...handlers){ routes.set(pathname,handlers); } };
+    const pass = (req,res,next)=>next();
+    registerCreatorAchievementRoutes(app,{
+        achievementService,
+        streamerWorldFlags:{ achievementsEnabled:true },
+        requireLogin:pass,
+        requireAuthorized:pass,
+        security:{ readHeavyRateLimit:pass }
+    });
+    const response = {
+        headers:{}, statusCode:200, body:null,
+        set(name,value){ this.headers[name]=value; return this; },
+        status(value){ this.statusCode=value; return this; },
+        json(value){ this.body=value; return value; }
+    };
+    await routes.get('/api/creator-achievements/state').at(-1)(
+        { session:{ user:{ username:'creator' } } },Object.assign(response,{ locals:{ lang:'en' } })
+    );
+    assert.equal(response.headers['Cache-Control'],'private, no-store');
+    assert.deepEqual(response.body.achievements,[{ hidden:true, locked:true }]);
+    assert.doesNotMatch(JSON.stringify(response.body),/hidden-one|Secret title|Secret condition|secret-item/);
+});
+
+test('achievement DOM renders only a generic locked placeholder and reveals unlocked details', async () => {
+    const lockedState = await achievementStateHarness().state('creator',{ language:'en' });
+    const unlockedState = await achievementStateHarness({ unlocked:true }).state('creator',{ language:'en' });
+    const render = state=>ejs.renderFile(path.join(root,'views/creator-achievements.ejs'),{
+        lang:'en', title:'Achievements and season archive',
+        user:{ username:'creator', authorized:true, is_admin:false }, balance:null,
+        csrfToken:'test-token', cspNonce:'test-nonce', state
+    });
+    const lockedHtml = await render(lockedState);
+    assert.match(lockedHtml,/Hidden coordinate/);
+    assert.doesNotMatch(lockedHtml,/hidden-one|Secret title|Secret condition|secret-item/);
+    const unlockedHtml = await render(unlockedState);
+    assert.match(unlockedHtml,/Secret title/);
+    assert.match(unlockedHtml,/Secret condition/);
+    assert.match(unlockedHtml,/secret-item/);
 });
 
 function memoryHarness({ failCollection = false } = {}) {
@@ -327,7 +400,9 @@ test('achievement page is bilingual, escaped by EJS, mobile responsive, and read
 
 test('live, story, game, and quest integrations call achievement settlement inside existing transaction paths', () => {
     assert.match(source('services/story-world-service.js'),/achievementService\.recordTrustedEvent\(client/);
-    assert.match(source('services/streamer-game-service.js'),/achievementService\.recordTrustedEvent\(client/);
+    const gameService=source('services/streamer-game-service.js');
+    assert.match(gameService,/achievementService\.recordTrustedEvent\(\s*client/);
+    assert.match(gameService,/await this\.recordCompletionAchievements\(client/);
     assert.match(source('services/quest-v2-service.js'),/achievementService\.recordTrustedEvent\(client/);
     assert.match(source('services/live-interaction-participant-commands.js'),/achievementService\.recordTrustedEvent\(client/);
     assert.match(source('services/live-interaction-service.js'),/achievement-live-reconsent/);

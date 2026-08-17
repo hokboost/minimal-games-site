@@ -6,7 +6,6 @@ const {
     TEMPLATES
 } = require('../content/streamer-world/live-interactions/templates');
 const {
-    isMuted,
     nextRoomState
 } = require('../domain/live-interactions/engine');
 const {
@@ -19,6 +18,9 @@ const {
     validateReconsent
 } = require('../domain/live-interactions/protocol');
 const participantCommands = require('./live-interaction-participant-commands');
+const {
+    evaluateCommunicationBoundary
+} = require('./creator-communication-boundary-policy');
 
 class LiveInteractionServiceError extends Error {
     constructor(code, status, message) {
@@ -39,58 +41,21 @@ const itemEvent = {
     game_invite: 'interaction.game_invite',
     story_intervention: 'interaction.story_intervention'
 };
-const preferenceKey = {
-    nudge: 'owner_notes',
-    clue: 'owner_notes',
-    celebration: 'celebrations',
-    story_letter: 'owner_notes',
-    quest_invite: 'quest_invites',
-    poll: 'owner_notes',
-    game_invite: 'game_invites',
-    story_intervention: 'owner_notes'
-};
-
-function minuteAt(timezone, date) {
-    try {
-        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-            timeZone: timezone || 'UTC',
-            weekday: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-            hourCycle: 'h23'
-        }).formatToParts(date).map(p => [p.type, p.value]));
-        return {
-            weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.weekday),
-            minute: Number(parts.hour) * 60 + Number(parts.minute)
-        };
-    } catch {
-        return {
-            weekday: 0,
-            minute: 0
-        };
-    }
-}
-
-function inWindow(window, clock) {
-    if (!window.enabled || Number(window.weekday) !== clock.weekday) return false;
-    const start = Number(window.startMinute),
-        end = Number(window.endMinute);
-    return start < end ? clock.minute >= start && clock.minute < end : clock.minute >= start || clock.minute < end;
-}
-
-function boundaryState(account, boundaries, room, now) {
-    const clock = minuteAt(account.timezone, now);
-    const quiet = boundaries.quietHours.some(w => inWindow(w, clock));
-    const liveWindows = boundaries.interactionWindows.filter(w => w.enabled && ['live', 'either'].includes(w.mode));
-    const preferred = liveWindows.length === 0 || liveWindows.some(w => inWindow(w, clock));
-    const blocked = boundaries.preferences.all_messages === 'block';
-    const muted = isMuted(room, now);
+function boundaryState(account, boundaries, room, now, options = {}) {
+    const result = evaluateCommunicationBoundary({
+        account,
+        preferences: boundaries?.preferences,
+        quietHours: boundaries?.quietHours,
+        interactionWindows: boundaries?.interactionWindows,
+        report: boundaries?.report,
+        room,
+        itemType: options.itemType,
+        gameId: options.gameId,
+        now
+    });
     return {
-        quiet,
-        preferred,
-        blocked,
-        muted,
-        canShowPresence: account.live_interaction_opt_in === true && !quiet && !muted && !blocked && preferred
+        ...result,
+        canShowPresence: result.allowRealtime
     };
 }
 
@@ -105,7 +70,7 @@ function roomProjection(room, boundary, viewerRole) {
         key: room.key,
         status: room.status,
         revision: room.revision,
-        lastSequence: room.nextSequence - 1,
+        lastSequence: room.visibleLastSequence ?? room.nextSequence - 1,
         highestAckSequence: room.highestAckSequence,
         creatorUsername: room.creatorUsername,
         ownerUsername: room.ownerUsername,
@@ -124,10 +89,13 @@ class LiveInteractionService {
         games = [],
         gameIds = [],
         storyNodeIds = [],
+        storyInterventionRegistry = null,
         questEnabled = false,
         storyEnabled = false,
         achievementService = null,
-        clock = () => new Date()
+        consentCoordinator = null,
+        clock = () => new Date(),
+        boundaryPolicy = evaluateCommunicationBoundary
     }) {
         if (!repository?.withTransaction) throw new TypeError('LiveInteractionService requires repository');
         this.repository = repository;
@@ -141,11 +109,20 @@ class LiveInteractionService {
             'Live game action paths must be internal allowlisted paths');
         this.gamePaths = new Map(catalog.map(game => [game.id, game.href]));
         this.gameIds = new Set(this.gamePaths.keys());
-        this.storyNodeIds = new Set(storyNodeIds);
+        this.strictStoryInterventionRegistry = Boolean(storyInterventionRegistry);
+        this.storyNodeIds = new Set(storyInterventionRegistry?.nodeIds || storyNodeIds);
+        this.storyInterventionRegistry = storyInterventionRegistry || {
+            hasBinding: (season, version, nodeId) => this.storyNodeIds.has(nodeId)
+        };
+        if (typeof this.storyInterventionRegistry.hasBinding !== 'function') {
+            throw new TypeError('Story intervention registry requires version-bound lookup');
+        }
         this.questEnabled = questEnabled;
         this.storyEnabled = storyEnabled;
         this.achievementService = achievementService;
+        this.consentCoordinator = consentCoordinator;
         this.clock = clock;
+        this.boundaryPolicy = boundaryPolicy;
         this.validateTemplateCatalog();
     }
     validateTemplateCatalog() {
@@ -158,8 +135,9 @@ class LiveInteractionService {
                 'Live template titles must be unique');
             zh.add(template.titleZh);
             en.add(template.titleEn);
-            if (template.type === 'story_intervention' && (!template.storyNodeIds.length || template.storyNodeIds
-                    .some(id => !this.storyNodeIds.has(id)))) throw new TypeError(
+            if (template.type === 'story_intervention' && (!template.storyNodeIds.length
+                || (this.strictStoryInterventionRegistry && template.storyNodeIds
+                    .some(id => !this.storyNodeIds.has(id))))) throw new TypeError(
                 'Story intervention template references an unavailable authored node');
             if (template.type === 'game_invite' && template.referenceIds.some(id => !this.gameIds.has(id)))
             throw new TypeError('Game invitation template references an unavailable game');
@@ -187,11 +165,22 @@ class LiveInteractionService {
         }
         return result.body;
     }
-    async boundaries(queryable, account, room) {
-        const rows = await this.repository.creatorBoundaries(queryable, account.id);
+    async boundaries(queryable, account, room, options = {}) {
+        const rows = await this.repository.creatorBoundaries(queryable, account.id, room?.id || null);
+        const evaluated = this.boundaryPolicy({
+            account,
+            preferences: rows.preferences,
+            quietHours: rows.quietHours,
+            interactionWindows: rows.interactionWindows,
+            report: rows.report,
+            room,
+            itemType: options.itemType,
+            gameId: options.gameId,
+            now: this.clock()
+        });
         return {
             rows,
-            state: boundaryState(account, rows, room, this.clock())
+            state: { ...evaluated, canShowPresence: evaluated.allowRealtime }
         };
     }
     async lockContext(client, interactionId, username) {
@@ -223,22 +212,38 @@ class LiveInteractionService {
             this.assertOwner(ownerUsername, accounts.owner);
             if (!accounts.creator?.timezone) throw new LiveInteractionServiceError(
                 'CREATOR_PROFILE_REQUIRED', 409, 'Creator profile required');
-            if (accounts.creator.live_interaction_opt_in !== true)
-            throw new LiveInteractionServiceError('LIVE_CONSENT_REQUIRED', 403,
-                    'Creator has not opted in');
             const priorReport = await this.repository.latestPairReport(client, accounts.creator.id,
                 accounts.owner.id, {
                     lock: true
                 });
-            if (priorReport && (!['resolved', 'dismissed'].includes(priorReport.status) || !priorReport
-                    .creator_reconsented_at)) {
-                throw new LiveInteractionServiceError('LIVE_PAIR_BLOCKED', 403,
-                    'Interaction remains blocked after a report');
-            }
             let room = await this.repository.findActivePair(client, accounts.creator.id, accounts.owner
                 .id, {
                     lock: true
                 });
+            const boundaryRows = await this.repository.creatorBoundaries(client, accounts.creator.id,
+                room?.id || null);
+            if (!boundaryRows.report && priorReport) {
+                boundaryRows.report = {
+                    status: priorReport.status,
+                    creatorReconsentedAt: priorReport.creator_reconsented_at
+                };
+            }
+            const boundary = this.boundaryPolicy({
+                account: accounts.creator,
+                preferences: boundaryRows.preferences,
+                quietHours: boundaryRows.quietHours,
+                interactionWindows: boundaryRows.interactionWindows,
+                report: boundaryRows.report,
+                room,
+                now: this.clock()
+            });
+            if (!boundary.allowDurable) {
+                const code = boundary.reason === 'unresolved_report' ? 'LIVE_PAIR_BLOCKED'
+                    : boundary.reason === 'global_opt_out' ? 'LIVE_CONSENT_REQUIRED'
+                        : 'LIVE_CONSENT_BLOCKED';
+                throw new LiveInteractionServiceError(code, 403,
+                    `Creator communication boundary blocks this interaction (${boundary.reason})`);
+            }
             if (room) {
                 const existing = await this.repository.findCommand(client, room.id, accounts.owner.id,
                     command.commandId);
@@ -249,6 +254,7 @@ class LiveInteractionService {
                 const body = {
                     success: true,
                     reused: true,
+                    realtimeSuppressed: !boundary.allowRealtime,
                     interaction: {
                         id: room.id,
                         revision: room.revision,
@@ -287,6 +293,7 @@ class LiveInteractionService {
                 eventId: crypto.randomUUID(),
                 interactionId: room.id,
                 eventType: 'interaction.opened',
+                audience: 'both',
                 actorType: 'owner',
                 actorUserId: accounts.owner.id,
                 subjectUserId: accounts.creator.id,
@@ -299,6 +306,7 @@ class LiveInteractionService {
             const body = {
                 success: true,
                 reused: false,
+                realtimeSuppressed: !boundary.allowRealtime,
                 interaction: {
                     id: room.id,
                     key: room.key,
@@ -334,7 +342,7 @@ class LiveInteractionService {
                 fanout: {
                     event,
                     room,
-                    audience: 'both'
+                    audience: boundary.allowRealtime ? 'both' : 'owner'
                 }
             };
         });
@@ -354,8 +362,12 @@ class LiveInteractionService {
         } else if (command.referenceId !== null) throw new LiveInteractionServiceError('LIVE_REFERENCE_INVALID',
             400, 'This interaction does not accept a reference');
         if (command.itemType === 'story_intervention') {
-            if (!this.storyEnabled || !template.storyNodeIds.includes(command.targetStoryNode) || !await this
-                .repository.validateStoryTarget(client, creator.id, command.targetStoryNode))
+            const target = this.storyEnabled && template.storyNodeIds.includes(command.targetStoryNode)
+                ? await this.repository.validateStoryTarget(client, creator.id, command.targetStoryNode)
+                : null;
+            if (!target || !this.storyInterventionRegistry.hasBinding(
+                target.seasonSlug, Number(target.contentVersion), command.targetStoryNode
+            ))
                 throw new LiveInteractionServiceError('LIVE_STORY_TARGET_MISMATCH', 409,
                     'Story intervention does not match the current authored node');
         }
@@ -388,13 +400,16 @@ class LiveInteractionService {
             const template = getTemplate(command.templateKey, command.itemType);
             if (!template) throw new LiveInteractionServiceError('LIVE_TEMPLATE_NOT_FOUND', 400,
                 'Unknown structured template');
-            const boundary = await this.boundaries(client, accounts.creator, room);
-            if (accounts.creator.live_interaction_opt_in !== true || boundary.state.blocked || boundary
-                .rows.preferences[preferenceKey[command.itemType]] === 'block')
-            throw new LiveInteractionServiceError('LIVE_CONSENT_BLOCKED', 403,
-                    'Creator communication preference blocks this interaction');
-            if (boundary.state.muted) throw new LiveInteractionServiceError('LIVE_MUTED', 409,
-                'Creator has muted owner interactions');
+            const boundary = await this.boundaries(client, accounts.creator, room, {
+                itemType: command.itemType,
+                gameId: command.itemType === 'game_invite' ? command.referenceId : null
+            });
+            if (!boundary.state.allowDurable) {
+                const code = boundary.state.reason === 'room_muted' ? 'LIVE_MUTED' : 'LIVE_CONSENT_BLOCKED';
+                throw new LiveInteractionServiceError(code,
+                    boundary.state.reason === 'room_muted' ? 409 : 403,
+                    `Creator communication boundary blocks this interaction (${boundary.state.reason})`);
+            }
             await this.validateReference(client, accounts.creator, command, template);
             const expiresAt = new Date(this.clock().getTime() + command.expiresInMinutes * 60000)
                 .toISOString();
@@ -407,7 +422,7 @@ class LiveInteractionService {
                 pollOptions: command.pollOptions,
                 actionPath: command.itemType === 'quest_invite' ? '/quests' : command.itemType ===
                     'game_invite' ? this.gamePaths.get(command.referenceId) : null,
-                delivery: boundary.state.quiet ? 'persistent_inbox_no_push' : 'realtime'
+                delivery: boundary.state.allowRealtime ? 'realtime' : 'persistent_inbox_no_push'
             };
             const next = nextRoomState(room, 'send');
             const savedRoom = await this.repository.advanceRoom(client, room, next);
@@ -430,6 +445,7 @@ class LiveInteractionService {
                 eventId: crypto.randomUUID(),
                 interactionId: room.id,
                 eventType: itemEvent[command.itemType],
+                audience: 'both',
                 actorType: 'owner',
                 actorUserId: accounts.owner.id,
                 subjectUserId: accounts.creator.id,
@@ -457,7 +473,7 @@ class LiveInteractionService {
                 revision: savedRoom.revision,
                 item,
                 event,
-                realtimeSuppressed: boundary.state.quiet
+                realtimeSuppressed: !boundary.state.allowRealtime
             };
             await this.repository.saveCommand(client, {
                 interactionId: room.id,
@@ -479,7 +495,8 @@ class LiveInteractionService {
                 details: {
                     itemId: item.id,
                     templateKey: item.templateKey,
-                    realtimeSuppressed: boundary.state.quiet
+                    realtimeSuppressed: !boundary.state.allowRealtime,
+                    boundaryReason: boundary.state.realtimeReason
                 }
             });
             await this.finalize(context, client, 201, body);
@@ -488,7 +505,7 @@ class LiveInteractionService {
                 fanout: {
                     event,
                     room: savedRoom,
-                    audience: boundary.state.quiet ? 'owner' : 'both'
+                    audience: boundary.state.allowRealtime ? 'both' : 'owner'
                 }
             };
         });
@@ -522,6 +539,7 @@ class LiveInteractionService {
                 eventId: crypto.randomUUID(),
                 interactionId: room.id,
                 eventType: 'interaction.reconsented',
+                audience: 'creator',
                 actorType: 'creator',
                 actorUserId: actorId,
                 subjectUserId: actorId,
@@ -605,57 +623,158 @@ class LiveInteractionService {
             events: result.events,
             hasMore: result.hasMore,
             nextAfter: result.nextAfter,
-            lastSequence: result.room.nextSequence - 1
+            lastSequence: result.lastSequence,
+            subscription: {
+                role: result.room.memberRole,
+                userId: result.room.memberRole === 'creator'
+                    ? result.room.creatorUserId : result.room.ownerUserId
+            }
         };
     }
     async state(username, interactionId = null) {
         const account = await this.repository.readAccount(username);
         if (!account) throw new LiveInteractionServiceError('LIVE_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
+        const unavailableState = async () => {
+            const recovery = await this.repository.latestReportRecovery?.(username);
+            if (!recovery) return {
+                success: true,
+                rooms: [],
+                interaction: null,
+                items: [],
+                recent: []
+            };
+            const boundary = await this.boundaries(this.repository.pool, account, recovery.room);
+            return {
+                success: true,
+                rooms: [],
+                interaction: roomProjection(recovery.room, boundary.state, 'creator'),
+                items: [],
+                recent: [],
+                report: recovery.report
+            };
+        };
         const rooms = await this.repository.listCreatorRooms(username);
         const selected = interactionId ? rooms.find(room => room.id === Number(interactionId)) : rooms[0];
-        if (!selected) return {
-            success: true,
-            rooms: [],
-            interaction: null,
-            items: [],
-            recent: []
-        };
+        if (!selected) return unavailableState();
         const snapshot = await this.repository.roomState(selected.id, username);
-        const boundary = await this.boundaries(this.repository.pool, account, snapshot.room);
+        if (!snapshot) return unavailableState();
+        const creatorAccounts = this.repository.readAccountsByIds
+            ? await this.repository.readAccountsByIds(rooms.map(room => room.creatorUserId))
+            : new Map();
+        const evaluatedRooms = await Promise.all(rooms.map(async room => {
+            const creatorAccount = creatorAccounts.get(Number(room.creatorUserId))
+                || (Number(account.id) === Number(room.creatorUserId) ? account
+                    : await this.repository.readAccount(room.creatorUsername));
+            if (!creatorAccount) return null;
+            return {
+                room,
+                boundary: await this.boundaries(this.repository.pool, creatorAccount, room)
+            };
+        }));
+        const roomStates = evaluatedRooms.filter(Boolean);
+        const selectedState = roomStates.find(value => value.room.id === snapshot.room.id);
+        if (!selectedState) return unavailableState();
         return {
             success: true,
-            rooms: rooms.map(room => roomProjection(room, boundary.state, room.memberRole)),
-            interaction: roomProjection(snapshot.room, boundary.state, snapshot.room.memberRole),
+            rooms: roomStates.map(value => roomProjection(value.room, value.boundary.state,
+                value.room.memberRole)),
+            interaction: roomProjection(snapshot.room, selectedState.boundary.state,
+                snapshot.room.memberRole),
             items: snapshot.items,
             recent: snapshot.recent,
             report: snapshot.report
         };
     }
-    async director(callerUsername, page = 1) {
+    async reportsForLockedActor(client, actor, { includeEvidence = false } = {}, context = {}) {
+        const independent = Boolean(actor?.is_admin === true && actor.authorized === true
+            && actor.deactivated !== true && actor.account_locked !== true
+            && this.ownerUsername && actor.username !== this.ownerUsername);
+        const ownerRead = Boolean(actor?.is_admin === true && actor.authorized === true
+            && actor.deactivated !== true && actor.account_locked !== true
+            && this.ownerUsername && actor.username === this.ownerUsername);
+        if ((includeEvidence && !independent) || (!includeEvidence && !ownerRead)) {
+            throw new LiveInteractionServiceError('LIVE_INDEPENDENT_MODERATOR_REQUIRED', 403,
+                'An independent active moderator is required');
+        }
+        const reports = await this.repository.listReports(client, { includeEvidence, limit: 50 });
+        for (const report of reports) {
+            await this.repository.appendSensitiveReadAudit(client, {
+                actorUserId: Number(actor.id),
+                actorUsername: actor.username,
+                interactionId: report.interactionId,
+                reportId: report.id,
+                accessKind: 'moderation_evidence',
+                decision: includeEvidence ? 'granted' : 'redacted',
+                fields: includeEvidence
+                    ? ['reason_code', 'detail', 'item_id', 'reporter_user_id'] : [],
+                requestId: context.requestId,
+                metadata: { purpose: 'queue', configuredOwner: ownerRead }
+            });
+        }
+        return reports;
+    }
+
+    async reportsForActor(callerUsername, { includeEvidence = false } = {}, context = {}) {
+        return this.repository.withTransaction(async client => {
+            const actor = await this.repository.readAccount(callerUsername, client, { lock: true });
+            return this.reportsForLockedActor(client, actor, { includeEvidence }, context);
+        });
+    }
+
+    async moderationQueue(callerUsername, context = {}) {
+        return {
+            reports: await this.reportsForActor(callerUsername, { includeEvidence: true }, context),
+            templates: []
+        };
+    }
+
+    async director(callerUsername, page = 1, context = {}) {
         if (!this.ownerUsername) throw new LiveInteractionServiceError('LIVE_OWNER_REQUIRED', 403,
             'Configured owner account required');
-        const owner = await this.repository.readAccount(callerUsername);
-        this.assertOwner(callerUsername, owner);
-        const summary = await this.repository.directorSummary(page);
-        for (const creator of summary.creators) {
-            const account = {
-                id: creator.userId,
-                timezone: creator.timezone,
-                live_interaction_opt_in: creator.liveInteractionOptIn
+        return this.repository.withTransaction(async client => {
+            const owner = await this.repository.readAccount(callerUsername, client, { lock: true });
+            this.assertOwner(callerUsername, owner);
+            const summary = await this.repository.directorSummary(client, page);
+            for (const creator of summary.creators) {
+                const granted = creator.profileVisibility === 'owner';
+                await this.repository.appendSensitiveReadAudit(client, {
+                    actorUserId: Number(owner.id),
+                    actorUsername: owner.username,
+                    targetUserId: creator.userId,
+                    accessKind: 'owner_profile',
+                    decision: granted ? 'granted' : 'redacted',
+                    fields: granted ? [
+                        'display_name', 'timezone', 'bilibili_room_id', 'live_interaction_opt_in',
+                        'relationship', 'room_request'
+                    ] : [],
+                    requestId: context.requestId,
+                    metadata: { configuredOwner: true, source: 'live_director' }
+                });
+                const account = {
+                    id: creator.userId,
+                    username: creator.username,
+                    authorized: true,
+                    deactivated: false,
+                    account_locked: false,
+                    timezone: creator.boundaryTimezone || creator.timezone,
+                    live_interaction_opt_in: creator.liveInteractionOptIn
+                };
+                const room = creator.interaction ? {
+                    mutedUntil: creator.interaction.mutedUntil
+                } : null;
+                const boundary = await this.boundaries(client, account, room);
+                creator.presence = creator.interaction && boundary.state.canShowPresence
+                    ? creator.interaction.availability : 'offline';
+                if (creator.interaction) delete creator.interaction.availability;
+                delete creator.boundaryTimezone;
+            }
+            return {
+                ...summary,
+                reports: await this.reportsForLockedActor(client, owner,
+                    { includeEvidence: false }, context),
+                templates: Object.values(TEMPLATES)
             };
-            const room = creator.interaction ? {
-                mutedUntil: creator.interaction.mutedUntil
-            } : null;
-            const boundary = await this.boundaries(this.repository.pool, account, room);
-            creator.presence = creator.interaction && boundary.state.canShowPresence ? creator.interaction
-                .availability : 'offline';
-            if (creator.interaction) delete creator.interaction.availability;
-        }
-        return {
-            ...summary,
-            reports: await this.repository.listReports(),
-            templates: Object.values(TEMPLATES)
-        };
+        });
     }
 }
 

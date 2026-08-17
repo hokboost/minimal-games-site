@@ -37,6 +37,29 @@
         }
     });
     document.addEventListener('submit', async (event) => {
+        const appealForm = event.target.closest('.appeal-form');
+        if (appealForm) {
+            event.preventDefault();
+            const button = appealForm.querySelector('button');
+            const card = appealForm.closest('[data-assignment-id]');
+            const reason = appealForm.querySelector('textarea').value.trim();
+            button.disabled = true;
+            try {
+                if (typeof window.crypto?.randomUUID !== 'function') {
+                    throw new Error('Secure command identity is unavailable');
+                }
+                await post('/api/quests/v2/appeals/submit', {
+                    assignmentId: Number(card.dataset.assignmentId),
+                    commandId: window.crypto.randomUUID(),
+                    reason
+                });
+                location.reload();
+            } catch (error) {
+                message.textContent = error.message;
+                button.disabled = false;
+            }
+            return;
+        }
         const form = event.target.closest('.evidence-form');
         if (!form) return;
         event.preventDefault();
@@ -57,5 +80,26 @@
             location.reload();
         } catch (error) { message.textContent = error.message; button.disabled = false; }
     });
+    function updateDeadlines() {
+        const now = Date.now();
+        for (const element of document.querySelectorAll('[data-quest-deadline]')) {
+            const deadline = Date.parse(element.dateTime);
+            if (!Number.isFinite(deadline)) continue;
+            const remaining = deadline - now;
+            if (remaining <= 0) {
+                element.textContent = lang === 'zh' ? '已到期，等待服务器归档' : 'Expired; awaiting server archive';
+                element.dataset.expired = 'true';
+                continue;
+            }
+            const days = Math.floor(remaining / 86400000);
+            const hours = Math.floor((remaining % 86400000) / 3600000);
+            element.textContent = lang === 'zh'
+                ? `${days} 天 ${hours} 小时`
+                : `${days}d ${hours}h remaining`;
+        }
+    }
+    updateDeadlines();
+    const deadlineTimer = setInterval(updateDeadlines, 60000);
+    deadlineTimer?.unref?.();
     if (lang === 'zh') message.textContent = '积分只会在可信事件或人工审核后结算。';
 })();

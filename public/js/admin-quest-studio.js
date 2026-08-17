@@ -17,8 +17,21 @@
     });
     document.addEventListener('click', async (event) => {
         const review = event.target.closest('[data-review]'); const publish = event.target.closest('[data-publish-version]');
-        if (!review && !publish) return; event.target.disabled = true;
-        try { if (review) await mutate('/api/admin/quests/v2/review', { assignmentId: Number(review.dataset.assignmentId), decision: review.dataset.review, note: review.closest('.quest-card').querySelector('[data-review-note]').value }); else await mutate('/api/admin/quests/v2/publish', { versionId: Number(publish.dataset.publishVersion) }); location.reload(); }
+        const appeal = event.target.closest('[data-appeal-decision]');
+        if (!review && !publish && !appeal) return; event.target.disabled = true;
+        try {
+            if (review) await mutate('/api/admin/quests/v2/review', { assignmentId: Number(review.dataset.assignmentId), decision: review.dataset.review, note: review.closest('.quest-card').querySelector('[data-review-note]').value });
+            else if (appeal) {
+                if (typeof window.crypto?.randomUUID !== 'function') throw new Error('Secure command identity is unavailable');
+                await mutate('/api/admin/quests/v2/appeals/resolve', {
+                    appealId: appeal.dataset.appealId,
+                    commandId: window.crypto.randomUUID(),
+                    decision: appeal.dataset.appealDecision,
+                    note: appeal.closest('.quest-card').querySelector('[data-appeal-note]').value
+                });
+            } else await mutate('/api/admin/quests/v2/publish', { versionId: Number(publish.dataset.publishVersion) });
+            location.reload();
+        }
         catch (error) { message.textContent = error.message; event.target.disabled = false; }
     });
 })();

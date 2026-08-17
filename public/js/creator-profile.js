@@ -71,7 +71,7 @@
 
     document.getElementById('creator-quiet-form')?.addEventListener('submit', (event) => {
         event.preventDefault();
-        const quietHours = [...document.querySelectorAll('.creator-quiet-row')]
+        const quietHours = [...event.currentTarget.querySelectorAll('.creator-quiet-row')]
             .filter((row) => row.querySelector('.quiet-enabled').checked)
             .map((row) => ({
                 weekday: Number(row.dataset.weekday),

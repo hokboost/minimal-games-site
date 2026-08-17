@@ -67,6 +67,13 @@ module.exports = function registerCreatorRewardRoutes(app, deps) {
             return res.json(await rewardCatalogService.catalog(req.session.user.username));
         } catch (error) { return fail(error, res); }
     });
+    app.get('/api/creator-rewards/catalog/:catalogVersionId', ...userReads, enabled, async (req, res) => {
+        try {
+            res.set('Cache-Control', 'private, no-store');
+            return res.json(await rewardCatalogService.itemDetail(req.session.user.username,
+                req.params.catalogVersionId));
+        } catch (error) { return fail(error, res); }
+    });
     app.get('/api/creator-rewards/state', ...userReads, enabled, async (req, res) => {
         try {
             res.set('Cache-Control', 'private, no-store');

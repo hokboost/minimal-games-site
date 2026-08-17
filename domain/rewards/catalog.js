@@ -130,23 +130,38 @@ function projectItem(row, eligibility) {
     };
 }
 
-function evaluateEligibility(item, facts) {
-    if (item.lifecycle !== 'active') return { eligible: false, reasonCode: 'CATALOG_RETIRED' };
-    if (item.owner_grant_only === true && facts.sourceType === 'direct_redemption') {
-        return { eligible: false, reasonCode: 'OWNER_GRANT_ONLY' };
-    }
+function evaluateRewardAccess(item, facts) {
+    const hidden = Object.freeze({ visible: false, eligible: false, reasonCode: 'REWARD_ITEM_NOT_FOUND' });
+    if (!item || item.lifecycle !== 'active') return hidden;
+    const sourceType = facts?.sourceType;
+    const ownerFlow = sourceType === 'owner_grant';
+    if (ownerFlow ? item.owner_grant_only !== true : item.owner_grant_only === true) return hidden;
+    if (item.visibility_type === 'owner_only' && !ownerFlow) return hidden;
+    if (item.visibility_type === 'owner_only' && item.owner_grant_only !== true) return hidden;
+    const unlockKeys = facts?.unlockKeys instanceof Set ? facts.unlockKeys : new Set();
     if (['story_unlock', 'achievement_unlock'].includes(item.visibility_type)
-        && !facts.unlockKeys.has(item.visibility_key)) {
-        return { eligible: false, reasonCode: 'UNLOCK_REQUIRED' };
-    }
+        && !unlockKeys.has(item.visibility_key)) return hidden;
+    const now = facts?.now instanceof Date ? facts.now : new Date(facts?.now || Date.now());
     if (item.visibility_type === 'season_window'
-        && (facts.now < new Date(item.visibility_start) || facts.now >= new Date(item.visibility_end))) {
-        return { eligible: false, reasonCode: 'SEASON_UNAVAILABLE' };
+        && (now < new Date(item.visibility_start) || now >= new Date(item.visibility_end))) return hidden;
+    if (Number(facts?.userItemCount || 0) >= Number(item.per_user_limit)) {
+        return Object.freeze({ visible: true, eligible: false, reasonCode: 'USER_LIMIT_REACHED' });
     }
-    if (Number(facts.userItemCount) >= Number(item.per_user_limit)) return { eligible: false, reasonCode: 'USER_LIMIT_REACHED' };
-    if (Number(facts.stockUsed) >= Number(item.stock_limit)) return { eligible: false, reasonCode: 'OUT_OF_STOCK' };
-    if (facts.cooldownUntil && new Date(facts.cooldownUntil) > facts.now) return { eligible: false, reasonCode: 'COOLDOWN_ACTIVE' };
-    return { eligible: true, reasonCode: null };
+    if (Number(facts?.stockUsed || 0) >= Number(item.stock_limit)) {
+        return Object.freeze({ visible: true, eligible: false, reasonCode: 'OUT_OF_STOCK' });
+    }
+    if (Number(facts?.pendingCount || 0) > 0) {
+        return Object.freeze({ visible: true, eligible: false, reasonCode: 'REWARD_PENDING_ORDER_EXISTS' });
+    }
+    if (facts?.cooldownUntil && new Date(facts.cooldownUntil) > now) {
+        return Object.freeze({ visible: true, eligible: false, reasonCode: 'COOLDOWN_ACTIVE' });
+    }
+    return Object.freeze({ visible: true, eligible: true, reasonCode: null });
+}
+
+function evaluateEligibility(item, facts) {
+    const result = evaluateRewardAccess(item, facts);
+    return { eligible: result.eligible, reasonCode: result.reasonCode };
 }
 
 function transitionOrder(state, action) {
@@ -212,6 +227,6 @@ function validateTrustedGrant(raw) {
 }
 
 module.exports = { APPROVALS, GRANT_TEMPLATES, ITEM_KINDS, ORDER_STATES, assertKeys, contentHash,
-    evaluateEligibility, projectItem, transitionOrder, validateCatalog, validateCreateOrder,
+    evaluateEligibility, evaluateRewardAccess, projectItem, transitionOrder, validateCatalog, validateCreateOrder,
     validateOrderCommand, validateOwnerGrant, validateReview, validateTrustedGrant,
     validateVisibility, validateWishlist };

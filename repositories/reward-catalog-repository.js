@@ -85,31 +85,53 @@ class RewardCatalogRepository {
     async lockAccounts(client, usernames) {
         const names = [...new Set(usernames.filter(Boolean))];
         const result = await client.query(`SELECT u.id,u.username,u.balance,u.bilibili_room_id,u.is_admin,
-            u.authorized,u.deactivated,p.live_interaction_opt_in,p.timezone,p.communication_style
+            u.authorized,u.deactivated,u.account_locked,p.live_interaction_opt_in,p.timezone,p.communication_style
             FROM users u LEFT JOIN creator_profiles p ON p.user_id=u.id
             WHERE u.username=ANY($1::TEXT[]) ORDER BY u.id FOR UPDATE OF u`, [names]);
         return new Map(result.rows.map(row => [row.username, row]));
     }
 
     async accountIdentity(username) {
-        return (await this.pool.query(`SELECT id,username,is_admin,authorized,deactivated
+        return (await this.pool.query(`SELECT id,username,is_admin,authorized,deactivated,account_locked
             FROM users WHERE username=$1`, [username])).rows[0] || null;
     }
 
     async creatorBoundaries(client, userId, ownerUserId) {
-        const [preferences, quiet, room] = await Promise.all([
-            client.query(`SELECT preference_key,preference_value FROM creator_preferences
-                WHERE user_id=$1 AND preference_type='communication'`, [userId]),
+        const [preferences, quiet, windows, room, report] = await Promise.all([
+            client.query(`SELECT preference_type,preference_key,preference_value FROM creator_preferences
+                WHERE user_id=$1`, [userId]),
             client.query(`SELECT weekday,start_minute,end_minute,enabled FROM creator_quiet_hours
                 WHERE user_id=$1 ORDER BY weekday`, [userId]),
-            client.query(`SELECT muted_until FROM live_interactions WHERE creator_user_id=$1
-                AND owner_user_id=$2 AND status='active' ORDER BY id DESC LIMIT 1`, [userId, ownerUserId])
+            client.query(`SELECT weekday,start_minute,end_minute,interaction_mode,enabled
+                FROM creator_interaction_windows WHERE user_id=$1 ORDER BY weekday`, [userId]),
+            client.query(`SELECT creator_muted_until FROM live_interactions WHERE creator_user_id=$1
+                AND owner_user_id=$2 AND status='active' ORDER BY id DESC LIMIT 1`, [userId, ownerUserId]),
+            client.query(`SELECT report.status,report.creator_reconsented_at
+                FROM live_interaction_reports report
+                JOIN live_interactions room ON room.id=report.interaction_id
+                WHERE room.creator_user_id=$1 AND room.owner_user_id=$2
+                  AND (report.status IN('open','reviewing')
+                    OR (report.status IN('resolved','dismissed')
+                      AND report.creator_reconsented_at IS NULL))
+                ORDER BY report.created_at DESC,report.id DESC LIMIT 1`, [userId, ownerUserId])
         ]);
+        const preferenceMap = {};
+        for (const row of preferences.rows) {
+            preferenceMap[`${row.preference_type}:${row.preference_key}`] = row.preference_value;
+            if (row.preference_type === 'communication') {
+                preferenceMap[row.preference_key] = row.preference_value;
+            }
+        }
         return {
-            preferences: Object.fromEntries(preferences.rows.map(row => [row.preference_key, row.preference_value])),
+            preferences: preferenceMap,
             quietHours: quiet.rows.map(row => ({ weekday: number(row.weekday), startMinute: number(row.start_minute),
                 endMinute: number(row.end_minute), enabled: row.enabled === true })),
-            room: room.rows[0] ? { mutedUntil: room.rows[0].muted_until } : null
+            interactionWindows: windows.rows.map(row => ({ weekday: number(row.weekday),
+                startMinute: number(row.start_minute), endMinute: number(row.end_minute),
+                mode: row.interaction_mode, enabled: row.enabled === true })),
+            room: room.rows[0] ? { mutedUntil: room.rows[0].creator_muted_until } : null,
+            report: report.rows[0] ? { status: report.rows[0].status,
+                creatorReconsentedAt: report.rows[0].creator_reconsented_at } : null
         };
     }
 
@@ -123,9 +145,32 @@ class RewardCatalogRepository {
             (SELECT MAX(approved_at + make_interval(hours=>version.cooldown_hours)) FROM reward_orders orders
                 JOIN users account ON account.id=orders.user_id WHERE account.username=$1
                 AND orders.catalog_version_id=version.id AND orders.status IN('approved','claimed')) AS cooldown_until,
-            EXISTS(SELECT 1 FROM story_unlock_intents unlock JOIN users account ON account.id=unlock.user_id
+            (SELECT COUNT(*) FROM reward_orders orders JOIN users account ON account.id=orders.user_id
+                WHERE account.username=$1 AND orders.catalog_version_id=version.id
+                AND orders.status IN('submitted','pending_approval')) AS pending_count,
+            CASE
+              WHEN version.visibility_type='story_unlock' THEN EXISTS(
+                SELECT 1 FROM story_unlock_intents unlock JOIN users account ON account.id=unlock.user_id
                 WHERE account.username=$1 AND unlock.unlock_type='reward_catalog_visibility'
-                AND unlock.unlock_key=version.visibility_key AND unlock.status IN('visible','consumed')) AS has_unlock
+                  AND unlock.unlock_key=CASE version.visibility_key
+                    WHEN 'reward.story-lantern' THEN 'tides.storm-label'
+                    ELSE version.visibility_key END
+                  AND unlock.status IN('visible','consumed')
+                  AND unlock.progression_scope='account_entitlement'
+                  AND unlock.economic_eligible=TRUE
+                  AND unlock.provenance_type IN('episode_first_clear','season_completion')
+                  AND unlock.published_binding_hash IS NOT NULL)
+              WHEN version.visibility_type='achievement_unlock' THEN EXISTS(
+                SELECT 1 FROM streamer_achievement_unlocks achievement_unlock
+                JOIN users account ON account.id=achievement_unlock.user_id
+                JOIN streamer_achievement_definitions definition
+                  ON definition.id=achievement_unlock.achievement_id
+                WHERE account.username=$1 AND (
+                  version.visibility_key='achievement:' || definition.slug
+                  OR (definition.event_type='game.run.completed'
+                    AND version.visibility_key='achievement:game:' || (definition.filters->>'gameId'))))
+              ELSE TRUE
+            END AS has_unlock
             FROM reward_catalog_versions version JOIN reward_catalog_items item ON item.id=version.item_id
             WHERE version.lifecycle='active' ORDER BY version.points_price,item.slug`, [username]);
         return result.rows;
@@ -155,10 +200,27 @@ class RewardCatalogRepository {
 
     async hasVisibilityUnlock(client, userId, type, key) {
         if (!key) return true;
-        if (type === 'achievement_unlock') return false;
+        if (type === 'achievement_unlock') {
+            return (await client.query(`SELECT EXISTS(
+                SELECT 1 FROM streamer_achievement_unlocks achievement_unlock
+                JOIN streamer_achievement_definitions definition
+                  ON definition.id=achievement_unlock.achievement_id
+                WHERE achievement_unlock.user_id=$1 AND (
+                  $2='achievement:' || definition.slug
+                  OR (definition.event_type='game.run.completed'
+                    AND $2='achievement:game:' || (definition.filters->>'gameId')))) AS allowed`,
+            [userId, key])).rows[0]?.allowed === true;
+        }
+        // The published v1 reward key predates the authored Season Two
+        // milestone key. Keep this explicit compatibility mapping instead of
+        // rewriting either immutable content version.
+        const storyKey = key === 'reward.story-lantern' ? 'tides.storm-label' : key;
         return (await client.query(`SELECT EXISTS(SELECT 1 FROM story_unlock_intents WHERE user_id=$1
             AND unlock_type='reward_catalog_visibility' AND unlock_key=$2
-            AND status IN('visible','consumed')) AS allowed`, [userId, key])).rows[0]?.allowed === true;
+            AND status IN('visible','consumed')
+            AND progression_scope='account_entitlement' AND economic_eligible=TRUE
+            AND provenance_type IN('episode_first_clear','season_completion')
+            AND published_binding_hash IS NOT NULL) AS allowed`, [userId, storyKey])).rows[0]?.allowed === true;
     }
 
     async reserveBudgets(client, userId, amount, dateKey) {
@@ -246,6 +308,13 @@ class RewardCatalogRepository {
     }
 
     async appendOrderEvent(client, values) {
+        const parent = await client.query(`SELECT id FROM reward_orders
+            WHERE id=$1 FOR UPDATE`, [values.orderId]);
+        if (parent.rowCount !== 1) {
+            const error = new Error('Reward order not found');
+            error.code = 'REWARD_ORDER_NOT_FOUND';
+            throw error;
+        }
         const sequence = number((await client.query(`SELECT COALESCE(MAX(sequence),0)+1 AS sequence
             FROM reward_order_events WHERE order_id=$1`, [values.orderId])).rows[0].sequence);
         await client.query(`INSERT INTO reward_order_events(event_id,order_id,sequence,event_type,actor_user_id,details)
@@ -317,7 +386,39 @@ class RewardCatalogRepository {
             this.pool.query(`SELECT COUNT(*) AS total FROM reward_orders orders JOIN users account
                 ON account.id=orders.user_id WHERE account.username=$1`, [username]),
             this.pool.query(`SELECT list.catalog_version_id,list.target_quantity,list.priority,list.revision,
-                item.slug,version.title_zh,version.title_en FROM reward_wishlists list JOIN users account ON account.id=list.user_id
+                item.slug,version.*,version.id AS catalog_version_id,
+                (SELECT COUNT(*) FROM reward_orders usage WHERE usage.catalog_version_id=version.id
+                  AND usage.status IN('approved','claimed')) AS stock_used,
+                (SELECT COUNT(*) FROM reward_orders usage WHERE usage.catalog_version_id=version.id
+                  AND usage.user_id=account.id AND usage.status IN('approved','claimed')) AS user_item_count,
+                (SELECT COUNT(*) FROM reward_orders usage WHERE usage.catalog_version_id=version.id
+                  AND usage.user_id=account.id AND usage.status IN('submitted','pending_approval')) AS pending_count,
+                (SELECT MAX(approved_at + make_interval(hours=>version.cooldown_hours))
+                  FROM reward_orders usage WHERE usage.catalog_version_id=version.id
+                    AND usage.user_id=account.id AND usage.status IN('approved','claimed')) AS cooldown_until,
+                CASE
+                  WHEN version.visibility_type='story_unlock' THEN EXISTS(
+                    SELECT 1 FROM story_unlock_intents unlock WHERE unlock.user_id=account.id
+                      AND unlock.unlock_type='reward_catalog_visibility'
+                      AND unlock.unlock_key=CASE version.visibility_key
+                        WHEN 'reward.story-lantern' THEN 'tides.storm-label'
+                        ELSE version.visibility_key END
+                      AND unlock.status IN('visible','consumed')
+                      AND unlock.progression_scope='account_entitlement'
+                      AND unlock.economic_eligible=TRUE
+                      AND unlock.provenance_type IN('episode_first_clear','season_completion')
+                      AND unlock.published_binding_hash IS NOT NULL)
+                  WHEN version.visibility_type='achievement_unlock' THEN EXISTS(
+                    SELECT 1 FROM streamer_achievement_unlocks achievement_unlock
+                    JOIN streamer_achievement_definitions definition
+                      ON definition.id=achievement_unlock.achievement_id
+                    WHERE achievement_unlock.user_id=account.id AND (
+                      version.visibility_key='achievement:' || definition.slug
+                      OR (definition.event_type='game.run.completed'
+                        AND version.visibility_key='achievement:game:' || (definition.filters->>'gameId'))))
+                  ELSE TRUE
+                END AS has_unlock
+                FROM reward_wishlists list JOIN users account ON account.id=list.user_id
                 JOIN reward_catalog_versions version ON version.id=list.catalog_version_id
                 JOIN reward_catalog_items item ON item.id=version.item_id WHERE account.username=$1
                 ORDER BY list.priority,list.updated_at DESC`, [username]),

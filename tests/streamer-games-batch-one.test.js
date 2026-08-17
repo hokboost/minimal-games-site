@@ -282,7 +282,12 @@ class MemoryRepository {
     async appendEvent(client, value) { const event = { ...value, sequence: this.events.filter(row => row.runId === value.runId).length + 1 };
         this.events.push(event); return event; }
     async insertAudit(client, value) { this.audits.push(value); }
-    async readRunIdentity(client, id) { const run = this.runs.get(id); return run && { creator_username: run.creatorUsername, owner_username: run.ownerUsername }; }
+    async readRunIdentity(client, id) { const run = this.runs.get(id); return run && {
+        id: run.id, game_id: run.gameId, mode: run.mode, status: run.status,
+        creator_user_id: run.creatorUserId, owner_user_id: run.ownerUserId,
+        live_interaction_id: run.liveInteractionId,
+        creator_username: run.creatorUsername, owner_username: run.ownerUsername
+    }; }
     async lockRun(client, id, username) { this.lockTrace.push({ kind: 'run', id }); const run = this.runs.get(id); if (!run) return null;
         const actorRole = username === run.creatorUsername ? 'creator' : username === run.ownerUsername ? 'owner' : null;
         return actorRole ? { run, actorRole, actorUserId: this.users.get(username).id } : null; }
@@ -309,7 +314,11 @@ async function serviceFixture(options = {}) {
     const repository = new MemoryRepository();
     let now = 100000;
     const questEvents = [];
-    const service = new StreamerGameService({ repository, ownerUsername: 'owner',
+    const consentCoordinator = {
+        async validateLockedRun() { return { allowed: true, reason: null }; },
+        async abandonLockedRun() { throw new Error('unexpected consent abandonment'); }
+    };
+    const service = new StreamerGameService({ repository, ownerUsername: 'owner', consentCoordinator,
         clock: () => new Date(now), questV2Service: { async recordInternalTrustedEvent(client, event) { questEvents.push(event); return { enabled: true }; } },
         ...options });
     await service.ensureCatalog();

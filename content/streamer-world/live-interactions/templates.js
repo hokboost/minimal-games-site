@@ -1,5 +1,7 @@
 'use strict';
 
+const { seasons: publishedStorySeasons } = require('../story');
+
 const definitions = [
     ['nudge.gentle-reset', 'nudge', '慢一点也算前进', 'A gentler pace still counts',
         '先放下必须立刻完成的念头。选一件十分钟内能收尾的小事，我们从那里重新接上。',
@@ -109,6 +111,35 @@ const definitions = [
         ['constellation-pieces.owner']
     ]
 ];
+
+const seasonInterventions = [
+    ['signal-between-us', 'story-intervention.signal-bound', '信号之间的版本来信',
+        'A version-bound note between signals',
+        '这封回应只属于你此刻抵达的信号节点。它不会跳过选择，也不会替你决定下一步。',
+        'This reply belongs only to the signal node you reached. It skips no choice and decides no next step for you.'],
+    ['tides-of-return', 'story-intervention.tide-bound', '归潮航线的版本来信',
+        'A version-bound note on the returning tide',
+        '潮水记得这一版航线和你现在停靠的位置。回应会留在这里，等你按自己的节奏继续。',
+        'The tide remembers this route version and your present harbor. The reply stays here until you continue at your pace.'],
+    ['city-of-borrowed-hours', 'story-intervention.hour-bound', '借时城的版本来信',
+        'A version-bound note from Borrowed Hours',
+        '城市只把这句话交给当前时刻，不借走未来的回答，也不把沉默记成欠款。',
+        'The city gives this line only to the present hour; it borrows no future answer and records no silence as debt.'],
+    ['archive-of-wild-stars', 'story-intervention.archive-bound', '野星档案的版本来信',
+        'A version-bound note in the wild-star archive',
+        '档案把回应系在这颗星与这一版记录上。更正可以保留，未知也可以继续未知。',
+        'The archive binds this reply to this star and content version. Corrections may remain, and unknowns may stay unknown.'],
+    ['homeward-constellation', 'story-intervention.homeward-bound', '归家星座的版本来信',
+        'A version-bound note in the homeward constellation',
+        '这句话只在你抵达的归家节点亮起。门仍然可以打开，离开和留下都不会被写成失败。',
+        'This line lights only at the homeward node you reached. The door stays open; leaving and staying are never written as failure.']
+];
+for (const [seasonSlug, key, titleZh, titleEn, bodyZh, bodyEn] of seasonInterventions) {
+    const season = publishedStorySeasons.find(item => item.slug === seasonSlug);
+    if (!season) throw new Error(`Published story season is unavailable: ${seasonSlug}`);
+    definitions.push([key, 'story_intervention', titleZh, titleEn, bodyZh, bodyEn,
+        season.nodes.filter(node => node.type === 'owner_intervention').map(node => node.id)]);
+}
 
 const TEMPLATES = Object.freeze(Object.fromEntries(definitions.map(([key, type, titleZh, titleEn, bodyZh, bodyEn,
     storyNodeIds = [], referenceIds = []

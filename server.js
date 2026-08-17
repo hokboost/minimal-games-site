@@ -1,7 +1,4 @@
 require('dotenv').config();
-// Keep direct `node server.js` deployments equivalent to `npm start`.
-// Existing explicit flag values (including false) are never overwritten.
-require('./lib/streamer-world-production-defaults');
 require('./lib/safe-logger').installSafeConsole();
 require('./lib/config-validation').validateServerEnvironment();
 
@@ -113,40 +110,76 @@ const registerCreatorAchievementRoutes = require('./routes/creator-achievements'
 const { CreatorRepository } = require('./repositories/creator-repository');
 const { CreatorProfileService } = require('./services/creator-profile-service');
 const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
+const {
+    assertStreamerWorldRuntimeReady,
+    checkStreamerWorldRuntimeReadiness
+} = require('./lib/streamer-world-runtime-readiness');
 const { QuestV2Service } = require('./services/quest-v2-service');
+const { QuestV2MaintenanceWorker } = require('./workers/quest-v2-maintenance');
 const { StoryWorldService } = require('./services/story-world-service');
 const { LiveInteractionRepository } = require('./repositories/live-interaction-repository');
 const { LiveInteractionService } = require('./services/live-interaction-service');
 const { LiveSocketGateway } = require('./services/live-socket-gateway');
+const { LiveEventDelivery } = require('./services/live-event-delivery');
 const { StreamerGameRepository } = require('./repositories/streamer-game-repository');
 const { GAME_IDS: STREAMER_GAME_IDS, StreamerGameService } = require('./services/streamer-game-service');
+const { CoopConsentCoordinator } = require('./services/coop-consent-coordinator');
+const {
+    evaluateCommunicationBoundary
+} = require('./services/creator-communication-boundary-policy');
 const { RewardCatalogRepository } = require('./repositories/reward-catalog-repository');
+const { RewardGrantIntentRepository } = require('./repositories/reward-grant-intent-repository');
 const { RewardCatalogService } = require('./services/reward-catalog-service');
+const { RewardGrantDispatcher } = require('./services/reward-grant-dispatcher');
+const { RewardGrantIntentWriter } = require('./services/reward-grant-intent-writer');
 const { AchievementService } = require('./services/achievement-service');
-const { EVENT_TYPES: LIVE_EVENT_TYPES, MAX_EVENT_BYTES: LIVE_EVENT_MAX_BYTES } = require('./domain/live-interactions/protocol');
-const storySeasonOne = require('./content/streamer-world/story/season-one');
+const {
+    publishedStoryInterventionRegistry
+} = require('./domain/story/published-content-registry');
 const streamerWorldFlags = readStreamerWorldFlags();
 const streamerGameIdSet = new Set(STREAMER_GAME_IDS);
 const visibleGameDefinitions = streamerWorldFlags.newGamesEnabled
     ? gameRegistry.GAME_DEFINITIONS
     : gameRegistry.GAME_DEFINITIONS.filter(game => !streamerGameIdSet.has(game.id));
-const achievementService = new AchievementService({ pool });
+const rewardGrantIntentWriter = new RewardGrantIntentWriter();
+const rewardGrantIntentRepository = new RewardGrantIntentRepository({ pool });
+const achievementService = new AchievementService({
+    pool,
+    rewardGrantIntentWriter: streamerWorldFlags.rewardsEnabled ? rewardGrantIntentWriter : null
+});
 const questV2Service = new QuestV2Service({ pool, BalanceLogger,
-    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null });
+    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null,
+    rewardGrantIntentWriter: streamerWorldFlags.rewardsEnabled ? rewardGrantIntentWriter : null,
+    ownerUsername: streamerWorldFlags.ownerUsername });
+const questV2MaintenanceWorker = new QuestV2MaintenanceWorker({
+    questV2Service,
+    enabled: streamerWorldFlags.questEngineV2Enabled
+});
 const storyWorldService = new StoryWorldService({
     pool,
     questV2Service,
     questIntegrationEnabled: streamerWorldFlags.questEngineV2Enabled,
-    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null
+    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null,
+    rewardGrantIntentWriter: streamerWorldFlags.rewardsEnabled ? rewardGrantIntentWriter : null
 });
 const questService = new QuestService({
     BalanceLogger,
     streamerQuestService: streamerWorldFlags.questEngineV2Enabled ? questV2Service : null
 });
 const creatorRepository = new CreatorRepository({ pool });
+const liveInteractionRepository = new LiveInteractionRepository({ pool });
+const streamerGameRepository = new StreamerGameRepository({ pool });
+const coopConsentCoordinator = new CoopConsentCoordinator({
+    gameRepository: streamerGameRepository,
+    liveRepository: liveInteractionRepository,
+    ownerUsername: streamerWorldFlags.ownerUsername,
+    boundaryPolicy: evaluateCommunicationBoundary
+});
 const creatorService = new CreatorProfileService({
     repository: creatorRepository,
-    gameIds: visibleGameDefinitions.map((game) => game.id)
+    gameIds: visibleGameDefinitions.map((game) => game.id),
+    consentCoordinator: coopConsentCoordinator,
+    ownerUsername: streamerWorldFlags.ownerUsername
 });
 let liveInteractionService;
 let liveSocketGateway;
@@ -359,8 +392,7 @@ function handleSocketBusEvent(type, payload) {
         return;
     }
     if (type === 'live_interaction') {
-        emitLiveInteractionLocal(payload?.event, payload);
-        return;
+        return emitLiveInteractionLocal(payload);
     }
     if (!validSocketUsername(username)) return;
     if (type === 'user_notification') {
@@ -389,34 +421,32 @@ function publishSocketEvent(type, payload) {
     }
 }
 
-function emitLiveInteractionLocal(event, delivery = {}) {
-    if (!event || event.version !== 1 || !LIVE_EVENT_TYPES.includes(event.eventType)
-        || !Number.isSafeInteger(Number(event.interactionId))
-        || Number(event.subjectUserId) !== Number(delivery.creatorUserId)
-        || Buffer.byteLength(JSON.stringify(event), 'utf8') > LIVE_EVENT_MAX_BYTES) return false;
-    const rooms = [`live:interaction:${Number(event.interactionId)}`];
-    if (delivery.audience !== 'owner' && Number.isSafeInteger(Number(delivery.creatorUserId))) rooms.push(`live:user:${Number(delivery.creatorUserId)}`);
-    if (delivery.audience !== 'creator' && Number.isSafeInteger(Number(delivery.ownerUserId))) rooms.push(`live:user:${Number(delivery.ownerUserId)}`);
-    io.to(rooms).emit('live:event', event);
-    return true;
+function emitLiveInteractionLocal(delivery) {
+    return liveEventDelivery.deliver(delivery);
 }
 
 async function publishLiveInteraction(event, room, audience = 'both') {
-    const delivery = { event, audience, creatorUserId: room.creatorUserId, ownerUserId: room.ownerUserId };
-    emitLiveInteractionLocal(event, delivery);
+    const delivery = {
+        eventId: event?.eventId,
+        interactionId: event?.interactionId,
+        realtimeAudience: audience
+    };
+    await emitLiveInteractionLocal(delivery);
     return publishSocketEvent('live_interaction', delivery);
 }
 
-const liveInteractionRepository = new LiveInteractionRepository({ pool });
 liveInteractionService = new LiveInteractionService({
     repository: liveInteractionRepository,
     ownerUsername: streamerWorldFlags.ownerUsername,
     publish: publishLiveInteraction,
     games: visibleGameDefinitions,
-    storyNodeIds: storySeasonOne.nodes.map((node) => node.id),
+    storyNodeIds: publishedStoryInterventionRegistry.nodeIds,
+    storyInterventionRegistry: publishedStoryInterventionRegistry,
     questEnabled: streamerWorldFlags.questEngineV2Enabled,
     storyEnabled: streamerWorldFlags.storyWorldEnabled,
-    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null
+    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null,
+    consentCoordinator: coopConsentCoordinator,
+    boundaryPolicy: evaluateCommunicationBoundary
 });
 async function authorizeLiveSocket(auth) {
     if (!auth?.sessionId || !auth?.username || !auth?.userId) return false;
@@ -425,26 +455,62 @@ async function authorizeLiveSocket(auth) {
         JOIN users account ON account.username=active.username AND account.id=$3
         JOIN user_sessions stored ON stored.sid=active.session_id
         WHERE active.session_id=$1 AND active.username=$2 AND active.is_active=TRUE
-          AND account.authorized=TRUE AND account.deactivated=FALSE AND stored.expire>NOW()
+          AND account.authorized=TRUE AND account.deactivated=FALSE
+          AND COALESCE(account.account_locked,FALSE)=FALSE AND stored.expire>NOW()
     `, [auth.sessionId, auth.username, auth.userId]);
     return result.rowCount === 1;
 }
-liveSocketGateway = new LiveSocketGateway({ service: liveInteractionService, enabled: streamerWorldFlags.liveInteractionsEnabled, authorize: authorizeLiveSocket });
-const streamerGameRepository = new StreamerGameRepository({ pool });
+const liveEventDelivery = new LiveEventDelivery({
+    sockets: () => io.sockets.sockets.values(),
+    loadEvent: (value) => liveInteractionRepository.readEventForDelivery(value),
+    authorizeSession: authorizeLiveSocket,
+    authorizeRecipient: async (event, subscription, auth, realtimeAudience) => {
+        const boundary = await liveInteractionRepository.realtimeRecipientContext(
+            event, subscription, auth, realtimeAudience);
+        if (!boundary) return false;
+        return evaluateCommunicationBoundary({
+            ...boundary,
+            itemType: event.payload?.itemType || null,
+            gameId: event.payload?.gameId || null,
+            now: new Date()
+        }).allowRealtime;
+    }
+});
 streamerGameService = new StreamerGameService({
     repository: streamerGameRepository,
     liveRepository: liveInteractionRepository,
     questV2Service: streamerWorldFlags.questEngineV2Enabled ? questV2Service : null,
     achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null,
+    rewardGrantIntentWriter: streamerWorldFlags.rewardsEnabled ? rewardGrantIntentWriter : null,
     ownerUsername: streamerWorldFlags.ownerUsername,
-    publish: publishLiveInteraction
+    publish: publishLiveInteraction,
+    consentCoordinator: coopConsentCoordinator
+});
+liveSocketGateway = new LiveSocketGateway({
+    service: liveInteractionService,
+    enabled: streamerWorldFlags.liveInteractionsEnabled,
+    authorize: authorizeLiveSocket,
+    authorizeGameSubscription: (username, input) => streamerGameService.authorizeSocketSubscription(username,
+        input)
 });
 const rewardCatalogRepository = new RewardCatalogRepository({ pool });
 rewardCatalogService = new RewardCatalogService({
     repository: rewardCatalogRepository,
     BalanceLogger,
     giftConfig,
-    ownerUsername: streamerWorldFlags.ownerUsername
+    ownerUsername: streamerWorldFlags.ownerUsername,
+    grantIntentRepository: rewardGrantIntentRepository,
+    boundaryPolicy: evaluateCommunicationBoundary,
+    publishRewardNotification: ({ username, orderId, templateKey }) => notifyUser(username, {
+        type: 'reward_status',
+        orderId,
+        templateKey
+    })
+});
+const rewardGrantDispatcher = new RewardGrantDispatcher({
+    repository: rewardGrantIntentRepository,
+    rewardService: rewardCatalogService,
+    workerId: `reward-dispatcher:${process.pid}:${crypto.randomBytes(6).toString('hex')}`
 });
 
 // 发送用户通知的辅助函数
@@ -499,6 +565,7 @@ async function revalidateConnectedSockets() {
               AND active.is_active = TRUE
               AND account.authorized = TRUE
               AND account.deactivated = FALSE
+              AND COALESCE(account.account_locked, FALSE) = FALSE
               AND stored.expire > NOW()
         `, [sessionIds]);
         const valid = new Set(activeResult.rows.map(
@@ -1059,7 +1126,9 @@ async function validateExistingIdempotentRequest(req) {
 
     const username = req.session?.user?.username;
     const sessionResult = await pool.query(`
-        SELECT u.authorized, u.is_admin, a.is_active
+        SELECT u.authorized, u.is_admin, u.deactivated,
+               COALESCE(u.account_locked, FALSE) AS account_locked,
+               a.is_active
         FROM users u
         LEFT JOIN active_sessions a
           ON a.username = u.username AND a.session_id = $2
@@ -1068,6 +1137,12 @@ async function validateExistingIdempotentRequest(req) {
     const current = sessionResult.rows[0];
     if (!current || current.is_active !== true) {
         return { status: 401, message: '登录会话已失效' };
+    }
+    if (current.deactivated === true) {
+        return { status: 401, message: '账户已停用' };
+    }
+    if (current.account_locked === true) {
+        return { status: 423, message: '账户已被锁定，请联系管理员' };
     }
     if (current.authorized !== true) {
         return { status: 403, message: '未授权访问' };
@@ -1086,21 +1161,29 @@ async function validateTransactionalIdempotentRequest(req, client) {
         || req.path.startsWith('/api/bilibili/')
         || req.path.startsWith('/admin/security/');
     const result = await client.query(`
-        SELECT 1
+        SELECT account.authorized, account.is_admin, account.deactivated,
+               COALESCE(account.account_locked, FALSE) AS account_locked
         FROM active_sessions AS active
         JOIN users AS account ON account.username = active.username
         WHERE active.session_id = $1
           AND active.username = $2
           AND active.is_active = TRUE
-          AND account.authorized = TRUE
-          AND account.deactivated = FALSE
-          AND ($3::boolean = FALSE OR account.is_admin = TRUE)
-        FOR SHARE OF active
-    `, [req.sessionID, req.session?.user?.username, requiresAdmin]);
-    if (result.rowCount !== 1) {
+        FOR SHARE OF active, account
+    `, [req.sessionID, req.session?.user?.username]);
+    const account = result.rows[0];
+    if (!account || account.deactivated === true) {
         return {
             status: requiresAdmin ? 403 : 401,
             message: requiresAdmin ? '管理员权限或会话已失效' : '登录会话或授权已失效'
+        };
+    }
+    if (account.account_locked === true) {
+        return { status: 423, message: '账户已被锁定，请联系管理员' };
+    }
+    if (account.authorized !== true || (requiresAdmin && account.is_admin !== true)) {
+        return {
+            status: 403,
+            message: requiresAdmin ? '管理员权限或会话已失效' : '未授权访问'
         };
     }
     return null;
@@ -2507,6 +2590,12 @@ function registerRuntimeLifecycle() {
         },
         async stop() {}
     });
+    applicationLifecycle.registerComponent('streamer-world-runtime-readiness', {
+        async start() {
+            await assertStreamerWorldRuntimeReady(pool, streamerWorldFlags);
+        },
+        async stop() {}
+    });
     applicationLifecycle.registerComponent('socket-event-bus', {
         start: () => socketEventBus.start(),
         stop: () => socketEventBus.close()
@@ -2551,6 +2640,26 @@ function registerRuntimeLifecycle() {
             : Promise.resolve(0),
         intervalMs: 60 * 60 * 1000,
         runOnStart: false,
+        unref: true
+    });
+    applicationLifecycle.registerRecurringJob('quest-assignment-expiry', {
+        run: () => questV2MaintenanceWorker.expire(),
+        intervalMs: 60 * 1000,
+        runOnStart: true,
+        unref: true
+    });
+    applicationLifecycle.registerRecurringJob('quest-weekly-board-materializer', {
+        run: () => questV2MaintenanceWorker.materialize(),
+        intervalMs: 60 * 60 * 1000,
+        runOnStart: false,
+        unref: true
+    });
+    applicationLifecycle.registerRecurringJob('reward-grant-dispatcher', {
+        run: () => streamerWorldFlags.rewardsEnabled
+            ? rewardGrantDispatcher.dispatchBatch()
+            : Promise.resolve({ skipped: true }),
+        intervalMs: 15 * 1000,
+        runOnStart: true,
         unref: true
     });
 }
@@ -2655,6 +2764,10 @@ async function checkReadiness() {
 
             const schemaChecks = schemaResult.rows[0] || {};
             const schemaReady = Object.values(schemaChecks).every((value) => value === true);
+            const streamerWorldRuntime = await checkStreamerWorldRuntimeReadiness(
+                client,
+                streamerWorldFlags
+            );
             let workerCredentialsReady = process.env.NODE_ENV !== 'production';
             try {
                 workerCredentialsReady = parseWorkerCredentials(
@@ -2673,7 +2786,10 @@ async function checkReadiness() {
                 && socketEventBus.isReady()
             );
             const onlineWorkers = Number(workerResult.rows[0]?.online_workers || 0);
-            const ready = schemaReady && configurationReady && backgroundReady;
+            const ready = schemaReady
+                && configurationReady
+                && streamerWorldRuntime.ready
+                && backgroundReady;
             return {
                 httpStatus: ready ? 200 : 503,
                 body: {
@@ -2684,6 +2800,7 @@ async function checkReadiness() {
                         database: true,
                         schema: schemaReady,
                         configuration: configurationReady,
+                        streamerWorld: streamerWorldRuntime,
                         backgroundLoops: backgroundReady,
                         socketEventBus: socketEventBus.isReady(),
                         giftWorker: {
@@ -2946,6 +3063,7 @@ registerAdminRoutes(app, {
     disconnectUserSockets,
     creatorRepository,
     creatorOwnerUsername: streamerWorldFlags.ownerUsername,
+    coopConsentCoordinator,
     passwordResetTokenSecret: resetTokenSecret
 });
 

@@ -185,6 +185,19 @@ class QuestRuntime {
         return [...this.state.events.values()];
     }
 
+    async listAssignmentTrustedHistory() {
+        return [...this.state.events.values()].map((event) => ({
+            trustedEventId: event.id,
+            eventType: event.event_type,
+            occurredAt: event.occurred_at,
+            payload: event.payload
+        }));
+    }
+
+    async consumeTrustedEvents() {
+        return [];
+    }
+
     async listTrustedCandidates() {
         return [];
     }
@@ -470,10 +483,14 @@ function liveServiceFixture({ canShowPresence = true, publishFailure = false } =
                 creator: {
                     id: 7,
                     username: 'creator',
+                    authorized: true,
+                    deactivated: false,
+                    account_locked: false,
                     timezone: 'UTC',
                     live_interaction_opt_in: true
                 },
-                owner: { id: 8, username: 'owner', is_admin: true }
+                owner: { id: 8, username: 'owner', is_admin: true,
+                    authorized: true, deactivated: false, account_locked: false }
             };
         },
         async lockMemberRoom() {
@@ -606,7 +623,9 @@ function catchUpRepositoryFixture() {
         interaction_id: 1,
         event_id: uuid(index + 100),
         sequence: index + 1,
+        protocol_version: 1,
         event_type: 'interaction.nudge',
+        audience: 'both',
         actor_type: 'owner',
         subject_user_id: 7,
         created_at: '2026-08-17T12:00:00.000Z',
@@ -618,6 +637,7 @@ function catchUpRepositoryFixture() {
         async connect() {},
         async query(sql, parameters) {
             calls.push({ sql: String(sql), parameters: structuredClone(parameters) });
+            if (/MAX\(sequence\)/.test(String(sql))) return { rows: [{ maximum: 120 }] };
             const [interactionId, afterSequence, queryLimit] = parameters;
             return {
                 rows: rows
@@ -628,7 +648,7 @@ function catchUpRepositoryFixture() {
     };
     const repository = new LiveInteractionRepository({ pool });
     repository.readMemberRoom = async (interactionId, username) => username === 'creator'
-        ? { id: interactionId, memberRole: 'creator', memberStatus: 'active' }
+        ? { id: interactionId, creatorUserId: 7, memberRole: 'creator', memberStatus: 'active' }
         : null;
     return { repository, calls, rows };
 }
@@ -641,7 +661,7 @@ test('co-op catch-up returns bounded ordered pages with explicit continuation', 
     assert.equal(first.events.at(-1).sequence, 30);
     assert.equal(first.hasMore, true);
     assert.equal(first.nextAfter, 30);
-    assert.deepEqual(calls[0].parameters, [1, 0, 31]);
+    assert.deepEqual(calls[0].parameters, [1, 0, 31, 'creator', 7]);
     const second = await repository.catchUp(1, 'creator', first.nextAfter, 30);
     assert.equal(second.events[0].sequence, 31);
     assert.equal(second.events.at(-1).sequence, 60);
@@ -666,7 +686,7 @@ test('co-op catch-up load keeps every page bounded and monotonic', async () => {
     assert.equal(pages.length, 100);
     assert.equal(pages.every(page => page.events.length <= 20), true);
     assert.equal(pages.every(page => page.events.every((event, index, values) => index === 0 || event.sequence > values[index - 1].sequence)), true);
-    assert.equal(calls.length, 100);
-    assert.equal(calls.every(call => call.parameters[2] === 21), true);
-    assert.equal(calls.every(call => /ORDER BY sequence LIMIT \$3/.test(call.sql)), true);
+    const pageCalls = calls.filter(call => /ORDER BY sequence LIMIT \$3/.test(call.sql));
+    assert.equal(pageCalls.length, 100);
+    assert.equal(pageCalls.every(call => call.parameters[2] === 21), true);
 });

@@ -55,5 +55,7 @@ module.exports = function registerQuestV2Routes(app, deps) {
     app.post('/api/quests/v2/assignments/postpone', ...writes, enabled, handle((u, b, c) => questV2Service.postpone(u, b, c), 200));
     app.post('/api/quests/v2/evidence/submit', ...writes, enabled, handle((u, b, c) => questV2Service.submitEvidence(u, b, c), 201));
     app.post('/api/quests/v2/assignments/submit', ...writes, enabled, handle((u, b, c) => questV2Service.transition(u, b, 'submit', c), 200));
+    app.post('/api/quests/v2/appeals/submit', ...writes, enabled,
+        handle((u, b, c) => questV2Service.submitAppeal(u, b, c), 201));
     app.post('/api/quests/v2/legacy/import', ...writes, enabled, handle((u, b, c) => questV2Service.importLegacy(u, b, c), 200));
 };

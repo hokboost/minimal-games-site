@@ -250,6 +250,7 @@ or external-delivery uncertainty semantics.
 npm run test:all
 npm run release:stage
 ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
+ALLOW_DATABASE_CREATE_TEST=true npm run release:verify
 npm run test:resilience
 npm run test:e2e
 npm run test:load
@@ -257,3 +258,8 @@ npm run test:load
 
 The database, browser, load, and provider-boundary suites need their documented
 external services and must also run in CI or a deployment-like environment.
+The release stage is an allowlisted runtime tree with an embedded migration
+ledger, CycloneDX SBOM, file hashes, and deterministic tar archive. Formal
+artifacts set `RELEASE_REQUIRE_CLEAN=true`; the artifact verifier installs only
+production dependencies in a fresh unpack and boots against a disposable
+PostgreSQL database with all external gift sends disabled.

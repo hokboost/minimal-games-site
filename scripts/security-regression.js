@@ -225,7 +225,9 @@ check('spin results are idempotent', games.includes("app.post('/api/spin'") && r
 check('idempotency replays revalidate current authorization and CSRF', server.includes('validateExistingIdempotentRequest') && idempotency.includes('validateExistingRequest(req)'));
 check('administrator idempotency replays revalidate current administrator authorization',
     server.includes('requiresAdmin && current.is_admin !== true')
-    && server.includes('account.is_admin = TRUE')
+    && server.includes('requiresAdmin && account.is_admin !== true')
+    && server.includes('current.account_locked === true')
+    && server.includes('account.account_locked === true')
     && !server.includes('getRecentAdminAuthDenial'));
 check('administrator authentication has no mandatory secondary verification',
     !/ADMIN_TOTP|totpCode|lastMfaVerifiedAt|getAdminTotpSecret|matchTotpCounter|RECENT_AUTH_REQUIRED|lastAuthenticatedAt|reauthenticate/.test([

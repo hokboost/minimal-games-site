@@ -6,7 +6,7 @@ Express/EJS 小游戏站点，使用 PostgreSQL 保存账户、整数余额、�
 
 - Node.js 20+
 - PostgreSQL 14+
-- Windows 礼物工作器另需 Python 3.10+ 和 `workers/bilibili/requirements.txt`
+- Windows 礼物工作器另需 Python 3.10+ 和带 SHA-256 的 `workers/bilibili/requirements.lock`
 
 复制 `.env.example` 中的变量到部署平台或本机未跟踪的 `.env`。生产环境必须提供数据库凭据、各用途独立密钥、readiness token，以及 `WORKER_CREDENTIALS_JSON` 中逐 worker 的独立凭证。管理员应使用独立强密码；登录后的后台操作依赖管理员会话、CSRF、严格限流和追加式审计，不要求二次密码或验证码。Windows worker 只配置自己的 `WORKER_CREDENTIAL_ID`、`WORKER_API_KEY` 和 `WORKER_HMAC_SECRET`。所有密钥至少使用 32 字节随机值，不能提交到 Git。
 
@@ -44,7 +44,9 @@ Flip 与 Stone 还会校验所有玩家策略中的最高 RTP，而不只校验�
 
 完整边界、扩展步骤、事务规则和渐进迁移计划见
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)；当前参数、精确结果和边界
-测试说明见 [`docs/GAME_ECONOMICS.md`](docs/GAME_ECONOMICS.md)。
+测试说明见 [`docs/GAME_ECONOMICS.md`](docs/GAME_ECONOMICS.md)。Streamer World
+的显式启用条件、启动依赖检查和紧急关闭步骤见
+[`docs/STREAMER_WORLD_OPERATIONS.md`](docs/STREAMER_WORLD_OPERATIONS.md)。
 
 ## 资金与状态
 
@@ -60,7 +62,7 @@ Flip 与 Stone 还会校验所有玩家策略中的最高 RTP，而不只校验�
 ## Windows 工作器
 
 ```powershell
-py -m pip install -r workers\bilibili\requirements.txt
+py -m pip install --require-hashes -r workers\bilibili\requirements.lock
 npm ci
 node windows-gift-listener.js
 ```
@@ -77,8 +79,9 @@ Cookie、Bilibili 配置和浏览器状态必须放在仓库外。默认使用�
 
 ```bash
 npm run test:all
-node scripts/build-release.js
+npm run release:stage
 ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
+ALLOW_DATABASE_CREATE_TEST=true npm run release:verify
 npm audit --audit-level=high
 python -m compileall -q bilibili_gift_sender.py workers/bilibili
 ```
@@ -86,6 +89,13 @@ python -m compileall -q bilibili_gift_sender.py workers/bilibili
 远端安全脚本默认被拒绝。确需对受控远端执行时，必须同时设置 `ALLOW_REMOTE_SECURITY_TESTS=I_ACKNOWLEDGE_REMOTE_TARGET`、`CHANGE_TICKET` 和目标 URL，并事先确认脚本是否会产生真实写入或花费。
 
 ## 发布与恢复
+
+正式制品必须在干净提交上用
+`RELEASE_REQUIRE_CLEAN=true npm run release:stage` 生成。只分发
+`build/artifacts/` 中的 tar.gz；同目录描述文件记录归档 SHA-256，包内包含
+commit、迁移账本、逐文件 manifest、`SHA256SUMS` 和 CycloneDX SBOM。
+`release:verify` 会在临时数据库中从干净解包执行 production-only `npm ci`、
+全部迁移、真实 `/ready` 启动和 SIGTERM 停机，且强制关闭 provider send。
 
 1. 停止 Windows 工作器，确认 `/api/workers/drain` 成功。
 2. 使用 `pg_dump` 创建可恢复备份，并在隔离数据库演练恢复。

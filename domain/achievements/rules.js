@@ -76,7 +76,7 @@ function progressFor(definition, event, priorKeys = []) {
 
 function publicAchievement(definition, progress, language = 'zh') {
     const unlocked = Boolean(progress?.unlocked_at);
-    if (definition.hidden && !unlocked) return Object.freeze({ slug: definition.slug, hidden: true, locked: true });
+    if (definition.hidden && !unlocked) return Object.freeze({ hidden: true, locked: true });
     return Object.freeze({
         slug: definition.slug,
         hidden: Boolean(definition.hidden),

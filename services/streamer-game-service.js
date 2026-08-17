@@ -14,6 +14,8 @@ const bingo = require('../domain/broadcast-bingo/engine');
 const echo = require('../domain/echo-memory/engine');
 const prediction = require('../domain/keeper-prediction/engine');
 const { DIFFICULTIES, MODES, assertKeys } = require('../domain/streamer-games/shared');
+const { dailyCalendarWindow } = require('../domain/streamer-games/daily-calendar');
+const { sourceGrantForEvent } = require('../domain/rewards/source-grant-policy');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const GAME_IDS = Object.freeze(Object.keys(packs));
@@ -96,15 +98,24 @@ function validateTrustedBingoEvent(raw, pack) {
     return value;
 }
 
+function accountAvailable(account) {
+    return Boolean(account && account.authorized === true && account.deactivated !== true
+        && account.account_locked !== true);
+}
+
 class StreamerGameService {
-    constructor({ repository, liveRepository = null, questV2Service = null, achievementService = null, ownerUsername = null,
-        publish = async () => {}, clock = () => new Date(), engines = ENGINE_REGISTRY, gamePacks = packs }) {
+    constructor({ repository, liveRepository = null, questV2Service = null, achievementService = null,
+        rewardGrantIntentWriter = null, ownerUsername = null,
+        consentCoordinator = null, publish = async () => {}, clock = () => new Date(), engines = ENGINE_REGISTRY,
+        gamePacks = packs }) {
         if (!repository?.withTransaction) throw new TypeError('StreamerGameService requires repository');
         this.repository = repository;
         this.liveRepository = liveRepository;
         this.questV2Service = questV2Service;
         this.achievementService = achievementService;
+        this.rewardGrantIntentWriter = rewardGrantIntentWriter;
         this.ownerUsername = ownerUsername;
+        this.consentCoordinator = consentCoordinator;
         this.publish = publish;
         this.clock = clock;
         this.engines = engines;
@@ -172,6 +183,40 @@ class StreamerGameService {
         return existing.response_body;
     }
 
+    coopSecurity() {
+        if (!this.consentCoordinator) {
+            throw new StreamerGameServiceError('GAME_COOP_SECURITY_UNAVAILABLE', 503,
+                'Cooperative consent validation is unavailable');
+        }
+        return this.consentCoordinator;
+    }
+
+    identityRun(identity) {
+        return {
+            id: identity.id,
+            gameId: identity.game_id,
+            mode: identity.mode,
+            status: identity.status,
+            creatorUserId: Number(identity.creator_user_id),
+            creatorUsername: identity.creator_username,
+            ownerUserId: identity.owner_user_id === null ? null : Number(identity.owner_user_id),
+            ownerUsername: identity.owner_username,
+            liveInteractionId: identity.live_interaction_id === null ? null : Number(identity.live_interaction_id)
+        };
+    }
+
+    consentRevokedError(reason) {
+        return new StreamerGameServiceError('GAME_COOP_CONSENT_REVOKED', 409,
+            `Cooperative consent is no longer active (${reason})`);
+    }
+
+    coopBoundaryError(consent) {
+        return consent?.withdrawal === false
+            ? new StreamerGameServiceError('GAME_COOP_WINDOW_CLOSED', 409,
+                `Cooperative interaction is outside the creator's live window (${consent.reason})`)
+            : this.consentRevokedError(consent?.reason || 'membership_inactive');
+    }
+
     async start(username, expectedGameId, raw, context = {}) {
         const command = validateStart(raw, expectedGameId);
         const semanticHash = hash({ type: 'start', ...command });
@@ -180,30 +225,51 @@ class StreamerGameService {
             result = await this.repository.withTransaction(async client => {
             const accounts = await this.repository.lockAccounts(client, [username, command.mode === 'coop' ? this.ownerUsername : null]);
             const creator = accounts.get(username);
-            if (!creator || creator.authorized !== true || creator.deactivated === true) throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403, 'Creator account unavailable');
+            if (!accountAvailable(creator)) throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403, 'Creator account unavailable');
             const existing = await this.repository.findStartCommand(client, creator.id, command.gameId, command.commandId);
             const replay = this.replay(existing, semanticHash);
             if (replay) return { body: replay };
             const startedAt = this.clock();
-            const serverDateKey = startedAt.toISOString().slice(0, 10);
-            if (command.gameId === 'dream-maze'
-                && await this.repository.findDailyMazeRun(client, creator.id, serverDateKey)) {
+            let dailyCalendar = null;
+            if (command.gameId === 'dream-maze') {
+                try {
+                    dailyCalendar = dailyCalendarWindow(startedAt, creator.timezone);
+                } catch {
+                    throw new StreamerGameServiceError('GAME_CREATOR_TIMEZONE_REQUIRED', 409,
+                        'A valid creator timezone is required for the daily maze');
+                }
+            }
+            const serverDateKey = dailyCalendar?.calendarKey || startedAt.toISOString().slice(0, 10);
+            let owner = null;
+            let liveInteractionId = null;
+            if (command.mode === 'coop') {
+                const security = this.coopSecurity();
+                owner = accounts.get(this.ownerUsername);
+                if (!this.ownerUsername || !accountAvailable(owner) || owner.is_admin !== true) throw new StreamerGameServiceError('GAME_OWNER_UNAVAILABLE', 409, 'Configured owner unavailable');
+                if (creator.live_interaction_opt_in !== true) throw new StreamerGameServiceError('GAME_COOP_CONSENT_REQUIRED', 403, 'Live interaction consent required');
+                liveInteractionId = await this.repository.findActiveLiveRoom(client, creator.id, owner.id);
+                if (!liveInteractionId) throw new StreamerGameServiceError('GAME_LIVE_ROOM_REQUIRED', 409, 'Active relay room required');
+                const consent = await security.validateLockedRun(client, {
+                    id: null,
+                    gameId: command.gameId,
+                    mode: 'coop',
+                    status: 'active',
+                    creatorUserId: Number(creator.id),
+                    creatorUsername: creator.username,
+                    ownerUserId: Number(owner.id),
+                    ownerUsername: owner.username,
+                    liveInteractionId
+                }, accounts);
+                if (!consent.allowed) throw this.coopBoundaryError(consent);
+            }
+            if (dailyCalendar && await this.repository.findOverlappingDailyMazeRun(client, creator.id,
+                dailyCalendar.windowStart, dailyCalendar.windowEnd)) {
                 throw new StreamerGameServiceError('GAME_DAILY_ALREADY_PLAYED', 409,
                     'Today\'s deterministic maze has already been started');
             }
             const active = await this.repository.findActiveCreatorRun(client, creator.id, command.gameId);
             if (active) throw new StreamerGameServiceError('GAME_ACTIVE_RUN_EXISTS', 409,
                 'Resume the active run before starting another');
-
-            let owner = null;
-            let liveInteractionId = null;
-            if (command.mode === 'coop') {
-                owner = accounts.get(this.ownerUsername);
-                if (!this.ownerUsername || !owner || owner.is_admin !== true || owner.authorized !== true || owner.deactivated === true) throw new StreamerGameServiceError('GAME_OWNER_UNAVAILABLE', 409, 'Configured owner unavailable');
-                if (creator.live_interaction_opt_in !== true) throw new StreamerGameServiceError('GAME_COOP_CONSENT_REQUIRED', 403, 'Live interaction consent required');
-                liveInteractionId = await this.repository.findActiveLiveRoom(client, creator.id, owner.id);
-                if (!liveInteractionId) throw new StreamerGameServiceError('GAME_LIVE_ROOM_REQUIRED', 409, 'Active relay room required');
-            }
 
             const version = this.versionFor(command.gameId);
             version.engine.challengeById(command.challengeId, version.pack);
@@ -216,7 +282,11 @@ class StreamerGameService {
                 id: runId, gameId: command.gameId, configVersion: version.version, versionId,
                 creatorUserId: Number(creator.id), creatorUsername: creator.username,
                 ownerUserId: owner ? Number(owner.id) : null, ownerUsername: owner?.username || null,
-                liveInteractionId, mode: command.mode, difficulty: command.difficulty, state
+                liveInteractionId, mode: command.mode, difficulty: command.difficulty, state,
+                dailyKey: dailyCalendar?.calendarKey || null,
+                dailyTimezone: dailyCalendar?.timezone || null,
+                dailyWindowStart: dailyCalendar?.windowStart || null,
+                dailyWindowEnd: dailyCalendar?.windowEnd || null
             });
             const event = await this.repository.appendEvent(client, {
                 eventId: crypto.randomUUID(), runId, eventType: 'game.run.started', actorUserId: Number(creator.id),
@@ -231,6 +301,7 @@ class StreamerGameService {
                 liveEvent = await this.liveRepository.appendEvent(client, {
                     eventId: crypto.randomUUID(), interactionId: liveInteractionId,
                     eventType: 'interaction.game_state_changed', actorType: 'creator',
+                    audience: 'both',
                     actorUserId: Number(creator.id), subjectUserId: Number(creator.id),
                     correlationId: command.commandId, stateRevision: 0,
                     payload: { gameId: command.gameId, runId, revision: 0, status: 'active' }
@@ -264,7 +335,44 @@ class StreamerGameService {
         return { id: run.id, gameId: run.gameId, configVersion: run.configVersion, mode: run.mode,
             difficulty: run.difficulty, status: run.status, revision: run.revision, score: run.score,
             actorRole, creatorUsername: run.creatorUsername, relayInteractionId: run.liveInteractionId,
-            partnerUsername: actorRole === 'creator' ? run.ownerUsername : run.creatorUsername, state };
+            partnerUsername: actorRole === 'creator' ? run.ownerUsername : run.creatorUsername,
+            consentRevokedReason: run.consentRevokedReason || null,
+            consentRevokedAt: run.consentRevokedAt || null,
+            resumed: run.resumed === true,
+            state };
+    }
+
+    async recordCompletionAchievements(client, run, nextState, context = {}) {
+        const event = {
+            sourceType: 'streamer_game',
+            sourceEventId: `achievement-game-run:${run.id}`,
+            eventType: 'game.run.completed',
+            occurredAt: this.clock().toISOString(),
+            payload: {
+                runId: run.id,
+                gameId: run.gameId,
+                challengeId: nextState.challengeId,
+                difficulty: run.difficulty,
+                mode: run.mode,
+                score: Number(nextState.score || 0),
+                authoritativeScore: true,
+                resumed: run.resumed === true
+            }
+        };
+        let achievement = null;
+        if (this.achievementService?.recordTrustedEvent) {
+            achievement = await this.achievementService.recordTrustedEvent(
+                client, run.creatorUsername, event, context
+            );
+        }
+        const reward = sourceGrantForEvent('game', event);
+        if (reward && this.rewardGrantIntentWriter?.enqueue) {
+            await this.rewardGrantIntentWriter.enqueue(client, {
+                ...reward,
+                userId: Number(run.creatorUserId)
+            });
+        }
+        return { event, achievement };
     }
 
     async action(username, expectedGameId, raw, context = {}) {
@@ -273,23 +381,62 @@ class StreamerGameService {
         const result = await this.repository.withTransaction(async client => {
             const identity = await this.repository.readRunIdentity(client, command.runId);
             if (!identity) throw new StreamerGameServiceError('GAME_RUN_NOT_FOUND', 404, 'Game run not found');
+            const identityRun = this.identityRun(identity);
             const accounts = await this.repository.lockAccounts(client,
                 [identity.creator_username, identity.owner_username]);
             for (const participantUsername of [identity.creator_username, identity.owner_username].filter(Boolean)) {
                 const participant = accounts.get(participantUsername);
-                if (!participant || participant.authorized !== true || participant.deactivated === true) {
+                if (!accountAvailable(participant)) {
                     throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403,
                         'Game participant unavailable');
                 }
             }
             const actor = accounts.get(username);
-            if (!actor || actor.authorized !== true || actor.deactivated === true) {
+            if (!accountAvailable(actor)) {
                 throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403, 'Game participant unavailable');
+            }
+            let consent = { allowed: true, reason: null };
+            if (identityRun.mode === 'coop') {
+                consent = await this.coopSecurity().validateLockedRun(client, identityRun, accounts);
             }
             const locked = await this.repository.lockRun(client, command.runId, username);
             if (!locked || locked.run.gameId !== command.gameId) throw new StreamerGameServiceError('GAME_RUN_NOT_FOUND', 404, 'Game run not found');
             const { run, actorRole, actorUserId } = locked;
             const existing = await this.repository.findCommand(client, run.id, actorUserId, command.commandId);
+            if (!consent.allowed) {
+                if (existing) {
+                    if (existing.semantic_hash !== semanticHash) throw new StreamerGameServiceError(
+                        'GAME_COMMAND_COLLISION', 409, 'Command identity collision');
+                    if (['GAME_COOP_CONSENT_REVOKED', 'GAME_COOP_WINDOW_CLOSED']
+                        .includes(existing.response_body?.code)) {
+                        await context.finalizeIdempotency?.(client, 409, existing.response_body);
+                        return { body: existing.response_body, consentError: consent };
+                    }
+                }
+                const abandoned = consent.withdrawal === false ? null
+                    : await this.coopSecurity().abandonLockedRun(client, run, consent.reason, {
+                        actorUserId,
+                        actorUsername: username,
+                        requestId: context.requestId
+                    });
+                const error = this.coopBoundaryError(consent);
+                const body = { success: false, code: error.code, message: error.message };
+                if (!existing) {
+                    await this.repository.saveCommand(client, {
+                        runId: run.id,
+                        actorUserId,
+                        commandId: command.commandId,
+                        commandType: `game.${run.gameId}.consent_rejected`,
+                        semanticHash,
+                        expectedRevision: command.expectedRevision,
+                        eventId: abandoned?.event?.eventId || null,
+                        status: 409,
+                        body
+                    });
+                }
+                await context.finalizeIdempotency?.(client, 409, body);
+                return { body, consentError: consent };
+            }
             const replay = this.replay(existing, semanticHash);
             if (replay) return { body: replay };
             if (run.status !== 'active') throw new StreamerGameServiceError('GAME_RUN_TERMINAL', 409, 'Game run is terminal');
@@ -352,15 +499,7 @@ class StreamerGameService {
                         eventType: 'game.run.completed', occurredAt: this.clock().toISOString(), payload: hookPayload
                     }, context);
                 }
-                if (this.achievementService?.recordTrustedEvent) {
-                    await this.achievementService.recordTrustedEvent(client, run.creatorUsername, {
-                        sourceType:'streamer_game',sourceEventId:`achievement-game-run:${run.id}`,
-                        eventType:'game.run.completed',occurredAt:this.clock().toISOString(),
-                        payload:{runId:run.id,gameId:run.gameId,challengeId:nextState.challengeId,
-                            difficulty:run.difficulty,mode:run.mode,score:nextState.score,
-                            authoritativeScore:true,resumed:Boolean(nextState.history?.some(item=>item.type==='resume'))}
-                    }, context);
-                }
+                await this.recordCompletionAchievements(client, run, nextState, context);
             }
 
             let liveEvent = null;
@@ -368,6 +507,7 @@ class StreamerGameService {
                 liveEvent = await this.liveRepository.appendEvent(client, {
                     eventId: crypto.randomUUID(), interactionId: run.liveInteractionId,
                     eventType: 'interaction.game_state_changed', actorType: actorRole,
+                    audience: 'both',
                     actorUserId, subjectUserId: run.creatorUserId, correlationId: command.commandId,
                     stateRevision: saved.revision, payload: { gameId: run.gameId, runId: run.id,
                         revision: saved.revision, status: nextState.status }
@@ -385,6 +525,7 @@ class StreamerGameService {
             await context.finalizeIdempotency?.(client, 200, body);
             return { body, liveEvent, run: saved };
         });
+        if (result.consentError) throw this.coopBoundaryError(result.consentError);
         if (result.liveEvent) {
             try {
                 await this.publish(result.liveEvent, result.run, 'both');
@@ -398,16 +539,109 @@ class StreamerGameService {
     async state(username, gameId, runId = null) {
         if (!GAME_IDS.includes(gameId)) throw new StreamerGameServiceError('INVALID_GAME', 400, 'Unknown game');
         if (runId !== null) validateUuid(runId, 'runId');
-        let resolved = runId ? await this.repository.readRun(runId, username) : null;
-        const history = await this.repository.listHistory(username, gameId, 20);
-        if (!resolved && history[0]) resolved = await this.repository.readRun(history[0].id, username);
+        let history = await this.repository.listHistory(username, gameId, 20);
+        const selectedRunId = runId || history[0]?.id || null;
         const collection = gameId === 'studio-crafting' ? await this.repository.collectionState(username) : null;
-        if (!resolved) return { success: true, gameId, run: null, history, collection };
-        const version = this.versionFor(gameId, resolved.run);
-        const projection = { ...version.engine.project(resolved.run.state, resolved.actorRole, version.pack),
-            serverNowMs: this.clock().getTime() };
-        return { success: true, gameId, run: this.runProjection(resolved.run, resolved.actorRole,
-            projection), history, collection };
+        if (!selectedRunId) {
+            const available = await this.repository.withTransaction(async client =>
+                accountAvailable((await this.repository.lockAccounts(client, [username])).get(username)));
+            if (!available) throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403,
+                'Game participant unavailable');
+            return { success: true, gameId, run: null, history, collection };
+        }
+        const checked = await this.repository.withTransaction(async client => {
+            const identity = await this.repository.readRunIdentity(client, selectedRunId);
+            if (!identity || identity.game_id !== gameId) return { resolved: null };
+            const runIdentity = this.identityRun(identity);
+            const accounts = await this.repository.lockAccounts(client,
+                [identity.creator_username, identity.owner_username]);
+            const actor = accounts.get(username);
+            if (!accountAvailable(actor)
+                || ![Number(identity.creator_user_id), Number(identity.owner_user_id)]
+                    .filter(Number.isSafeInteger).includes(Number(actor.id))) {
+                return { resolved: null };
+            }
+            let consent = { allowed: true, reason: null };
+            if (runIdentity.mode === 'coop' && runIdentity.status === 'active') {
+                consent = await this.coopSecurity().validateLockedRun(client, runIdentity, accounts, {
+                    interactive: false
+                });
+            }
+            const resolved = await this.repository.lockRun(client, selectedRunId, username);
+            if (!resolved) return { resolved: null };
+            if (!consent.allowed) {
+                if (consent.withdrawal !== false) {
+                    await this.coopSecurity().abandonLockedRun(client, resolved.run, consent.reason, {
+                        actorUserId: Number(actor.id),
+                        actorUsername: username
+                    });
+                }
+                return { consentError: consent };
+            }
+            if (resolved.actorRole === 'creator' && resolved.run.status === 'active'
+                && resolved.run.resumed !== true
+                && typeof this.repository.markRunResumed === 'function') {
+                const resumed = await this.repository.markRunResumed(client, resolved.run,
+                    Number(actor.id), hash(resolved.run.state));
+                if (resumed) resolved.run.resumed = true;
+            }
+            return { resolved };
+        });
+        if (checked.consentError) throw this.coopBoundaryError(checked.consentError);
+        if (!checked.resolved) throw new StreamerGameServiceError('GAME_RUN_NOT_FOUND', 404,
+            'Game run not found');
+        history = await this.repository.listHistory(username, gameId, 20);
+        const version = this.versionFor(gameId, checked.resolved.run);
+        const projection = { ...version.engine.project(checked.resolved.run.state,
+            checked.resolved.actorRole, version.pack), serverNowMs: this.clock().getTime() };
+        return { success: true, gameId, run: this.runProjection(checked.resolved.run,
+            checked.resolved.actorRole, projection), history, collection };
+    }
+
+    async authorizeSocketSubscription(username, input) {
+        if (!input || typeof input !== 'object' || Array.isArray(input)) {
+            throw new StreamerGameServiceError('INVALID_INPUT', 400, 'Invalid game subscription');
+        }
+        const interactionId = Number(input.interactionId);
+        if (!Number.isSafeInteger(interactionId) || interactionId < 1
+            || !GAME_IDS.includes(input.gameId)) {
+            throw new StreamerGameServiceError('INVALID_INPUT', 400, 'Invalid game subscription');
+        }
+        const runId = validateUuid(input.runId, 'runId');
+        const checked = await this.repository.withTransaction(async client => {
+            const identity = await this.repository.readRunIdentity(client, runId);
+            if (!identity || identity.game_id !== input.gameId
+                || Number(identity.live_interaction_id) !== interactionId
+                || identity.mode !== 'coop') {
+                return { missing: true };
+            }
+            const runIdentity = this.identityRun(identity);
+            const accounts = await this.repository.lockAccounts(client,
+                [identity.creator_username, identity.owner_username]);
+            const actor = accounts.get(username);
+            if (!accountAvailable(actor)) return { missing: true };
+            const consent = await this.coopSecurity().validateLockedRun(client, runIdentity, accounts);
+            const locked = await this.repository.lockRun(client, runId, username);
+            if (!locked) return { missing: true };
+            if (!consent.allowed) {
+                if (consent.withdrawal !== false) {
+                    await this.coopSecurity().abandonLockedRun(client, locked.run, consent.reason, {
+                        actorUserId: Number(actor.id), actorUsername: username
+                    });
+                }
+                return { consentError: consent };
+            }
+            if (locked.run.status !== 'active') {
+                throw new StreamerGameServiceError('GAME_RUN_TERMINAL', 409,
+                    'Game run is terminal');
+            }
+            return { subscription: { role: locked.actorRole, userId: Number(actor.id),
+                interactionId, gameId: input.gameId, runId } };
+        });
+        if (checked.consentError) throw this.coopBoundaryError(checked.consentError);
+        if (checked.missing) throw new StreamerGameServiceError('GAME_RUN_NOT_FOUND', 404,
+            'Game run not found');
+        return checked.subscription;
     }
 
     async recordTrustedBingoEvent(raw, context = {}) {
@@ -417,14 +651,14 @@ class StreamerGameService {
         }
         const command = validateTrustedBingoEvent(raw, this.packs['broadcast-bingo']);
         const semanticHash = hash(command);
-        return this.repository.withTransaction(async client => {
+        const result = await this.repository.withTransaction(async client => {
             const accounts = await this.repository.lockAccounts(client, [command.username, context.actorUsername]);
             const creator = accounts.get(command.username);
             const owner = accounts.get(context.actorUsername);
-            if (!creator || creator.authorized !== true || creator.deactivated === true) {
+            if (!accountAvailable(creator)) {
                 throw new StreamerGameServiceError('GAME_ACCOUNT_UNAVAILABLE', 403, 'Creator account unavailable');
             }
-            if (!owner || owner.is_admin !== true || owner.authorized !== true || owner.deactivated === true) {
+            if (!accountAvailable(owner) || owner.is_admin !== true) {
                 throw new StreamerGameServiceError('GAME_OWNER_REQUIRED', 403,
                     'Configured owner account unavailable');
             }
@@ -434,19 +668,58 @@ class StreamerGameService {
                     throw new StreamerGameServiceError('GAME_TRUSTED_EVENT_COLLISION', 409,
                         'Trusted event identity collision');
                 }
-                await context.finalizeIdempotency?.(client, 200, existing.response_body);
-                return existing.response_body;
+                const status = Number(existing.response_status || 200);
+                await context.finalizeIdempotency?.(client, status, existing.response_body);
+                return status >= 400 ? {
+                    consentError: {
+                        reason: existing.response_body?.reason || 'membership_inactive',
+                        withdrawal: existing.response_body?.code !== 'GAME_COOP_WINDOW_CLOSED'
+                    },
+                    body: existing.response_body
+                } : existing.response_body;
             }
-            const active = await this.repository.findActiveCreatorRun(client, creator.id, 'broadcast-bingo');
+            const active = await this.repository.findActiveCreatorRun(client, creator.id,
+                'broadcast-bingo', { lock: false });
             if (!active) {
                 const body = { success: true, matched: false, runId: null };
                 await this.repository.insertTrustedGameEvent(client, { creatorUserId: creator.id, ...command,
-                    semanticHash, runId: null, body });
+                    semanticHash, runId: null, status: 200, body });
                 await context.finalizeIdempotency?.(client, 200, body);
                 return body;
             }
+            const identity = await this.repository.readRunIdentity(client, active.id);
+            if (!identity) throw new StreamerGameServiceError('GAME_RUN_NOT_FOUND', 404,
+                'Game run not found');
+            const runIdentity = this.identityRun(identity);
+            let consent = { allowed: true, reason: null };
+            if (runIdentity.mode === 'coop') {
+                consent = await this.coopSecurity().validateLockedRun(client, runIdentity, accounts);
+            }
             const locked = await this.repository.lockRun(client, active.id, command.username);
+            if (!locked || locked.run.status !== 'active') {
+                const body = { success: true, matched: false, runId: null };
+                await this.repository.insertTrustedGameEvent(client, { creatorUserId: creator.id, ...command,
+                    semanticHash, runId: null, status: 200, body });
+                await context.finalizeIdempotency?.(client, 200, body);
+                return body;
+            }
             const { run, actorUserId } = locked;
+            if (!consent.allowed) {
+                if (consent.withdrawal !== false) {
+                    await this.coopSecurity().abandonLockedRun(client, run, consent.reason, {
+                        actorUserId: Number(owner.id),
+                        actorUsername: context.actorUsername,
+                        requestId: context.requestId
+                    });
+                }
+                const error = this.coopBoundaryError(consent);
+                const body = { success: false, code: error.code, reason: consent.reason,
+                    message: error.message };
+                await this.repository.insertTrustedGameEvent(client, { creatorUserId: creator.id, ...command,
+                    semanticHash, runId: run.id, status: 409, body });
+                await context.finalizeIdempotency?.(client, 409, body);
+                return { consentError: consent, body };
+            }
             const version = this.versionFor(run.gameId, run);
             const nextState = version.engine.applyAction(run.state, { type: 'trusted_event',
                 eventKey: command.eventKey, sourceEventId: command.sourceEventId },
@@ -471,6 +744,7 @@ class StreamerGameService {
                         occurredAt: this.clock().toISOString(), payload: hookPayload
                     }, context);
                 }
+                await this.recordCompletionAchievements(client, run, nextState, context);
             }
             await this.repository.insertAudit(client, { runId: run.id, actorUserId,
                 action: 'streamer_game.trusted_bingo_event', requestId: context.requestId,
@@ -478,10 +752,12 @@ class StreamerGameService {
             const body = { success: true, matched: true, runId: run.id, revision: saved.revision,
                 status: nextState.status, eventId: event.eventId };
             await this.repository.insertTrustedGameEvent(client, { creatorUserId: creator.id, ...command,
-                semanticHash, runId: run.id, body });
+                semanticHash, runId: run.id, status: 200, body });
             await context.finalizeIdempotency?.(client, 200, body);
             return body;
         });
+        if (result?.consentError) throw this.coopBoundaryError(result.consentError);
+        return result;
     }
 }
 

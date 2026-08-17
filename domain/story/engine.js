@@ -109,9 +109,7 @@ function recoverStoryRun(content, runValue, expectedRevisionValue) {
     if (!run.checkpoint || !content.nodesById.has(run.checkpoint.nodeId)) throw new StoryTransitionError('STORY_CHECKPOINT_MISSING', 'No recoverable checkpoint exists');
     const fromNodeId = run.currentNodeId;
     run.currentNodeId = run.checkpoint.nodeId; run.currentEpisode = content.nodesById.get(run.currentNodeId).episode;
-    const restored = structuredClone(run.checkpoint.state);
-    for (const key of ['memories', 'unlocks', 'messages', 'completedEpisodes']) restored[key] = { ...(restored[key] || {}), ...(run.state[key] || {}) };
-    run.state = restored; run.revision += 1;
+    run.state = structuredClone(run.checkpoint.state); run.revision += 1;
     return Object.freeze({ run, emitted: Object.freeze([]), event: Object.freeze({ action: 'recover', fromNodeId, toNodeId: run.currentNodeId, selectedChoice: null, answerCorrect: null, revision: run.revision, newlyCompletedEpisodes: [], effectSummary: Object.freeze([{ type: 'checkpoint_restore', key: run.checkpoint.nodeId }]) }) });
 }
 

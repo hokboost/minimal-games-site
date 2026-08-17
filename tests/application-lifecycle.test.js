@@ -337,6 +337,7 @@ test('server module wires the lifecycle without starting on require', () => {
             'session-store',
             'paid-action-concurrency-guard',
             'database-schema',
+            'streamer-world-runtime-readiness',
             'socket-event-bus',
             'session-cleanup',
             'ip-cleanup',
@@ -360,7 +361,10 @@ test('server module wires the lifecycle without starting on require', () => {
         cwd: projectRoot,
         encoding: 'utf8',
         env: { ...process.env, NODE_ENV: 'development' },
-        timeout: 20 * 1000
+        // The repository's generated bilingual content makes a cold module load on
+        // mounted Windows workspaces materially slower than an in-memory unit test.
+        // This remains a no-I/O contract check; give module loading, not startup, room.
+        timeout: 90 * 1000
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
 });

@@ -41,6 +41,9 @@ class MemoryRepository {
                 id: 1,
                 username: 'owner',
                 is_admin: true,
+                authorized: true,
+                deactivated: false,
+                account_locked: false,
                 timezone: 'UTC',
                 live_interaction_opt_in: false
             },
@@ -48,8 +51,21 @@ class MemoryRepository {
                 id: 2,
                 username: 'creator',
                 is_admin: false,
+                authorized: true,
+                deactivated: false,
+                account_locked: false,
                 timezone: 'UTC',
                 live_interaction_opt_in: true
+            },
+            moderator: {
+                id: 3,
+                username: 'moderator',
+                is_admin: true,
+                authorized: true,
+                deactivated: false,
+                account_locked: false,
+                timezone: 'UTC',
+                live_interaction_opt_in: false
             }
         };
         this.rooms = new Map();
@@ -125,6 +141,11 @@ class MemoryRepository {
     async readAccount(username) {
         return this.accounts[username] || null;
     }
+    async readAccountsByIds(userIds) {
+        const wanted = new Set(userIds.map(Number));
+        return new Map(Object.values(this.accounts).filter(value => wanted.has(Number(value.id)))
+            .map(value => [Number(value.id), value]));
+    }
     async creatorBoundaries() {
         return {
             preferences: {},
@@ -197,7 +218,8 @@ class MemoryRepository {
     async readMemberRoom(id, username) {
         const room = this.rooms.get(id),
             member = this.members.get(`${id}:${username}`);
-        return room && member ? {
+        return room?.status === 'active' && member?.status === 'active'
+            && !(member.role === 'owner' && room.mutedUntil) ? {
             ...room,
             memberRole: member.role,
             memberStatus: member.status,
@@ -243,6 +265,7 @@ class MemoryRepository {
             sequence,
             protocol_version: 1,
             event_type: event.eventType,
+            audience: event.audience,
             actor_type: event.actorType,
             subject_user_id: event.subjectUserId,
             correlation_id: event.correlationId,
@@ -313,6 +336,12 @@ class MemoryRepository {
     async markMemberLeft(client, id, actor) {
         this.members.get(`${id}:${actor===2?'creator':'owner'}`).status = 'left';
     }
+    async markRoomMembersInactive(client, id) {
+        for (const username of ['creator', 'owner']) {
+            const member = this.members.get(`${id}:${username}`);
+            if (member) member.status = 'left';
+        }
+    }
     async insertReport(client, report) {
         this.reports.set(this.nextReport, {
             id: this.nextReport,
@@ -336,6 +365,19 @@ class MemoryRepository {
             room: structuredClone(room)
         };
     }
+    async lockModerationContext(client, { interactionId, reportId, moderatorUsername }) {
+        const room = this.rooms.get(interactionId);
+        const report = this.reports.get(reportId);
+        return room && report ? {
+            room: { ...room, memberRole: 'owner', memberStatus: 'active', highestAckSequence: 0 },
+            report: structuredClone(report),
+            moderator: this.accounts[moderatorUsername] || null,
+            owner: this.accounts.owner
+        } : null;
+    }
+    async appendSensitiveReadAudit(client, value) {
+        this.audits.push(structuredClone(value));
+    }
     async reconsentReport(client, id, creator) {
         const report = this.reports.get(id);
         if (!report || report.reporterUserId !== creator || !['resolved', 'dismissed'].includes(report.status) ||
@@ -357,19 +399,24 @@ class MemoryRepository {
     async catchUp(id, username, after, limit) {
         const room = await this.readMemberRoom(id, username);
         if (!room) return null;
-        const rows = this.events.filter(event => event.interactionId === id && event.sequence > after);
+        const rows = this.events.filter(event => event.interactionId === id && event.sequence > after
+            && (event.audience === 'both' || event.audience === room.memberRole));
+        const visible = this.events.filter(event => event.interactionId === id
+            && (event.audience === 'both' || event.audience === room.memberRole));
         return {
             room,
             events: rows.slice(0, limit),
             hasMore: rows.length > limit,
-            nextAfter: rows.slice(0, limit).at(-1)?.sequence || after
+            nextAfter: rows.slice(0, limit).at(-1)?.sequence || after,
+            lastSequence: visible.at(-1)?.sequence || 0
         };
     }
     async listCreatorRooms(username) {
         const rooms = [];
         for (const room of [...this.rooms.values()].sort((a, b) => b.id - a.id)) {
             const member = this.members.get(`${room.id}:${username}`);
-            if (member) rooms.push({
+            if (member?.status === 'active' && room.status === 'active'
+                && !(member.role === 'owner' && room.mutedUntil)) rooms.push({
                 ...room,
                 memberRole: member.role,
                 memberStatus: member.status,
@@ -387,12 +434,25 @@ class MemoryRepository {
             room,
             items: [...this.items.values()].filter(item => item.interactionId === id).map(item => structuredClone(
                 item)),
-            recent: this.events.filter(event => event.interactionId === id).slice(-30),
+            recent: this.events.filter(event => event.interactionId === id
+                && (event.audience === 'both' || event.audience === room.memberRole)).slice(-30),
             report: report ? {
                 id: report.id,
                 status: report.status,
                 reconsented: Boolean(report.creator_reconsented_at)
             } : null
+        };
+    }
+    async latestReportRecovery(username) {
+        if (username !== 'creator') return null;
+        const report = [...this.reports.values()].filter(row => !row.creator_reconsented_at).at(-1);
+        if (!report) return null;
+        const room = this.rooms.get(report.interaction_id);
+        const member = this.members.get(`${room.id}:creator`);
+        return {
+            room: { ...room, memberRole: member.role, memberStatus: member.status,
+                highestAckSequence: member.ack },
+            report: { id: report.id, status: report.status, reconsented: false }
         };
     }
 }
@@ -454,16 +514,19 @@ test('live flags require foundation and live switch while defaults remain closed
     }).liveInteractionsEnabled, false);
 });
 
-test('24 unique bilingual structured templates cover all interaction kinds and real story nodes', () => {
+test('structured templates cover all interaction kinds and every published version-bound story node', () => {
     const values = Object.values(TEMPLATES);
-    assert.equal(values.length, 24);
-    assert.equal(new Set(values.map(x => x.titleZh)).size, 24);
-    assert.equal(new Set(values.map(x => x.titleEn)).size, 24);
+    assert.ok(values.length >= 29);
+    assert.equal(new Set(values.map(x => x.titleZh)).size, values.length);
+    assert.equal(new Set(values.map(x => x.titleEn)).size, values.length);
     assert.deepEqual(new Set(values.map(x => x.type)), new Set(protocol.ITEM_TYPES));
-    const nodes = new Set(seasonOne.nodes.filter(node => node.type === 'owner_intervention').map(node => node
-        .id));
+    const { publishedStoryInterventionRegistry } = require('../domain/story/published-content-registry');
+    const nodes = new Set(publishedStoryInterventionRegistry.nodeIds);
     for (const template of values.filter(x => x.type === 'story_intervention'))
         for (const id of template.storyNodeIds) assert.ok(nodes.has(id), id);
+    const covered = new Set(values.filter(x => x.type === 'story_intervention')
+        .flatMap(template => template.storyNodeIds));
+    for (const node of nodes) assert.ok(covered.has(node), node);
 });
 
 test('protocol rejects unknown fields, oversized text, forged references, and malformed poll payloads', () => {
@@ -762,6 +825,33 @@ test('server-only safe action paths are persisted for visible quest/game invitat
     }), /internal allowlisted/);
 });
 
+test('a newly blocked game invalidates acceptance while decline stays neutral and durable', async () => {
+    const repo = new MemoryRepository();
+    const { service } = makeService(repo);
+    await open(service);
+    const sent = await service.send('owner', {
+        commandId: uuid(), creatorUsername: 'creator', interactionId: 1, expectedRevision: 1,
+        itemType: 'game_invite', templateKey: 'game-invite.quiz-round', referenceId: 'quiz'
+    });
+    repo.creatorBoundaries = async () => ({
+        preferences: { 'game:quiz': 'block' }, quietHours: [], interactionWindows: []
+    });
+    const before = { events: repo.events.length, audits: repo.audits.length,
+        revision: repo.rooms.get(1).revision };
+    await assert.rejects(service.itemAction('creator', {
+        commandId: uuid(), interactionId: 1, expectedRevision: sent.revision,
+        itemId: sent.item.id
+    }, 'accept'), error => error.code === 'LIVE_CONSENT_BLOCKED');
+    assert.deepEqual({ events: repo.events.length, audits: repo.audits.length,
+        revision: repo.rooms.get(1).revision }, before);
+    const declined = await service.itemAction('creator', {
+        commandId: uuid(), interactionId: 1, expectedRevision: sent.revision,
+        itemId: sent.item.id
+    }, 'decline');
+    assert.equal(declined.item.status, 'declined');
+    assert.equal(repo.events.at(-1).eventType, 'interaction.item_declined');
+});
+
 test('story intervention requires current version-bound owner node and template membership', async () => {
     const repo = new MemoryRepository(),
         {
@@ -873,7 +963,7 @@ async () => {
     assert.equal(repo.events.length, 2);
 });
 
-test('ack is monotonic, cannot move ahead, and left members retain read-only REST history', async () => {
+test('ack is monotonic, cannot move ahead, and former members lose REST history immediately', async () => {
     const repo = new MemoryRepository(),
         {
             service
@@ -908,12 +998,11 @@ test('ack is monotonic, cannot move ahead, and left members retain read-only RES
         interactionId: 1,
         sequence: 3
     }), error => error.code === 'LIVE_MEMBERSHIP_REQUIRED');
-    const history = await service.catchUp('creator', {
+    await assert.rejects(service.catchUp('creator', {
         interactionId: 1,
         afterSequence: 0,
         limit: 100
-    });
-    assert.equal(history.events.length, 3);
+    }), error => error.code === 'LIVE_MEMBERSHIP_REQUIRED');
 });
 
 test('expired invitation becomes a durable terminal event and cannot be accepted on replay', async () => {
@@ -978,7 +1067,14 @@ test('report marks item non-actionable; moderation alone stays blocked until exp
         commandId: uuid(),
         creatorUsername: 'creator'
     }), error => error.code === 'LIVE_PAIR_BLOCKED');
-    const moderated = await service.moderate('owner', {
+    await assert.rejects(service.moderate('owner', {
+        commandId: uuid(),
+        interactionId: 1,
+        expectedRevision: 3,
+        reportId: 1,
+        resolution: 'resolved'
+    }), error => error.code === 'LIVE_INDEPENDENT_MODERATOR_REQUIRED');
+    const moderated = await service.moderate('moderator', {
         commandId: uuid(),
         interactionId: 1,
         expectedRevision: 3,
@@ -1018,7 +1114,7 @@ test('creator state exposes only safe reconsent projection and never leaks Direc
         reasonCode: 'privacy',
         detail: 'private detail'
     });
-    await service.moderate('owner', {
+    await service.moderate('moderator', {
         commandId: uuid(),
         interactionId: 1,
         expectedRevision: 2,
@@ -1080,7 +1176,9 @@ test('durable envelope stays below PostgreSQL bus limit with outer delivery wrap
         interaction_id: 1,
         event_id: uuid(),
         sequence: 1,
+        protocol_version: 1,
         event_type: 'interaction.nudge',
+        audience: 'both',
         actor_type: 'owner',
         subject_user_id: 2,
         created_at: new Date().toISOString(),
@@ -1094,10 +1192,9 @@ test('durable envelope stays below PostgreSQL bus limit with outer delivery wrap
         origin: 'a'.repeat(32),
         type: 'live_interaction',
         payload: {
-            event,
-            audience: 'both',
-            creatorUserId: 2,
-            ownerUserId: 1
+            eventId: event.eventId,
+            interactionId: event.interactionId,
+            realtimeAudience: 'both'
         }
     });
     assert.ok(Buffer.byteLength(JSON.stringify(event)) <= protocol.MAX_EVENT_BYTES);
@@ -1149,7 +1246,7 @@ test('socket commands revalidate exact session and disconnect revoked clients be
     assert.equal(reply.code, 'SESSION_REVOKED');
     assert.equal(accessed, 0);
     assert.equal(socket.disconnected, true);
-    assert.deepEqual(joined, ['live:user:2']);
+    assert.deepEqual(joined, []);
 });
 
 test('socket subscribe uses member-scoped catch-up and joins only after authorization', async () => {
@@ -1162,7 +1259,8 @@ test('socket subscribe uses member-scoped catch-up and joins only after authoriz
                 return {
                     success: true,
                     events: [],
-                    lastSequence: 4
+                    lastSequence: 4,
+                    subscription: { role: 'creator', userId: 2 }
                 };
             },
             acknowledge: async () => ({
@@ -1198,7 +1296,7 @@ test('socket subscribe uses member-scoped catch-up and joins only after authoriz
         reply = value;
     });
     assert.equal(reply.lastSequence, 4);
-    assert.deepEqual(joined, ['live:user:2', 'live:interaction:7']);
+    assert.deepEqual(joined, ['live:interaction:7:creator:user:2']);
 });
 
 test('socket command flood is bounded before it reaches durable services', async () => {
@@ -1225,7 +1323,8 @@ test('socket command flood is bounded before it reaches durable services', async
                 calls++;
                 return {
                     events: [],
-                    lastSequence: 0
+                    lastSequence: 0,
+                    subscription: { role: 'creator', userId: 2 }
                 };
             },
             acknowledge: async () => ({}),
@@ -1525,6 +1624,9 @@ test('Director registrar keeps non-owner admins on Phase 1 summary and blocks ev
                 liveReads++;
                 return {};
             },
+            async moderationQueue() {
+                return { reports: [], templates: [] };
+            },
             open() {},
             send() {},
             moderate() {}
@@ -1581,6 +1683,7 @@ test('Director registrar keeps non-owner admins on Phase 1 summary and blocks ev
     }
     assert.equal(liveReads, 0);
     assert.equal(res.model.liveEnabled, false);
+    assert.equal(res.model.moderationEnabled, true);
     assert.deepEqual(res.model.summary.creators, []);
     const send = rows.find(row => row.routePath === '/api/admin/live/send'),
         blocked = {

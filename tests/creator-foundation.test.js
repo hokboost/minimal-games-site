@@ -61,7 +61,8 @@ test('creator feature switches default off and require both foundation gates', (
 
 test('server environment validation keeps streamer flags on strict lowercase boolean contract', () => {
     const configSource = source('lib/config-validation.js');
-    for (const name of FLAG_NAMES) assert.match(configSource, new RegExp(`'${name}'`));
+    assert.match(configSource, /const \{ FLAG_NAMES, readStreamerWorldFlags \} = require\('\.\/streamer-world-flags'\)/);
+    assert.match(configSource, /for \(const name of FLAG_NAMES\) validateBoolean\(name\)/);
     assert.match(configSource, /!\['true', 'false'\]\.includes\(value\)/);
     const example = source('.env.example');
     for (const name of FLAG_NAMES) assert.match(example, new RegExp(`^${name}=false$`, 'm'));

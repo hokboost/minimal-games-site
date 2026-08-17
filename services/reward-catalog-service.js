@@ -2,11 +2,11 @@
 
 const crypto = require('node:crypto');
 const pack = require('../content/streamer-world/rewards/catalog');
-const { boundaryState } = require('./live-interaction-service');
 const { stableStringify } = require('../lib/idempotency');
 const {
     contentHash,
     evaluateEligibility,
+    evaluateRewardAccess,
     projectItem,
     transitionOrder,
     validateCatalog,
@@ -17,6 +17,9 @@ const {
     validateTrustedGrant,
     validateWishlist
 } = require('../domain/rewards/catalog');
+const {
+    evaluateCommunicationBoundary
+} = require('./creator-communication-boundary-policy');
 
 class RewardCatalogServiceError extends Error {
     constructor(code, status, message) {
@@ -40,10 +43,20 @@ function cooldownUntil(lastApproved, hours) {
     return new Date(new Date(lastApproved).getTime() + Number(hours) * 3600000);
 }
 
+function accountAvailable(account) {
+    return Boolean(account && account.authorized === true && account.deactivated !== true
+        && account.account_locked !== true);
+}
+
 class RewardCatalogService {
-    constructor({ repository, BalanceLogger, giftConfig, ownerUsername = null, clock = () => new Date() }) {
+    constructor({ repository, BalanceLogger, giftConfig, ownerUsername = null, clock = () => new Date(),
+        boundaryPolicy = evaluateCommunicationBoundary, publishRewardNotification = async () => {},
+        grantIntentRepository = null }) {
         if (!repository?.withTransaction || !BalanceLogger?.updateBalance) {
             throw new TypeError('RewardCatalogService requires repository and BalanceLogger');
+        }
+        if (typeof boundaryPolicy !== 'function') {
+            throw new TypeError('RewardCatalogService requires a communication boundary policy');
         }
         validateCatalog(pack, giftConfig);
         this.repository = repository;
@@ -51,6 +64,9 @@ class RewardCatalogService {
         this.giftConfig = giftConfig;
         this.ownerUsername = ownerUsername;
         this.clock = clock;
+        this.boundaryPolicy = boundaryPolicy;
+        this.publishRewardNotification = publishRewardNotification;
+        this.grantIntentRepository = grantIntentRepository;
         this.pack = pack;
         this.grantTemplates = new Map(pack.grantTemplates.map(template => [template.key, template]));
     }
@@ -79,27 +95,31 @@ class RewardCatalogService {
             sourceType,
             userItemCount: Number(facts.user_item_count || 0),
             stockUsed: Number(facts.stock_used || 0),
+            pendingCount: Number(facts.pending_count || 0),
             cooldownUntil: cooldownUntil(facts.last_approved, item.cooldown_hours),
             unlockKeys,
             now: this.clock()
         };
     }
 
-    async requireEligible(client, account, item, sourceType, excludeOrderId = null) {
-        if (!item || item.lifecycle !== 'active') {
-            throw new RewardCatalogServiceError('REWARD_ITEM_UNAVAILABLE', 404, 'Reward item unavailable');
-        }
+    notFound() {
+        return new RewardCatalogServiceError('REWARD_ITEM_NOT_FOUND', 404, 'Reward item not found');
+    }
+
+    async access(client, account, item, sourceType, excludeOrderId = null) {
+        if (!item) throw this.notFound();
         const facts = await this.repository.eligibilityFacts(client, account.id, item.id, excludeOrderId);
         facts.hasUnlock = await this.repository.hasVisibilityUnlock(client, account.id,
             item.visibility_type, ['story_unlock', 'achievement_unlock'].includes(item.visibility_type)
                 ? item.visibility_key : null);
-        const result = evaluateEligibility(item, this.itemFacts(item, facts, sourceType));
+        return { facts, result: evaluateRewardAccess(item, this.itemFacts(item, facts, sourceType)) };
+    }
+
+    async requireEligible(client, account, item, sourceType, excludeOrderId = null) {
+        const { facts, result } = await this.access(client, account, item, sourceType, excludeOrderId);
+        if (!result.visible) throw this.notFound();
         if (!result.eligible) {
             throw new RewardCatalogServiceError(result.reasonCode, 409, 'Reward is not currently eligible');
-        }
-        if (Number(facts.pending_count || 0) > 0) {
-            throw new RewardCatalogServiceError('REWARD_PENDING_ORDER_EXISTS', 409,
-                'A pending order for this reward already exists');
         }
         return facts;
     }
@@ -109,18 +129,36 @@ class RewardCatalogService {
         return {
             success: true,
             catalogVersion: this.pack.catalogVersion,
-            items: rows.filter(row => row.owner_grant_only !== true).map(row => {
-                const eligibility = evaluateEligibility(row, {
+            items: rows.map(row => {
+                const access = evaluateRewardAccess(row, {
                     sourceType: 'direct_redemption',
                     userItemCount: Number(row.user_item_count),
                     stockUsed: Number(row.stock_used),
+                    pendingCount: Number(row.pending_count || 0),
                     cooldownUntil: row.cooldown_until,
                     unlockKeys: row.has_unlock ? new Set([row.visibility_key]) : new Set(),
                     now: this.clock()
                 });
-                return projectItem(row, eligibility);
-            })
+                return { row, access };
+            }).filter(entry => entry.access.visible)
+                .map(entry => projectItem(entry.row, entry.access))
         };
+    }
+
+    async itemDetail(username, catalogVersionId) {
+        const id = Number(catalogVersionId);
+        if (!Number.isSafeInteger(id) || id < 1) throw this.notFound();
+        const result = await this.repository.withTransaction(async client => {
+            const account = (await this.repository.lockAccounts(client, [username])).get(username);
+            if (!accountAvailable(account)) {
+                throw new RewardCatalogServiceError('REWARD_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
+            }
+            const item = await this.repository.lockCatalogVersion(client, id);
+            const { result } = await this.access(client, account, item, 'direct_redemption');
+            if (!result.visible) throw this.notFound();
+            return { success: true, item: projectItem(item, result) };
+        });
+        return result;
     }
 
     orderProjection(order, item = order) {
@@ -178,7 +216,7 @@ class RewardCatalogService {
         return this.repository.withTransaction(async client => {
             const accounts = await this.repository.lockAccounts(client, [username]);
             const account = accounts.get(username);
-            if (!account || account.authorized !== true || account.deactivated === true) {
+            if (!accountAvailable(account)) {
                 throw new RewardCatalogServiceError('REWARD_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
             }
             const existing = await this.repository.findCommand(client, account.id, command.commandId);
@@ -226,15 +264,15 @@ class RewardCatalogService {
     async ownerGrant(ownerUsername, raw, context = {}) {
         const command = validateOwnerGrant(raw);
         const hash = semanticHash({ action: 'owner_grant', ownerUsername, ...command });
-        return this.repository.withTransaction(async client => {
+        const result = await this.repository.withTransaction(async client => {
             const accounts = await this.repository.lockAccounts(client, [ownerUsername, command.creatorUsername]);
             const owner = accounts.get(ownerUsername);
             const creator = accounts.get(command.creatorUsername);
-            if (!this.ownerUsername || ownerUsername !== this.ownerUsername || !owner || owner.is_admin !== true
-                || owner.authorized !== true || owner.deactivated === true) {
+            if (!this.ownerUsername || ownerUsername !== this.ownerUsername || !accountAvailable(owner)
+                || owner.is_admin !== true) {
                 throw new RewardCatalogServiceError('REWARD_OWNER_REQUIRED', 403, 'Configured owner required');
             }
-            if (!creator || creator.authorized !== true || creator.deactivated === true
+            if (!accountAvailable(creator)
                 || creator.live_interaction_opt_in !== true) {
                 throw new RewardCatalogServiceError('REWARD_GRANT_CONSENT_REQUIRED', 403,
                     'Creator has not opted into owner interactions');
@@ -243,18 +281,24 @@ class RewardCatalogService {
             const replay = this.replay(existing, hash);
             if (replay) {
                 await this.finalize(client, context, replay, existing.response_status);
-                return replay;
+                return { body: replay, realtime: null };
             }
             const boundaries = await this.repository.creatorBoundaries(client, creator.id, owner.id);
-            boundaries.interactionWindows = [];
-            const boundary = boundaryState(creator, boundaries, boundaries.room, this.clock());
-            if (boundary.blocked || boundary.muted || boundaries.preferences.celebrations === 'block') {
+            const boundary = this.boundaryPolicy({
+                account: creator,
+                preferences: boundaries.preferences,
+                quietHours: boundaries.quietHours,
+                interactionWindows: boundaries.interactionWindows,
+                room: boundaries.room,
+                report: boundaries.report,
+                itemType: 'reward_grant',
+                now: this.clock()
+            });
+            if (boundary?.allowDurable !== true) {
                 throw new RewardCatalogServiceError('REWARD_GRANT_MUTED', 403,
                     'Creator has muted or blocked owner reward grants');
             }
             const item = await this.repository.lockCatalogVersion(client, command.catalogVersionId);
-            if (!item?.owner_grant_only) throw new RewardCatalogServiceError('REWARD_OWNER_ITEM_REQUIRED', 400,
-                'Selected item is not available for owner grants');
             await this.requireEligible(client, creator, item, 'owner_grant');
             const orderId = crypto.randomUUID();
             const status = item.approval_policy === 'manual' ? 'pending_approval' : 'approved';
@@ -266,7 +310,7 @@ class RewardCatalogService {
                 sourceKey: `owner:${command.commandId}`, grantTemplateKey: command.templateKey,
                 createdByUserId: owner.id, status, pointsCost: 0,
                 exposureValue: Number(item.exposure_value), semanticHash: hash,
-                notificationPolicy: boundary.quiet ? 'quiet_suppressed' : 'normal'
+                notificationPolicy: boundary.allowRealtime ? 'normal' : 'quiet_suppressed'
             });
             await this.appendEvent(client, orderId, 'order_submitted', owner.id,
                 { templateKey: command.templateKey, creatorUsername: command.creatorUsername });
@@ -276,12 +320,10 @@ class RewardCatalogService {
                 await this.repository.createGrant(client, orderId, creator.id);
                 await this.appendEvent(client, orderId, 'grant_available', owner.id);
             }
-            if (!boundary.quiet) {
-                const template = this.grantTemplates.get(command.templateKey);
-                await this.repository.appendRewardInbox(client, { userId: creator.id, ownerUsername,
-                    orderId, templateKey: command.templateKey, titleZh: template.titleZh,
-                    titleEn: template.titleEn, bodyZh: item.description_zh, bodyEn: item.description_en });
-            }
+            const template = this.grantTemplates.get(command.templateKey);
+            await this.repository.appendRewardInbox(client, { userId: creator.id, ownerUsername,
+                orderId, templateKey: command.templateKey, titleZh: template.titleZh,
+                titleEn: template.titleEn, bodyZh: item.description_zh, bodyEn: item.description_en });
             const body = { success: true, order: this.orderProjection(order, item) };
             await this.repository.saveCommand(client, { actorUserId: owner.id, commandId: command.commandId,
                 commandType: 'reward.owner.grant', semanticHash: hash, status: 201, body });
@@ -290,53 +332,82 @@ class RewardCatalogService {
                 details: { creatorUsername: command.creatorUsername, itemSlug: item.slug,
                     templateKey: command.templateKey, notificationPolicy: order.notification_policy } });
             await this.finalize(client, context, body, 201);
-            return body;
+            return { body, realtime: boundary.allowRealtime ? {
+                username: creator.username, orderId, templateKey: command.templateKey
+            } : null };
         });
+        if (result.realtime) {
+            try { await this.publishRewardNotification(result.realtime); } catch {
+                // Durable inbox storage is authoritative; realtime is best-effort only.
+            }
+        }
+        return result.body;
     }
 
     async grantFromTrustedSource(raw) {
         const command = validateTrustedGrant(raw);
+        return this.repository.withTransaction(client => this.grantTrustedInTransaction(client, command));
+    }
+
+    async grantTrustedInTransaction(client, command) {
         const sourceKey = `${command.sourceType}:${command.sourceEventId}`;
         const hash = semanticHash({ action: 'trusted_grant', ...command });
+        const accounts = await this.repository.lockAccounts(client, [command.username]);
+        const account = accounts.get(command.username);
+        if (!accountAvailable(account)) {
+            throw new RewardCatalogServiceError('REWARD_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
+        }
+        const existing = await this.repository.findSourceOrder(client, account.id, command.sourceType, sourceKey);
+        if (existing) {
+            if (existing.semantic_hash !== hash) throw new RewardCatalogServiceError(
+                'REWARD_SOURCE_COLLISION', 409, 'Trusted reward source identity changed semantics');
+            return { success: true, replayed: true, order: this.orderProjection(existing) };
+        }
+        const item = await this.repository.lockCatalogVersionBySlug(client, command.catalogSlug);
+        await this.requireEligible(client, account, item, command.sourceType);
+        const orderId = crypto.randomUUID();
+        const status = item.approval_policy === 'manual' ? 'pending_approval' : 'approved';
+        if (status === 'approved') {
+            await this.repository.reserveBudgets(client, account.id, Number(item.exposure_value), dateKey(this.clock()));
+        }
+        const order = await this.repository.createOrder(client, {
+            id: orderId, userId: account.id, catalogVersionId: item.id,
+            sourceType: command.sourceType, sourceKey, createdByUserId: null, status,
+            pointsCost: 0, exposureValue: Number(item.exposure_value), semanticHash: hash
+        });
+        await this.appendEvent(client, orderId, 'order_submitted', null,
+            { sourceType: command.sourceType, sourceEventId: command.sourceEventId });
+        if (status === 'pending_approval') {
+            await this.appendEvent(client, orderId, 'approval_requested', null);
+        } else {
+            await this.appendEvent(client, orderId, 'order_approved', null, { automatic: true });
+            if (item.kind === 'provider_gift') {
+                await this.repository.createGrant(client, orderId, account.id);
+                await this.appendEvent(client, orderId, 'grant_available', null);
+            }
+        }
+        await this.repository.audit(client, { orderId, action: 'reward.trusted.grant',
+            details: { sourceType: command.sourceType, sourceEventId: command.sourceEventId,
+                itemSlug: item.slug, status } });
+        return { success: true, replayed: false, order: this.orderProjection(order, item) };
+    }
+
+    async dispatchClaimedIntent(intent, workerId) {
+        if (!this.grantIntentRepository?.lockClaim || !this.grantIntentRepository?.completeClaim) {
+            throw new RewardCatalogServiceError('REWARD_GRANT_DISPATCH_UNAVAILABLE', 503,
+                'Trusted reward dispatcher is unavailable');
+        }
         return this.repository.withTransaction(async client => {
-            const accounts = await this.repository.lockAccounts(client, [command.username]);
-            const account = accounts.get(command.username);
-            if (!account || account.authorized !== true || account.deactivated === true) {
-                throw new RewardCatalogServiceError('REWARD_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
-            }
-            const existing = await this.repository.findSourceOrder(client, account.id, command.sourceType, sourceKey);
-            if (existing) {
-                if (existing.semantic_hash !== hash) throw new RewardCatalogServiceError(
-                    'REWARD_SOURCE_COLLISION', 409, 'Trusted reward source identity changed semantics');
-                return { success: true, replayed: true, order: this.orderProjection(existing) };
-            }
-            const item = await this.repository.lockCatalogVersionBySlug(client, command.catalogSlug);
-            await this.requireEligible(client, account, item, command.sourceType);
-            const orderId = crypto.randomUUID();
-            const status = item.approval_policy === 'manual' ? 'pending_approval' : 'approved';
-            if (status === 'approved') {
-                await this.repository.reserveBudgets(client, account.id, Number(item.exposure_value), dateKey(this.clock()));
-            }
-            const order = await this.repository.createOrder(client, {
-                id: orderId, userId: account.id, catalogVersionId: item.id,
-                sourceType: command.sourceType, sourceKey, createdByUserId: null, status,
-                pointsCost: 0, exposureValue: Number(item.exposure_value), semanticHash: hash
-            });
-            await this.appendEvent(client, orderId, 'order_submitted', null,
-                { sourceType: command.sourceType, sourceEventId: command.sourceEventId });
-            if (status === 'pending_approval') {
-                await this.appendEvent(client, orderId, 'approval_requested', null);
-            } else {
-                await this.appendEvent(client, orderId, 'order_approved', null, { automatic: true });
-                if (item.kind === 'provider_gift') {
-                    await this.repository.createGrant(client, orderId, account.id);
-                    await this.appendEvent(client, orderId, 'grant_available', null);
-                }
-            }
-            await this.repository.audit(client, { orderId, action: 'reward.trusted.grant',
-                details: { sourceType: command.sourceType, sourceEventId: command.sourceEventId,
-                    itemSlug: item.slug, status } });
-            return { success: true, replayed: false, order: this.orderProjection(order, item) };
+            const claimed = await this.grantIntentRepository.lockClaim(client, intent.id, workerId);
+            if (!claimed) throw new RewardCatalogServiceError('REWARD_GRANT_LEASE_LOST', 409,
+                'Trusted reward grant lease is no longer active');
+            const command = validateTrustedGrant({ sourceType: claimed.source_type,
+                sourceEventId: claimed.source_event_id, username: claimed.username,
+                catalogSlug: claimed.catalog_slug });
+            const response = await this.grantTrustedInTransaction(client, command);
+            await this.grantIntentRepository.completeClaim(client, claimed, workerId,
+                response.order.id, response);
+            return response;
         });
     }
 
@@ -349,7 +420,7 @@ class RewardCatalogService {
             const accounts = await this.repository.lockAccounts(client, [adminUsername, identity.username]);
             const admin = accounts.get(adminUsername);
             const creator = accounts.get(identity.username);
-            if (!admin || admin.is_admin !== true || admin.authorized !== true || admin.deactivated === true) {
+            if (!accountAvailable(admin) || admin.is_admin !== true) {
                 throw new RewardCatalogServiceError('REWARD_ADMIN_REQUIRED', 403, 'Active administrator required');
             }
             const existing = await this.repository.findCommand(client, admin.id, command.commandId);
@@ -369,7 +440,7 @@ class RewardCatalogService {
             let next;
             let balance = Number(creator.balance);
             if (command.decision === 'approve') {
-                if (!creator || creator.authorized !== true || creator.deactivated === true) {
+                if (!accountAvailable(creator)) {
                     throw new RewardCatalogServiceError('REWARD_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
                 }
                 const lockedVersion = await this.repository.lockCatalogVersion(client, order.catalog_version_id);
@@ -408,7 +479,7 @@ class RewardCatalogService {
         return this.repository.withTransaction(async client => {
             const accounts = await this.repository.lockAccounts(client, [username]);
             const account = accounts.get(username);
-            if (!account || account.authorized !== true || account.deactivated === true) {
+            if (!accountAvailable(account)) {
                 throw new RewardCatalogServiceError('REWARD_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
             }
             const existing = await this.repository.findCommand(client, account.id, command.commandId);
@@ -468,7 +539,7 @@ class RewardCatalogService {
             if (!identity) throw new RewardCatalogServiceError('REWARD_ORDER_NOT_FOUND', 404, 'Reward order not found');
             const accounts = await this.repository.lockAccounts(client, ownerAction ? [username, identity.username] : [username]);
             const actor = accounts.get(username);
-            if (!actor || actor.authorized !== true || actor.deactivated === true
+            if (!accountAvailable(actor)
                 || (ownerAction && (username !== this.ownerUsername || actor.is_admin !== true))) {
                 throw new RewardCatalogServiceError(ownerAction ? 'REWARD_OWNER_REQUIRED' : 'REWARD_ACCOUNT_UNAVAILABLE',
                     403, 'Reward actor unavailable');
@@ -517,7 +588,7 @@ class RewardCatalogService {
         return this.repository.withTransaction(async client => {
             const accounts = await this.repository.lockAccounts(client, [username]);
             const account = accounts.get(username);
-            if (!account || account.authorized !== true || account.deactivated === true) {
+            if (!accountAvailable(account)) {
                 throw new RewardCatalogServiceError('REWARD_ACCOUNT_UNAVAILABLE', 403, 'Account unavailable');
             }
             const existing = await this.repository.findCommand(client, account.id, command.commandId);
@@ -527,9 +598,7 @@ class RewardCatalogService {
                 return replay;
             }
             const item = await this.repository.lockCatalogVersion(client, command.catalogVersionId);
-            if (!item || item.lifecycle !== 'active' || item.owner_grant_only === true) {
-                throw new RewardCatalogServiceError('REWARD_ITEM_UNAVAILABLE', 404, 'Reward item unavailable');
-            }
+            await this.requireEligible(client, account, item, 'direct_redemption');
             const row = await this.repository.upsertWishlist(client, account.id, command);
             const body = { success: true, wishlist: { catalogVersionId: Number(row.catalog_version_id),
                 targetQuantity: Number(row.target_quantity), priority: Number(row.priority),
@@ -560,9 +629,16 @@ class RewardCatalogService {
                     : row.delivery_status === 'failed' ? 'DELIVERY_FAILED' : null,
                 createdAt: row.created_at, approvedAt: row.approved_at, claimedAt: row.claimed_at
             })),
-            wishlist: result.wishlist.map(row => ({ catalogVersionId: Number(row.catalog_version_id),
-                slug: row.slug, titleZh: row.title_zh, titleEn: row.title_en,
-                targetQuantity: Number(row.target_quantity), priority: Number(row.priority), revision: Number(row.revision) })),
+            wishlist: result.wishlist.map(row => ({ row, access: evaluateRewardAccess(row, {
+                sourceType: 'direct_redemption', userItemCount: Number(row.user_item_count || 0),
+                stockUsed: Number(row.stock_used || 0), pendingCount: Number(row.pending_count || 0),
+                cooldownUntil: row.cooldown_until,
+                unlockKeys: row.has_unlock ? new Set([row.visibility_key]) : new Set(), now: this.clock()
+            }) })).filter(entry => entry.access.visible).map(({ row }) => ({
+                catalogVersionId: Number(row.catalog_version_id), slug: row.slug,
+                titleZh: row.title_zh, titleEn: row.title_en,
+                targetQuantity: Number(row.target_quantity), priority: Number(row.priority),
+                revision: Number(row.revision) })),
             assets: result.assets.map(row => ({ type: row.asset_type, key: row.asset_key, acquiredAt: row.acquired_at })),
             pagination: { page: safePage, limit: 30, total: result.total,
                 pages: Math.max(1, Math.ceil(result.total / 30)) }
@@ -571,22 +647,35 @@ class RewardCatalogService {
 
     async adminState(adminUsername) {
         const admin = await this.repository.accountIdentity(adminUsername);
-        if (!admin || admin.is_admin !== true || admin.authorized !== true || admin.deactivated === true) {
+        if (!accountAvailable(admin) || admin.is_admin !== true) {
             throw new RewardCatalogServiceError('REWARD_ADMIN_REQUIRED', 403, 'Active administrator required');
         }
-        const canGrant = Boolean(this.ownerUsername && adminUsername === this.ownerUsername);
+        const canGrant = Boolean(this.ownerUsername && adminUsername === this.ownerUsername
+            && accountAvailable(admin));
         const rows = await this.repository.pendingReview(50);
+        const deadLetters = this.grantIntentRepository?.listDeadLetters
+            ? await this.grantIntentRepository.listDeadLetters(50) : [];
         return { success: true, caller: adminUsername, pending: rows.map(row => ({
             id: row.id, creatorUsername: row.username, slug: row.slug,
             titleZh: row.title_zh, titleEn: row.title_en, sourceType: row.source_type,
             templateKey: row.grant_template_key, pointsCost: Number(row.points_cost),
             exposureValue: Number(row.exposure_value), createdAt: row.created_at
         })), canGrant,
-        grantItems: canGrant ? (await this.repository.listCatalog(adminUsername)).filter(row => row.owner_grant_only === true)
-            .map(row => ({ id: Number(row.id), slug: row.slug, titleZh: row.title_zh,
+        grantItems: canGrant ? (await this.repository.listCatalog(adminUsername)).filter(row => evaluateRewardAccess(row, {
+            sourceType: 'owner_grant', userItemCount: Number(row.user_item_count || 0),
+            stockUsed: Number(row.stock_used || 0), pendingCount: Number(row.pending_count || 0),
+            cooldownUntil: row.cooldown_until,
+            unlockKeys: row.has_unlock ? new Set([row.visibility_key]) : new Set(), now: this.clock()
+        }).visible).map(row => ({ id: Number(row.id), slug: row.slug, titleZh: row.title_zh,
                 titleEn: row.title_en, requiresApproval: row.approval_policy === 'manual' })) : [],
-        grantTemplates: canGrant ? this.pack.grantTemplates : [] };
+        grantTemplates: canGrant ? this.pack.grantTemplates : [],
+        deadLetters: deadLetters.map(row => ({ id: row.id, sourceType: row.source_type,
+            sourceEventId: row.source_event_id, creatorUsername: row.username,
+            catalogSlug: row.catalog_slug, attempts: Number(row.attempts),
+            errorCode: row.last_error_code, errorDetail: row.last_error_detail,
+            deadLetteredAt: row.dead_lettered_at })) };
     }
 }
 
-module.exports = { RewardCatalogService, RewardCatalogServiceError, cooldownUntil, dateKey, semanticHash };
+module.exports = { RewardCatalogService, RewardCatalogServiceError, accountAvailable, cooldownUntil,
+    dateKey, semanticHash };

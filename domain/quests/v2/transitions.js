@@ -5,10 +5,11 @@ const TRANSITIONS = Object.freeze({
     accepted: Object.freeze(['active', 'cancelled']),
     active: Object.freeze(['submitted', 'completed', 'declined', 'expired', 'cancelled']),
     submitted: Object.freeze(['under_review', 'returned']),
-    under_review: Object.freeze(['completed', 'returned']),
+    under_review: Object.freeze(['active', 'completed', 'returned', 'rejected']),
     returned: Object.freeze(['submitted', 'declined', 'cancelled']),
     completed: Object.freeze([]),
     declined: Object.freeze([]),
+    rejected: Object.freeze([]),
     expired: Object.freeze([]),
     cancelled: Object.freeze([])
 });

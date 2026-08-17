@@ -195,6 +195,7 @@ async function startApp({
     label = 'app',
     faultToken = null,
     poolMax = 6,
+    startupTimeoutMs = 30000,
     extraEnv = {}
 }) {
     const applicationName = `mgs-test-${label}-${process.pid}`.slice(0, 63);
@@ -219,7 +220,7 @@ async function startApp({
     });
 
     const baseUrl = `http://127.0.0.1:${port}`;
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + startupTimeoutMs;
     while (Date.now() < deadline) {
         if (child.exitCode !== null) {
             throw new Error(`${label} exited during startup (${child.exitCode})\n${output.join('')}`);

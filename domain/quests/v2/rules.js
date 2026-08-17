@@ -4,6 +4,7 @@ const MAX_DEPTH = 6;
 const MAX_CHILDREN = 12;
 const MAX_WINDOW_SECONDS = 31 * 24 * 60 * 60;
 const MAX_TARGET = 1_000_000;
+const MAX_ELIGIBILITY_REFERENCES = 128;
 const TOKEN = /^[a-z][a-z0-9_.-]{1,119}$/;
 const FILTER_KEY = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
@@ -141,6 +142,65 @@ function validateRule(raw, depth = 0) {
     throw new QuestRuleError('Unknown quest rule operation');
 }
 
+// Eligibility is evaluated before an assignment exists, so only durable,
+// server-owned account facts are meaningful here. Completion/event/review
+// operators deliberately remain valid for completion rules but are rejected
+// from eligibility rules; in particular, wrapping an unavailable fact source
+// in `not` must never turn a missing runtime projection into eligibility.
+function validateEligibilityRule(raw) {
+    const normalized = validateRule(raw);
+    let references = 0;
+    const visit = (node) => {
+        if (node.op === 'all' || node.op === 'any') {
+            node.rules.forEach(visit);
+            return;
+        }
+        if (node.op === 'not') {
+            visit(node.rule);
+            return;
+        }
+        if (!['has_achievement', 'story_flag', 'relationship_level',
+            'owns_collection_item'].includes(node.op)) {
+            throw new QuestRuleError('Unsupported quest eligibility operation');
+        }
+        references += 1;
+        if (references > MAX_ELIGIBILITY_REFERENCES) {
+            throw new QuestRuleError('Quest eligibility references too many facts');
+        }
+    };
+    visit(normalized);
+    return normalized;
+}
+
+function collectEligibilityRequirements(raw) {
+    const rule = validateEligibilityRule(raw);
+    const achievements = new Set();
+    const storyFlags = new Set();
+    const collectionItems = new Set();
+    let referenceCount = 0;
+    const visit = (node) => {
+        if (node.op === 'all' || node.op === 'any') {
+            node.rules.forEach(visit);
+            return;
+        }
+        if (node.op === 'not') {
+            visit(node.rule);
+            return;
+        }
+        referenceCount += 1;
+        if (node.op === 'has_achievement') achievements.add(node.slug);
+        if (node.op === 'story_flag') storyFlags.add(node.flag);
+        if (node.op === 'owns_collection_item') collectionItems.add(node.item);
+    };
+    visit(rule);
+    return Object.freeze({
+        achievements: Object.freeze([...achievements].sort()),
+        storyFlags: Object.freeze([...storyFlags].sort()),
+        collectionItems: Object.freeze([...collectionItems].sort()),
+        referenceCount
+    });
+}
+
 function eventMatches(event, type, filters) {
     return event?.eventType === type
         && Object.entries(filters).every(([key, expected]) => {
@@ -212,4 +272,13 @@ function evaluateRule(ruleValue, context = {}) {
     return evaluate(rule);
 }
 
-module.exports = { MAX_CHILDREN, MAX_DEPTH, QuestRuleError, evaluateRule, validateRule };
+module.exports = {
+    MAX_CHILDREN,
+    MAX_DEPTH,
+    MAX_ELIGIBILITY_REFERENCES,
+    QuestRuleError,
+    collectEligibilityRequirements,
+    evaluateRule,
+    validateEligibilityRule,
+    validateRule
+};

@@ -23,9 +23,9 @@ const uuid = value => `00000000-0000-4000-a000-${String(value).padStart(12, '0')
 class DailyMemoryRepository {
     constructor() {
         this.user = { id: 1, username: 'creator', authorized: true, deactivated: false,
-            is_admin: false, live_interaction_opt_in: false };
+            is_admin: false, live_interaction_opt_in: false, timezone: 'UTC' };
         this.owner = { id: 2, username: 'owner', authorized: true, deactivated: false,
-            is_admin: true, live_interaction_opt_in: true };
+            is_admin: true, live_interaction_opt_in: true, timezone: 'UTC' };
         this.versions = new Map();
         this.runs = new Map();
         this.starts = new Map();
@@ -59,8 +59,25 @@ class DailyMemoryRepository {
         return [...this.runs.values()].find(run => run.creatorUserId === creator
             && run.gameId === 'dream-maze' && run.state.dailyKey === day) || null;
     }
+    async findOverlappingDailyMazeRun(client, creator, windowStart, windowEnd) {
+        const start = new Date(windowStart).getTime();
+        const end = new Date(windowEnd).getTime();
+        return [...this.runs.values()].find(run => run.creatorUserId === creator
+            && run.gameId === 'dream-maze'
+            && new Date(run.dailyWindowStart).getTime() < end
+            && new Date(run.dailyWindowEnd).getTime() > start) || null;
+    }
     async findActiveCreatorRun(client, creator, game) {
         return [...this.runs.values()].find(run => run.creatorUserId === creator && run.gameId === game && run.status === 'active') || null;
+    }
+    async readRunIdentity(client, id) {
+        const run = this.runs.get(id);
+        return run ? {
+            id: run.id, game_id: run.gameId, mode: run.mode, status: run.status,
+            creator_user_id: run.creatorUserId, owner_user_id: run.ownerUserId,
+            live_interaction_id: run.liveInteractionId,
+            creator_username: run.creatorUsername, owner_username: run.ownerUsername
+        } : null;
     }
     async createRun(client, value) {
         const version = this.versions.get(value.gameId);
@@ -82,7 +99,8 @@ class DailyMemoryRepository {
     async findTrustedGameEvent(client, type, id) { return this.trusted.get(`${type}:${id}`) || null; }
     async insertTrustedGameEvent(client, value) {
         this.trusted.set(`${value.sourceType}:${value.sourceEventId}`,
-            { semantic_hash: value.semanticHash, run_id: value.runId, response_body: value.body });
+            { semantic_hash: value.semanticHash, run_id: value.runId,
+                response_status: value.status, response_body: value.body });
     }
     async lockRun(client, id, username) {
         const run = this.runs.get(id);
@@ -247,7 +265,9 @@ test('batch two migration activates daily identity and append-only trusted event
     assert.match(sql, /CREATE TABLE streamer_game_trusted_events/);
     assert.match(sql, /UNIQUE\(source_type,source_event_id\)/);
     assert.match(sql, /streamer_game_trusted_events_append_only/);
-    assert.match(source('repositories/streamer-game-repository.js'), /values\.gameId === 'dream-maze' \? values\.state\.dailyKey : null/);
+    const repositorySource = source('repositories/streamer-game-repository.js');
+    assert.match(repositorySource, /findOverlappingDailyMazeRun/);
+    assert.match(repositorySource, /values\.dailyKey, values\.dailyTimezone, values\.dailyWindowStart, values\.dailyWindowEnd/);
 });
 
 test('daily maze start serializes by creator/day, rolls back atomically, and permits the next day', async () => {
@@ -280,11 +300,17 @@ test('daily maze start serializes by creator/day, rolls back atomically, and per
 test('trusted bingo replays canonical responses, rejects collisions, and rolls back Quest failure', async () => {
     const repository = new DailyMemoryRepository();
     let failQuest = true;
+    const achievementEvents = [];
+    const achievementService = { async recordTrustedEvent(client, username, event) {
+        achievementEvents.push({ username, event: structuredClone(event) });
+        return { success: true, unlocked: [] };
+    } };
     const questV2Service = { async recordInternalTrustedEvent() {
         if (failQuest) throw new Error('quest hook failed');
         return { matchedAssignments: [] };
     } };
     const service = new StreamerGameService({ repository, ownerUsername: 'owner', questV2Service,
+        achievementService,
         clock: () => new Date('2026-08-16T12:00:00.000Z') });
     await service.ensureCatalog();
     const started = await service.start('creator', 'broadcast-bingo', { commandId: uuid(20),
@@ -305,6 +331,8 @@ test('trusted bingo replays canonical responses, rejects collisions, and rolls b
     const before = repository.snapshot();
     const terminalCommand = { ...firstCommand, sourceEventId: 'owner:event:0005', eventKey: keys[4] };
     await assert.rejects(service.recordTrustedBingoEvent(terminalCommand, context), /quest hook failed/);
+    assert.equal(achievementEvents.length, 0,
+        'the completion producer must remain behind the Quest rollback point');
     assert.deepEqual(repository.runs, before.runs);
     assert.deepEqual(repository.events, before.events);
     assert.deepEqual(repository.trusted, before.trusted);
@@ -313,6 +341,10 @@ test('trusted bingo replays canonical responses, rejects collisions, and rolls b
     const terminal = await service.recordTrustedBingoEvent(terminalCommand, context);
     assert.equal(terminal.status, 'completed');
     assert.equal(repository.hooks.length, 3);
+    assert.equal(achievementEvents.length, 1);
+    assert.equal(achievementEvents[0].event.eventType, 'game.run.completed');
+    assert.equal(achievementEvents[0].event.payload.gameId, 'broadcast-bingo');
+    assert.equal(achievementEvents[0].event.payload.authoritativeScore, true);
 });
 
 test('new batch stays isolated from balances, provider sends, and gift delivery', () => {

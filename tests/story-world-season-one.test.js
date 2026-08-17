@@ -6,9 +6,11 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const pack = require('../content/streamer-world/story/season-one');
+const seasonTwo = require('../content/streamer-world/story/season-2');
 const { evaluateCondition, validateCondition, StoryConditionError } = require('../domain/story/conditions');
 const { applyEffects, initialStoryState, validateEffect, StoryEffectError } = require('../domain/story/effects');
 const { createStoryRun, recoverStoryRun, StoryTransitionError, transitionStory } = require('../domain/story/engine');
+const { buildPublishedStoryProgressionRegistry } = require('../domain/story/progression-registry');
 const { publicStoryProjection } = require('../domain/story/projection');
 const { validateStoryContent, StoryContentError, NODE_TYPES } = require('../domain/story/validator');
 const { readStreamerWorldFlags } = require('../lib/streamer-world-flags');
@@ -16,6 +18,7 @@ const { IDEMPOTENT_WRITE_PATHS, ROUTE_MANIFEST } = require('../routes/manifest')
 const { validateInternalStoryEvent, validateRegisteredRule } = require('../services/quest-v2-service');
 const { StoryWorldService } = require('../services/story-world-service');
 const { StoryWorldRepository } = require('../repositories/story-world-repository');
+const { RewardCatalogRepository } = require('../repositories/reward-catalog-repository');
 
 const root = path.resolve(__dirname, '..');
 const source = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -125,11 +128,104 @@ test('checkpoint recovery increments revision and restores a deterministic snaps
     const checkpointNode = pack.nodes.find((item) => item.type === 'checkpoint');
     let run = { ...createStoryRun(pack), currentNodeId: checkpointNode.id, currentEpisode: checkpointNode.episode };
     run = transitionStory(pack, run, { action: 'advance', expectedRevision: 0 }).run;
-    const altered = structuredClone(run); altered.state.flags.later = true; altered.state.memories['later.memory'] = true; altered.revision = 2;
+    const checkpointState = structuredClone(run.state);
+    const altered = structuredClone(run);
+    altered.state.flags.later = true;
+    altered.state.memories['later.memory'] = true;
+    altered.state.unlocks['reward_catalog_visibility:later.reward'] = true;
+    altered.state.messages['later.message'] = true;
+    altered.state.completedEpisodes['later-episode'] = true;
+    altered.revision = 2;
     const recovered = recoverStoryRun(pack, altered, 2);
-    assert.equal(recovered.run.revision, 3); assert.equal(recovered.run.state.flags.later, undefined);
-    assert.equal(recovered.run.state.memories['later.memory'], true);
+    assert.equal(recovered.run.revision, 3);
+    assert.deepEqual(recovered.run.state, checkpointState);
+    for (const [field, key] of [
+        ['flags','later'], ['memories','later.memory'],
+        ['unlocks','reward_catalog_visibility:later.reward'],
+        ['messages','later.message'], ['completedEpisodes','later-episode']
+    ]) assert.equal(recovered.run.state[field][key], undefined);
     assert.equal(recovered.event.action, 'recover');
+});
+
+test('repeated recovery cannot combine mutually exclusive branch progression', () => {
+    const checkpointNode = pack.nodes.find((item) => item.type === 'checkpoint');
+    let run = { ...createStoryRun(pack), currentNodeId: checkpointNode.id,
+        currentEpisode: checkpointNode.episode };
+    run = transitionStory(pack, run, { action:'advance', expectedRevision:0 }).run;
+    const branchA = structuredClone(run);
+    branchA.state.unlocks['reward_catalog_visibility:branch-a'] = true;
+    branchA.state.completedEpisodes['branch-a-ending'] = true;
+    branchA.state.memories['branch-a-memory'] = true;
+    branchA.state.messages['branch-a-message'] = true;
+    branchA.revision += 1;
+    const afterA = recoverStoryRun(pack, branchA, branchA.revision).run;
+    const branchB = structuredClone(afterA);
+    branchB.state.unlocks['reward_catalog_visibility:branch-b'] = true;
+    branchB.state.completedEpisodes['branch-b-ending'] = true;
+    branchB.revision += 1;
+    const recovered = recoverStoryRun(pack, branchB, branchB.revision).run;
+    assert.deepEqual(recovered.state, run.checkpoint.state);
+    for (const key of ['reward_catalog_visibility:branch-a','reward_catalog_visibility:branch-b']) {
+        assert.equal(recovered.state.unlocks[key], undefined);
+    }
+    for (const key of ['branch-a-ending','branch-b-ending']) {
+        assert.equal(recovered.state.completedEpisodes[key], undefined);
+    }
+    assert.equal(recovered.state.memories['branch-a-memory'], undefined);
+    assert.equal(recovered.state.messages['branch-a-message'], undefined);
+});
+
+test('published progression registry requires first clear and separately allowlists economic visibility', () => {
+    const registry = buildPublishedStoryProgressionRegistry([pack,seasonTwo]);
+    const gameNode = pack.nodes.find(node => (node.effects || []).some(effect =>
+        effect.type === 'unlock' && effect.unlockType === 'game'));
+    const gameEffect = gameNode.effects.find(effect => effect.type === 'unlock');
+    const branch = registry.resolve(pack,gameNode.id,gameEffect,new Set());
+    assert.deepEqual(branch,{
+        progressionScope:'branch_local', provenanceType:'branch_effect',
+        provenanceKey:gameNode.id, publishedBindingHash:null, economicEligible:false
+    });
+    const entitlement = registry.resolve(pack,gameNode.id,gameEffect,new Set([gameNode.episode]));
+    assert.equal(entitlement.progressionScope,'account_entitlement');
+    assert.equal(entitlement.provenanceType,'episode_first_clear');
+    assert.equal(entitlement.economicEligible,false);
+    assert.match(entitlement.publishedBindingHash,/^[a-f0-9]{64}$/);
+
+    const economic = registry.bindings.filter(row => row.economicEligible);
+    assert.deepEqual(economic.map(row => ({
+        season:row.season,nodeId:row.nodeId,unlockType:row.unlockType,unlockKey:row.unlockKey,
+        provenanceType:row.provenanceType,provenanceKey:row.provenanceKey
+    })), [{
+        season:'tides-of-return', nodeId:'storm-name-market.archive',
+        unlockType:'reward_catalog_visibility', unlockKey:'tides.storm-label',
+        provenanceType:'episode_first_clear', provenanceKey:'storm-name-market'
+    }]);
+});
+
+test('published progression binding seed is restart-idempotent across PostgreSQL bigint strings', async () => {
+    const binding = buildPublishedStoryProgressionRegistry([pack]).bindings[0];
+    const client = { query:async(sql,values)=>{
+        if (/INSERT INTO story_progression_bindings/.test(sql)) {
+            assert.equal(values[1],3);
+            return { rowCount:0, rows:[] };
+        }
+        if (/FROM story_progression_bindings WHERE binding_hash/.test(sql)) return {
+            rowCount:1,
+            rows:[{
+                binding_hash:binding.publishedBindingHash,
+                content_version_id:'3', node_id:binding.nodeId,
+                unlock_type:binding.unlockType, unlock_key:binding.unlockKey,
+                progression_scope:binding.progressionScope,
+                provenance_type:binding.provenanceType, provenance_key:binding.provenanceKey,
+                economic_eligible:binding.economicEligible
+            }]
+        };
+        throw new Error(`Unexpected binding seed query: ${sql}`);
+    } };
+    const repository = new StoryWorldRepository(client);
+    assert.equal(await repository.seedProgressionBindings('3',[binding]),1);
+    await assert.rejects(repository.seedProgressionBindings('not-an-id',[binding]),
+        /content version/);
 });
 
 test('ending router uses accumulated long-term state and has a safe fallback', () => {
@@ -170,6 +266,42 @@ test('migration freezes snapshots and separates story from money and gift tables
     assert.doesNotMatch(sql, /REFERENCES\s+(?:balances|gift_exchanges|wish_inventory)/i);
 });
 
+test('forward story progression migration fails legacy unlocks closed and validates irreversible provenance', () => {
+    const sql = source('migrations/add_streamer_story_progression_scopes.sql');
+    for (const fragment of [
+        'progression_scope', 'provenance_type', 'provenance_key',
+        'published_binding_hash', 'economic_eligible',
+        "progression_scope = 'branch_local'", "DEFAULT 'legacy_unverified'",
+        'story_progression_bindings', 'story_validate_unlock_progression', 'story_first_clears',
+        "source_event.action = 'finish'", 'source_event.from_node_id = binding.node_id',
+        'story unlock provenance is immutable'
+    ]) assert.match(sql,new RegExp(fragment));
+    assert.match(source('lib/database-migrations.js'),/add_streamer_story_progression_scopes\.sql/);
+    assert.doesNotMatch(sql,/UPDATE\s+(?:story_memories|creator_inbox_messages)/i);
+    assert.doesNotMatch(sql,/gift_exchanges|wish_inventory|delivery_outbox|provider_receipt/i);
+});
+
+test('reward visibility reads only reviewed economic story entitlements', async () => {
+    const calls = [];
+    const pool = { query:async()=>({rows:[]}), connect:async()=>({query:async()=>({rows:[]}),release(){}}) };
+    const repository = new RewardCatalogRepository({ pool });
+    const client = { query:async(sql,values)=>{ calls.push({sql,values}); return {rows:[{allowed:false}]}; } };
+    assert.equal(await repository.hasVisibilityUnlock(client,7,'story_unlock','tides.storm-label'),false);
+    assert.equal(await repository.hasVisibilityUnlock(client,7,'story_unlock','reward.story-lantern'),false);
+    assert.equal(calls.length,2);
+    assert.deepEqual(calls[0].values,[7,'tides.storm-label']);
+    assert.deepEqual(calls[1].values,[7,'tides.storm-label'],
+        'the immutable v1 reward key must map to its published Season Two milestone');
+    for (const fragment of [
+        "progression_scope='account_entitlement'", 'economic_eligible=TRUE',
+        'published_binding_hash IS NOT NULL'
+    ]) assert.match(calls[0].sql,new RegExp(fragment));
+    assert.ok(calls[0].sql.includes("provenance_type IN('episode_first_clear','season_completion')"));
+    assert.doesNotMatch(calls[0].sql,/story_memories|creator_inbox_messages/);
+    const repositorySource = source('repositories/reward-catalog-repository.js');
+    assert.match(repositorySource,/WHEN 'reward\.story-lantern' THEN 'tides\.storm-label'/);
+});
+
 test('Story World requires strict lowercase master, creator, and story flags', () => {
     assert.equal(readStreamerWorldFlags({ STREAMER_WORLD_ENABLED: 'true', CREATOR_PROFILE_ENABLED: 'true', STORY_WORLD_ENABLED: 'true' }).storyWorldEnabled, true);
     for (const value of ['TRUE', '1', 'yes', ' true ']) assert.equal(readStreamerWorldFlags({ STREAMER_WORLD_ENABLED: 'true', CREATOR_PROFILE_ENABLED: 'true', STORY_WORLD_ENABLED: value }).storyWorldEnabled, false);
@@ -189,7 +321,7 @@ test('trusted Story events use a strict registered schema', () => {
 });
 
 function memoryHarness() {
-    const initial = createStoryRun(pack); const state = { run: { id: 7, user_id: 4, campaign_id: 2, content_version_id: 3, status: initial.status, current_episode: initial.currentEpisode, current_node_id: initial.currentNodeId, revision: initial.revision, replay_mode: false, state_snapshot: initial.state, checkpoint_snapshot: null }, events: [], audits: [], memories: [], unlocks: [], firstClears: [], relationships: [], questEvents: [], normalized: { flags: {}, clues: {}, inventory: {}, routes: {}, messages: {}, memories: {}, unlocks: {} } };
+    const initial = createStoryRun(pack); const state = { run: { id: 7, user_id: 4, campaign_id: 2, content_version_id: 3, status: initial.status, current_episode: initial.currentEpisode, current_node_id: initial.currentNodeId, revision: initial.revision, replay_mode: false, state_snapshot: initial.state, checkpoint_snapshot: null }, events: [], audits: [], memories: [], unlocks: [], inbox: [], firstClears: [], relationships: [], questEvents: [], normalized: { flags: {}, clues: {}, inventory: {}, routes: {}, messages: {}, memories: {}, unlocks: {} } };
     let tail = Promise.resolve();
     const pool = { async connect() { let snapshot, unlock; return { query: async (sql) => { if (sql === 'BEGIN') { const prior = tail; tail = new Promise((resolve) => { unlock = resolve; }); await prior; snapshot = structuredClone(state); } if (sql === 'ROLLBACK') { for (const key of Object.keys(state)) delete state[key]; Object.assign(state, snapshot); unlock?.(); } if (sql === 'COMMIT') unlock?.(); return { rows: [], rowCount: 0 }; }, release() {} }; } };
     const repository = () => ({
@@ -203,7 +335,7 @@ function memoryHarness() {
         loadCatalogIdentity: async () => ({ campaign_id: 2, content_version_id: 3 }), loadContentVersion: async () => null,
         insertFirstClear: async (entry) => { if (state.failFirstClear) throw new Error('first clear failed'); if (state.firstClearResult === false) return false; state.firstClears.push(entry); return true; },
         appendRelationshipFirstClear: async (entry) => { if (state.failRelationship) throw new Error('relationship failed'); state.relationships.push(entry); },
-        insertMemory: async (entry) => state.memories.push(entry), insertUnlock: async (entry) => state.unlocks.push(entry), insertMessage: async () => {}
+        insertMemory: async (entry) => state.memories.push(entry), insertUnlock: async (entry) => { if (state.failUnlock) throw new Error('unlock failed'); state.unlocks.push(entry); }, insertMessage: async (entry) => state.inbox.push(entry)
     });
     const service = new StoryWorldService({ pool, repositoryFactory: repository, content: pack }); service.catalog = { campaign: { id: 2 }, version: { id: 3 } }; service.contentCache.set(3, pack);
     return { state, service };
@@ -263,10 +395,25 @@ test('non-first episode completion emits neither relationship XP nor Quest progr
     service.questIntegrationEnabled = true; service.questV2Service = { recordInternalTrustedEvent: async (_client, event) => state.questEvents.push(event) };
     await service.commit('alice', { runId: 7, action: 'advance', expectedRevision: 0 }, { requestId: 'story-not-first-clear' });
     assert.deepEqual(state.relationships, []); assert.deepEqual(state.questEvents, []);
+    assert.equal(state.unlocks[0].progressionScope,'branch_local');
+    assert.equal(state.unlocks[0].economicEligible,false);
+});
+
+test('first-clear story unlock persists immutable published entitlement provenance', async () => {
+    const { state, service } = memoryHarness(); placeAtCompletionSpecial(state);
+    await service.commit('alice',{runId:7,action:'advance',expectedRevision:0},
+        {requestId:'story-entitlement-first-clear'});
+    assert.equal(state.unlocks.length,1);
+    assert.equal(state.unlocks[0].progressionScope,'account_entitlement');
+    assert.equal(state.unlocks[0].provenanceType,'episode_first_clear');
+    assert.equal(state.unlocks[0].provenanceKey,'locked-window');
+    assert.match(state.unlocks[0].publishedBindingHash,/^[a-f0-9]{64}$/);
+    assert.equal(state.unlocks[0].economicEligible,false);
 });
 
 for (const [name, configure, pattern] of [
     ['first-clear', (state) => { state.failFirstClear = true; }, /first clear failed/],
+    ['unlock', (state) => { state.failUnlock = true; }, /unlock failed/],
     ['relationship', (state) => { state.failRelationship = true; }, /relationship failed/],
     ['Quest hook', (state, service) => { service.questIntegrationEnabled = true; service.questV2Service = { recordInternalTrustedEvent: async () => { state.questEvents.push('attempt'); throw new Error('quest hook failed'); } }; }, /quest hook failed/]
 ]) test(`${name} failure rolls back run, event, projections, memories, and first-clear side effects`, async () => {
@@ -275,16 +422,17 @@ for (const [name, configure, pattern] of [
     assert.deepEqual(state, before);
 });
 
-test('service recovery reconciles rewound projections but keeps monotonic value records', async () => {
+test('service recovery reconciles every branch projection while account meta history remains durable', async () => {
     const { state, service } = memoryHarness(); const checkpointNode = pack.nodes.find((item) => item.type === 'checkpoint');
     const checkpointState = initialStoryState(); checkpointState.flags.before = true; checkpointState.memories['before.memory'] = true;
-    const currentState = structuredClone(checkpointState); currentState.flags.after = true; currentState.clues.after = true; currentState.memories['after.memory'] = true; currentState.unlocks['collection:after'] = true;
+    const currentState = structuredClone(checkpointState); currentState.flags.after = true; currentState.clues.after = true; currentState.memories['after.memory'] = true; currentState.unlocks['collection:after'] = true; currentState.messages['after.message'] = true; currentState.completedEpisodes.after = true;
     Object.assign(state.run, { current_node_id: pack.nodesById.get(checkpointNode.next).id, current_episode: checkpointNode.episode, revision: 8, state_snapshot: currentState, checkpoint_snapshot: { nodeId: checkpointNode.next, revision: 5, state: checkpointState } });
-    state.firstClears.push({ episode: 'before-first-bell' }); state.normalized = { flags: structuredClone(currentState.flags), clues: structuredClone(currentState.clues), inventory: {}, routes: {}, messages: {}, memories: structuredClone(currentState.memories), unlocks: structuredClone(currentState.unlocks) };
+    state.firstClears.push({ episode: 'before-first-bell' }); state.memories.push({ key:'after.memory' }); state.inbox.push({ key:'after.message' }); state.normalized = { flags: structuredClone(currentState.flags), clues: structuredClone(currentState.clues), inventory: {}, routes: {}, messages: structuredClone(currentState.messages), memories: structuredClone(currentState.memories), unlocks: structuredClone(currentState.unlocks) };
     await service.recover('alice', { runId: 7, expectedRevision: 8 }, { requestId: 'story-service-recover' });
     assert.deepEqual(state.normalized.flags, { before: true }); assert.deepEqual(state.normalized.clues, {});
-    assert.equal(state.normalized.memories['after.memory'], true); assert.equal(state.normalized.unlocks['collection:after'], true);
-    assert.equal(state.firstClears.length, 1);
+    assert.deepEqual(state.normalized.memories, { 'before.memory':true }); assert.deepEqual(state.normalized.unlocks, {});
+    assert.deepEqual(state.normalized.messages, {}); assert.deepEqual(state.run.state_snapshot.completedEpisodes, {});
+    assert.equal(state.memories.length, 1); assert.equal(state.inbox.length, 1); assert.equal(state.firstClears.length, 1);
 });
 
 test('catalog seed fails closed for hash, snapshot, or count drift at the same version', async () => {
@@ -356,8 +504,30 @@ function executeStoryBrowser(model, responses) {
     const calls = [];
     const context = { document: { body, getElementById(id) { return ({ 'story-stage': stage, 'story-axes': axes, 'story-unlocks': unlocks, 'story-message': message, 'story-bootstrap': bootstrap })[id]; }, createElement: (tag) => new Element(tag) }, window: {}, JSON, Object, Number, Error };
     context.window.idempotentFetch = async (url, options) => { calls.push({ url, body: JSON.parse(options.body) }); const payload = responses[url]; return { ok: true, json: async () => payload }; };
-    vm.runInNewContext(source('public/js/story-world.js'), context); return { stage, calls };
+    vm.runInNewContext(source('public/js/story-world.js'), context); return { stage, axes, unlocks, message, calls };
 }
+
+test('browser recovery removes abandoned branch unlocks from the rendered projection', async () => {
+    const active = {
+        run:{status:'active',revision:8,canRecover:true},
+        node:{speaker:null,episode:'Branch A',text:'A temporary branch.',action:'advance'},
+        progress:{axes:{trust:4},unlocks:['reward_catalog_visibility:branch-a']}
+    };
+    const restored = {
+        run:{status:'active',revision:9,canRecover:true},
+        node:{speaker:null,episode:'Checkpoint',text:'The checkpoint is restored.',action:'advance'},
+        progress:{axes:{trust:1},unlocks:[]}
+    };
+    const ui = executeStoryBrowser({runId:7,story:active,selectedSeason:'signal-between-us'}, {
+        '/api/story/runs/recover':{success:true,recovered:true,runId:7,story:restored}
+    });
+    assert.equal(ui.unlocks.children[0].textContent,'reward_catalog_visibility:branch-a');
+    const recover = ui.stage.children.find(item=>item.dataset.action==='recover');
+    await ui.stage.listeners.click({target:recover});
+    assert.deepEqual(ui.calls.map(item=>item.url),['/api/story/runs/recover']);
+    assert.equal(ui.unlocks.children.length,0);
+    assert.match(ui.stage.children[1].textContent,/checkpoint is restored/i);
+});
 
 test('browser choice preview is reversible and confirmation is the only commit', async () => {
     const run = transitionStory(pack, createStoryRun(pack), { action: 'advance', expectedRevision: 0 }).run;

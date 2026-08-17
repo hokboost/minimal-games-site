@@ -37,12 +37,14 @@ function positiveId(value, field = 'id') {
 }
 
 class CreatorProfileService {
-    constructor({ repository, gameIds = [] }) {
+    constructor({ repository, gameIds = [], consentCoordinator = null, ownerUsername = null }) {
         if (!repository?.withTransaction || !repository?.loadDashboard) {
             throw new TypeError('CreatorProfileService requires a creator repository');
         }
         this.repository = repository;
         this.gameIds = [...new Set(gameIds.map(String))];
+        this.consentCoordinator = consentCoordinator;
+        this.ownerUsername = ownerUsername || null;
     }
 
     async requireUser(client, username) {
@@ -73,6 +75,14 @@ class CreatorProfileService {
                 throw new CreatorServiceError('CREATOR_PROFILE_VERSION_CONFLICT', 409, 'Profile changed in another session');
             }
             const saved = await this.repository.saveProfile(client, user.id, profile);
+            if (this.consentCoordinator && previous?.liveInteractionOptIn === true
+                && saved.liveInteractionOptIn !== true) {
+                await this.consentCoordinator.withdrawCreator(client, Number(user.id), 'global_opt_out', {
+                    actorUserId: Number(user.id),
+                    actorUsername: username,
+                    requestId: context.requestId
+                }, { closeRooms: true });
+            }
             await this.repository.appendConsentEvent(client, {
                 userId: user.id,
                 actorType: 'creator',
@@ -115,6 +125,24 @@ class CreatorProfileService {
             const user = await this.requireUser(client, username);
             const previous = await this.repository.listPreferences(client, user.id);
             await this.repository.replacePreferences(client, user.id, preferences);
+            if (this.consentCoordinator) {
+                const globalBlock = preferences.some(preference => preference.type === 'communication'
+                    && preference.key === 'all_messages' && preference.value === 'block');
+                if (globalBlock) {
+                    await this.consentCoordinator.withdrawCreator(client, Number(user.id),
+                        'communication_blocked', {
+                            actorUserId: Number(user.id),
+                            actorUsername: username,
+                            requestId: context.requestId
+                        }, { closeRooms: true });
+                } else {
+                    await this.consentCoordinator.withdrawBlockedGames(client, Number(user.id), {
+                        actorUserId: Number(user.id),
+                        actorUsername: username,
+                        requestId: context.requestId
+                    });
+                }
+            }
             await this.repository.appendConsentEvent(client, {
                 userId: user.id,
                 actorType: 'creator',
@@ -256,15 +284,42 @@ class CreatorProfileService {
         });
     }
 
-    async adminSummaries(page = 1) {
+    async adminSummaries(callerUsername, page = 1, context = {}) {
         const normalizedPage = Number(page);
         const safePage = Number.isSafeInteger(normalizedPage) && normalizedPage > 0 ? normalizedPage : 1;
         const limit = 50;
-        return {
-            page: safePage,
-            pageSize: limit,
-            creators: await this.repository.listAdminSummaries({ limit, offset: (safePage - 1) * limit })
-        };
+        return this.repository.withTransaction(async client => {
+            const actor = await this.repository.readAdminAccount(client, callerUsername);
+            if (!actor || actor.is_admin !== true || actor.authorized !== true
+                || actor.deactivated === true || actor.account_locked === true) {
+                throw new CreatorServiceError('CREATOR_PROFILE_READ_FORBIDDEN', 403,
+                    'Active administrator account required');
+            }
+            const includeOwnerPrivate = Boolean(this.ownerUsername
+                && actor.username === this.ownerUsername);
+            const creators = await this.repository.listAdminSummaries(client, {
+                limit,
+                offset: (safePage - 1) * limit,
+                includeOwnerPrivate
+            });
+            for (const creator of creators) {
+                const granted = includeOwnerPrivate && creator.profileVisibility === 'owner';
+                await this.repository.appendSensitiveReadAudit(client, {
+                    actorUserId: Number(actor.id),
+                    actorUsername: actor.username,
+                    targetUserId: creator.userId,
+                    accessKind: 'owner_profile',
+                    decision: granted ? 'granted' : 'redacted',
+                    fields: granted ? [
+                        'display_name', 'timezone', 'bilibili_room_id', 'live_interaction_opt_in',
+                        'relationship', 'room_request'
+                    ] : [],
+                    requestId: context.requestId,
+                    metadata: { configuredOwner: includeOwnerPrivate }
+                });
+            }
+            return { page: safePage, pageSize: limit, creators };
+        });
     }
 
     async exportData(username) {

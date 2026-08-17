@@ -21,6 +21,7 @@ const EVENT_TYPES = Object.freeze([
     'interaction.closed', 'interaction.report_resolved', 'interaction.reconsented',
     'interaction.item_expired', 'interaction.game_state_changed'
 ]);
+const EVENT_AUDIENCES = Object.freeze(['owner', 'creator', 'both', 'system']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class LiveProtocolError extends Error {
@@ -266,6 +267,7 @@ function envelope(row) {
         eventId: row.event_id,
         sequence: Number(row.sequence),
         eventType: row.event_type,
+        audience: row.audience,
         actor: {
             type: row.actor_type
         },
@@ -275,7 +277,8 @@ function envelope(row) {
         correlationId: row.correlation_id,
         stateRevision: Number(row.state_revision)
     });
-    if (!EVENT_TYPES.includes(result.eventType) || Buffer.byteLength(JSON.stringify(result), 'utf8') >
+    if (!EVENT_TYPES.includes(result.eventType) || !EVENT_AUDIENCES.includes(result.audience)
+        || Buffer.byteLength(JSON.stringify(result), 'utf8') >
         MAX_EVENT_BYTES) {
         throw new LiveProtocolError('LIVE_INVALID_EVENT', 'Stored event violates protocol');
     }
@@ -283,6 +286,7 @@ function envelope(row) {
 }
 
 module.exports = {
+    EVENT_AUDIENCES,
     EVENT_TYPES,
     ITEM_TYPES,
     LiveProtocolError,

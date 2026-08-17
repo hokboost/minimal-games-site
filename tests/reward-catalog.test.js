@@ -55,7 +55,7 @@ class MemoryRewardRepository {
         this.ledger = [];
         this.budgetUsed = 0;
         this.budgetLimit = 50000;
-        this.boundaries = { preferences: {}, quietHours: [], interactionWindows: [], room: null };
+        this.boundaries = { preferences: {}, quietHours: [], interactionWindows: [], room: null, report: null };
         this.tail = Promise.resolve();
     }
     data() {
@@ -213,7 +213,7 @@ class MemoryRewardRepository {
     }
 }
 
-function fixture() {
+function fixture(options = {}) {
     const repository = new MemoryRewardRepository();
     const BalanceLogger = { async updateBalance(options) {
         const account = repository.accounts.get(options.username);
@@ -227,7 +227,9 @@ function fixture() {
         return { success: true, balance: account.balance };
     } };
     return { repository, service: new RewardCatalogService({ repository, BalanceLogger,
-        giftConfig, ownerUsername: 'owner', clock: () => new Date('2026-08-16T12:00:00Z') }) };
+        giftConfig, ownerUsername: 'owner', clock: () => new Date('2026-08-16T12:00:00Z'),
+        boundaryPolicy: options.boundaryPolicy,
+        publishRewardNotification: options.publishRewardNotification }) };
 }
 
 test('catalog is deeply frozen, bilingual, unique, and bound to server gift configuration', () => {
@@ -351,13 +353,59 @@ test('owner grant honors opt-in, communication mute, and quiet hours without rel
         catalogVersionId: 11, templateKey: 'quest-chain-celebration' }), error => error.code === 'REWARD_GRANT_MUTED');
     assert.equal(repository.orders.size, 0);
     delete repository.boundaries.preferences.celebrations;
-    repository.boundaries.quietHours = [{ weekday: 0, startMinute: 0, endMinute: 1440, enabled: true }];
+    repository.boundaries.quietHours = [{ weekday: 0, startMinute: 0, endMinute: 1439, enabled: true }];
     const result = await service.ownerGrant('owner', { commandId: uuid(11), creatorUsername: 'creator',
         catalogVersionId: 11, templateKey: 'quest-chain-celebration' });
     assert.equal(result.order.notificationPolicy, 'quiet_suppressed');
-    assert.equal(repository.inbox.length, 0);
+    assert.equal(repository.inbox.length, 1, 'quiet suppresses realtime only, never durable inbox storage');
     assert.equal(repository.grants.size, 1);
 });
+
+test('quiet reward grant persists inbox but suppresses realtime, while normal grant fans out after commit', async () => {
+    const notifications = [];
+    const { service, repository } = fixture({
+        publishRewardNotification: async value => notifications.push(structuredClone(value))
+    });
+    repository.boundaries.quietHours = [{ weekday: 0, startMinute: 0, endMinute: 1439, enabled: true }];
+    await service.ownerGrant('owner', { commandId: uuid(110), creatorUsername: 'creator',
+        catalogVersionId: 11, templateKey: 'quest-chain-celebration' });
+    assert.equal(repository.inbox.length, 1);
+    assert.equal(notifications.length, 0);
+    repository.boundaries.quietHours = [];
+    await service.ownerGrant('owner', { commandId: uuid(111), creatorUsername: 'creator',
+        catalogVersionId: 12, templateKey: 'story-route-milestone' });
+    assert.equal(repository.inbox.length, 2);
+    assert.equal(notifications.length, 1);
+});
+
+test('outside preferred reward window stays durable without realtime and hard boundaries reject before storage',
+    async () => {
+        const notifications = [];
+        const { service, repository } = fixture({
+            publishRewardNotification: async value => notifications.push(structuredClone(value))
+        });
+        repository.boundaries.interactionWindows = [{ weekday: 0, startMinute: 60, endMinute: 120,
+            mode: 'live', enabled: true }];
+        const durable = await service.ownerGrant('owner', { commandId: uuid(112), creatorUsername: 'creator',
+            catalogVersionId: 11, templateKey: 'quest-chain-celebration' });
+        assert.equal(durable.order.notificationPolicy, 'quiet_suppressed');
+        assert.equal(repository.inbox.length, 1, 'preferred windows never discard the durable reward inbox');
+        assert.equal(notifications.length, 0, 'outside the preferred window realtime must stay suppressed');
+
+        repository.boundaries.interactionWindows = [];
+        repository.boundaries.report = { status: 'resolved', creatorReconsentedAt: null };
+        await assert.rejects(service.ownerGrant('owner', { commandId: uuid(113), creatorUsername: 'creator',
+            catalogVersionId: 12, templateKey: 'story-route-milestone' }),
+        error => error.code === 'REWARD_GRANT_MUTED');
+        assert.equal(repository.inbox.length, 1, 'unreconsented reports fail before durable grant storage');
+
+        repository.boundaries.report = null;
+        repository.boundaries.room = { mutedUntil: '2026-08-17T00:00:00.000Z' };
+        await assert.rejects(service.ownerGrant('owner', { commandId: uuid(114), creatorUsername: 'creator',
+            catalogVersionId: 12, templateKey: 'story-route-milestone' }),
+        error => error.code === 'REWARD_GRANT_MUTED');
+        assert.equal(repository.inbox.length, 1, 'an active creator mute fails before durable grant storage');
+    });
 
 test('trusted quest, story, game, achievement, and season sources create replay-safe entitlements only', async () => {
     const { service, repository } = fixture();

@@ -16,9 +16,70 @@ class QuestV2RuntimeRepository {
             JOIN creator_profiles profile ON profile.user_id = account.id
             JOIN relationship_profiles relationship ON relationship.user_id = account.id
             WHERE account.username = $1 AND account.authorized = TRUE AND account.deactivated = FALSE
+              AND COALESCE(account.account_locked, FALSE) = FALSE
             FOR UPDATE OF account
         `, [username]);
         return result.rows[0] || null;
+    }
+
+    async loadEligibilityFacts(userId, requirements = {}) {
+        const achievements = Array.isArray(requirements.achievements)
+            ? requirements.achievements : [];
+        const storyFlags = Array.isArray(requirements.storyFlags)
+            ? requirements.storyFlags : [];
+        const collectionItems = Array.isArray(requirements.collectionItems)
+            ? requirements.collectionItems : [];
+        if (![achievements, storyFlags, collectionItems].every((items) => items.length <= 128
+            && items.every((item) => typeof item === 'string' && item.length <= 120))) {
+            throw new Error('Quest eligibility fact request is malformed');
+        }
+
+        const achievementRows = achievements.length === 0 ? [] : (await this.client.query(`
+            SELECT DISTINCT definition.slug
+            FROM streamer_achievement_unlocks achievement_unlock
+            JOIN streamer_achievement_definitions definition
+              ON definition.id = achievement_unlock.achievement_id
+            WHERE achievement_unlock.user_id = $1
+              AND definition.slug = ANY($2::TEXT[])
+        `, [userId, achievements])).rows;
+
+        // Only the authoritative current projection of a non-replay active or
+        // completed run can satisfy an eligibility flag. Abandoned runs and
+        // discarded checkpoint branches are intentionally excluded.
+        const storyRows = storyFlags.length === 0 ? [] : (await this.client.query(`
+            SELECT flag.flag_key, flag.flag_value, run.id AS run_id
+            FROM story_flags flag
+            JOIN story_runs run ON run.id = flag.run_id
+            WHERE run.user_id = $1
+              AND run.replay_mode = FALSE
+              AND run.status IN ('active', 'completed')
+              AND flag.flag_key = ANY($2::TEXT[])
+            ORDER BY flag.flag_key, run.id
+        `, [userId, storyFlags])).rows;
+
+        const storyValues = Object.create(null);
+        for (const row of storyRows) {
+            if (!Object.hasOwn(storyValues, row.flag_key)) {
+                storyValues[row.flag_key] = row.flag_value;
+                continue;
+            }
+            if (stableStringify(storyValues[row.flag_key]) !== stableStringify(row.flag_value)) {
+                throw new Error(`Quest eligibility story flag has conflicting authoritative values: ${row.flag_key}`);
+            }
+        }
+
+        const collectionRows = collectionItems.length === 0 ? [] : (await this.client.query(`
+            SELECT holding.item_key
+            FROM streamer_collection_holdings holding
+            WHERE holding.user_id = $1
+              AND holding.item_key = ANY($2::TEXT[])
+        `, [userId, collectionItems])).rows;
+
+        return Object.freeze({
+            achievements: Object.freeze(achievementRows.map((row) => row.slug).sort()),
+            storyFlags: Object.freeze({ ...storyValues }),
+            collectionItems: Object.freeze(collectionRows.map((row) => row.item_key).sort())
+        });
     }
 
     async listAssignments(userId, { limit = 100, offset = 0 } = {}) {
@@ -28,11 +89,14 @@ class QuestV2RuntimeRepository {
                    assignment.assignment_source, assignment.offered_at, assignment.accepted_at,
                    assignment.submitted_at, assignment.completed_at, assignment.resolved_at,
                    assignment.due_at, assignment.postpone_until,
+                   assignment.postponed_hours, assignment.last_postponed_at,
+                   assignment.expired_at, assignment.rejected_at,
                    definition.slug, version.version, version.category, version.difficulty,
                    version.estimated_minutes, version.title_zh, version.title_en,
                    version.description_zh, version.description_en,
                    version.hint_zh, version.hint_en, version.completion_zh, version.completion_en,
                    version.verification_mode, version.review_policy,
+                   version.postpone_policy, version.expiry_behavior,
                    settlement.status AS settlement_status
             FROM quest_v2_assignments assignment
             JOIN quest_v2_versions version ON version.id = assignment.version_id
@@ -82,9 +146,28 @@ class QuestV2RuntimeRepository {
         return result.rows;
     }
 
+    async listAppeals(userId) {
+        const result = await this.client.query(`
+            SELECT appeal.id,appeal.assignment_id,appeal.status,appeal.reason,
+                   appeal.decision,appeal.resolution_note,appeal.submitted_at,appeal.resolved_at,
+                   definition.slug,version.title_zh,version.title_en
+            FROM quest_v2_appeals appeal
+            JOIN quest_v2_assignments assignment ON assignment.id=appeal.assignment_id
+            JOIN quest_v2_versions version ON version.id=assignment.version_id
+            JOIN quest_v2_definitions definition ON definition.id=version.definition_id
+            WHERE appeal.user_id=$1
+            ORDER BY appeal.submitted_at DESC,appeal.id
+            LIMIT 100
+        `, [userId]);
+        return result.rows;
+    }
+
     async lockAssignment(userId, assignmentId) {
         const result = await this.client.query(`
-            SELECT assignment.*, definition.slug, version.category, version.verification_mode,
+            SELECT assignment.*,
+                   (assignment.due_at IS NOT NULL
+                    AND assignment.due_at <= clock_timestamp()) AS overdue,
+                   definition.slug, version.category, version.verification_mode,
                    version.review_policy, version.cooldown_hours, version.decline_behavior,
                    version.postpone_policy, version.expiry_behavior, version.unlock_hooks,
                    version.completion_zh, version.completion_en
@@ -105,7 +188,11 @@ class QuestV2RuntimeRepository {
                 accepted_at = CASE WHEN $4::VARCHAR(20) = 'accepted' THEN NOW() ELSE accepted_at END,
                 submitted_at = CASE WHEN $4::VARCHAR(20) = 'submitted' THEN NOW() ELSE submitted_at END,
                 completed_at = CASE WHEN $4::VARCHAR(20) = 'completed' THEN NOW() ELSE completed_at END,
-                resolved_at = CASE WHEN $4::VARCHAR(20) IN ('completed', 'declined', 'expired', 'cancelled') THEN NOW() ELSE resolved_at END,
+                resolved_at = CASE WHEN $4::VARCHAR(20) IN (
+                    'completed', 'declined', 'rejected', 'expired', 'cancelled'
+                ) THEN NOW() ELSE resolved_at END,
+                expired_at = CASE WHEN $4::VARCHAR(20) = 'expired' THEN NOW() ELSE expired_at END,
+                rejected_at = CASE WHEN $4::VARCHAR(20) = 'rejected' THEN NOW() ELSE rejected_at END,
                 postpone_until = COALESCE($5::TIMESTAMPTZ, postpone_until),
                 updated_at = NOW()
             WHERE id = $1 AND revision = $2 AND status = ANY($3::TEXT[])
@@ -160,6 +247,9 @@ class QuestV2RuntimeRepository {
         const result = await this.client.query(`
             SELECT assignment.id AS assignment_id, assignment.status AS assignment_status,
                    assignment.revision AS assignment_revision, assignment.user_id,
+                   assignment.due_at, assignment.postponed_hours,
+                   (assignment.due_at IS NOT NULL
+                    AND assignment.due_at <= clock_timestamp()) AS overdue,
                    step.id AS step_id, step.evidence_kind, step.required,
                    state.status AS step_status, state.revision AS step_revision
             FROM quest_v2_assignments assignment
@@ -223,7 +313,11 @@ class QuestV2RuntimeRepository {
     async assignmentSubmissionReadiness(assignmentId) {
         const result = await this.client.query(`
             SELECT COUNT(*) FILTER (WHERE step.required) AS required_count,
-                   COUNT(*) FILTER (WHERE step.required AND state.status IN ('submitted', 'completed')) AS ready_count
+                   COUNT(*) FILTER (WHERE step.required AND state.status IN ('submitted', 'completed')) AS ready_count,
+                   COUNT(*) FILTER (WHERE step.required AND state.status = 'submitted') AS submitted_count,
+                   COUNT(*) FILTER (WHERE step.required
+                     AND step.evidence_kind <> 'trusted_event'
+                     AND state.status IN ('active', 'returned')) AS pending_reviewable_count
             FROM quest_v2_step_definitions step
             JOIN quest_v2_assignments assignment ON assignment.version_id = step.version_id AND assignment.id = $1
             JOIN quest_v2_assignment_steps state
@@ -231,7 +325,9 @@ class QuestV2RuntimeRepository {
         `, [assignmentId]);
         return {
             required: Number(result.rows[0]?.required_count || 0),
-            ready: Number(result.rows[0]?.ready_count || 0)
+            ready: Number(result.rows[0]?.ready_count || 0),
+            submitted: Number(result.rows[0]?.submitted_count || 0),
+            pendingReviewable: Number(result.rows[0]?.pending_reviewable_count || 0)
         };
     }
 
@@ -255,6 +351,9 @@ class QuestV2RuntimeRepository {
                    step.id AS step_id, step.step_key, step.required
             FROM quest_v2_assignments assignment
             JOIN quest_v2_step_definitions step ON step.version_id = assignment.version_id
+            JOIN quest_v2_assignment_steps state
+              ON state.assignment_id = assignment.id
+             AND state.step_definition_id = step.id
             JOIN LATERAL (
                 SELECT candidate.* FROM quest_v2_evidence candidate
                 WHERE candidate.assignment_id = assignment.id
@@ -262,7 +361,7 @@ class QuestV2RuntimeRepository {
                 ORDER BY candidate.submitted_at DESC, candidate.id DESC
                 LIMIT 1 FOR UPDATE
             ) evidence ON TRUE
-            WHERE assignment.id = $1
+            WHERE assignment.id = $1 AND state.status = 'submitted'
             ORDER BY step.ordinal
         `, [assignmentId]);
         return result.rows;
@@ -279,14 +378,47 @@ class QuestV2RuntimeRepository {
 
     async markStepsReviewed(assignmentId, decision) {
         const result = await this.client.query(`
-            UPDATE quest_v2_assignment_steps
-            SET status = $2::VARCHAR(20), revision = revision + 1,
-                completed_at = CASE WHEN $2::VARCHAR(20) = 'completed' THEN NOW() ELSE NULL END,
+            UPDATE quest_v2_assignment_steps state
+            SET status = CASE $2::VARCHAR(20)
+                    WHEN 'approved' THEN 'completed'
+                    WHEN 'returned' THEN 'returned'
+                    ELSE 'rejected'
+                END,
+                revision = state.revision + 1,
+                completed_at = CASE WHEN $2::VARCHAR(20) = 'approved' THEN NOW() ELSE NULL END,
                 updated_at = NOW()
-            WHERE assignment_id = $1 AND status = 'submitted'
-            RETURNING step_definition_id
-        `, [assignmentId, decision === 'approved' ? 'completed' : 'returned']);
-        return result.rowCount;
+            FROM quest_v2_step_definitions step
+            WHERE state.assignment_id = $1
+              AND state.step_definition_id = step.id
+              AND state.status = 'submitted'
+            RETURNING state.step_definition_id, step.step_key
+        `, [assignmentId, decision]);
+        return result.rows;
+    }
+
+    async unlockEligibleSteps(assignmentId) {
+        const result = await this.client.query(`
+            UPDATE quest_v2_assignment_steps state
+            SET status = 'active', revision = state.revision + 1, updated_at = NOW()
+            FROM quest_v2_step_definitions step
+            WHERE state.assignment_id = $1
+              AND state.step_definition_id = step.id
+              AND state.status = 'locked'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM unnest(step.depends_on_keys) dependency(step_key)
+                  LEFT JOIN quest_v2_step_definitions prerequisite
+                    ON prerequisite.version_id = step.version_id
+                   AND prerequisite.step_key = dependency.step_key
+                  LEFT JOIN quest_v2_assignment_steps prerequisite_state
+                    ON prerequisite_state.assignment_id = state.assignment_id
+                   AND prerequisite_state.step_definition_id = prerequisite.id
+                  WHERE prerequisite.id IS NULL
+                     OR prerequisite_state.status IS DISTINCT FROM 'completed'
+              )
+            RETURNING state.step_definition_id, step.step_key
+        `, [assignmentId]);
+        return result.rows;
     }
 
     async insertSettlement(settlement) {
@@ -349,10 +481,11 @@ class QuestV2RuntimeRepository {
         const result = await this.client.query(`
             SELECT assignment.id, assignment.status, assignment.revision,
                    assignment.user_id, assignment.version_id, assignment.accepted_at,
+                   assignment.due_at, assignment.completed_at, assignment.resolved_at,
                    assignment.board_id, assignment.chain_id,
                    assignment.reward_policy_version, assignment.reward_points,
                    assignment.completion_rule, definition.slug, version.version,
-                   version.verification_mode, version.category,
+                   version.verification_mode, version.category, version.allow_event_reuse,
                    CASE WHEN chain_node.node_number IS NULL THEN ''
                         ELSE chain.slug || ':' || chain_node.node_number::TEXT END AS chain_node_key
             FROM quest_v2_assignments assignment
@@ -370,15 +503,52 @@ class QuestV2RuntimeRepository {
         return result.rows;
     }
 
+    async readAssignmentSubjectId(assignmentId) {
+        const result = await this.client.query(
+            'SELECT user_id FROM quest_v2_assignments WHERE id=$1',
+            [assignmentId]
+        );
+        const userId = Number(result.rows[0]?.user_id);
+        return Number.isSafeInteger(userId) && userId > 0 ? userId : null;
+    }
+
+    async readAppealSubjectId(appealId) {
+        const result = await this.client.query(
+            'SELECT user_id FROM quest_v2_appeals WHERE id=$1',
+            [appealId]
+        );
+        const userId = Number(result.rows[0]?.user_id);
+        return Number.isSafeInteger(userId) && userId > 0 ? userId : null;
+    }
+
+    async lockReviewerAndSubject(reviewerUsername, subjectUserId) {
+        const result = await this.client.query(`
+            SELECT id,username,is_admin
+            FROM users
+            WHERE (username=$1 OR id=$2)
+              AND authorized=TRUE AND deactivated=FALSE
+              AND COALESCE(account_locked,FALSE)=FALSE
+            ORDER BY id
+            FOR UPDATE
+        `, [reviewerUsername, subjectUserId]);
+        return {
+            reviewer: result.rows.find((row) => row.username === reviewerUsername) || null,
+            subject: result.rows.find((row) => Number(row.id) === Number(subjectUserId)) || null
+        };
+    }
+
     async lockAssignmentForReview(assignmentId) {
         const result = await this.client.query(`
             SELECT assignment.*, account.username, definition.slug,
                    version.review_policy, version.verification_mode,
                    version.completion_zh, version.completion_en, version.category,
+                   version.safety_class,
                    CASE WHEN chain_node.node_number IS NULL THEN ''
                         ELSE chain.slug || ':' || chain_node.node_number::TEXT END AS chain_node_key
             FROM quest_v2_assignments assignment
             JOIN users account ON account.id = assignment.user_id
+              AND account.authorized=TRUE AND account.deactivated=FALSE
+              AND COALESCE(account.account_locked,FALSE)=FALSE
             JOIN quest_v2_versions version ON version.id = assignment.version_id
             JOIN quest_v2_definitions definition ON definition.id = version.definition_id
             LEFT JOIN quest_v2_chains chain ON chain.id = assignment.chain_id
@@ -391,10 +561,102 @@ class QuestV2RuntimeRepository {
         return result.rows[0] || null;
     }
 
+    async lockReviewer(username) {
+        const result = await this.client.query(`
+            SELECT id, username, is_admin
+            FROM users
+            WHERE username = $1 AND is_admin = TRUE AND authorized = TRUE
+              AND deactivated = FALSE AND COALESCE(account_locked, FALSE) = FALSE
+            FOR SHARE
+        `, [username]);
+        return result.rows[0] || null;
+    }
+
+    async recordChainCompletion({ id, userId, chainId, assignmentId, sourceEventId }) {
+        const result = await this.client.query(`
+            WITH chain_state AS (
+                SELECT chain.id,chain.slug,COUNT(*) AS total_nodes,
+                       COUNT(*) FILTER (WHERE EXISTS(
+                           SELECT 1 FROM quest_v2_assignments completed
+                           WHERE completed.user_id=$2
+                             AND completed.chain_id=chain.id
+                             AND completed.version_id=node.version_id
+                             AND completed.status='completed'
+                       )) AS completed_nodes
+                FROM quest_v2_chains chain
+                JOIN quest_v2_chain_nodes node ON node.chain_id=chain.id
+                WHERE chain.id=$3
+                  AND EXISTS(
+                      SELECT 1 FROM quest_v2_assignments trigger_assignment
+                      WHERE trigger_assignment.id=$4 AND trigger_assignment.user_id=$2
+                        AND trigger_assignment.chain_id=chain.id
+                        AND trigger_assignment.status='completed'
+                  )
+                GROUP BY chain.id,chain.slug
+            ), inserted AS (
+                INSERT INTO quest_v2_chain_completions(
+                    id,user_id,chain_id,trigger_assignment_id,source_event_id
+                )
+                SELECT $1,$2,state.id,$4,$5 FROM chain_state state
+                WHERE state.total_nodes>0 AND state.completed_nodes=state.total_nodes
+                ON CONFLICT(user_id,chain_id) DO NOTHING
+                RETURNING *
+            )
+            SELECT inserted.*,chain_state.slug AS chain_slug
+            FROM inserted JOIN chain_state ON chain_state.id=inserted.chain_id
+        `, [id, userId, chainId, assignmentId, sourceEventId]);
+        return result.rows[0] || null;
+    }
+
+    async findAppealForAssignment(userId, assignmentId) {
+        return (await this.client.query(`SELECT * FROM quest_v2_appeals
+            WHERE user_id=$1 AND assignment_id=$2 FOR UPDATE`, [userId, assignmentId])).rows[0] || null;
+    }
+
+    async insertAppeal(appeal) {
+        return (await this.client.query(`INSERT INTO quest_v2_appeals(
+            id,assignment_id,user_id,command_id,semantic_hash,reason
+        ) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`, [appeal.id, appeal.assignmentId,
+            appeal.userId, appeal.commandId, appeal.semanticHash, appeal.reason])).rows[0] || null;
+    }
+
+    async lockAppeal(appealId) {
+        return (await this.client.query(`SELECT appeal.*,account.username
+            FROM quest_v2_appeals appeal
+            JOIN users account ON account.id=appeal.user_id
+              AND account.authorized=TRUE AND account.deactivated=FALSE
+              AND COALESCE(account.account_locked,FALSE)=FALSE
+            WHERE appeal.id=$1 FOR UPDATE OF appeal`, [appealId])).rows[0] || null;
+    }
+
+    async resolveAppeal(appealId, reviewerUserId, resolution) {
+        return (await this.client.query(`UPDATE quest_v2_appeals
+            SET status='resolved',decision=$2,resolution_note=$3,resolved_by_user_id=$4,
+                resolution_command_id=$5,resolution_semantic_hash=$6,resolved_at=NOW()
+            WHERE id=$1 AND status='pending' RETURNING *`, [appealId, resolution.decision,
+            resolution.note, reviewerUserId, resolution.commandId,
+            resolution.semanticHash])).rows[0] || null;
+    }
+
+    async listPendingAppeals(limit = 100) {
+        const result = await this.client.query(`SELECT appeal.id,appeal.assignment_id,
+                   appeal.reason,appeal.submitted_at,account.username,
+                   definition.slug,version.title_zh,version.title_en
+            FROM quest_v2_appeals appeal
+            JOIN users account ON account.id=appeal.user_id
+            JOIN quest_v2_assignments assignment ON assignment.id=appeal.assignment_id
+            JOIN quest_v2_versions version ON version.id=assignment.version_id
+            JOIN quest_v2_definitions definition ON definition.id=version.definition_id
+            WHERE appeal.status='pending'
+            ORDER BY appeal.submitted_at,appeal.id LIMIT $1`, [limit]);
+        return result.rows;
+    }
+
     async listReviewQueue(limit = 100) {
         const result = await this.client.query(`
             SELECT assignment.id, assignment.revision, account.username,
                    version.title_zh, version.title_en, version.reward_points,
+                   version.review_policy, version.safety_class,
                    evidence.id AS evidence_id, evidence.evidence_kind,
                    evidence.content, evidence.content_sha256, evidence.sha256,
                    evidence.byte_count, evidence.width, evidence.height,
@@ -403,6 +665,9 @@ class QuestV2RuntimeRepository {
             JOIN users account ON account.id = assignment.user_id
             JOIN quest_v2_versions version ON version.id = assignment.version_id
             JOIN quest_v2_step_definitions step ON step.version_id = version.id AND step.required = TRUE
+            JOIN quest_v2_assignment_steps state
+              ON state.assignment_id = assignment.id
+             AND state.step_definition_id = step.id
             JOIN LATERAL (
                 SELECT id, evidence_kind, content, content_sha256, sha256,
                        byte_count, width, height, redacted_at
@@ -410,20 +675,54 @@ class QuestV2RuntimeRepository {
                 WHERE assignment_id = assignment.id AND step_definition_id = step.id
                 ORDER BY submitted_at DESC, id DESC LIMIT 1
             ) evidence ON TRUE
-            WHERE assignment.status = 'under_review'
+            WHERE assignment.status = 'under_review' AND state.status = 'submitted'
+              AND version.review_policy IN ('owner', 'admin')
             ORDER BY assignment.submitted_at, assignment.id, step.ordinal
             LIMIT $1
         `, [limit]);
         return result.rows;
     }
 
-    async postponeAssignment(assignmentId, expectedRevision, postponeUntil) {
+    async postponeAssignment(assignmentId, expectedRevision, hours, maximumHours) {
         const result = await this.client.query(`
             UPDATE quest_v2_assignments
-            SET postpone_until = $3, revision = revision + 1, updated_at = NOW()
-            WHERE id = $1 AND revision = $2 AND status IN ('offered', 'active')
+            SET due_at = due_at + make_interval(hours => $3),
+                postpone_until = due_at + make_interval(hours => $3),
+                postponed_hours = postponed_hours + $3,
+                last_postponed_at = NOW(),
+                revision = revision + 1, updated_at = NOW()
+            WHERE id = $1 AND revision = $2
+              AND status IN ('offered', 'active', 'returned')
+              AND due_at IS NOT NULL AND due_at > clock_timestamp()
+              AND postponed_hours + $3 <= $4
             RETURNING *
-        `, [assignmentId, expectedRevision, postponeUntil]);
+        `, [assignmentId, expectedRevision, hours, maximumHours]);
+        return result.rows[0] || null;
+    }
+
+    async lockDueAssignments(limit = 100) {
+        const result = await this.client.query(`
+            SELECT id, revision, status, due_at, user_id, version_id, occurrence
+            FROM quest_v2_assignments
+            WHERE status IN ('offered', 'accepted', 'active', 'returned')
+              AND due_at IS NOT NULL AND due_at <= clock_timestamp()
+            ORDER BY due_at, id
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+        `, [limit]);
+        return result.rows;
+    }
+
+    async expireAssignment(assignmentId, expectedRevision) {
+        const result = await this.client.query(`
+            UPDATE quest_v2_assignments
+            SET status = 'expired', revision = revision + 1,
+                expired_at = NOW(), resolved_at = NOW(), updated_at = NOW()
+            WHERE id = $1 AND revision = $2
+              AND status IN ('offered', 'accepted', 'active', 'returned')
+              AND due_at IS NOT NULL AND due_at <= clock_timestamp()
+            RETURNING *
+        `, [assignmentId, expectedRevision]);
         return result.rows[0] || null;
     }
 
@@ -443,6 +742,79 @@ class QuestV2RuntimeRepository {
         }));
     }
 
+    async listAssignmentTrustedHistory(assignmentId) {
+        const result = await this.client.query(`
+            SELECT event.id AS trusted_event_id, event.event_type,
+                   event.occurred_at, event.payload
+            FROM quest_v2_assignments assignment
+            JOIN quest_v2_versions version ON version.id = assignment.version_id
+            JOIN quest_v2_trusted_events event
+              ON event.subject_user_id = assignment.user_id
+             AND event.occurred_at >= assignment.accepted_at
+             AND event.occurred_at <= clock_timestamp()
+             AND (assignment.due_at IS NULL OR event.occurred_at <= assignment.due_at)
+             AND (assignment.completed_at IS NULL OR event.occurred_at < assignment.completed_at)
+             AND (assignment.resolved_at IS NULL OR event.occurred_at < assignment.resolved_at)
+            WHERE assignment.id = $1
+              AND assignment.status = 'active'
+              AND assignment.accepted_at IS NOT NULL
+              AND (
+                  version.allow_event_reuse = TRUE
+                  OR NOT EXISTS (
+                      SELECT 1
+                      FROM quest_v2_assignment_event_consumptions prior
+                      WHERE prior.user_id = assignment.user_id
+                        AND prior.version_id = assignment.version_id
+                        AND prior.trusted_event_id = event.id
+                        AND prior.assignment_id <> assignment.id
+                  )
+              )
+            ORDER BY event.occurred_at, event.id
+            LIMIT 10000
+        `, [assignmentId]);
+        return result.rows.map((row) => ({
+            trustedEventId: Number(row.trusted_event_id),
+            eventType: row.event_type,
+            occurredAt: new Date(row.occurred_at).toISOString(),
+            payload: row.payload
+        }));
+    }
+
+    async consumeTrustedEvents(assignmentId, trustedEventIds) {
+        if (!Array.isArray(trustedEventIds) || trustedEventIds.length === 0) return [];
+        const result = await this.client.query(`
+            WITH inserted AS (
+                INSERT INTO quest_v2_assignment_event_consumptions (
+                    assignment_id, trusted_event_id, user_id, version_id,
+                    occurrence, allow_event_reuse
+                )
+                SELECT assignment.id, event.id, assignment.user_id,
+                       assignment.version_id, assignment.occurrence,
+                       version.allow_event_reuse
+                FROM quest_v2_assignments assignment
+                JOIN quest_v2_versions version ON version.id = assignment.version_id
+                JOIN quest_v2_trusted_events event
+                  ON event.id = ANY($2::BIGINT[])
+                 AND event.subject_user_id = assignment.user_id
+                 AND event.occurred_at >= assignment.accepted_at
+                 AND event.occurred_at <= clock_timestamp()
+                 AND (assignment.due_at IS NULL OR event.occurred_at <= assignment.due_at)
+                 AND (assignment.completed_at IS NULL OR event.occurred_at < assignment.completed_at)
+                 AND (assignment.resolved_at IS NULL OR event.occurred_at < assignment.resolved_at)
+                WHERE assignment.id = $1 AND assignment.status = 'active'
+                  AND assignment.accepted_at IS NOT NULL
+                ON CONFLICT DO NOTHING
+                RETURNING trusted_event_id
+            )
+            SELECT trusted_event_id FROM inserted
+            UNION
+            SELECT trusted_event_id
+            FROM quest_v2_assignment_event_consumptions
+            WHERE assignment_id = $1 AND trusted_event_id = ANY($2::BIGINT[])
+        `, [assignmentId, trustedEventIds]);
+        return result.rows.map((row) => Number(row.trusted_event_id));
+    }
+
     async listTrustedSteps(assignmentId) {
         const result = await this.client.query(`
             SELECT step.id, step.step_key, step.completion_rule, state.status
@@ -456,7 +828,7 @@ class QuestV2RuntimeRepository {
     }
 
     async markTrustedStepCompleted(assignmentId, stepId, ruleResult) {
-        await this.client.query(`
+        const result = await this.client.query(`
             UPDATE quest_v2_assignment_steps state
             SET status = 'completed', progress = $3::JSONB,
                 revision = revision + 1, completed_at = NOW(), updated_at = NOW()
@@ -464,7 +836,9 @@ class QuestV2RuntimeRepository {
             WHERE state.assignment_id = $1 AND state.step_definition_id = $2
               AND state.step_definition_id = step.id
               AND step.evidence_kind = 'trusted_event' AND state.status = 'active'
+            RETURNING state.step_definition_id, step.step_key
         `, [assignmentId, stepId, JSON.stringify(ruleResult)]);
+        return result.rows[0] || null;
     }
 
     async finalizeTrustedEvent(id, resultBody) {
@@ -492,15 +866,19 @@ class QuestV2RuntimeRepository {
     async redactExpiredEvidenceBatch(limit = 100) {
         const result = await this.client.query(`
             WITH due AS (
-                SELECT id FROM quest_v2_evidence
-                WHERE redacted_at IS NULL AND retention_until <= NOW()
-                ORDER BY retention_until, id LIMIT $1 FOR UPDATE SKIP LOCKED
+                SELECT evidence.id,assignment.user_id,account.username
+                FROM quest_v2_evidence evidence
+                JOIN quest_v2_assignments assignment ON assignment.id=evidence.assignment_id
+                JOIN users account ON account.id=assignment.user_id
+                WHERE evidence.redacted_at IS NULL AND evidence.retention_until <= NOW()
+                ORDER BY evidence.retention_until,evidence.id LIMIT $1
+                FOR UPDATE OF evidence SKIP LOCKED
             )
             UPDATE quest_v2_evidence evidence
             SET content = '{}'::JSONB, media_bytes = NULL,
                 redacted_at = NOW(), redaction_reason = 'retention_expired'
             FROM due WHERE evidence.id = due.id
-            RETURNING evidence.id, evidence.assignment_id
+            RETURNING evidence.id,evidence.assignment_id,due.user_id,due.username
         `, [limit]);
         return result.rows;
     }

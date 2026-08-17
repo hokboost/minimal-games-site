@@ -543,7 +543,8 @@ test('Quest retention batch uses skip-locked ordering and caller limit', async (
     assert.deepEqual(client.calls[0].parameters, [100]);
     assert.match(client.calls[0].sql, /redacted_at IS NULL/);
     assert.match(client.calls[0].sql, /retention_until <= NOW\(\)/);
-    assert.match(client.calls[0].sql, /ORDER BY retention_until, id LIMIT \$1 FOR UPDATE SKIP LOCKED/);
+    assert.match(client.calls[0].sql,
+        /ORDER BY evidence\.retention_until,evidence\.id LIMIT \$1 FOR UPDATE OF evidence SKIP LOCKED/);
     assert.match(client.calls[0].sql, /content = '\{\}'::JSONB/);
     assert.match(client.calls[0].sql, /media_bytes = NULL/);
     assert.match(client.calls[0].sql, /redaction_reason = 'retention_expired'/);

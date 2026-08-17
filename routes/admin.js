@@ -20,7 +20,8 @@ module.exports = function registerAdminRoutes(app, deps) {
         passwordResetTokenSecret,
         gameRegistry,
         creatorRepository,
-        creatorOwnerUsername
+        creatorOwnerUsername,
+        coopConsentCoordinator
     } = deps;
     if (!Buffer.isBuffer(passwordResetTokenSecret) || passwordResetTokenSecret.length < 32) {
         throw new Error('passwordResetTokenSecret must be a Buffer of at least 32 bytes');
@@ -627,7 +628,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 `UPDATE users
                  SET authorized = false
                  WHERE username = $1 AND is_admin = false
-                 RETURNING username`,
+                 RETURNING id, username`,
                 [username]
             );
 
@@ -638,6 +639,14 @@ module.exports = function registerAdminRoutes(app, deps) {
                     return res.status(403).json({ success: false, message: '不能取消管理员授权' });
                 }
                 return res.status(404).json({ success: false, message: '用户不存在' });
+            }
+
+            if (coopConsentCoordinator) {
+                await coopConsentCoordinator.withdrawCreator(client, Number(result.rows[0].id),
+                    'creator_account_inactive', {
+                        actorUsername: req.session.user.username,
+                        requestId: req.idempotencyKey
+                    }, { closeRooms: true });
             }
 
             const externalState = await prepareExternalWorkForAccountTransition({
@@ -1146,7 +1155,7 @@ module.exports = function registerAdminRoutes(app, deps) {
                 );
 
                 const userResult = await client.query(
-                    'SELECT is_admin, deactivated FROM users WHERE username = $1 FOR UPDATE',
+                    'SELECT id, is_admin, deactivated FROM users WHERE username = $1 FOR UPDATE',
                     [username]
                 );
                 if (userResult.rows.length === 0) {
@@ -1389,6 +1398,13 @@ module.exports = function registerAdminRoutes(app, deps) {
                 if (deactivated.rowCount !== 1) {
                     throw new Error('Account deactivation state changed concurrently');
                 }
+                if (coopConsentCoordinator) {
+                    await coopConsentCoordinator.withdrawCreator(client,
+                        Number(userResult.rows[0].id), 'account_deactivated', {
+                            actorUsername: req.session.user.username,
+                            requestId: req.idempotencyKey
+                        }, { closeRooms: true });
+                }
                 const responseBody = {
                     success: true,
                     message: unresolvedGiftCount + unresolvedPkCount > 0
@@ -1462,11 +1478,18 @@ module.exports = function registerAdminRoutes(app, deps) {
                     account_locked_by = $2,
                     account_lock_reason = $3
                 WHERE username = $1 AND is_admin = FALSE AND deactivated = FALSE
-                RETURNING username
+                RETURNING id, username
             `, [username, req.session.user.username, reason]);
             if (result.rowCount !== 1) {
                 await client.query('ROLLBACK');
                 return res.status(404).json({ success: false, message: '用户不存在、已停用或属于管理员' });
+            }
+            if (coopConsentCoordinator) {
+                await coopConsentCoordinator.withdrawCreator(client, Number(result.rows[0].id),
+                    'account_locked', {
+                        actorUsername: req.session.user.username,
+                        requestId: req.idempotencyKey
+                    }, { closeRooms: true });
             }
             const responseBody = { success: true, message: '账户已锁定；该用户登录后只会看到锁定提示' };
             await auditAdminAction({

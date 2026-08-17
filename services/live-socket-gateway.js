@@ -1,21 +1,25 @@
 'use strict';
 
+const { roleRoom } = require('./live-event-delivery');
+
 class LiveSocketGateway {
     constructor({
         service,
         enabled,
-        authorize
+        authorize,
+        authorizeGameSubscription = null
     }) {
         if (!service?.catchUp || typeof authorize !== 'function') throw new TypeError(
             'Live socket gateway requires service and session authorizer');
         this.service = service;
         this.enabled = Boolean(enabled);
         this.authorize = authorize;
+        this.authorizeGameSubscription = authorizeGameSubscription;
     }
     attach(socket) {
         const auth = socket.authenticatedUser;
         if (!auth?.username || !auth.userId) return;
-        socket.join(`live:user:${auth.userId}`);
+        socket.liveInteractionSubscriptions = new Map();
         const timestamps = [];
         const limited = () => {
             const now = Date.now();
@@ -59,12 +63,53 @@ class LiveSocketGateway {
             });
             if (!await current(callback)) return;
             try {
+                const interactionId = Number(input?.interactionId);
+                const previous = socket.liveInteractionSubscriptions.get(interactionId);
+                if (previous) {
+                    socket.leave?.(roleRoom(previous.interactionId, previous.role, previous.userId));
+                    socket.liveInteractionSubscriptions.delete(interactionId);
+                }
+                let subscription;
+                if (input?.gameId !== undefined || input?.runId !== undefined) {
+                    if (typeof this.authorizeGameSubscription !== 'function') {
+                        const unavailable = new Error('Game subscription unavailable');
+                        unavailable.code = 'GAME_SUBSCRIPTION_UNAVAILABLE';
+                        unavailable.status = 403;
+                        throw unavailable;
+                    }
+                    subscription = await this.authorizeGameSubscription(auth.username, {
+                        interactionId,
+                        gameId: input?.gameId,
+                        runId: input?.runId
+                    });
+                }
                 const result = await this.service.catchUp(auth.username, {
-                    interactionId: input?.interactionId,
+                    interactionId,
                     afterSequence: input?.afterSequence ?? 0,
                     limit: input?.limit ?? 100
                 });
-                socket.join(`live:interaction:${Number(input.interactionId)}`);
+                subscription ||= result.subscription;
+                if (!subscription || !['creator', 'owner'].includes(subscription.role)
+                    || Number(subscription.userId) !== Number(auth.userId)) {
+                    const denied = new Error('Active live membership required');
+                    denied.code = 'LIVE_MEMBERSHIP_REQUIRED';
+                    denied.status = 403;
+                    throw denied;
+                }
+                const preciseRoom = roleRoom(interactionId, subscription.role, auth.userId);
+                const replayFloorSequence = Number(result.nextAfter ?? input?.afterSequence ?? 0);
+                socket.join(preciseRoom);
+                socket.liveInteractionSubscriptions.set(interactionId, {
+                    interactionId,
+                    role: subscription.role,
+                    userId: Number(auth.userId),
+                    room: preciseRoom,
+                    gameId: input?.gameId || null,
+                    runId: input?.runId || null,
+                    replayFloorSequence: Number.isSafeInteger(replayFloorSequence)
+                        && replayFloorSequence >= 0 ? replayFloorSequence : 0,
+                    deliveredEventIds: new Set((result.events || []).map(event => event.eventId))
+                });
                 socket.emit('live:events', {
                     version: 1,
                     ...result
@@ -74,6 +119,13 @@ class LiveSocketGateway {
                     lastSequence: result.lastSequence
                 });
             } catch (error) {
+                const interactionId = Number(input?.interactionId);
+                const previous = socket.liveInteractionSubscriptions.get(interactionId);
+                if (previous) {
+                    socket.leave?.(previous.room || roleRoom(previous.interactionId, previous.role,
+                        previous.userId));
+                    socket.liveInteractionSubscriptions.delete(interactionId);
+                }
                 return respond(callback, failure(error));
             }
         });

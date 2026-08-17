@@ -5,6 +5,7 @@ const { stableStringify } = require('../lib/idempotency');
 const { ACHIEVEMENTS } = require('../content/streamer-world/achievements/catalog');
 const { progressFor, publicAchievement, validateDefinition, validateTrustedEvent } = require('../domain/achievements/rules');
 const { AchievementRepository } = require('../repositories/achievement-repository');
+const { sourceGrantForEvent } = require('../domain/rewards/source-grant-policy');
 
 class AchievementServiceError extends Error {
     constructor(code, status, message) {
@@ -16,11 +17,12 @@ class AchievementServiceError extends Error {
 }
 
 class AchievementService {
-    constructor({ pool, repositoryFactory, clock = () => new Date() }) {
+    constructor({ pool, repositoryFactory, clock = () => new Date(), rewardGrantIntentWriter = null }) {
         if (!pool?.connect) throw new TypeError('Achievement service requires a database pool');
         this.pool = pool;
         this.repositoryFactory = repositoryFactory || ((client) => new AchievementRepository(client));
         this.clock = clock;
+        this.rewardGrantIntentWriter = rewardGrantIntentWriter;
     }
 
     async transaction(work) {
@@ -87,9 +89,19 @@ class AchievementService {
             if (shouldUnlock && await repository.insertUnlock(user.id, definition.id, inserted.row.id)) {
                 await repository.insertCollection(user.id, definition.collection_key, definition.slug);
                 unlocked.push(definition.slug);
+                const reward = sourceGrantForEvent('achievement', event,
+                    { achievementSlug: definition.slug });
+                if (reward && this.rewardGrantIntentWriter?.enqueue) {
+                    await this.rewardGrantIntentWriter.enqueue(client, { ...reward, userId: Number(user.id) });
+                }
             }
         }
-        if (event.eventType === 'story.season.completed') await repository.archiveSeason(user.id, event);
+        if (event.eventType === 'story.season.completed' && await repository.archiveSeason(user.id, event)) {
+            const reward = sourceGrantForEvent('season', event);
+            if (reward && this.rewardGrantIntentWriter?.enqueue) {
+                await this.rewardGrantIntentWriter.enqueue(client, { ...reward, userId: Number(user.id) });
+            }
+        }
         await repository.audit({ userId:user.id,actorUsername:username,action:'achievement.trusted_event.recorded',
             sourceEventId:event.sourceEventId,details:{ eventType:event.eventType,unlocked },requestId:context.requestId });
         return { success:true,replayed:false,unlocked };
