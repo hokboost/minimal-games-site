@@ -2,13 +2,13 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 
-This report describes review-ready code. It does not claim that a production migration or a real Bilibili gift delivery was performed. Every Streamer World feature remains disabled by default.
+This report describes review-ready code. It does not claim that a real Bilibili gift delivery was performed. The production `npm start` launcher enables missing Streamer World product flags for this deployment; an explicitly configured `false` always wins and provides immediate rollback.
 
 ## Delivery boundary
 
 The expansion is modular work inside the existing Express/EJS/PostgreSQL/Socket.IO application. It preserves the current authorization, sessions, CSRF, rate limits, balance ledger, gift inventory, exchange, outbox, worker lease, provider receipt, and uncertain-reconciliation state machines.
 
-Quest, Story, games, achievements, Live Interaction, and rewards never call the gift provider. A provider-backed reward claim creates stored `wish_inventory`; only the creator's existing backpack action can enqueue it through the original delivery state machine. No production database, external credential, or real gift send was used.
+Quest, Story, games, achievements, Live Interaction, and rewards never call the gift provider. A provider-backed reward claim creates stored `wish_inventory`; only the creator's existing backpack action can enqueue it through the original delivery state machine. On 2026-08-17 the nine expansion migrations were applied to the configured Render PostgreSQL database and the full 25/25 checksum ledger was verified; no real gift send was used.
 
 ## Changed modules
 
@@ -127,7 +127,7 @@ The manifest enforces duplicate identity, CSRF, login/authorization, administrat
 - Failure injection covers response loss, semantic collision, CAS, hook rollback, post-commit fan-out failure, retention audit failure, revoked sessions, and provider isolation.
 - Expired evidence clears text/checklist/PNG content only after retention while preserving hash, review, settlement, and audit tombstones.
 - Browser projections omit provider identifiers, semantic hashes, hidden solutions, future branches, partner-only clues, and arbitrary evidence HTML.
-- Flags accept only exact lowercase `true`, default off, require root/Creator prerequisites, and can disable all expansion routes without altering stored state.
+- Flags accept only exact lowercase `true` and require root/Creator prerequisites. This deployment's production launcher enables missing product keys, while any explicitly configured `false` remains authoritative and can disable expansion routes without altering stored state.
 
 ## Verification
 
@@ -160,18 +160,16 @@ Generated, vendored, binary, minified, lock, build, coverage, empty, and comment
 
 ## Feature activation and rollback
 
-Apply migrations and validate with all flags false. Then enable the root/Creator gates before individual product gates: `STREAMER_WORLD_ENABLED`, `CREATOR_PROFILE_ENABLED`, `QUEST_ENGINE_V2_ENABLED`, `STORY_WORLD_ENABLED`, `LIVE_INTERACTIONS_ENABLED`, `STREAMER_NEW_GAMES_ENABLED`, `STREAMER_REWARD_CATALOG_ENABLED`, and `STREAMER_ACHIEVEMENTS_ENABLED`. Configure one exact active administrator in `STREAMER_WORLD_OWNER_USERNAME`.
+Apply migrations and validate before activation. The production launcher supplies `true` only when these keys are absent: `STREAMER_WORLD_ENABLED`, `CREATOR_PROFILE_ENABLED`, `QUEST_ENGINE_V2_ENABLED`, `STORY_WORLD_ENABLED`, `LIVE_INTERACTIONS_ENABLED`, `STREAMER_NEW_GAMES_ENABLED`, `STREAMER_REWARD_CATALOG_ENABLED`, and `STREAMER_ACHIEVEMENTS_ENABLED`. An environment value explicitly set to `false` is never overwritten. Configure one exact active administrator in `STREAMER_WORLD_OWNER_USERNAME` for owner-only collaboration tools.
 
 Application rollback sets the relevant product flag false and restarts instances. Stored immutable history remains intact. Database rollback is forward-fix only because audit/provenance records are intentionally append-only.
 
 ## External operator steps
 
 1. Run `npm run test:migrations` against disposable fresh and historical PostgreSQL databases matching production and review emitted query plans.
-2. Verify a current production backup and restore procedure.
-3. Apply the nine registered migrations through the repository migration runner in a controlled window.
-4. Run schema checksum and smoke checks with every new flag false.
-5. Configure the exact owner, then enable features incrementally while observing latency, event bus, conflicts, retention, outbox lag, and uncertain reconciliation.
-6. Independently reconcile provider receipts before resolving uncertain existing gift exchanges; never auto-retry or auto-refund uncertainty.
+2. Verify and periodically exercise the production backup and restore procedure.
+3. Configure the exact owner, then observe latency, event bus, conflicts, retention, outbox lag, and uncertain reconciliation after activation.
+4. Independently reconcile provider receipts before resolving uncertain existing gift exchanges; never auto-retry or auto-refund uncertainty.
 
 ## Known limitations
 

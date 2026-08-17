@@ -1,10 +1,10 @@
 {
   "name": "minimal-games-site",
   "version": "1.0.0",
-  "description": "包含12款玩法、剧情闯关、题库和完整游戏逻辑的轻量小游戏网站",
+  "description": "包含22款玩法、分支剧情、任务、题库和完整游戏逻辑的互动游戏平台",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node -r ./lib/streamer-world-production-defaults.js server.js",
     "dev": "nodemon server.js",
     "preview": "node scripts/preview-ui.js",
     "test:syntax": "node scripts/check-syntax.js",

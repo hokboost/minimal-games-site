@@ -9,6 +9,9 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const { FLAG_NAMES, readStreamerWorldFlags } = require('../lib/streamer-world-flags');
 const {
+    applyStreamerWorldProductionDefaults
+} = require('../lib/streamer-world-production-defaults');
+const {
     BASE_MIGRATION,
     MIGRATIONS,
     assertDatabaseSchemaCurrent,
@@ -118,6 +121,30 @@ test('all Streamer World flags remain disabled by default', () => {
     assert.equal(flags.rewardsEnabled, false);
     assert.equal(flags.achievementsEnabled, false);
     assert.equal(flags.ownerUsername, null);
+});
+
+test('production launcher enables only missing Streamer World flags', () => {
+    const env = { NODE_ENV: 'production', STREAMER_NEW_GAMES_ENABLED: 'false' };
+    applyStreamerWorldProductionDefaults(env);
+    assert.equal(env.STREAMER_NEW_GAMES_ENABLED, 'false');
+    for (const name of FLAG_NAMES.filter(name => name !== 'STREAMER_NEW_GAMES_ENABLED')) {
+        assert.equal(env[name], 'true', name);
+    }
+    assert.equal(readStreamerWorldFlags(env).newGamesEnabled, false);
+});
+
+test('production defaults expose games when no product flag is configured', () => {
+    const env = { NODE_ENV: 'production' };
+    applyStreamerWorldProductionDefaults(env);
+    assert.equal(readStreamerWorldFlags(env).newGamesEnabled, true);
+    assert.equal(readStreamerWorldFlags(env).storyWorldEnabled, true);
+    assert.equal(readStreamerWorldFlags(env).questEngineV2Enabled, true);
+});
+
+test('non-production launch does not mutate Streamer World flags', () => {
+    const env = { NODE_ENV: 'development' };
+    applyStreamerWorldProductionDefaults(env);
+    assert.deepEqual(env, { NODE_ENV: 'development' });
 });
 
 test('flag parser accepts only exact lowercase true', () => {
