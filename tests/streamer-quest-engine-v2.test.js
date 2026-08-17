@@ -342,7 +342,7 @@ test('journal uses shared idempotent fetch and response-loss retry reuses its co
         fetch: async (_url, options) => { calls += 1; keys.push(options.headers.get('Idempotency-Key')); if (calls === 1) throw new Error('response lost'); return { headers: { get: () => null } }; }
     };
     context.globalThis = context;
-    vm.runInNewContext(source('public/js/i18n-helpers.js'), context);
+    vm.runInNewContext(source('public/js/idempotent-fetch.js'), context);
     const options = { method: 'POST', body: '{"assignmentId":1}' };
     await assert.rejects(context.window.idempotentFetch('/api/quests/v2/assignments/accept', options), /response lost/);
     await context.window.idempotentFetch('/api/quests/v2/assignments/accept', options);

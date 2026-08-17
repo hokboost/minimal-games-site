@@ -214,7 +214,7 @@ check('PK status and start intent are bound to the current room',
     gifts.includes('control.room_id = account.bilibili_room_id')
     && gifts.includes("String(currentState.room_id || '') === String(roomId)"));
 check('idempotency finalization retries transient failures', idempotency.includes('FINALIZE_ATTEMPTS = 5') && idempotency.includes('retryQuery(pool'));
-check('pending request keys survive page reloads', read('public/js/i18n-helpers.js').includes('sessionStorage.setItem') && read('public/js/i18n-helpers.js').includes('IDEMPOTENCY_MAX_AGE_MS'));
+check('pending request keys survive page reloads', read('public/js/idempotent-fetch.js').includes('sessionStorage.setItem') && read('public/js/idempotent-fetch.js').includes('IDEMPOTENCY_MAX_AGE_MS'));
 check('ambiguous commits replay durable terminal results instead of overwriting them',
     idempotency.includes('SELECT status, response_status, response_body')
     && idempotency.includes("committed.status === 'indeterminate' ? 'indeterminate' : 'replayed'"));

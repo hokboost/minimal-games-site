@@ -597,6 +597,12 @@ test('UI is bilingual, mobile, keyboard/touch ready, reconnects coop, and never 
     const view = source('views/streamer-game.ejs');
     const browser = source('public/js/streamer-game.js');
     assert.doesNotThrow(() => ejs.compile(view));
+    assert.match(view, /src="\/js\/idempotent-fetch\.js"/);
+    assert.doesNotMatch(view, /src="\/idempotency\.js"/);
+    assert.ok(
+        view.indexOf('/js/idempotent-fetch.js') < view.indexOf('/js/streamer-game.js'),
+        'idempotent request helper must load before the game controller'
+    );
     assert.match(view, /socket\.io/);
     assert.match(browser, /live:subscribe/);
     assert.match(browser, /interaction\.game_state_changed/);
