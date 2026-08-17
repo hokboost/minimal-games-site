@@ -83,7 +83,14 @@ async function runSustainedLoad({ apps, sessions, durationMs }) {
         while (Date.now() < deadline) {
             const app = apps[(userIndex + sequence) % apps.length];
             session.baseUrl = app.baseUrl;
-            const ip = `198.51.100.${userIndex + 10}`;
+            // A pressure test represents many independent clients. Reusing one
+            // IP per worker exhausts the 100/minute public safety limit after
+            // exactly 800 successful requests, then the cheap 429 responses
+            // accelerate the loop and make the result depend on runner speed.
+            // Keep a small, bounded pool of RFC 2544 benchmark addresses per
+            // session; shared rate limiting is verified separately below with
+            // one deliberately fixed address.
+            const ip = `198.18.${userIndex}.${10 + (sequence % 8)}`;
             const startedAt = Date.now();
             try {
                 let response;
@@ -207,7 +214,7 @@ async function run() {
             && failure.body.includes('服务器繁忙')
         ));
         const unexpectedServerErrors = metrics.serverFailures.length - controlledOverloads.length;
-        const overloadResponses = (metrics.statuses.get(429) || 0) + controlledOverloads.length;
+        const rateLimitedResponses = metrics.statuses.get(429) || 0;
         const p95 = percentile(metrics.latencies, 0.95);
         const p99 = percentile(metrics.latencies, 0.99);
         console.log('Load measurements:', {
@@ -221,7 +228,14 @@ async function run() {
         assert.equal(metrics.errors.length, 0, `Load transport errors: ${metrics.errors.slice(0, 3).join('; ')}`);
         assert.equal(unexpectedServerErrors, 0, `Load produced ${unexpectedServerErrors} unexpected HTTP 5xx responses`);
         assert.ok(totalResponses >= sessions.length, `Too few load responses: ${totalResponses}`);
-        assert.ok(overloadResponses / totalResponses <= 0.6, 'Controlled overload rejection dominated the pressure test');
+        assert.ok(
+            controlledOverloads.length / totalResponses <= 0.6,
+            'Controlled capacity rejection dominated the pressure test'
+        );
+        assert.ok(
+            rateLimitedResponses / totalResponses <= 0.1,
+            'Public rate limiting dominated the pressure test instead of exercising application capacity'
+        );
         assert.ok(p95 < 6000, `P95 latency too high: ${p95}ms`);
         assert.ok(p99 < 10000, `P99 latency too high: ${p99}ms`);
         assert.ok(maxApplicationConnections <= 8, `Pool cap exceeded: ${maxApplicationConnections}`);
