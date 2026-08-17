@@ -64,7 +64,7 @@ function renderMatrix(matrix = ACHIEVEMENT_PRODUCER_MATRIX) {
         }
         lines.push('');
     }
-    return `${lines.join('\n')}\n`;
+    return lines.join('\n');
 }
 
 function main(argv = process.argv.slice(2)) {
