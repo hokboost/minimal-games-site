@@ -17,7 +17,7 @@ const { readStreamerWorldFlags } = require('../lib/streamer-world-flags');
 const { GAME_DEFINITIONS } = require('../domain/games/registry');
 const { StreamerGameRepository } = require('../repositories/streamer-game-repository');
 const { validateInternalGameEvent } = require('../services/quest-v2-service');
-const { ENGINE_REGISTRY, StreamerGameService, StreamerGameServiceError, hash } = require('../services/streamer-game-service');
+const { ENGINE_REGISTRY, GAME_IDS, StreamerGameService, StreamerGameServiceError, hash } = require('../services/streamer-game-service');
 
 const root = path.resolve(__dirname, '..');
 const source = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -635,6 +635,48 @@ test('browser helper gives deterministic countdown, keyboard action, and single-
         { type: 'tap', beatIndex: 3 });
     const gate = ui.createBusyGate(); assert.equal(gate.begin(), true); assert.equal(gate.begin(), false);
     gate.end(); assert.equal(gate.begin(), true);
+});
+
+test('streamer game template loads only existing local assets in dependency order', () => {
+    const view = source('views/streamer-game.ejs');
+    const stylesheets = [...view.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)]
+        .map(match => match[1]);
+    assert.deepEqual(stylesheets, [
+        '/creator-shell.css',
+        '/streamer-games.css',
+        '/game-experience.css'
+    ]);
+
+    const scripts = [...view.matchAll(/<script[^>]+src="([^"]+)"[^>]*><\/script>/g)]
+        .map(match => match[1]);
+    const fixedLocalAssets = [
+        ...stylesheets,
+        ...scripts.filter(asset => asset !== '/socket.io/socket.io.js' && !asset.includes('<%='))
+    ];
+    for (const asset of fixedLocalAssets) {
+        assert.equal(fs.existsSync(path.join(root, 'public', asset.slice(1))), true,
+            `missing static asset ${asset}`);
+    }
+    for (const gameId of GAME_IDS) {
+        const asset = `/js/games/${gameId}.js`;
+        assert.equal(fs.existsSync(path.join(root, 'public', asset.slice(1))), true,
+            `missing static asset ${asset}`);
+    }
+
+    const dependencyOrder = [
+        '/js/idempotent-fetch.js',
+        '/socket.io/socket.io.js',
+        '/js/streamer-game-ui-state.js',
+        '/js/creator-shell.js',
+        '/js/creator-operation-center.js',
+        '/js/creator-responsive-navigation.js',
+        '/js/creator-context-help.js',
+        '/js/streamer-game.js',
+        '/js/games/game-state-narrator.js',
+        '/js/games/game-experience.js',
+        '/js/games/<%= gameId %>.js'
+    ];
+    assert.deepEqual(scripts, dependencyOrder);
 });
 
 test('UI is bilingual, mobile, keyboard/touch ready, reconnects coop, and never renders hidden HTML', () => {
