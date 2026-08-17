@@ -61,7 +61,9 @@
         headers.set('Idempotency-Key', key);
         try {
             const response = await fetch(url, { ...options, headers });
-            const idempotencyStatus = response.headers.get('Idempotency-Status');
+            const idempotencyStatus = String(
+                response.headers?.get?.('Idempotency-Status') || ''
+            ).trim().toLowerCase();
             if (!['pending', 'indeterminate'].includes(idempotencyStatus)) {
                 pendingIdempotencyKeys.delete(signature);
                 persistPendingKeys();

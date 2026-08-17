@@ -205,7 +205,8 @@ class RewardCatalogRepository {
     async createOrder(client, values) {
         return (await client.query(`INSERT INTO reward_orders(id,user_id,catalog_version_id,source_type,source_key,
             grant_template_key,created_by_user_id,status,points_cost,exposure_value,semantic_hash,notification_policy,approved_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $8='approved' THEN NOW() END) RETURNING *`,
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8::VARCHAR(24),$9,$10,$11,$12,
+                CASE WHEN $8::VARCHAR(24)='approved' THEN NOW() END) RETURNING *`,
         [values.id, values.userId, values.catalogVersionId, values.sourceType, values.sourceKey,
             values.grantTemplateKey || null, values.createdByUserId, values.status, values.pointsCost,
             values.exposureValue, values.semanticHash, values.notificationPolicy || 'normal'])).rows[0];
@@ -234,13 +235,13 @@ class RewardCatalogRepository {
     }
 
     async transitionOrder(client, orderId, status, actorUserId = null) {
-        return (await client.query(`UPDATE reward_orders SET status=$2,updated_at=NOW(),
-            reviewer_user_id=CASE WHEN $2 IN('approved','rejected') THEN $3 ELSE reviewer_user_id END,
-            approved_at=CASE WHEN $2='approved' THEN NOW() ELSE approved_at END,
-            rejected_at=CASE WHEN $2='rejected' THEN NOW() ELSE rejected_at END,
-            claimed_at=CASE WHEN $2='claimed' THEN NOW() ELSE claimed_at END,
-            cancelled_at=CASE WHEN $2='cancelled' THEN NOW() ELSE cancelled_at END,
-            revoked_at=CASE WHEN $2='revoked' THEN NOW() ELSE revoked_at END
+        return (await client.query(`UPDATE reward_orders SET status=$2::VARCHAR(24),updated_at=NOW(),
+            reviewer_user_id=CASE WHEN $2::VARCHAR(24) IN('approved','rejected') THEN $3 ELSE reviewer_user_id END,
+            approved_at=CASE WHEN $2::VARCHAR(24)='approved' THEN NOW() ELSE approved_at END,
+            rejected_at=CASE WHEN $2::VARCHAR(24)='rejected' THEN NOW() ELSE rejected_at END,
+            claimed_at=CASE WHEN $2::VARCHAR(24)='claimed' THEN NOW() ELSE claimed_at END,
+            cancelled_at=CASE WHEN $2::VARCHAR(24)='cancelled' THEN NOW() ELSE cancelled_at END,
+            revoked_at=CASE WHEN $2::VARCHAR(24)='revoked' THEN NOW() ELSE revoked_at END
             WHERE id=$1 RETURNING *`, [orderId, status, actorUserId])).rows[0];
     }
 

@@ -1046,8 +1046,8 @@ module.exports = function registerAdminRoutes(app, deps) {
                     : status === 'correct' && level >= 3 ? 'passed' : null;
                 const sessionUpdated = await client.query(`
                         UPDATE dictation_sessions
-                        SET result = $1,
-                            ended_at = CASE WHEN $1 = 'in_progress' THEN NULL ELSE NOW() END
+                        SET result = $1::VARCHAR(20),
+                            ended_at = CASE WHEN $1::VARCHAR(20) = 'in_progress' THEN NULL ELSE NOW() END
                         WHERE id = $2 AND username = $3 AND version = $4
                         RETURNING id
                 `, [terminalResult || 'in_progress', sessionId, username, submission.session_version]);

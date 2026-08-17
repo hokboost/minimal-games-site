@@ -100,12 +100,12 @@ class QuestV2RuntimeRepository {
     async transitionAssignment(assignmentId, expectedRevision, fromStatuses, toStatus, extra = {}) {
         const result = await this.client.query(`
             UPDATE quest_v2_assignments
-            SET status = $4,
+            SET status = $4::VARCHAR(20),
                 revision = revision + 1,
-                accepted_at = CASE WHEN $4 = 'accepted' THEN NOW() ELSE accepted_at END,
-                submitted_at = CASE WHEN $4 = 'submitted' THEN NOW() ELSE submitted_at END,
-                completed_at = CASE WHEN $4 = 'completed' THEN NOW() ELSE completed_at END,
-                resolved_at = CASE WHEN $4 IN ('completed', 'declined', 'expired', 'cancelled') THEN NOW() ELSE resolved_at END,
+                accepted_at = CASE WHEN $4::VARCHAR(20) = 'accepted' THEN NOW() ELSE accepted_at END,
+                submitted_at = CASE WHEN $4::VARCHAR(20) = 'submitted' THEN NOW() ELSE submitted_at END,
+                completed_at = CASE WHEN $4::VARCHAR(20) = 'completed' THEN NOW() ELSE completed_at END,
+                resolved_at = CASE WHEN $4::VARCHAR(20) IN ('completed', 'declined', 'expired', 'cancelled') THEN NOW() ELSE resolved_at END,
                 postpone_until = COALESCE($5::TIMESTAMPTZ, postpone_until),
                 updated_at = NOW()
             WHERE id = $1 AND revision = $2 AND status = ANY($3::TEXT[])
@@ -280,8 +280,8 @@ class QuestV2RuntimeRepository {
     async markStepsReviewed(assignmentId, decision) {
         const result = await this.client.query(`
             UPDATE quest_v2_assignment_steps
-            SET status = $2, revision = revision + 1,
-                completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE NULL END,
+            SET status = $2::VARCHAR(20), revision = revision + 1,
+                completed_at = CASE WHEN $2::VARCHAR(20) = 'completed' THEN NOW() ELSE NULL END,
                 updated_at = NOW()
             WHERE assignment_id = $1 AND status = 'submitted'
             RETURNING step_definition_id
@@ -295,8 +295,8 @@ class QuestV2RuntimeRepository {
             INSERT INTO quest_v2_reward_settlements (
                 settlement_key, assignment_id, user_id, reward_policy_version,
                 reward_points, operation_type, status, posted_at
-            ) VALUES ($1, $2, $3, $4, $5, 'quest_auto_reward', $6,
-                      CASE WHEN $6 = 'zero_value' THEN NOW() ELSE NULL END)
+            ) VALUES ($1, $2, $3, $4, $5, 'quest_auto_reward', $6::VARCHAR(20),
+                      CASE WHEN $6::VARCHAR(20) = 'zero_value' THEN NOW() ELSE NULL END)
             ON CONFLICT (assignment_id) DO NOTHING
             RETURNING settlement_key, status
         `, [settlement.key, settlement.assignmentId, settlement.userId,
@@ -588,9 +588,9 @@ class QuestV2RuntimeRepository {
                 assignment_key, user_id, version_id, status, occurrence,
                 reward_policy_version, reward_points, completion_rule,
                 assignment_source, completed_at, resolved_at, due_at
-            ) VALUES ($1, $2, $3, $4, 1, 1, 0,
+            ) VALUES ($1, $2, $3, $4::VARCHAR(20), 1, 1, 0,
                 '{"op":"admin_confirmation"}'::JSONB,
-                'legacy_import', CASE WHEN $4 = 'completed' THEN NOW() ELSE NULL END,
+                'legacy_import', CASE WHEN $4::VARCHAR(20) = 'completed' THEN NOW() ELSE NULL END,
                 NOW(), NOW() + INTERVAL '1 second')
             RETURNING id
         `, [`legacy:${card.id}:history`, userId, versionId, terminal]);

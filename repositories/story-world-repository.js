@@ -111,9 +111,10 @@ class StoryWorldRepository {
 
     async updateRun(runId, expectedRevision, run) {
         const result = await this.client.query(`
-            UPDATE story_runs SET status=$3,current_episode=$4,current_node_id=$5,revision=$6,
+            UPDATE story_runs SET status=$3::VARCHAR(20),current_episode=$4,current_node_id=$5,revision=$6,
                 state_snapshot=$7::JSONB,checkpoint_snapshot=$8::JSONB,
-                completed_at=CASE WHEN $3='completed' THEN COALESCE(completed_at,NOW()) ELSE NULL END,updated_at=NOW()
+                completed_at=CASE WHEN $3::VARCHAR(20)='completed'
+                    THEN COALESCE(completed_at,NOW()) ELSE NULL END,updated_at=NOW()
             WHERE id=$1 AND revision=$2 AND status='active' RETURNING *
         `, [runId, expectedRevision, run.status, run.currentEpisode, run.currentNodeId, run.revision,
             JSON.stringify(run.state), run.checkpoint ? JSON.stringify(run.checkpoint) : null]);

@@ -276,9 +276,10 @@ class LiveInteractionRepository {
     }
 
     async advanceRoom(client, room, next) {
-        const result = await client.query(`UPDATE live_interactions SET status=$3,revision=$4,
+        const result = await client.query(`UPDATE live_interactions SET status=$3::VARCHAR(20),revision=$4,
             creator_availability=$5,creator_muted_until=$6,
-            closed_at=CASE WHEN $3 IN ('left','closed') THEN COALESCE(closed_at,NOW()) ELSE closed_at END
+            closed_at=CASE WHEN $3::VARCHAR(20) IN ('left','closed')
+                THEN COALESCE(closed_at,NOW()) ELSE closed_at END
             WHERE id=$1 AND revision=$2 RETURNING *`, [room.id, room.revision, next.status,
             next.revision, next.availability, next.mutedUntil
         ]);

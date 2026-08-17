@@ -4,6 +4,7 @@ require('dotenv').config();
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const {
     BASE_MIGRATION,
@@ -12,6 +13,7 @@ const {
     migrationTransactionBody
 } = require('../lib/database-migrations');
 const { queueMissingPkRunners } = require('../lib/pk-runner-recovery');
+const { StreamerGameRepository } = require('../repositories/streamer-game-repository');
 const {
     acquireWorkerRoleLease,
     hasActiveWorkerRoleLease,
@@ -156,6 +158,20 @@ async function run() {
     if (!Object.values(verification.rows[0]).every(Boolean)) {
         throw new Error(`Fresh schema verification failed: ${JSON.stringify(verification.rows[0])}`);
     }
+
+    // Execute the real extended-query protocol against PostgreSQL. A mock or
+    // migration-only check cannot catch ambiguous parameter inference between
+    // the VARCHAR status assignment and its completed-at predicate.
+    const streamerGames = new StreamerGameRepository({ pool: testPool });
+    assert.equal(await streamerGames.updateRun(testPool, {
+        id: randomUUID(),
+        revision: 0,
+        configVersion: 'signal-v2',
+        contentHash: '0'.repeat(64),
+        contentSnapshot: {},
+        creatorUsername: 'migration-test-user',
+        ownerUsername: null
+    }, { status: 'active', score: 0 }), null);
 
     const phaseNinePlans = await Promise.all([
         testPool.query(`EXPLAIN (FORMAT JSON)

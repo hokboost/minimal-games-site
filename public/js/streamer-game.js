@@ -9,6 +9,9 @@
     let signalTimer = null;
     let socket = null;
     const pending = new Map();
+    const unresolvedIdempotencyStatuses = new Set(['pending', 'indeterminate']);
+    let mutationRecovery = null;
+    let startInFlight = false;
     const challenge = document.getElementById('sg-challenge');
     const content = document.getElementById('sg-content');
     const actions = document.getElementById('sg-actions');
@@ -17,6 +20,61 @@
     const text = (zh, en) => lang === 'zh' ? zh : en;
     const localized = (value, key) => value?.[`${key}${lang === 'zh' ? 'Zh' : 'En'}`] || '';
     const commandId = () => globalThis.crypto.randomUUID();
+
+    function responseIdempotencyStatus(response) {
+        const value = response?.headers?.get?.('Idempotency-Status');
+        return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : null;
+    }
+
+    function runSnapshot() {
+        return {
+            id: model.run?.id || null,
+            revision: model.run?.revision ?? null,
+            status: model.run?.status || null
+        };
+    }
+
+    function recoveryResolved(before) {
+        const current = runSnapshot();
+        return current.id !== before.id || current.revision !== before.revision
+            || current.status !== before.status;
+    }
+
+    function reconcileMutationRecovery() {
+        if (mutationRecovery && recoveryResolved(mutationRecovery.before)) mutationRecovery = null;
+    }
+
+    function recoveryMessage(idempotencyStatus) {
+        return idempotencyStatus === 'pending'
+            ? text('操作仍在服务器处理中。已保留恢复信息并刷新权威状态，请勿重复提交。',
+                'The operation is still pending on the server. Recovery data was preserved and authoritative state was refreshed; do not resubmit it.')
+            : text('服务器尚未确认操作结果。已保留恢复信息并刷新权威状态，请勿重复提交。',
+                'The server has not confirmed the operation result. Recovery data was preserved and authoritative state was refreshed; do not resubmit it.');
+    }
+
+    function applyMutationRecoveryLock() {
+        const blocked = Boolean(mutationRecovery);
+        document.getElementById('sg-start').disabled = blocked || startInFlight;
+        if (!blocked) return;
+        actions.querySelectorAll('button,select').forEach(control => { control.disabled = true; });
+        message.textContent = mutationRecovery.message;
+    }
+
+    async function recoverUnresolvedMutation(error, before) {
+        if (!unresolvedIdempotencyStatuses.has(error.idempotencyStatus)) return false;
+        error.message = recoveryMessage(error.idempotencyStatus);
+        mutationRecovery = { before, message: error.message, idempotencyStatus: error.idempotencyStatus };
+        try {
+            await refresh(before.id);
+        } catch {
+            // Keep the recovery lock when authoritative state cannot be read.
+        }
+        if (!mutationRecovery) {
+            error.message = text('已刷新服务器权威状态，请确认最新对局后继续。',
+                'Authoritative server state was refreshed. Review the latest run before continuing.');
+        }
+        return true;
+    }
 
     function publishModel() {
         document.dispatchEvent(new CustomEvent('streamer-game:model', {
@@ -57,9 +115,11 @@
             body: JSON.stringify(command)
         });
         const result = await response.json();
-        if (response.ok || response.status < 500) pending.delete(signature);
+        const idempotencyStatus = responseIdempotencyStatus(response);
+        if (!unresolvedIdempotencyStatuses.has(idempotencyStatus)
+            && (response.ok || response.status < 500)) pending.delete(signature);
         if (!response.ok) throw Object.assign(new Error(result.message || text('请求失败', 'Request failed')),
-            { code: result.code, status: response.status });
+            { code: result.code, status: response.status, idempotencyStatus });
         return result;
     }
 
@@ -236,6 +296,7 @@
             .forEach(line => tutorial.append(node('li', '', line)));
         if (!run) {
             content.append(node('p', 'sg-meta', text('选择挑战开始。', 'Choose a challenge to begin.')));
+            applyMutationRecoveryLock();
             publishModel();
             return;
         }
@@ -277,18 +338,28 @@
             for (let slot = 0; slot < 6; slot += 1) collection.append(node('p', 'sg-meta',
                 `${slot + 1}: ${bySlot.get(slot) || text('空位', 'empty')}`));
         }
+        applyMutationRecoveryLock();
         publishModel();
     }
 
     async function refresh(runId) {
         const response = await fetch(`/api/${gameId}/state?runId=${encodeURIComponent(runId || model.run?.id || '')}`, { credentials: 'same-origin' });
-        if (response.ok) model = await response.json();
+        if (response.ok) {
+            model = await response.json();
+            reconcileMutationRecovery();
+        }
         render();
+        return response.ok;
     }
 
     async function commit(action) {
+        if (mutationRecovery) {
+            message.textContent = mutationRecovery.message;
+            return;
+        }
         const run = model.run;
         if (!run || !busyGate.begin()) return;
+        const before = runSnapshot();
         const operationId = window.CreatorOperations?.begin({
             label: text('提交对局动作', 'Submit game action'),
             method: 'POST',
@@ -299,11 +370,20 @@
         try {
             const result = await post(`/api/${gameId}/action`, { runId: run.id, expectedRevision: run.revision, action }, signature);
             model.run = result.run;
+            mutationRecovery = null;
             model.history = [{ status: result.run.status, difficulty: result.run.difficulty, score: result.run.score }, ...(model.history || [])];
             if (gameId === 'studio-crafting' && result.run.status === 'completed') await refresh(result.run.id);
             else render();
             if (operationId) window.CreatorOperations.finish(operationId, { status: 200 });
         } catch (error) {
+            const recovering = await recoverUnresolvedMutation(error, before);
+            if (!recovering && error.code === 'GAME_REVISION_CONFLICT') {
+                try {
+                    await refresh(run.id);
+                } catch {
+                    // Preserve the original conflict when authoritative refresh fails.
+                }
+            }
             if (operationId) window.CreatorOperations.fail(operationId, error);
             throw error;
         } finally {
@@ -313,7 +393,14 @@
     }
 
     document.getElementById('sg-start').addEventListener('click', async event => {
+        if (mutationRecovery || startInFlight) {
+            event.currentTarget.disabled = true;
+            if (mutationRecovery) message.textContent = mutationRecovery.message;
+            return;
+        }
+        startInFlight = true;
         event.currentTarget.disabled = true;
+        const before = runSnapshot();
         const operationId = window.CreatorOperations?.begin({
             label: text('开始或恢复对局', 'Start or resume game'),
             method: 'POST',
@@ -323,10 +410,11 @@
             const mode = document.querySelector('input[name=sg-mode]:checked').value;
             const result = await post(`/api/${gameId}/start`, { challengeId: challenge.value,
                 difficulty: document.getElementById('sg-difficulty').value, mode }, `start:${gameId}:${challenge.value}:${mode}`);
-            model.run = result.run; render();
+            model.run = result.run; mutationRecovery = null; render();
             if (operationId) window.CreatorOperations.finish(operationId, { status: 200 });
         } catch (error) {
-            if (error.code === 'GAME_ACTIVE_RUN_EXISTS') await refresh();
+            const recovering = await recoverUnresolvedMutation(error, before);
+            if (!recovering && error.code === 'GAME_ACTIVE_RUN_EXISTS') await refresh();
             message.textContent = error.code === 'GAME_ACTIVE_RUN_EXISTS'
                 ? text('已恢复尚未完成的对局。', 'Resumed your active run.') : error.message;
             if (operationId) {
@@ -334,7 +422,10 @@
                 else window.CreatorOperations.fail(operationId, error);
             }
         }
-        finally { event.currentTarget.disabled = false; }
+        finally {
+            startInFlight = false;
+            event.currentTarget.disabled = Boolean(mutationRecovery);
+        }
     });
     actions.addEventListener('click', async event => {
         const button = event.target.closest('button[data-type]'); if (!button) return;

@@ -204,6 +204,38 @@ test('fresh migration test verifies all streamer vertical slice tables', () => {
     assert.match(script, /streamer_season_archives/);
 });
 
+test('varchar transition parameters keep one explicit PostgreSQL type in assignments and conditions', () => {
+    const story = source('repositories/story-world-repository.js');
+    assert.equal((story.match(/\$3::VARCHAR\(20\)/g) || []).length, 2);
+    assert.match(story, /status=\$3::VARCHAR\(20\)/);
+    assert.match(story, /CASE WHEN \$3::VARCHAR\(20\)='completed'/);
+
+    const live = source('repositories/live-interaction-repository.js');
+    assert.equal((live.match(/\$3::VARCHAR\(20\)/g) || []).length, 2);
+    assert.match(live, /status=\$3::VARCHAR\(20\)/);
+    assert.match(live, /CASE WHEN \$3::VARCHAR\(20\) IN \('left','closed'\)/);
+
+    const rewards = source('repositories/reward-catalog-repository.js');
+    assert.equal((rewards.match(/\$8::VARCHAR\(24\)/g) || []).length, 2);
+    assert.equal((rewards.match(/\$2::VARCHAR\(24\)/g) || []).length, 7);
+    assert.match(rewards, /status=\$2::VARCHAR\(24\)/);
+    assert.match(rewards, /CASE WHEN \$2::VARCHAR\(24\)='revoked'/);
+
+    const quests = source('repositories/quest-v2-runtime-repository.js');
+    assert.equal((quests.match(/\$4::VARCHAR\(20\)/g) || []).length, 7);
+    assert.equal((quests.match(/\$2::VARCHAR\(20\)/g) || []).length, 2);
+    assert.equal((quests.match(/\$6::VARCHAR\(20\)/g) || []).length, 2);
+    assert.match(quests, /status = \$4::VARCHAR\(20\)/);
+    assert.match(quests, /CASE WHEN \$4::VARCHAR\(20\) = 'completed'/);
+    assert.match(quests, /status = \$2::VARCHAR\(20\)/);
+    assert.match(quests, /status, posted_at[\s\S]*\$6::VARCHAR\(20\)/);
+
+    const admin = source('routes/admin.js');
+    assert.equal((admin.match(/\$1::VARCHAR\(20\)/g) || []).length, 2);
+    assert.match(admin, /SET result = \$1::VARCHAR\(20\)/);
+    assert.match(admin, /CASE WHEN \$1::VARCHAR\(20\) = 'in_progress'/);
+});
+
 test('fresh migration test verifies every principal Phase 9 cursor index', () => {
     const script = source('scripts/test-fresh-migrations.js');
     assert.match(script, /creator_inbox_user_archive_time_idx/);

@@ -15,6 +15,7 @@ const weaver = require('../domain/story-weaver/engine');
 const crafting = require('../domain/studio-crafting/engine');
 const { readStreamerWorldFlags } = require('../lib/streamer-world-flags');
 const { GAME_DEFINITIONS } = require('../domain/games/registry');
+const { StreamerGameRepository } = require('../repositories/streamer-game-repository');
 const { validateInternalGameEvent } = require('../services/quest-v2-service');
 const { ENGINE_REGISTRY, StreamerGameService, StreamerGameServiceError, hash } = require('../services/streamer-game-service');
 
@@ -196,6 +197,40 @@ test('migration stores version snapshots, CAS runs, immutable replay, hook inten
     assert.match(sql, /streamer_game_version_no_delete/);
     assert.match(sql, /streamer_game_collection_append_only/);
     assert.match(source('domain/live-interactions/protocol.js'), /interaction\.game_state_changed/);
+});
+
+test('repository update gives PostgreSQL one explicit status type for active and completed actions', async () => {
+    const calls = [];
+    const repository = new StreamerGameRepository({
+        pool: { connect() {}, query() {} }
+    });
+    const client = {
+        async query(sql, parameters) {
+            calls.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), parameters });
+            return { rows: [] };
+        }
+    };
+    const run = {
+        id: uuid(3),
+        revision: 7,
+        configVersion: 'signal-v1',
+        contentHash: '0'.repeat(64),
+        contentSnapshot: {},
+        creatorUsername: 'creator',
+        ownerUsername: null
+    };
+
+    for (const [status, score] of [['active', 12], ['completed', 34]]) {
+        const nextState = { status, score, history: [] };
+        assert.equal(await repository.updateRun(client, run, nextState), null);
+        const call = calls.at(-1);
+        assert.match(call.sql, /status=\$4::VARCHAR\(16\)/);
+        assert.match(call.sql,
+            /completed_at=CASE WHEN \$4::VARCHAR\(16\)='completed' THEN NOW\(\) ELSE NULL END/);
+        assert.deepEqual(call.parameters, [run.id, run.revision, JSON.stringify(nextState), status, score]);
+    }
+
+    assert.equal(calls.length, 2);
 });
 
 test('Quest V2 accepts only a server-shaped game completion event', () => {

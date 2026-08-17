@@ -498,7 +498,7 @@ test('successful send response finalizes the same status and body', async () => 
     assert.equal(res.calls.at(-1).body, 'accepted');
 });
 
-test('server error response records indeterminate instead of retrying business work', async () => {
+test('server error response records and returns indeterminate instead of inviting a new request key', async () => {
     const pool = insertedPool();
     const middleware = createIdempotencyMiddleware({ pool, paths: ['/api/creator/inbox/read'] });
     const req = request();
@@ -512,8 +512,12 @@ test('server error response records indeterminate instead of retrying business w
         success: false,
         message: '请求处理结果无法自动确认，请联系管理员核对账务'
     }));
-    assert.equal(res.headers.get('idempotency-status'), 'created');
-    assert.equal(res.calls.at(-1).status, 503);
+    assert.equal(res.headers.get('idempotency-status'), 'indeterminate');
+    assert.equal(res.calls.at(-1).status, 409);
+    assert.deepEqual(res.calls.at(-1).body, {
+        success: false,
+        message: '请求处理结果无法自动确认，请联系管理员核对账务'
+    });
 });
 
 test('response wrapper finalizes at most once across json then end', async () => {

@@ -83,10 +83,16 @@ class FakeCustomEvent {
     }
 }
 
-function response(body, status = 200) {
+function response(body, status = 200, idempotencyStatus = null) {
     return {
         ok: status >= 200 && status < 300,
         status,
+        headers: {
+            get(name) {
+                return String(name).toLowerCase() === 'idempotency-status'
+                    ? idempotencyStatus : null;
+            }
+        },
         async json() { return body; }
     };
 }
@@ -120,7 +126,8 @@ function stateBase(overrides = {}) {
     };
 }
 
-function createBrowser({ gameId, initialRun, mutation, refreshed }) {
+function createBrowser({ gameId, initialRun, mutation, refreshed,
+    mutationStatus = 200, mutationIdempotencyStatus = null }) {
     const ids = ['sg-bootstrap', 'sg-challenge', 'sg-content', 'sg-actions', 'sg-status',
         'sg-message', 'sg-history', 'sg-tutorial', 'sg-collection', 'sg-start', 'sg-difficulty'];
     const elements = new Map(ids.map(id => [id, new FakeNode(id === 'sg-start' ? 'button' : 'div', id)]));
@@ -158,7 +165,8 @@ function createBrowser({ gameId, initialRun, mutation, refreshed }) {
         idempotentFetch: async (url, options) => {
             mutationCalls.push({ url, options });
             if (mutation instanceof Error) throw mutation;
-            return response(mutation);
+            if (typeof mutation === 'function') return mutation(url, options);
+            return response(mutation, mutationStatus, mutationIdempotencyStatus);
         },
         io: () => socket
     };
@@ -183,7 +191,8 @@ function createBrowser({ gameId, initialRun, mutation, refreshed }) {
     vm.createContext(context);
     vm.runInContext(source('public/js/streamer-game-ui-state.js'), context);
     vm.runInContext(source('public/js/streamer-game.js'), context);
-    return { documentListeners, elements, mutationCalls, refreshCalls, socketHandlers, socketEmits };
+    return { documentListeners, elements, mutationCalls, refreshCalls, socketHandlers, socketEmits,
+        window: windowObject };
 }
 
 function buttons(element) {
@@ -241,6 +250,90 @@ test('actual crafting renderer restores resting/material rules after a network e
     assert.equal(current.find(button => button.dataset.material === 'folded-paper').disabled, false);
     assert.equal(current.find(button => button.dataset.material === 'soft-light').disabled, true);
     assert.equal(current.find(button => button.dataset.type === 'craft').disabled, true);
+});
+
+test('an indeterminate mutation refreshes authoritative state and locks out blind resubmission', async () => {
+    const craftingState = stateBase({
+        challengeId: 'paper-moon-lamp',
+        recipe: { 'folded-paper': 1, 'soft-light': 1 },
+        materialLabels: { 'folded-paper': 'Folded paper', 'soft-light': 'Soft light' },
+        materials: {},
+        crafted: [],
+        roomSlots: [null, null, null, null, null, null],
+        nextMaterial: 'folded-paper'
+    });
+    const initialRun = run({ gameId: 'studio-crafting', state: craftingState });
+    const browser = createBrowser({
+        gameId: 'studio-crafting',
+        initialRun,
+        mutation: { success: false, code: 'GAME_SERVICE_UNAVAILABLE', message: 'Game unavailable' },
+        mutationStatus: 503,
+        mutationIdempotencyStatus: ' InDeTeRmInAtE '
+    });
+    const actionPanel = browser.elements.get('sg-actions');
+    const gather = buttons(actionPanel).find(button => button.dataset.material === 'folded-paper');
+    await actionPanel.dispatch('click', { target: gather });
+
+    assert.equal(browser.mutationCalls.length, 1);
+    assert.equal(browser.refreshCalls.length, 1);
+    assert.equal(browser.elements.get('sg-start').disabled, true);
+    assert.ok(actionPanel.querySelectorAll('button,select').every(control => control.disabled));
+    assert.match(browser.elements.get('sg-message').textContent, /not confirmed|do not resubmit/i);
+
+    const currentGather = buttons(actionPanel)
+        .find(button => button.dataset.material === 'folded-paper');
+    await actionPanel.dispatch('click', { target: currentGather });
+    assert.equal(browser.mutationCalls.length, 1, 'recovery lock must not mint another mutation');
+});
+
+test('start stays single-flight while the request is pending and unlocks only after its response', async () => {
+    let settle;
+    const nextRun = run({ gameId: 'signal-duet', state: stateBase({
+        bpm: 90, totalBeats: 8, completedBeats: 0, nextBeatAtMs: Date.now() + 1000,
+        timingWindowMs: 200, yourTurn: true, visibleBeats: []
+    }) });
+    const browser = createBrowser({
+        gameId: 'signal-duet',
+        initialRun: null,
+        mutation: () => new Promise(resolve => { settle = resolve; })
+    });
+    const start = browser.elements.get('sg-start');
+    const request = start.dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(start.disabled, true);
+    await start.dispatch('click');
+    assert.equal(browser.mutationCalls.length, 1);
+    settle(response({ success: true, run: nextRun }, 201, 'created'));
+    await request;
+    assert.equal(start.disabled, false);
+    assert.equal(browser.window.StreamerGameModel.get().run.id, nextRun.id);
+});
+
+test('a revision conflict automatically refreshes the authoritative run', async () => {
+    const before = stateBase({ width: 1, height: 1, placements: [], yourTurn: true,
+        privateClue: { blockedCells: [], nextColumn: 0 } });
+    const after = stateBase({ width: 1, height: 1,
+        placements: [{ key: '0:0', x: 0, y: 0, role: 'owner' }], yourTurn: false,
+        privateClue: { blockedCells: [], nextColumn: 0 } });
+    const initialRun = run({ gameId: 'constellation-repair', state: before, mode: 'coop', actorRole: 'owner' });
+    const refreshedRun = run({ gameId: 'constellation-repair', state: after,
+        mode: 'coop', actorRole: 'owner', revision: 1 });
+    const browser = createBrowser({
+        gameId: 'constellation-repair',
+        initialRun,
+        mutation: { success: false, code: 'GAME_REVISION_CONFLICT', message: 'Game changed' },
+        mutationStatus: 409,
+        mutationIdempotencyStatus: 'created',
+        refreshed: { success: true, gameId: 'constellation-repair', run: refreshedRun, history: [] }
+    });
+    const cell = buttons(browser.elements.get('sg-actions'))
+        .find(button => button.dataset.x === '0' && button.dataset.y === '0');
+    await browser.elements.get('sg-actions').dispatch('click', { target: cell });
+
+    assert.equal(browser.mutationCalls.length, 1);
+    assert.equal(browser.refreshCalls.length, 1);
+    assert.equal(browser.window.StreamerGameModel.get().run.revision, 1);
+    assert.ok(buttons(browser.elements.get('sg-actions')).every(button => button.disabled));
 });
 
 test('signal renderer shows its authoritative countdown and Space commits the current beat', async () => {

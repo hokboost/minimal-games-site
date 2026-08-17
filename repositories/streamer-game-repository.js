@@ -193,8 +193,9 @@ class StreamerGameRepository {
 
     async updateRun(client, run, nextState) {
         const result = await client.query(`
-            UPDATE streamer_game_runs SET state=$3::JSONB,status=$4,score=$5,revision=revision+1,updated_at=NOW(),
-                completed_at=CASE WHEN $4='completed' THEN NOW() ELSE NULL END
+            UPDATE streamer_game_runs SET state=$3::JSONB,status=$4::VARCHAR(16),score=$5,
+                revision=revision+1,updated_at=NOW(),
+                completed_at=CASE WHEN $4::VARCHAR(16)='completed' THEN NOW() ELSE NULL END
             WHERE id=$1 AND revision=$2 RETURNING *
         `, [run.id, run.revision, JSON.stringify(nextState), nextState.status, nextState.score]);
         return result.rows[0] ? runRow({ ...result.rows[0], config_version: run.configVersion,

@@ -13,6 +13,24 @@ const {
 } = require('../tests/helpers/integration-environment');
 
 const FAULT_TOKEN = 'browser-fault-token-0123456789abcdef';
+const STREAMER_GAME_ENV = Object.freeze({
+    STREAMER_WORLD_ENABLED: 'true',
+    CREATOR_PROFILE_ENABLED: 'true',
+    STREAMER_NEW_GAMES_ENABLED: 'true'
+});
+
+const STREAMER_GAME_IDS = Object.freeze([
+    'constellation-repair',
+    'signal-duet',
+    'mystery-board',
+    'story-weaver',
+    'studio-crafting',
+    'meteor-defense',
+    'dream-maze',
+    'broadcast-bingo',
+    'echo-memory',
+    'keeper-prediction'
+]);
 
 const GAME_PAGES = [
     { path: '/quiz', control: '#start-quiz-btn' },
@@ -25,7 +43,8 @@ const GAME_PAGES = [
     { path: '/duel', control: '#duelBtn' },
     { path: '/dictation', control: '#start-btn' },
     { path: '/wish', control: '.gift-action-btn[data-gift="bobo"][data-count="1"]' },
-    { path: '/doudizhu', control: '#startDoudizhuBtn' }
+    { path: '/doudizhu', control: '#startDoudizhuBtn' },
+    ...STREAMER_GAME_IDS.map(gameId => ({ path: `/${gameId}`, control: '#sg-start' }))
 ];
 
 async function eventually(check, timeoutMs = 8000) {
@@ -167,7 +186,8 @@ async function testSlotRecovery(page, context, database, user, app) {
         port: Number(new URL(app.baseUrl).port),
         label: 'browser-e2e-restarted',
         faultToken: FAULT_TOKEN,
-        poolMax: 8
+        poolMax: 8,
+        extraEnv: STREAMER_GAME_ENV
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator('#bet-amount').fill('17');
@@ -285,6 +305,39 @@ async function exerciseEveryGame(page, database, user) {
     assert.equal(doudizhuStart.body.state.humanSeat <= 2, true);
     assert.equal(doudizhuStart.body.state.hand.length >= 1, true);
     assert.equal(Object.hasOwn(doudizhuStart.body.state, 'hands'), false);
+
+    for (const gameId of STREAMER_GAME_IDS) {
+        await page.goto(`${page.baseUrl}/${gameId}`, { waitUntil: 'domcontentloaded' });
+        const started = await waitForApiAction(page, `/api/${gameId}/start`, () => page.locator('#sg-start').click());
+        assert.equal(started.response.status(), 201);
+        assert.equal(started.body.run.gameId, gameId);
+
+        if (gameId === 'signal-duet') {
+            await page.locator('#sg-actions button[data-type="tap"]').waitFor({ state: 'visible' });
+            const tapped = await waitForApiAction(page, `/api/${gameId}/action`, () => (
+                page.locator('#sg-actions button[data-type="tap"]').click()
+            ));
+            assert.equal(tapped.body.run.revision, 1);
+        }
+
+        await page.locator('#sg-actions button[data-type="abandon"]').waitFor({ state: 'visible' });
+        const abandoned = await waitForApiAction(page, `/api/${gameId}/action`, () => (
+            page.locator('#sg-actions button[data-type="abandon"]').click()
+        ));
+        assert.equal(abandoned.body.run.status, 'abandoned');
+        const durable = await database.pool.query(`
+            SELECT run.status,run.revision,
+                   (SELECT COUNT(*)::integer FROM streamer_game_events event WHERE event.run_id=run.id) event_count,
+                   (SELECT COUNT(*)::integer FROM streamer_game_commands command WHERE command.run_id=run.id) command_count
+            FROM streamer_game_runs run WHERE run.id=$1
+        `, [started.body.run.id]);
+        assert.deepEqual(durable.rows[0], {
+            status: 'abandoned',
+            revision: gameId === 'signal-duet' ? 2 : 1,
+            event_count: gameId === 'signal-duet' ? 3 : 2,
+            command_count: gameId === 'signal-duet' ? 2 : 1
+        });
+    }
 }
 
 async function run() {
@@ -309,7 +362,8 @@ async function run() {
             port,
             label: 'browser-e2e',
             faultToken: FAULT_TOKEN,
-            poolMax: 8
+            poolMax: 8,
+            extraEnv: STREAMER_GAME_ENV
         });
         browser = await chromium.launch({ headless: true });
 

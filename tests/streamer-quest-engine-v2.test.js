@@ -349,6 +349,38 @@ test('journal uses shared idempotent fetch and response-loss retry reuses its co
     assert.deepEqual(keys, ['11111111-1111-4111-a111-111111111111', '11111111-1111-4111-a111-111111111111']);
 });
 
+test('shared idempotent fetch keeps the same key after an indeterminate HTTP response', async () => {
+    const storage = new Map();
+    const keys = [];
+    let generated = 0;
+    const context = {
+        window: {},
+        sessionStorage: {
+            getItem: key => storage.get(key) || null,
+            setItem: (key, value) => storage.set(key, value)
+        },
+        Headers, Date, Uint8Array,
+        crypto: {
+            randomUUID: () => `11111111-1111-4111-a111-${String(++generated).padStart(12, '0')}`,
+            getRandomValues: bytes => bytes.fill(1)
+        },
+        fetch: async (_url, options) => {
+            keys.push(options.headers.get('Idempotency-Key'));
+            return { headers: { get: () => ' InDeTeRmInAtE ' } };
+        }
+    };
+    context.globalThis = context;
+    vm.runInNewContext(source('public/js/idempotent-fetch.js'), context);
+    const options = { method: 'POST', body: '{"runId":"one","expectedRevision":0}' };
+    await context.window.idempotentFetch('/api/signal-duet/action', options);
+    await context.window.idempotentFetch('/api/signal-duet/action', options);
+    assert.deepEqual(keys, [
+        '11111111-1111-4111-a111-000000000001',
+        '11111111-1111-4111-a111-000000000001'
+    ]);
+    assert.equal(generated, 1);
+});
+
 test('routes and templates provide disabled 404, bilingual privacy, and mobile controls', () => {
     const route = source('routes/quest-v2.js');
     const view = source('views/quest-journal.ejs');
