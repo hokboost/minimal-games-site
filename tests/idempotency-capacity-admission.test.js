@@ -27,7 +27,7 @@ function createPool(query = async () => ({ rows: [] })) {
 }
 
 function createRequest({
-    key = 'capacity-key-1234',
+    key = 'test-idempotency-000000000001',
     pathValue = '/api/constellation-repair/start',
     username = 'tester'
 } = {}) {

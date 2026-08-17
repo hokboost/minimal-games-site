@@ -122,7 +122,7 @@ async function run() {
         const originalSlotBody = await originalSlotResponse.json();
         assert.equal(originalSlotBody.success, true);
 
-        const holderKey = 'capacity-holder-slot-key-0001';
+        const holderKey = 'test-idempotency-000000000002';
         const holder = holderSession.postJson('/api/slot/play', {
             username: holderUser.username,
             betAmount: 10
