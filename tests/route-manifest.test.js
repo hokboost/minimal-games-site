@@ -28,6 +28,7 @@ const mutationFiles = [
     'routes/story-world.js',
     'routes/live-interactions.js',
     'routes/streamer-games.js',
+    'routes/creator-rewards.js',
     'routes/admin-creator-director.js',
     'routes/tasks.js',
     'routes/wish.js'

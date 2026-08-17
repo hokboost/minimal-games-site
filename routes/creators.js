@@ -84,6 +84,7 @@ module.exports = function registerCreatorRoutes(app, deps) {
                 csrfToken: generateCSRFToken(req),
                 storyWorldEnabled: streamerWorldFlags.storyWorldEnabled,
                 liveInteractionsEnabled: streamerWorldFlags.liveInteractionsEnabled,
+                rewardsEnabled: streamerWorldFlags.rewardsEnabled,
                 dashboard
             });
         } catch (error) {

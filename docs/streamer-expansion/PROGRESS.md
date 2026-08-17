@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-17T01:53:58Z`
+Last updated: `2026-08-17T02:30:24Z`
 
 ## Pre-existing working-tree changes
 
@@ -137,13 +137,13 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 7 — Rewards and gift bridge
 
-- [ ] Complete.
-- Features:
-- Migrations:
-- Routes:
-- Provider-state tests:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Features: A deeply frozen bilingual/versioned catalog with server-validated provider mappings; open, seasonal, story, and future achievement visibility; stock, per-user, cooldown, and row-locked global/feature/user exposure budgets; replay-safe trusted quest/story/game/achievement/season grant provenance; direct point redemption through the existing `BalanceLogger` operation `reward_catalog_redemption`; one-active high-value approval requests with independent-review enforcement and approval-time balance/eligibility/budget revalidation; structured configured-owner grants honoring creator opt-in, communication blocks, room mute, and quiet hours; immutable order events/audits; wishlist goals; cosmetic/story-key assets; recoverable creator/admin UIs; and delivery-history projection. Provider identifiers never enter browser catalog/state projections.
+- Migrations: `migrations/add_streamer_reward_catalog.sql` is the sole forward-only Phase 7 migration. It adds immutable item/version definitions, constrained lifecycle/visibility, locked budget counters, source-deduplicated orders, a partial one-pending-item invariant, grants, separate non-redeemable assets, append-only events/commands/audit, and wishlist revisions. It references the existing `wish_inventory` table but does not alter any historical gift migration or create another delivery queue.
+- Routes: Private no-store catalog/state/page reads plus four fixed creator mutations cover order creation, claim, cancellation, and wishlist updates. Three fixed audited/idempotent admin mutations cover structured Director grants, independent review, and pre-claim revocation. Every write is manifest-listed behind login, authorization/admin, capacity, rate, CSRF, and exact-path idempotency; the feature remains default-off behind Streamer World + creator foundation + reward flags. Successful direct redemption also persists the authoritative balance into the current session.
+- Provider-state tests: 21 focused tests cover catalog and visibility validation, provider privacy, SQL append-only/state-machine contracts, automatic and manual ledger settlement, response-finalization rollback, semantic replay/collision rejection, concurrent pending suppression, budget failure rollback, independent review, consent/mute/quiet behavior, trusted-source provenance, stored-only inventory claim, claimed-grant irreversibility, reward-order delivery backlink, uncertain reconciliation projection, session balance persistence, fixed policy/provider boundaries, and VM browser response-loss recovery. Claim creates only `wish_inventory(status='stored', source_type='reward_catalog', source_batch_id='reward-order:<uuid>')`; the creator must separately use the existing backpack send action, after which the unchanged inventory/exchange/outbox/worker/provider-receipt/reconciliation flow owns room change, deactivation, failure, and uncertainty. No reward path auto-sends, auto-refunds, or auto-resends an uncertain result.
+- Credited added lines: 19,368 cumulative (backend 11,385; frontend 2,132; authored content 1,127; tests 4,552; docs 158; tooling 2; other 12), with ten meaningful deletions and 19,358 net growth. Backend + frontend + content is 14,644. Remaining 50,000-line category gates are intentionally deferred to the Phase 8 full content expansion.
+- Risks or decisions: `npm run test:all`, `npm run release:stage`, focused reward/creator/manifest suites, EJS compilation, syntax/secrets scans, and `git diff --check` passed. The disposable PostgreSQL migration suite was not run because it requires explicit database-create authorization; this new SQL has static and transaction-behavior coverage but still needs an operator-authorized disposable PostgreSQL execution before deployment. Achievement visibility is modeled fail-closed until the Phase 8 evaluator exists. Quiet-time grants remain persistently visible in the reward journal but produce no inbox/presence push. No production database or real Bilibili send was touched.
 
 ### Phase 8 — Full content expansion
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 6 is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 7 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +9,878 / -8
-  frontend  +1,938 / -0
-  content   +1,006 / -0
-  tests     +4,063 / -0
+  backend   +11,385 / -8
+  frontend  +2,132 / -0
+  content   +1,127 / -0
+  tests     +4,552 / -0
   docs      +158 / -0
   tooling   +2 / -1
   other     +12 / -1
 
-Credited additions: 17,057
+Credited additions: 19,368
 Meaningful deletions: 10
-Credited net growth: 17,047
-Backend + frontend + content: 12,822
+Credited net growth: 19,358
+Backend + frontend + content: 14,644
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 17,057 / 50,000
-  [FAIL] net growth: 17,047 / 40,000
-  [FAIL] backend additions: 9,878 / 12,000
-  [FAIL] frontend additions: 1,938 / 8,000
-  [FAIL] authored-content additions: 1,006 / 16,000
-  [FAIL] test additions: 4,063 / 10,000
-  [FAIL] backend + frontend + content: 12,822 / 36,000
+  [FAIL] total meaningful additions: 19,368 / 50,000
+  [FAIL] net growth: 19,358 / 40,000
+  [FAIL] backend additions: 11,385 / 12,000
+  [FAIL] frontend additions: 2,132 / 8,000
+  [FAIL] authored-content additions: 1,127 / 16,000
+  [FAIL] test additions: 4,552 / 10,000
+  [FAIL] backend + frontend + content: 14,644 / 36,000
 
 Overall: FAIL
 ```
 
-The overall threshold failure remains expected after Phase 6; reward, hardening, frontend, test, and full-content phases supply the remaining volume.
+The overall threshold failure remains expected after Phase 7; the full-content and hardening phases supply the remaining volume.
 
 ## Current acceptance status
 

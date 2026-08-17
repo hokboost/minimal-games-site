@@ -37,6 +37,7 @@ module.exports = function registerAdminCreatorDirectorRoutes(app, deps) {
                 balance: null,
                 csrfToken: generateCSRFToken(req),
                 ownerUsername: streamerWorldFlags.ownerUsername,
+                rewardsEnabled: streamerWorldFlags.rewardsEnabled,
                 summary,
                 liveEnabled
             });

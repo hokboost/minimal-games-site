@@ -105,6 +105,7 @@ const registerStoryWorldRoutes = require('./routes/story-world');
 const registerAdminStoryAuditRoutes = require('./routes/admin-story-audit');
 const registerLiveInteractionRoutes = require('./routes/live-interactions');
 const registerStreamerGameRoutes = require('./routes/streamer-games');
+const registerCreatorRewardRoutes = require('./routes/creator-rewards');
 const { CreatorRepository } = require('./repositories/creator-repository');
 const { CreatorProfileService } = require('./services/creator-profile-service');
 const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
@@ -115,6 +116,8 @@ const { LiveInteractionService } = require('./services/live-interaction-service'
 const { LiveSocketGateway } = require('./services/live-socket-gateway');
 const { StreamerGameRepository } = require('./repositories/streamer-game-repository');
 const { GAME_IDS: STREAMER_GAME_IDS, StreamerGameService } = require('./services/streamer-game-service');
+const { RewardCatalogRepository } = require('./repositories/reward-catalog-repository');
+const { RewardCatalogService } = require('./services/reward-catalog-service');
 const { EVENT_TYPES: LIVE_EVENT_TYPES, MAX_EVENT_BYTES: LIVE_EVENT_MAX_BYTES } = require('./domain/live-interactions/protocol');
 const storySeasonOne = require('./content/streamer-world/story/season-one');
 const streamerWorldFlags = readStreamerWorldFlags();
@@ -140,6 +143,7 @@ const creatorService = new CreatorProfileService({
 let liveInteractionService;
 let liveSocketGateway;
 let streamerGameService;
+let rewardCatalogService;
 
 // 导入i18n国际化
 const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
@@ -424,6 +428,13 @@ streamerGameService = new StreamerGameService({
     questV2Service: streamerWorldFlags.questEngineV2Enabled ? questV2Service : null,
     ownerUsername: streamerWorldFlags.ownerUsername,
     publish: publishLiveInteraction
+});
+const rewardCatalogRepository = new RewardCatalogRepository({ pool });
+rewardCatalogService = new RewardCatalogService({
+    repository: rewardCatalogRepository,
+    BalanceLogger,
+    giftConfig,
+    ownerUsername: streamerWorldFlags.ownerUsername
 });
 
 // 发送用户通知的辅助函数
@@ -2474,6 +2485,12 @@ function registerRuntimeLifecycle() {
         },
         async stop() {}
     });
+    applicationLifecycle.registerComponent('reward-catalog', {
+        async start() {
+            if (streamerWorldFlags.rewardsEnabled) await rewardCatalogService.initialize();
+        },
+        async stop() {}
+    });
     applicationLifecycle.registerComponent('socket-event-bus', {
         start: () => socketEventBus.start(),
         stop: () => socketEventBus.close()
@@ -3081,6 +3098,18 @@ registerLiveInteractionRoutes(app, {
 
 registerStreamerGameRoutes(app, {
     streamerGameService,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireAdmin,
+    requireCSRF,
+    security,
+    paidActionConcurrencyGuard
+});
+
+registerCreatorRewardRoutes(app, {
+    rewardCatalogService,
     streamerWorldFlags,
     generateCSRFToken,
     requireLogin,
