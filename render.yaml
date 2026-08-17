@@ -51,3 +51,21 @@ services:
         value: "10000"
       - key: TASK_CARDS_ENABLED_USERS
         value: "hokboost"
+      - key: STREAMER_WORLD_ENABLED
+        value: "true"
+      - key: CREATOR_PROFILE_ENABLED
+        value: "true"
+      - key: QUEST_ENGINE_V2_ENABLED
+        value: "true"
+      - key: STORY_WORLD_ENABLED
+        value: "true"
+      - key: LIVE_INTERACTIONS_ENABLED
+        value: "true"
+      - key: STREAMER_NEW_GAMES_ENABLED
+        value: "true"
+      - key: STREAMER_REWARD_CATALOG_ENABLED
+        value: "true"
+      - key: STREAMER_ACHIEVEMENTS_ENABLED
+        value: "true"
+      - key: STREAMER_WORLD_OWNER_USERNAME
+        sync: false
