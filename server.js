@@ -106,6 +106,7 @@ const registerAdminStoryAuditRoutes = require('./routes/admin-story-audit');
 const registerLiveInteractionRoutes = require('./routes/live-interactions');
 const registerStreamerGameRoutes = require('./routes/streamer-games');
 const registerCreatorRewardRoutes = require('./routes/creator-rewards');
+const registerCreatorAchievementRoutes = require('./routes/creator-achievements');
 const { CreatorRepository } = require('./repositories/creator-repository');
 const { CreatorProfileService } = require('./services/creator-profile-service');
 const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
@@ -118,6 +119,7 @@ const { StreamerGameRepository } = require('./repositories/streamer-game-reposit
 const { GAME_IDS: STREAMER_GAME_IDS, StreamerGameService } = require('./services/streamer-game-service');
 const { RewardCatalogRepository } = require('./repositories/reward-catalog-repository');
 const { RewardCatalogService } = require('./services/reward-catalog-service');
+const { AchievementService } = require('./services/achievement-service');
 const { EVENT_TYPES: LIVE_EVENT_TYPES, MAX_EVENT_BYTES: LIVE_EVENT_MAX_BYTES } = require('./domain/live-interactions/protocol');
 const storySeasonOne = require('./content/streamer-world/story/season-one');
 const streamerWorldFlags = readStreamerWorldFlags();
@@ -125,11 +127,14 @@ const streamerGameIdSet = new Set(STREAMER_GAME_IDS);
 const visibleGameDefinitions = streamerWorldFlags.newGamesEnabled
     ? gameRegistry.GAME_DEFINITIONS
     : gameRegistry.GAME_DEFINITIONS.filter(game => !streamerGameIdSet.has(game.id));
-const questV2Service = new QuestV2Service({ pool, BalanceLogger });
+const achievementService = new AchievementService({ pool });
+const questV2Service = new QuestV2Service({ pool, BalanceLogger,
+    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null });
 const storyWorldService = new StoryWorldService({
     pool,
     questV2Service,
-    questIntegrationEnabled: streamerWorldFlags.questEngineV2Enabled
+    questIntegrationEnabled: streamerWorldFlags.questEngineV2Enabled,
+    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null
 });
 const questService = new QuestService({
     BalanceLogger,
@@ -407,7 +412,8 @@ liveInteractionService = new LiveInteractionService({
     games: visibleGameDefinitions,
     storyNodeIds: storySeasonOne.nodes.map((node) => node.id),
     questEnabled: streamerWorldFlags.questEngineV2Enabled,
-    storyEnabled: streamerWorldFlags.storyWorldEnabled
+    storyEnabled: streamerWorldFlags.storyWorldEnabled,
+    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null
 });
 async function authorizeLiveSocket(auth) {
     if (!auth?.sessionId || !auth?.username || !auth?.userId) return false;
@@ -426,6 +432,7 @@ streamerGameService = new StreamerGameService({
     repository: streamerGameRepository,
     liveRepository: liveInteractionRepository,
     questV2Service: streamerWorldFlags.questEngineV2Enabled ? questV2Service : null,
+    achievementService: streamerWorldFlags.achievementsEnabled ? achievementService : null,
     ownerUsername: streamerWorldFlags.ownerUsername,
     publish: publishLiveInteraction
 });
@@ -2491,6 +2498,12 @@ function registerRuntimeLifecycle() {
         },
         async stop() {}
     });
+    applicationLifecycle.registerComponent('achievement-catalog', {
+        async start() {
+            if (streamerWorldFlags.achievementsEnabled) await achievementService.initialize();
+        },
+        async stop() {}
+    });
     applicationLifecycle.registerComponent('socket-event-bus', {
         start: () => socketEventBus.start(),
         stop: () => socketEventBus.close()
@@ -3118,6 +3131,14 @@ registerCreatorRewardRoutes(app, {
     requireCSRF,
     security,
     paidActionConcurrencyGuard
+});
+
+registerCreatorAchievementRoutes(app, {
+    achievementService,
+    streamerWorldFlags,
+    requireLogin,
+    requireAuthorized,
+    security
 });
 
 // 404 处理（必须在所有API路由之后）

@@ -7,6 +7,7 @@ const { publicStoryProjection } = require('../domain/story/projection');
 const { hydrateCompiledContent } = require('../domain/story/compiler');
 const { StoryWorldRepository } = require('../repositories/story-world-repository');
 const seasonOne = require('../content/streamer-world/story/season-one');
+const { seasons: publishedSeasons } = require('../content/streamer-world/story');
 
 class StoryWorldServiceError extends Error {
     constructor(code, status, message) {
@@ -61,11 +62,20 @@ function isQuietNow(timezone, rows, date = new Date()) {
 }
 
 class StoryWorldService {
-    constructor({ pool, repositoryFactory, questV2Service = null, questIntegrationEnabled = false, content = seasonOne, clock = () => new Date() }) {
+    constructor({ pool, repositoryFactory, questV2Service = null, questIntegrationEnabled = false, achievementService = null, content = null, contents = publishedSeasons, clock = () => new Date() }) {
         if (!pool?.connect) throw new TypeError('Story service requires a database pool');
         this.pool = pool; this.repositoryFactory = repositoryFactory || ((client) => new StoryWorldRepository(client));
         this.questV2Service = questV2Service; this.questIntegrationEnabled = Boolean(questIntegrationEnabled);
-        this.content = content; this.clock = clock; this.catalog = null; this.contentCache = new Map();
+        this.achievementService = achievementService;
+        this.contents = Object.freeze(content ? [content] : [...contents]);
+        if (!this.contents.length) throw new TypeError('Story service requires published content');
+        this.contentsBySlug = new Map(this.contents.map((item) => [item.slug, item]));
+        if (this.contentsBySlug.size !== this.contents.length) throw new TypeError('Story season slugs must be unique');
+        this.content = this.contents[0] || seasonOne;
+        this.clock = clock;
+        this.catalog = null;
+        this.catalogs = new Map();
+        this.contentCache = new Map();
     }
     async transaction(work) {
         const client = await this.pool.connect();
@@ -74,12 +84,35 @@ class StoryWorldService {
         finally { client.release(); }
     }
     async initialize() {
-        this.catalog = await this.transaction((client) => this.repositoryFactory(client).seedContent(this.content));
-        this.contentCache.set(Number(this.catalog.version.id), this.content);
-        return this.catalog;
+        const catalogs = await this.transaction(async (client) => {
+            const repository = this.repositoryFactory(client);
+            const seeded = [];
+            for (const content of this.contents) seeded.push([content, await repository.seedContent(content)]);
+            return seeded;
+        });
+        for (const [content, catalog] of catalogs) {
+            this.catalogs.set(content.slug, catalog);
+            this.contentCache.set(Number(catalog.version.id), content);
+        }
+        this.catalog = this.catalogs.get(this.content.slug);
+        return Object.freeze({ defaultCatalog: this.catalog, seasonCount: catalogs.length });
     }
-    async ensureCatalog(repository) {
-        const identity = this.catalog || await repository.loadCatalogIdentity(this.content.slug, this.content.version);
+    selectContent(slug) {
+        const selected = slug ? this.contentsBySlug.get(slug) : this.content;
+        if (!selected) throw new StoryWorldServiceError('STORY_SEASON_NOT_FOUND', 404, 'Story season was not found');
+        return selected;
+    }
+    seasonProjection(language = 'zh') {
+        return this.contents.map((content) => ({
+            slug: content.slug,
+            version: content.version,
+            title: language === 'en' ? content.title.en : content.title.zh,
+            episodes: content.episodes.length
+        }));
+    }
+    async ensureCatalog(repository, content = this.content) {
+        const identity = this.catalogs.get(content.slug) || (content === this.content ? this.catalog : null)
+            || await repository.loadCatalogIdentity(content.slug, content.version);
         if (!identity) throw new StoryWorldServiceError('STORY_NOT_READY', 503, 'Story catalog is not initialized');
         return identity.campaign ? { campaignId: Number(identity.campaign.id), contentVersionId: Number(identity.version.id) }
             : { campaignId: Number(identity.campaign_id), contentVersionId: Number(identity.content_version_id) };
@@ -105,34 +138,36 @@ class StoryWorldService {
     projection(content, run, quiet, language, ownerMessagesBlocked = false) {
         return publicStoryProjection(content, run, { language, ownerMessagesBlocked, ownerPresence: quiet ? 'deferred_for_quiet_hours' : 'asynchronous' });
     }
-    async state(username, { language = 'zh' } = {}) {
+    async state(username, { language = 'zh', season = null } = {}) {
         return this.transaction(async (client) => {
             const repository = this.repositoryFactory(client); const { creator, quiet, ownerMessagesBlocked } = await this.creatorContext(repository, username, { lock: false });
-            const ids = await this.ensureCatalog(repository); const row = await repository.latestRun(creator.id, ids.campaignId);
-            const content = row ? await this.resolveContent(repository, row.content_version_id) : this.content;
-            return { success: true, available: true, hasRun: Boolean(row), runId: row ? Number(row.id) : null, story: row ? this.projection(content, databaseRun(row), quiet, language, ownerMessagesBlocked) : null };
+            const selected = this.selectContent(season);
+            const ids = await this.ensureCatalog(repository, selected); const row = await repository.latestRun(creator.id, ids.campaignId);
+            const content = row ? await this.resolveContent(repository, row.content_version_id) : selected;
+            return { success: true, available: true, selectedSeason: selected.slug, seasons: this.seasonProjection(language), hasRun: Boolean(row), runId: row ? Number(row.id) : null, story: row ? this.projection(content, databaseRun(row), quiet, language, ownerMessagesBlocked) : null };
         });
     }
     async start(username, input = {}, context = {}) {
-        exactInput(input, ['replay', 'language']);
+        exactInput(input, ['replay', 'language', 'season']);
         if (input.replay !== undefined && typeof input.replay !== 'boolean') throw new StoryWorldServiceError('STORY_INVALID_INPUT', 400, 'Invalid replay mode');
         const commandId = requestId(context.requestId); const replayMode = input.replay === true;
         return this.transaction(async (client) => {
             const repository = this.repositoryFactory(client); const { creator, quiet, ownerMessagesBlocked } = await this.creatorContext(repository, username);
-            const ids = await this.ensureCatalog(repository); const active = await repository.lockActiveRun(creator.id, ids.campaignId);
+            const selected = this.selectContent(input.season);
+            const ids = await this.ensureCatalog(repository, selected); const active = await repository.lockActiveRun(creator.id, ids.campaignId);
             if (active) { const bound = await this.resolveContent(repository, active.content_version_id); return { success: true, resumed: true, runId: Number(active.id), story: this.projection(bound, databaseRun(active), quiet, input.language, ownerMessagesBlocked) }; }
             const previous = await repository.latestRun(creator.id, ids.campaignId, ids.contentVersionId);
             if (previous && !replayMode) throw new StoryWorldServiceError('STORY_REPLAY_REQUIRED', 409, 'Season already completed; start explicitly in replay mode');
             if (!previous && replayMode) throw new StoryWorldServiceError('STORY_FIRST_RUN_REQUIRED', 409, 'Complete a first run before replaying');
-            const run = createStoryRun(this.content, { replayMode });
+            const run = createStoryRun(selected, { replayMode });
             const row = await repository.createRun({ userId: creator.id, ...ids, run });
-            const response = { success: true, resumed: false, runId: Number(row.id), story: this.projection(this.content, run, quiet, input.language, ownerMessagesBlocked) };
-            const semanticHash = crypto.createHash('sha256').update(stableStringify({ replayMode, username })).digest('hex');
+            const response = { success: true, resumed: false, runId: Number(row.id), selectedSeason: selected.slug, story: this.projection(selected, run, quiet, input.language, ownerMessagesBlocked) };
+            const semanticHash = crypto.createHash('sha256').update(stableStringify({ replayMode, username, season: selected.slug })).digest('hex');
             const inserted = await repository.appendEvent({ eventId: crypto.randomUUID(), runId: row.id, commandId, semanticHash,
                 actorUsername: username, action: replayMode ? 'replay' : 'start', fromNodeId: null, toNodeId: run.currentNodeId,
                 selectedChoice: null, answerCorrect: null, fromRevision: 0, toRevision: 0, effectsDigest: { beforeStateHash: null, afterStateHash: stateHash(run.state), effects: [] }, response });
             if (!inserted) throw new StoryWorldServiceError('STORY_COMMAND_COLLISION', 409, 'Story command identity collision');
-            await repository.insertAudit({ runId: row.id, userId: creator.id, username, action: replayMode ? 'story.run.replay' : 'story.run.started', details: { contentVersion: this.content.version }, requestId: commandId });
+            await repository.insertAudit({ runId: row.id, userId: creator.id, username, action: replayMode ? 'story.run.replay' : 'story.run.started', details: { contentVersion: selected.version, season: selected.slug }, requestId: commandId });
             await context.finalizeIdempotency?.(client, 201, response); return response;
         });
     }
@@ -164,7 +199,7 @@ class StoryWorldService {
                 effectsDigest: { beforeStateHash: stateHash(before.state), afterStateHash: stateHash(result.run.state), effects: result.event.effectSummary }, response });
             if (!inserted) throw new StoryWorldServiceError('STORY_COMMAND_COLLISION', 409, 'Story command identity collision');
             await repository.syncState(runId, eventId, result.run.state);
-            if (!result.run.replayMode) await this.persistValue(repository, { creator, contentVersionId: Number(row.content_version_id), runId, eventId, result, username, client, commandId, content: boundContent, choiceAlreadyCommitted, ownerMessagesBlocked });
+            if (!result.run.replayMode) await this.persistValue(repository, { creator, contentVersionId: Number(row.content_version_id), runId, eventId, result, username, client, commandId, content: boundContent, choiceAlreadyCommitted, ownerMessagesBlocked, quiet });
             await repository.insertAudit({ runId, userId: creator.id, username, action: `story.${result.event.action}.committed`, details: { fromNodeId: result.event.fromNodeId, toNodeId: result.event.toNodeId, selectedChoice: result.event.selectedChoice, revision: result.run.revision, replayMode: result.run.replayMode }, requestId: commandId });
             await context.finalizeIdempotency?.(client, 200, response); return response;
         });
@@ -174,16 +209,29 @@ class StoryWorldService {
         return option ? (language === 'en' ? option.outcome.en : option.outcome.zh) : null;
     }
     async persistValue(repository, args) {
-        const { creator, contentVersionId, runId, eventId, result, username, client, commandId, content, choiceAlreadyCommitted, ownerMessagesBlocked } = args;
+        const { creator, contentVersionId, runId, eventId, result, username, client, commandId, content, choiceAlreadyCommitted, ownerMessagesBlocked, quiet } = args;
         for (const effect of result.emitted) {
             if (effect.type === 'unlock_memory') await repository.insertMemory({ userId: creator.id, contentVersionId, runId, eventId, key: effect.key, memory: content.memories[effect.key] });
             if (effect.type === 'unlock') await repository.insertUnlock({ userId: creator.id, contentVersionId, eventId, unlockType: effect.unlockType, key: effect.key });
             if (effect.type === 'deliver_message' && !ownerMessagesBlocked) await repository.insertMessage({ userId: creator.id, key: effect.key, message: content.messages[effect.key], runId });
+            if (effect.type === 'deliver_message' && !ownerMessagesBlocked && this.achievementService?.recordTrustedEvent) {
+                await this.achievementService.recordTrustedEvent(client, username, {
+                    sourceType:'story',sourceEventId:`story-owner-letter:${eventId}:${effect.key}`,
+                    eventType:'story.owner_letter.persisted',occurredAt:this.clock().toISOString(),
+                    payload:{ runId,season:content.slug,messageKey:effect.key,quiet:Boolean(quiet) }
+                }, { requestId:commandId });
+            }
         }
         if (result.event.selectedChoice && !choiceAlreadyCommitted && this.questIntegrationEnabled && this.questV2Service?.recordInternalTrustedEvent) await this.questV2Service.recordInternalTrustedEvent(client, {
             sourceType: 'story', sourceEventId: `story-event:${eventId}`, username, eventType: 'story.choice.committed', occurredAt: this.clock().toISOString(),
             payload: { runId, episodeSlug: result.run.currentEpisode, choiceId: result.event.selectedChoice, contentVersion: content.version }
         }, { requestId: commandId });
+        if (result.event.selectedChoice && !choiceAlreadyCommitted && this.achievementService?.recordTrustedEvent) {
+            await this.achievementService.recordTrustedEvent(client, username, {
+                sourceType:'story',sourceEventId:`story-choice:${eventId}`,eventType:'story.choice.committed',occurredAt:this.clock().toISOString(),
+                payload:{ runId,season:content.slug,episode:content.nodesById.get(result.event.fromNodeId).episode,choiceId:result.event.selectedChoice }
+            }, { requestId:commandId });
+        }
         for (const episode of result.event.newlyCompletedEpisodes) {
             const first = await repository.insertFirstClear({ userId: creator.id, contentVersionId, episode, runId, eventId });
             if (first) await repository.appendRelationshipFirstClear({ userId: creator.id, episode, runId, eventId });
@@ -191,6 +239,17 @@ class StoryWorldService {
                 sourceType: 'story', sourceEventId: `story-episode:${eventId}:${episode}`, username, eventType: 'story.episode.completed', occurredAt: this.clock().toISOString(),
                 payload: { runId, episodeSlug: episode, contentVersion: content.version }
             }, { requestId: commandId });
+            if (first && this.achievementService?.recordTrustedEvent) await this.achievementService.recordTrustedEvent(client, username, {
+                sourceType:'story',sourceEventId:`story-achievement-episode:${eventId}:${episode}`,
+                eventType:'story.episode.completed',occurredAt:this.clock().toISOString(),payload:{runId,season:content.slug,episode}
+            }, { requestId:commandId });
+        }
+        if (result.run.status === 'completed' && result.event.action === 'finish' && this.achievementService?.recordTrustedEvent) {
+            await this.achievementService.recordTrustedEvent(client, username, {
+                sourceType:'story',sourceEventId:`story-achievement-season:${eventId}`,
+                eventType:'story.season.completed',occurredAt:this.clock().toISOString(),
+                payload:{runId,season:content.slug,conclusion:result.event.fromNodeId,contentVersion:content.version}
+            }, { requestId:commandId });
         }
     }
     async preview(username, input = {}) {

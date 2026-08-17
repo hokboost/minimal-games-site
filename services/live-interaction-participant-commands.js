@@ -126,6 +126,11 @@ const participantCommands = {
                 stateRevision: savedRoom.revision,
                 payload: transition.eventPayload
             });
+            if (this.achievementService?.recordTrustedEvent) await this.achievementService.recordTrustedEvent(client, username, {
+                sourceType:'live_interaction',sourceEventId:`achievement-live-resolved:${event.eventId}`,
+                eventType:'live.item.resolved',occurredAt:this.clock().toISOString(),
+                payload:{interactionId:room.id,itemId:item.id,type:item.itemType,status:savedItem.status}
+            }, context);
             const body = {
                 success: true,
                 interactionId: room.id,

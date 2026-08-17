@@ -574,6 +574,81 @@ test('open and send commit before fanout, replay exact durable response, and rej
     assert.equal(repo.events.length, 2);
 });
 
+test('live achievement hook is stable on response replay and failure rolls back the persisted item', async () => {
+    const calls = [];
+    const repo = new MemoryRepository();
+    const { service } = makeService(repo, {
+        achievementService: {
+            async recordTrustedEvent(client, username, event) {
+                calls.push({ client, username, event: structuredClone(event) });
+            }
+        }
+    });
+    await open(service);
+    const command = {
+        commandId: uuid(),
+        creatorUsername: 'creator',
+        interactionId: 1,
+        expectedRevision: 1,
+        itemType: 'nudge',
+        templateKey: 'nudge.gentle-reset'
+    };
+    const first = await service.send('owner', command);
+    const replay = await service.send('owner', command);
+    assert.deepEqual(replay, first);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].event.eventType, 'live.item.persisted');
+    assert.equal(calls[0].event.sourceEventId, `achievement-live-persisted:${first.event.eventId}`);
+
+    service.achievementService = {
+        async recordTrustedEvent() {
+            throw new Error('achievement settlement failed');
+        }
+    };
+    const before = repo.snapshot();
+    await assert.rejects(service.send('owner', {
+        ...command,
+        commandId: uuid(),
+        expectedRevision: 2,
+        templateKey: 'nudge.open-window'
+    }), /achievement settlement failed/);
+    assert.deepEqual(repo.snapshot(), before);
+});
+
+test('resolved live item and achievement event share one rollback boundary', async () => {
+    const repo = new MemoryRepository();
+    const { service } = makeService(repo, {
+        achievementService: { recordTrustedEvent: async () => ({ success: true }) }
+    });
+    await open(service);
+    const sent = await service.send('owner', {
+        commandId: uuid(),
+        creatorUsername: 'creator',
+        interactionId: 1,
+        expectedRevision: 1,
+        itemType: 'quest_invite',
+        templateKey: 'quest-invite.small-signal',
+        referenceId: 'welcome-map-reading'
+    });
+    const before = repo.snapshot();
+    service.achievementService = {
+        async recordTrustedEvent(client, username, event) {
+            assert.equal(username, 'creator');
+            assert.equal(event.eventType, 'live.item.resolved');
+            assert.equal(event.sourceEventId.startsWith('achievement-live-resolved:'), true);
+            throw new Error('resolved achievement failed');
+        }
+    };
+    await assert.rejects(service.itemAction('creator', {
+        commandId: uuid(),
+        interactionId: 1,
+        expectedRevision: 2,
+        itemId: sent.item.id
+    }, 'accept'), /resolved achievement failed/);
+    assert.deepEqual(repo.snapshot(), before);
+    assert.equal(repo.items.get(sent.item.id).status, 'delivered');
+});
+
 test('configured owner is enforced even for an active administrator', async () => {
     const repo = new MemoryRepository(),
         {

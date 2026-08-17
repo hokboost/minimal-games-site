@@ -9,6 +9,19 @@ function challengeById(id, pack = config.pack) {
     return challenge;
 }
 
+function promptCard(challenge, round, pack) {
+    if (!Array.isArray(pack.promptCards) || pack.promptCards.length === 0) {
+        return {
+            id:`legacy-${challenge.id}`,
+            promptZh:challenge.briefZh,
+            promptEn:challenge.briefEn,
+            choicesZh:challenge.choicesZh,
+            choicesEn:challenge.choicesEn
+        };
+    }
+    return pack.promptCards[(challenge.seed + round * 37) % pack.promptCards.length];
+}
+
 function createState({ challengeId, difficulty, mode, contentPack = config.pack }) {
     const challenge = challengeById(challengeId, contentPack);
     return { ...baseState('keeper-prediction', challenge, difficulty, mode), round: 0,
@@ -42,11 +55,13 @@ function applyAction(state, raw, context) {
 
 function project(state, viewerRole, contentPack = config.pack) {
     const challenge = challengeById(state.challengeId, contentPack);
+    const card = promptCard(challenge,state.round,contentPack);
     return { ...publicBase(state, challenge), round: state.round, roundCount: state.roundCount,
-        choicesZh: challenge.choicesZh, choicesEn: challenge.choicesEn,
+        promptCardId:card.id,promptZh:card.promptZh,promptEn:card.promptEn,
+        choicesZh: card.choicesZh, choicesEn: card.choicesEn,
         submitted: Boolean(state.submissions[viewerRole === 'owner' ? 'owner' : 'creator']),
         partnerSubmitted: Boolean(state.submissions[viewerRole === 'owner' ? 'creator' : 'owner']),
         reveals: state.reveals };
 }
 
-module.exports = { applyAction, challengeById, createState, project };
+module.exports = { applyAction, challengeById, createState, project, promptCard };

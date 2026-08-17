@@ -1,6 +1,6 @@
 'use strict';
 
 module.exports = Object.freeze({
-    ...require('./batch-one'),
-    ...require('./batch-two')
+    ...require('./phase-8-batch-one'),
+    ...require('./phase-8-batch-two')
 });

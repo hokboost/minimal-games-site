@@ -83,7 +83,8 @@ function publicBase(state, challenge) {
         titleZh: challenge.titleZh,
         titleEn: challenge.titleEn,
         briefZh: challenge.briefZh,
-        briefEn: challenge.briefEn
+        briefEn: challenge.briefEn,
+        flavor: challenge.flavor || null
     };
 }
 

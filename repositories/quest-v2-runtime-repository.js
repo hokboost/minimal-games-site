@@ -349,12 +349,19 @@ class QuestV2RuntimeRepository {
         const result = await this.client.query(`
             SELECT assignment.id, assignment.status, assignment.revision,
                    assignment.user_id, assignment.version_id, assignment.accepted_at,
+                   assignment.board_id, assignment.chain_id,
                    assignment.reward_policy_version, assignment.reward_points,
                    assignment.completion_rule, definition.slug, version.version,
-                   version.verification_mode
+                   version.verification_mode, version.category,
+                   CASE WHEN chain_node.node_number IS NULL THEN ''
+                        ELSE chain.slug || ':' || chain_node.node_number::TEXT END AS chain_node_key
             FROM quest_v2_assignments assignment
             JOIN quest_v2_versions version ON version.id = assignment.version_id
             JOIN quest_v2_definitions definition ON definition.id = version.definition_id
+            LEFT JOIN quest_v2_chains chain ON chain.id = assignment.chain_id
+            LEFT JOIN quest_v2_chain_nodes chain_node
+              ON chain_node.chain_id = assignment.chain_id
+             AND chain_node.version_id = assignment.version_id
             WHERE assignment.user_id = $1 AND assignment.status = 'active'
               AND version.verification_mode IN ('automatic', 'hybrid')
             ORDER BY assignment.id
@@ -367,11 +374,17 @@ class QuestV2RuntimeRepository {
         const result = await this.client.query(`
             SELECT assignment.*, account.username, definition.slug,
                    version.review_policy, version.verification_mode,
-                   version.completion_zh, version.completion_en
+                   version.completion_zh, version.completion_en, version.category,
+                   CASE WHEN chain_node.node_number IS NULL THEN ''
+                        ELSE chain.slug || ':' || chain_node.node_number::TEXT END AS chain_node_key
             FROM quest_v2_assignments assignment
             JOIN users account ON account.id = assignment.user_id
             JOIN quest_v2_versions version ON version.id = assignment.version_id
             JOIN quest_v2_definitions definition ON definition.id = version.definition_id
+            LEFT JOIN quest_v2_chains chain ON chain.id = assignment.chain_id
+            LEFT JOIN quest_v2_chain_nodes chain_node
+              ON chain_node.chain_id = assignment.chain_id
+             AND chain_node.version_id = assignment.version_id
             WHERE assignment.id = $1
             FOR UPDATE OF assignment
         `, [assignmentId]);

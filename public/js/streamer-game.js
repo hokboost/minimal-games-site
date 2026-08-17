@@ -147,6 +147,10 @@
     }
 
     function renderMaze(state) {
+        if (state.room) {
+            content.append(node('h3', 'sg-room-title', lang === 'zh' ? state.room.titleZh : state.room.titleEn));
+            content.append(node('p', 'sg-meta', lang === 'zh' ? state.room.descriptionZh : state.room.descriptionEn));
+        }
         content.append(node('p', 'sg-card', text(`位置 ${state.position.x + 1},${state.position.y + 1} · 剩余提示 ${state.hintsRemaining}`,
             `Position ${state.position.x + 1},${state.position.y + 1} · ${state.hintsRemaining} hints left`)));
         if (state.lastHint) content.append(node('p', 'sg-meta', text(`伙伴提示：${state.lastHint}`, `Partner hint: ${state.lastHint}`)));
@@ -186,6 +190,7 @@
 
     function renderPrediction(state) {
         content.append(node('p', 'sg-meta', text(`回合 ${state.round + 1}/${state.roundCount}`, `Round ${state.round + 1}/${state.roundCount}`)));
+        content.append(node('p', 'sg-card', lang === 'zh' ? state.promptZh : state.promptEn));
         for (const reveal of state.reveals) content.append(node('p', 'sg-card', text(`第 ${reveal.round + 1} 回合默契 ${reveal.points}/2`,
             `Round ${reveal.round + 1} match ${reveal.points}/2`)));
         if (state.submitted) {
@@ -214,6 +219,18 @@
         status.append(node('span', 'sg-chip', run.status), node('span', 'sg-chip', `${text('修订', 'rev')} ${run.revision}`),
             node('span', 'sg-chip', `${text('分数', 'score')} ${run.score}`), node('span', 'sg-chip', run.actorRole));
         content.append(node('h2', '', localized(state, 'title')), node('p', 'sg-meta', localized(state, 'brief')));
+        if (state.flavor) {
+            const flavor = node('section', 'sg-flavor');
+            flavor.append(
+                node('p', 'sg-card', run.status === 'completed'
+                    ? localized(state.flavor, 'success')
+                    : localized(state.flavor, 'retry')),
+                node('p', 'sg-meta', localized(state.flavor, 'accessibility')),
+                node('p', 'sg-meta', localized(state.flavor, 'quest')),
+                node('p', 'sg-meta', localized(state.flavor, 'story'))
+            );
+            content.append(flavor);
+        }
         if (gameId === 'constellation-repair') renderConstellation(state);
         else if (gameId === 'signal-duet') renderSignal(state);
         else if (gameId === 'mystery-board') renderMystery(state);

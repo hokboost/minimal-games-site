@@ -8,7 +8,7 @@ const { validateEvidence } = require('../domain/quests/v2/evidence');
 const { assertTransition } = require('../domain/quests/v2/transitions');
 const { QuestV2CatalogRepository } = require('../repositories/quest-v2-catalog-repository');
 const { QuestV2RuntimeRepository } = require('../repositories/quest-v2-runtime-repository');
-const pack = require('../content/streamer-world/quests/phase-2-pack');
+const pack = require('../content/streamer-world/quests');
 
 const ACTIVE = new Set(['offered', 'accepted', 'active', 'submitted', 'under_review', 'returned']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -139,12 +139,13 @@ function validateInternalGameEvent(raw) {
 }
 
 class QuestV2Service {
-    constructor({ pool, BalanceLogger, catalogRepositoryFactory, runtimeRepositoryFactory }) {
+    constructor({ pool, BalanceLogger, catalogRepositoryFactory, runtimeRepositoryFactory, achievementService = null }) {
         if (!pool?.connect || !BalanceLogger?.updateBalance) throw new TypeError('Quest V2 service requires pool and BalanceLogger');
         this.pool = pool;
         this.BalanceLogger = BalanceLogger;
         this.catalogRepositoryFactory = catalogRepositoryFactory || ((client) => new QuestV2CatalogRepository(client));
         this.runtimeRepositoryFactory = runtimeRepositoryFactory || ((client) => new QuestV2RuntimeRepository(client));
+        this.achievementService = achievementService;
     }
 
     async transaction(work) {
@@ -402,6 +403,15 @@ class QuestV2Service {
                 payload: { evidenceIds: evidence.map((item) => item.id) }, requestId: context.requestId
             });
             await runtime.insertAudit({ assignmentId, actorType: 'admin', actorUsername: adminUsername, action: `quest.review.${decision}`, details: { note, evidenceIds: evidence.map((item) => item.id), ...settlement }, requestId: context.requestId });
+            if (decision === 'approved' && this.achievementService?.recordTrustedEvent) {
+                await this.achievementService.recordTrustedEvent(client, assignment.username, {
+                    sourceType:'quest',sourceEventId:`achievement-quest-review:${assignmentId}:${assignment.revision}`,
+                    eventType:'quest.assignment.completed',occurredAt:new Date().toISOString(),
+                    payload:{assignmentId,questSlug:assignment.slug,category:assignment.category,
+                        verification:'manual',rewardPoints:Number(assignment.reward_points),board:Boolean(assignment.board_id),
+                        resubmitted:evidence.some(item=>Number(item.submission_ordinal)>1),chainNode:assignment.chain_node_key || ''}
+                }, context);
+            }
             const body = { success: true, assignmentId, status: target, ...settlement };
             await this.finalize(context, client, 200, body);
             return body;
@@ -460,6 +470,15 @@ class QuestV2Service {
                 payload: { completedSteps }, requestId: context.requestId
             });
             await runtime.insertAudit({ assignmentId: assignment.id, actorType: 'trusted_event', action: 'quest.trusted.completed', details: { trustedEventId: event.eventId, completedSteps, ...settlement }, requestId: context.requestId });
+            if (this.achievementService?.recordTrustedEvent) {
+                await this.achievementService.recordTrustedEvent(client, old.username, {
+                    sourceType:'quest',sourceEventId:`achievement-quest-trusted:${event.eventId}:${assignment.id}`,
+                    eventType:'quest.assignment.completed',occurredAt:event.occurredAt,
+                    payload:{assignmentId:Number(assignment.id),questSlug:assignment.slug,category:assignment.category,
+                        verification:'automatic',rewardPoints:Number(assignment.reward_points),board:Boolean(assignment.board_id),
+                        resubmitted:false,chainNode:assignment.chain_node_key || ''}
+                }, context);
+            }
             rewardEarned += settlement.rewardEarned;
             matches.push({ assignmentId: Number(assignment.id), status: 'completed', completedSteps, ...settlement });
         }

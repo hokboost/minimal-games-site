@@ -147,14 +147,14 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 8 — Full content expansion
 
-- [ ] Complete.
-- Story seasons/episodes/nodes/dialogue/choices/endings:
-- Quest templates/chains/boards/events:
-- Achievements and collections:
-- Game levels/scenarios:
-- Uniqueness validation:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Story seasons/episodes/nodes/dialogue/choices/endings: Five immutable versioned seasons now contain 60 episodes, 1,714 reachable nodes, 1,080 choices with four durable consequences each, 25 route conclusions, 60 shared memories, 32 consent-bound owner interventions, and 4,145 bilingual visible beats. Seasons Two through Five each carry 12 episodes, four substantial authored scenes per episode, 240 choices, and five endings. Old Season One runs remain bound to their original content snapshot; selecting, completing, and replaying Seasons Two through Five preserves the selected season.
+- Quest templates/chains/boards/events: The frozen Quest V2 catalog now contains 180 uniquely titled/defined bilingual templates, 30 named multi-step chains, and 12 weekly boards. The original 60 published definitions and legacy task-card bridge remain intact; expanded definitions continue to use the closed trusted-event/rule AST and transactional settlement path.
+- Achievements and collections: Sixty immutable bilingual achievements use a closed event/filter registry, stable source-event dedupe, unique progress/unlock settlement, hidden-safe projection, permanent collection grants, and season archives bound to the actual story content snapshot hash. Story, Quest, game, and Live Interaction hooks run inside their existing business transactions; replay does not add progress, and hook/collection failure rolls the source mutation back.
+- Game levels/scenarios: All ten version-two packs coexist with the immutable version-one snapshots. Challenge counts are Constellation 30, Signal 40, Mystery 20, Weaver 30, Crafting 85, Meteor 25, Maze 20 plus 100 authored rooms/30 events, Bingo 20 plus 120 safe event labels, Echo 50, and Prediction 20 plus more than 200 fictional prompt cards. The original 200 selectable challenges additionally carry 2,000 unique bilingual success/retry/accessibility/Quest/Story feedback fields that are projected by the engine and rendered by the browser. Expanded rooms, safe events, cards, recipes, and challenges remain recursively frozen and are consumed by their engines rather than existing as seed-only data.
+- Uniqueness validation: Story validation checks exact duplicates, restricted owner-message references, repeated openings, normalized digit templates, cross-season six-word/twelve-character n-grams, reachability, and persistent choice effects. Game validation checks the closed ten-field feedback schema, bounds, complete original challenge coverage, and global bilingual uniqueness; focused tests also assert unique challenge prose, maze rooms, Bingo events, Prediction prompts, Quest titles/descriptions, and achievement definitions.
+- Credited added lines: 37,145 cumulative (backend 12,315; frontend 2,175; authored content 17,524; tests 4,958; docs 158; tooling 2; other 13), with ten meaningful deletions and 37,135 net growth. Backend + frontend + content is 32,014. The Phase 8 backend and authored-content gates pass; Phase 9 remains responsible for the frontend, tests, core, total, and net-growth gates.
+- Risks or decisions: `npm run test:all`, `npm run release:stage`, the 119-test focused Story/full-content/game/browser suite, Creator configuration tests, EJS compilation, syntax/secrets scans, and `git diff --check` pass. The new achievement migration has not been executed against a disposable PostgreSQL database because database creation requires explicit operator authorization; it still requires an operator-authorized disposable run before deployment. All new feature flags default off, no historical migration was edited, no production database was touched, and no balance/gift/provider send path was invoked.
 
 ### Phase 9 — Hardening and release readiness
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 7 is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 8 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +11,385 / -8
-  frontend  +2,132 / -0
-  content   +1,127 / -0
-  tests     +4,552 / -0
+  backend   +12,315 / -8
+  frontend  +2,175 / -0
+  content   +17,524 / -0
+  tests     +4,958 / -0
   docs      +158 / -0
   tooling   +2 / -1
-  other     +12 / -1
+  other     +13 / -1
 
-Credited additions: 19,368
+Credited additions: 37,145
 Meaningful deletions: 10
-Credited net growth: 19,358
-Backend + frontend + content: 14,644
+Credited net growth: 37,135
+Backend + frontend + content: 32,014
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 19,368 / 50,000
-  [FAIL] net growth: 19,358 / 40,000
-  [FAIL] backend additions: 11,385 / 12,000
-  [FAIL] frontend additions: 2,132 / 8,000
-  [FAIL] authored-content additions: 1,127 / 16,000
-  [FAIL] test additions: 4,552 / 10,000
-  [FAIL] backend + frontend + content: 14,644 / 36,000
+  [FAIL] total meaningful additions: 37,145 / 50,000
+  [FAIL] net growth: 37,135 / 40,000
+  [PASS] backend additions: 12,315 / 12,000
+  [FAIL] frontend additions: 2,175 / 8,000
+  [PASS] authored-content additions: 17,524 / 16,000
+  [FAIL] test additions: 4,958 / 10,000
+  [FAIL] backend + frontend + content: 32,014 / 36,000
 
 Overall: FAIL
 ```
 
-The overall threshold failure remains expected after Phase 7; the full-content and hardening phases supply the remaining volume.
+The remaining overall threshold failures are expected before Phase 9 hardening, accessibility, browser coverage, and release work.
 
 ## Current acceptance status
 
@@ -214,10 +214,10 @@ The overall threshold failure remains expected after Phase 7; the full-content a
 - [ ] 10,000 test additions.
 - [ ] 36,000 backend + frontend + content additions.
 - [x] 10 distinct new games complete.
-- [ ] 5 story seasons complete.
-- [ ] 180 quest templates complete.
-- [ ] 30 quest chains complete.
-- [ ] 60 achievements complete.
+- [x] 5 story seasons complete.
+- [x] 180 quest templates complete.
+- [x] 30 quest chains complete.
+- [x] 60 achievements complete.
 - [x] Old tests pass at the Phase 0 baseline.
 - [x] Real Bilibili sends remain disabled.
 - [ ] Final report written.

@@ -110,9 +110,13 @@ function applyAction(state, raw, context) {
 function project(state, viewerRole, contentPack = config.pack) {
     const challenge = challengeById(state.challengeId, contentPack);
     const legalDirections = state.graph[`${state.position.x}:${state.position.y}`];
+    const room = Array.isArray(contentPack.roomLibrary) && contentPack.roomLibrary.length
+        ? contentPack.roomLibrary[(challenge.seed + state.position.y * state.size + state.position.x) % contentPack.roomLibrary.length]
+        : null;
     return { ...publicBase(state, challenge), dailyKey: state.dailyKey, size: state.size,
         position: state.position, visited: state.visited, hintsRemaining: state.hintsRemaining,
-        lastHint: state.lastHint, canNavigate: viewerRole === 'creator', canHint: state.mode === 'solo' || viewerRole === 'owner', legalDirections };
+        lastHint: state.lastHint, canNavigate: viewerRole === 'creator', canHint: state.mode === 'solo' || viewerRole === 'owner', legalDirections,
+        room:room ? { id:room.id,titleZh:room.titleZh,titleEn:room.titleEn,descriptionZh:room.descriptionZh,descriptionEn:room.descriptionEn } : null };
 }
 
 module.exports = { applyAction, buildMaze, challengeById, createState, project, shortestDirections };

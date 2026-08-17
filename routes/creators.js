@@ -85,6 +85,7 @@ module.exports = function registerCreatorRoutes(app, deps) {
                 storyWorldEnabled: streamerWorldFlags.storyWorldEnabled,
                 liveInteractionsEnabled: streamerWorldFlags.liveInteractionsEnabled,
                 rewardsEnabled: streamerWorldFlags.rewardsEnabled,
+                achievementsEnabled: streamerWorldFlags.achievementsEnabled,
                 dashboard
             });
         } catch (error) {

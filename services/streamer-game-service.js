@@ -19,15 +19,25 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const GAME_IDS = Object.freeze(Object.keys(packs));
 const ENGINE_REGISTRY = Object.freeze({
     'constellation-v1': constellation,
+    'constellation-v2': constellation,
     'signal-v1': signal,
+    'signal-v2': signal,
     'mystery-v1': mystery,
+    'mystery-v2': mystery,
     'weaver-v1': weaver,
+    'weaver-v2': weaver,
     'crafting-v1': crafting,
+    'crafting-v2': crafting,
     'meteor-v1': meteor,
+    'meteor-v2': meteor,
     'maze-v1': maze,
+    'maze-v2': maze,
     'bingo-v1': bingo,
+    'bingo-v2': bingo,
     'echo-v1': echo,
-    'prediction-v1': prediction
+    'echo-v2': echo,
+    'prediction-v1': prediction,
+    'prediction-v2': prediction
 });
 
 class StreamerGameServiceError extends Error {
@@ -87,12 +97,13 @@ function validateTrustedBingoEvent(raw, pack) {
 }
 
 class StreamerGameService {
-    constructor({ repository, liveRepository = null, questV2Service = null, ownerUsername = null,
+    constructor({ repository, liveRepository = null, questV2Service = null, achievementService = null, ownerUsername = null,
         publish = async () => {}, clock = () => new Date(), engines = ENGINE_REGISTRY, gamePacks = packs }) {
         if (!repository?.withTransaction) throw new TypeError('StreamerGameService requires repository');
         this.repository = repository;
         this.liveRepository = liveRepository;
         this.questV2Service = questV2Service;
+        this.achievementService = achievementService;
         this.ownerUsername = ownerUsername;
         this.publish = publish;
         this.clock = clock;
@@ -104,8 +115,20 @@ class StreamerGameService {
 
     validateCatalog() {
         const localized = new Set();
+        const minimums = {
+            'constellation-repair':30,
+            'signal-duet':40,
+            'mystery-board':20,
+            'story-weaver':30,
+            'studio-crafting':80,
+            'meteor-defense':25,
+            'dream-maze':20,
+            'broadcast-bingo':20,
+            'echo-memory':50,
+            'keeper-prediction':20
+        };
         for (const [gameId, pack] of Object.entries(this.packs)) {
-            if (pack.gameId !== gameId || pack.challenges.length < 20 || !this.engines[pack.version]) throw new TypeError('Invalid streamer game pack');
+            if (pack.gameId !== gameId || pack.challenges.length < minimums[gameId] || !this.engines[pack.version]) throw new TypeError('Invalid streamer game pack');
             for (const challenge of pack.challenges) {
                 if (!challenge.titleZh || !challenge.titleEn || !challenge.briefZh || !challenge.briefEn) throw new TypeError('Incomplete localized game content');
                 for (const text of [challenge.titleZh, challenge.titleEn, challenge.briefZh, challenge.briefEn]) {
@@ -113,6 +136,13 @@ class StreamerGameService {
                     localized.add(text);
                 }
             }
+        }
+        if (this.packs['studio-crafting'].collections.length < 12
+            || this.packs['dream-maze'].roomLibrary.length < 100
+            || this.packs['dream-maze'].eventDefinitions.length < 30
+            || this.packs['broadcast-bingo'].safeEventKinds.length < 120
+            || this.packs['keeper-prediction'].promptCards.length < 200) {
+            throw new TypeError('Streamer game content minimum is incomplete');
         }
     }
 
@@ -320,6 +350,15 @@ class StreamerGameService {
                     quest = await this.questV2Service.recordInternalTrustedEvent(client, {
                         sourceType: 'streamer_game', sourceEventId: `game-run:${run.id}`, username: run.creatorUsername,
                         eventType: 'game.run.completed', occurredAt: this.clock().toISOString(), payload: hookPayload
+                    }, context);
+                }
+                if (this.achievementService?.recordTrustedEvent) {
+                    await this.achievementService.recordTrustedEvent(client, run.creatorUsername, {
+                        sourceType:'streamer_game',sourceEventId:`achievement-game-run:${run.id}`,
+                        eventType:'game.run.completed',occurredAt:this.clock().toISOString(),
+                        payload:{runId:run.id,gameId:run.gameId,challengeId:nextState.challengeId,
+                            difficulty:run.difficulty,mode:run.mode,score:nextState.score,
+                            authoritativeScore:true,resumed:Boolean(nextState.history?.some(item=>item.type==='resume'))}
                     }, context);
                 }
             }

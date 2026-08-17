@@ -126,6 +126,7 @@ class LiveInteractionService {
         storyNodeIds = [],
         questEnabled = false,
         storyEnabled = false,
+        achievementService = null,
         clock = () => new Date()
     }) {
         if (!repository?.withTransaction) throw new TypeError('LiveInteractionService requires repository');
@@ -143,6 +144,7 @@ class LiveInteractionService {
         this.storyNodeIds = new Set(storyNodeIds);
         this.questEnabled = questEnabled;
         this.storyEnabled = storyEnabled;
+        this.achievementService = achievementService;
         this.clock = clock;
         this.validateTemplateCatalog();
     }
@@ -444,6 +446,11 @@ class LiveInteractionService {
                     inboxMessageId
                 }
             });
+            if (this.achievementService?.recordTrustedEvent) await this.achievementService.recordTrustedEvent(client, accounts.creator.username, {
+                sourceType:'live_interaction',sourceEventId:`achievement-live-persisted:${event.eventId}`,
+                eventType:'live.item.persisted',occurredAt:this.clock().toISOString(),
+                payload:{interactionId:room.id,itemId:item.id,type:item.itemType,quiet:Boolean(boundary.state.quiet),muted:false}
+            }, context);
             const body = {
                 success: true,
                 interactionId: room.id,
@@ -524,6 +531,11 @@ class LiveInteractionService {
                     reportId: command.reportId
                 }
             });
+            if (this.achievementService?.recordTrustedEvent) await this.achievementService.recordTrustedEvent(client, username, {
+                sourceType:'live_interaction',sourceEventId:`achievement-live-reconsent:${event.eventId}`,
+                eventType:'live.report.reconsented',occurredAt:this.clock().toISOString(),
+                payload:{interactionId:room.id,reportId:command.reportId}
+            }, context);
             const body = {
                 success: true,
                 interactionId: room.id,

@@ -26,7 +26,7 @@ module.exports = function registerStoryWorldRoutes(app, deps) {
     }
     app.get('/story', ...reads, enabled, async (req, res) => {
         try {
-            const state = await storyWorldService.state(req.session.user.username, { language: res.locals.lang });
+            const state = await storyWorldService.state(req.session.user.username, { language: res.locals.lang, season: req.query.season || null });
             res.set('Cache-Control', 'private, no-store');
             return res.render('story-world', { title: res.locals.lang === 'zh' ? '我们之间的信号' : 'The Signal Between Us', user: req.session.user, balance: null, csrfToken: generateCSRFToken(req), initialState: state });
         } catch (caught) {
@@ -35,7 +35,7 @@ module.exports = function registerStoryWorldRoutes(app, deps) {
         }
     });
     app.get('/api/story/state', ...reads, enabled, async (req, res) => {
-        try { res.set('Cache-Control', 'private, no-store'); return res.json(await storyWorldService.state(req.session.user.username, { language: res.locals.lang })); }
+        try { res.set('Cache-Control', 'private, no-store'); return res.json(await storyWorldService.state(req.session.user.username, { language: res.locals.lang, season: req.query.season || null })); }
         catch (caught) { return error(caught, res); }
     });
     app.post('/api/story/runs/start', ...writes, enabled, async (req, res) => {

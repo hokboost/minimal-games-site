@@ -381,6 +381,35 @@ test('completed browser state exposes replay without an invalid finish command',
     assert.deepEqual(actions, ['replay']);
 });
 
+test('browser preserves selected season through completion and value-free replay', async () => {
+    const activeStory = {
+        run: { status: 'active', revision: 11, canRecover: false },
+        node: { speaker: null, episode: 'The Listening Orchard', text: 'The last bell is ready.', action: 'finish' },
+        progress: { axes: {}, unlocks: [] }
+    };
+    const completedStory = {
+        ...activeStory,
+        run: { status: 'completed', revision: 12, canRecover: false },
+        node: { speaker: null, episode: 'The Listening Orchard', text: 'The orchard keeps its answer.', action: null }
+    };
+    const ui = executeStoryBrowser({
+        runId: 31,
+        story: activeStory,
+        selectedSeason: 'city-of-borrowed-hours',
+        seasons: [{ slug: 'city-of-borrowed-hours', title: 'The Signal Between Us: Borrowed Hours' }]
+    }, {
+        '/api/story/actions/commit': { success: true, runId: 31, story: completedStory },
+        '/api/story/runs/start': { success: true, runId: 32, story: activeStory }
+    });
+    const finish = ui.stage.children.find((item) => item.dataset.action === 'finish');
+    await ui.stage.listeners.click({ target: finish });
+    const replay = ui.stage.children.find((item) => item.dataset.action === 'replay');
+    await ui.stage.listeners.click({ target: replay });
+    assert.equal(ui.calls[1].url, '/api/story/runs/start');
+    assert.equal(ui.calls[1].body.replay, true);
+    assert.equal(ui.calls[1].body.season, 'city-of-borrowed-hours');
+});
+
 test('Story World modules never touch balance or gift provider boundaries', () => {
     for (const file of ['domain/story/effects.js','services/story-world-service.js','repositories/story-world-repository.js','routes/story-world.js']) {
         assert.doesNotMatch(source(file), /BalanceLogger|sendGift|bilibili_gift_sender|gift_exchanges|wish_inventory/i, file);
