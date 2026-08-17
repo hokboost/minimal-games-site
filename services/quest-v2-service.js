@@ -11,9 +11,10 @@ const { QuestV2RuntimeRepository } = require('../repositories/quest-v2-runtime-r
 const pack = require('../content/streamer-world/quests/phase-2-pack');
 
 const ACTIVE = new Set(['offered', 'accepted', 'active', 'submitted', 'under_review', 'returned']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REGISTERED_TRUSTED_EVENTS = new Set([
     'adventure.chapter.completed', 'quiz.round.completed', 'doudizhu.match.won',
-    'story.choice.committed', 'story.episode.completed'
+    'story.choice.committed', 'story.episode.completed', 'game.run.completed'
 ]);
 
 class QuestV2ServiceError extends Error {
@@ -107,6 +108,34 @@ function validateInternalStoryEvent(raw) {
     }
     return { sourceType: 'story', sourceEventId: raw.sourceEventId, username: raw.username,
         eventType: raw.eventType, occurredAt: new Date(raw.occurredAt).toISOString(), payload: { ...raw.payload } };
+}
+
+function validateInternalGameEvent(raw) {
+    if (!raw || raw.sourceType !== 'streamer_game' || raw.eventType !== 'game.run.completed') {
+        throw new QuestV2ServiceError('INVALID_TRUSTED_EVENT', 400, 'Invalid internal game event');
+    }
+    if (Object.keys(raw).some(key => !['sourceType', 'sourceEventId', 'username', 'eventType', 'occurredAt', 'payload'].includes(key))) {
+        throw new QuestV2ServiceError('INVALID_TRUSTED_EVENT', 400, 'Internal game event contains unsupported fields');
+    }
+    const payload = raw.payload || {};
+    const keys = Object.keys(payload).sort();
+    const expected = ['challengeId', 'configVersion', 'difficulty', 'gameId', 'mode', 'runId', 'score'].sort();
+    if (stableStringify(keys) !== stableStringify(expected)
+        || !UUID_PATTERN.test(payload.runId || '')
+        || !/^[a-z][a-z0-9-]{2,39}$/.test(payload.gameId || '')
+        || !/^[a-z][a-z0-9-]{2,79}$/.test(payload.challengeId || '')
+        || !/^[A-Za-z0-9._-]{3,64}$/.test(payload.configVersion || '')
+        || !['gentle', 'standard', 'expert'].includes(payload.difficulty)
+        || !['solo', 'coop'].includes(payload.mode)
+        || !Number.isSafeInteger(payload.score) || payload.score < 0 || payload.score > 100000000
+        || raw.sourceEventId !== `game-run:${payload.runId}`
+        || typeof raw.username !== 'string' || raw.username.length < 1 || raw.username.length > 64
+        || /[\u0000-\u001f\u007f]/u.test(raw.username)
+        || !Number.isFinite(Date.parse(raw.occurredAt))) {
+        throw new QuestV2ServiceError('INVALID_TRUSTED_EVENT', 400, 'Malformed internal game event');
+    }
+    return { sourceType: raw.sourceType, sourceEventId: raw.sourceEventId, username: raw.username,
+        eventType: raw.eventType, occurredAt: new Date(raw.occurredAt).toISOString(), payload: { ...payload } };
 }
 
 class QuestV2Service {
@@ -385,7 +414,10 @@ class QuestV2Service {
     }
 
     async recordInternalTrustedEvent(client, rawEvent, context = {}) {
-        return this._recordValidatedTrustedEvent(client, validateInternalStoryEvent(rawEvent), context);
+        const event = rawEvent?.sourceType === 'streamer_game'
+            ? validateInternalGameEvent(rawEvent)
+            : validateInternalStoryEvent(rawEvent);
+        return this._recordValidatedTrustedEvent(client, event, context);
     }
 
     async _recordValidatedTrustedEvent(client, old, context = {}) {
@@ -532,4 +564,5 @@ class QuestV2Service {
     }
 }
 
-module.exports = { QuestV2Service, QuestV2ServiceError, REGISTERED_TRUSTED_EVENTS, validateInternalStoryEvent, validateRegisteredRule };
+module.exports = { QuestV2Service, QuestV2ServiceError, REGISTERED_TRUSTED_EVENTS,
+    validateInternalGameEvent, validateInternalStoryEvent, validateRegisteredRule };

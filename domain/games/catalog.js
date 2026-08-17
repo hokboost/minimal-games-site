@@ -333,6 +333,51 @@ const GAME_DEFINITIONS = deepFreeze([
         costEn: 'Free to claim',
         metaZh: `${ADVENTURE_CONFIG.contentVersion} 剧情季`,
         metaEn: `${ADVENTURE_CONFIG.contentVersion} story season`
+    }),
+    defineGame({
+        id: 'constellation-repair', index: '13', group: 'free', href: '/constellation-repair',
+        actions: [action('/api/constellation-repair/start', CAPACITY_USER_ACTION_POLICIES), action('/api/constellation-repair/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'coop', economicsKind: 'free', recordView: null,
+        titleZh: '星图协修', titleEn: 'Constellation Repair',
+        descZh: '你与站主掌握不同线索，轮流修复星路；也可使用单人双视角模式。',
+        descEn: 'Repair star routes with asymmetric clues from the owner, or use the solo dual-view fallback.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 张协作星图', metaEn: '20 co-op charts'
+    }),
+    defineGame({
+        id: 'signal-duet', index: '14', group: 'free', href: '/signal-duet',
+        actions: [action('/api/signal-duet/start', CAPACITY_USER_ACTION_POLICIES), action('/api/signal-duet/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'rhythm', economicsKind: 'free', recordView: null,
+        titleZh: '信号双奏', titleEn: 'Signal Duet',
+        descZh: '跟随原创视觉脉冲轮流接拍，服务器时钟负责判定，也支持单人练习。',
+        descEn: 'Trade original visual pulses against server timing, with a complete solo practice mode.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 首原创节拍', metaEn: '20 original patterns'
+    }),
+    defineGame({
+        id: 'mystery-board', index: '15', group: 'free', href: '/mystery-board',
+        actions: [action('/api/mystery-board/start', CAPACITY_USER_ACTION_POLICIES), action('/api/mystery-board/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'brain', economicsKind: 'free', recordView: null,
+        titleZh: '谜案拼图', titleEn: 'Mystery Board',
+        descZh: '连接手写证据、识别矛盾，再选择能够解释全部事实的结论。',
+        descEn: 'Link authored evidence, identify contradictions, and choose the conclusion that explains every fact.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 宗原创谜案', metaEn: '20 authored cases'
+    }),
+    defineGame({
+        id: 'story-weaver', index: '16', group: 'free', href: '/story-weaver',
+        actions: [action('/api/story-weaver/start', CAPACITY_USER_ACTION_POLICIES), action('/api/story-weaver/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'free', category: 'creative', economicsKind: 'free', recordView: null,
+        titleZh: '故事接龙工坊', titleEn: 'Story Weaver',
+        descZh: '使用安全的双语段落卡异步续写，在主题呼应与交接中完成故事。',
+        descEn: 'Build an asynchronous story from safe bilingual passage cards and thematic handoffs.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 个故事开端', metaEn: '20 story openings'
+    }),
+    defineGame({
+        id: 'studio-crafting', index: '17', group: 'free', href: '/studio-crafting',
+        actions: [action('/api/studio-crafting/start', CAPACITY_USER_ACTION_POLICIES), action('/api/studio-crafting/action', CAPACITY_USER_ACTION_POLICIES)],
+        assetKind: 'collection', category: 'creative', economicsKind: 'free', recordView: null,
+        titleZh: '星光工坊', titleEn: 'Studio Crafting',
+        descZh: '按确定性配方收集材料、制作摆件并布置自己的六格工作室。',
+        descEn: 'Gather deterministic materials, craft keepsakes, and arrange a six-slot personal studio.',
+        costZh: '免费', costEn: 'Free', metaZh: '20 件可收藏摆件', metaEn: '20 collectible decorations'
     })
 ]);
 

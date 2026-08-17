@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-17T00:55:57Z`
+Last updated: `2026-08-17T01:29:59Z`
 
 ## Pre-existing working-tree changes
 
@@ -115,14 +115,14 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 5 — New games batch one
 
-- [ ] Complete.
-- Games:
-- Level/content counts:
-- Migrations:
-- Routes:
-- Tests:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Games: Five server-authoritative skill games are complete: Constellation Repair (asymmetric route repair with finite blockers and solo fallback), Signal Duet (server-clock visual rhythm windows and solo fallback), Mystery Board (authored evidence/contradiction graphs), Story Weaver (closed bilingual passage-card construction with asynchronous co-op turns), and Studio Crafting (material conservation, craft-then-place lifecycle, durable collection, and six persistent room slots). Every game has its own pure engine/configuration module, three difficulty contracts, revision-CAS persistence, immutable version snapshot, terminal scoring, reconnect projection, keyboard/touch UI, and bounded hidden-state projection. Creators can durably abandon an unfinished occurrence before starting another. Co-op game state remains in dedicated game tables; Phase 4 carries only bounded `interaction.game_state_changed` metadata, including a start event that lets the invited owner discover the run without receiving a UUID out of band.
+- Level/content counts: 100 original bilingual challenges, exactly 20 per game. Constellation has 20 deterministic blocked grids; Signal has 20 strictly increasing visual patterns; Mystery has 20 individually authored four-evidence cases with varied suspect positions, valid/false links, and contradictions; Weaver has 20 story openings plus ten closed bilingual connective passage cards; Crafting has 20 recipes/collectibles. Nested recipes, evidence, patterns, and packs are recursively frozen.
+- Migrations: `migrations/add_streamer_games_batch_one.sql` is the sole append-only Phase 5 migration. It explicitly and fail-closed upgrades the Phase 4 event-type CHECK, then adds immutable content snapshots, owner/creator runs, one-active-run uniqueness, persistent semantic start/action responses, ordered events, safe hook intents, collection/room projections, and audit history. Version retirement is one-way; commands/events/audits/collection provenance are immutable; hook intent content is frozen with a one-way processing lifecycle. No historical migration was edited.
+- Routes: Five pages plus private state APIs and ten fixed start/action mutations. Every mutation is protected in manifest/runtime by capacity, login, current authorization, bounded basic/action rates, CSRF, and exact-path idempotency. The entire catalog, routes, startup seed, and lobby visibility remain default-off behind `STREAMER_WORLD_ENABLED=true`, `CREATOR_PROFILE_ENABLED=true`, and `STREAMER_NEW_GAMES_ENABLED=true`. Co-op additionally requires the configured active owner, creator live-interaction consent, and an active Phase 4 relay room.
+- Tests: 34 focused Phase 5 subtests cover content uniqueness/deep freezing; all five pure engines; three difficulties; blocker/path and authoritative timing rules; mystery hidden solutions; story handoffs; crafting conservation/lifecycle; strict flags; registry/manifest parity; exact migration upgrade; trusted Quest event validation; semantic replay/collision; concurrent starts/actions; durable abandon/restart; deterministic users-before-run locks; participant deactivation rollback; idempotency-finalization and Quest-hook rollback; exactly-once hook/collection settlement; old-version snapshots/hash drift; malformed UUID API behavior; feature-off 404; owner history discovery; response-loss-safe start relay; bounded hidden live metadata; provider isolation; and real VM/DOM behavior for touch clicks, keyboard rhythm input, countdown, rule-disabled controls after success/network failure, terminal controls, and empty-page live-event authoritative refresh. `npm run test:all`, `npm run release:stage`, EJS compilation, syntax/secrets scans, and `git diff --check` passed.
+- Credited added lines: 15,831 cumulative before this progress update (backend 9,263; frontend 1,859; authored content 830; tests 3,707; docs 158; tooling 2; other 12), with ten meaningful deletions and 15,821 net growth. Backend + frontend + content is 11,952.
+- Risks or decisions: The disposable PostgreSQL migration suite was not run because it requires explicit database-create authorization; the migration is statically and behaviorally covered but still needs an operator-authorized disposable PostgreSQL run before deployment. Durable REST game state is authoritative; Socket.IO/PG-bus fanout failure cannot lose a move. Story and achievement integration remains as non-monetary immutable hook intents until those consumers exist; Quest V2 receives one registered server-trusted completion event in the game transaction. The game modules import no balance logger, gift inventory/outbox, provider receipt, or sender. No production database or real gift send was touched.
 
 ### Phase 6 — New games batch two
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 4 is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 5 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +7,806 / -7
-  frontend  +1,527 / -0
-  content   +550 / -0
-  tests     +2,850 / -0
+  backend   +9,263 / -8
+  frontend  +1,859 / -0
+  content   +830 / -0
+  tests     +3,707 / -0
   docs      +158 / -0
   tooling   +2 / -1
   other     +12 / -1
 
-Credited additions: 12,905
-Meaningful deletions: 9
-Credited net growth: 12,896
-Backend + frontend + content: 9,883
+Credited additions: 15,831
+Meaningful deletions: 10
+Credited net growth: 15,821
+Backend + frontend + content: 11,952
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 12,905 / 50,000
-  [FAIL] net growth: 12,896 / 40,000
-  [FAIL] backend additions: 7,806 / 12,000
-  [FAIL] frontend additions: 1,527 / 8,000
-  [FAIL] authored-content additions: 550 / 16,000
-  [FAIL] test additions: 2,850 / 10,000
-  [FAIL] backend + frontend + content: 9,883 / 36,000
+  [FAIL] total meaningful additions: 15,831 / 50,000
+  [FAIL] net growth: 15,821 / 40,000
+  [FAIL] backend additions: 9,263 / 12,000
+  [FAIL] frontend additions: 1,859 / 8,000
+  [FAIL] authored-content additions: 830 / 16,000
+  [FAIL] test additions: 3,707 / 10,000
+  [FAIL] backend + frontend + content: 11,952 / 36,000
 
 Overall: FAIL
 ```
 
-The overall threshold failure remains expected after Phase 4; later game, reward, hardening, frontend, test, and full-content phases supply the remaining volume.
+The overall threshold failure remains expected after Phase 5; the second game batch, reward, hardening, frontend, test, and full-content phases supply the remaining volume.
 
 ## Current acceptance status
 

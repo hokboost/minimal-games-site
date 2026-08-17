@@ -104,6 +104,7 @@ const registerAdminQuestStudioRoutes = require('./routes/admin-quest-studio');
 const registerStoryWorldRoutes = require('./routes/story-world');
 const registerAdminStoryAuditRoutes = require('./routes/admin-story-audit');
 const registerLiveInteractionRoutes = require('./routes/live-interactions');
+const registerStreamerGameRoutes = require('./routes/streamer-games');
 const { CreatorRepository } = require('./repositories/creator-repository');
 const { CreatorProfileService } = require('./services/creator-profile-service');
 const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
@@ -112,9 +113,15 @@ const { StoryWorldService } = require('./services/story-world-service');
 const { LiveInteractionRepository } = require('./repositories/live-interaction-repository');
 const { LiveInteractionService } = require('./services/live-interaction-service');
 const { LiveSocketGateway } = require('./services/live-socket-gateway');
+const { StreamerGameRepository } = require('./repositories/streamer-game-repository');
+const { GAME_IDS: STREAMER_GAME_IDS, StreamerGameService } = require('./services/streamer-game-service');
 const { EVENT_TYPES: LIVE_EVENT_TYPES, MAX_EVENT_BYTES: LIVE_EVENT_MAX_BYTES } = require('./domain/live-interactions/protocol');
 const storySeasonOne = require('./content/streamer-world/story/season-one');
 const streamerWorldFlags = readStreamerWorldFlags();
+const streamerGameIdSet = new Set(STREAMER_GAME_IDS);
+const visibleGameDefinitions = streamerWorldFlags.newGamesEnabled
+    ? gameRegistry.GAME_DEFINITIONS
+    : gameRegistry.GAME_DEFINITIONS.filter(game => !streamerGameIdSet.has(game.id));
 const questV2Service = new QuestV2Service({ pool, BalanceLogger });
 const storyWorldService = new StoryWorldService({
     pool,
@@ -128,10 +135,11 @@ const questService = new QuestService({
 const creatorRepository = new CreatorRepository({ pool });
 const creatorService = new CreatorProfileService({
     repository: creatorRepository,
-    gameIds: gameRegistry.GAME_DEFINITIONS.map((game) => game.id)
+    gameIds: visibleGameDefinitions.map((game) => game.id)
 });
 let liveInteractionService;
 let liveSocketGateway;
+let streamerGameService;
 
 // 导入i18n国际化
 const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
@@ -153,7 +161,7 @@ const applicationLifecycle = new ApplicationLifecycle({
 });
 
 const app = express();
-app.locals.gameCatalog = gameRegistry.GAME_DEFINITIONS;
+app.locals.gameCatalog = visibleGameDefinitions;
 app.locals.gameCatalogGroups = gameRegistry.GAME_GROUPS;
 app.locals.gameRecordViews = gameRegistry.presentation.RECORD_VIEWS;
 app.locals.gamePublicWishConfigs = gameRegistry.getPublicWishConfigs();
@@ -392,7 +400,7 @@ liveInteractionService = new LiveInteractionService({
     repository: liveInteractionRepository,
     ownerUsername: streamerWorldFlags.ownerUsername,
     publish: publishLiveInteraction,
-    games: gameRegistry.GAME_DEFINITIONS,
+    games: visibleGameDefinitions,
     storyNodeIds: storySeasonOne.nodes.map((node) => node.id),
     questEnabled: streamerWorldFlags.questEngineV2Enabled,
     storyEnabled: streamerWorldFlags.storyWorldEnabled
@@ -409,6 +417,14 @@ async function authorizeLiveSocket(auth) {
     return result.rowCount === 1;
 }
 liveSocketGateway = new LiveSocketGateway({ service: liveInteractionService, enabled: streamerWorldFlags.liveInteractionsEnabled, authorize: authorizeLiveSocket });
+const streamerGameRepository = new StreamerGameRepository({ pool });
+streamerGameService = new StreamerGameService({
+    repository: streamerGameRepository,
+    liveRepository: liveInteractionRepository,
+    questV2Service: streamerWorldFlags.questEngineV2Enabled ? questV2Service : null,
+    ownerUsername: streamerWorldFlags.ownerUsername,
+    publish: publishLiveInteraction
+});
 
 // 发送用户通知的辅助函数
 function notifyUser(username, notification) {
@@ -2452,6 +2468,12 @@ function registerRuntimeLifecycle() {
         },
         async stop() {}
     });
+    applicationLifecycle.registerComponent('streamer-game-catalog', {
+        async start() {
+            if (streamerWorldFlags.newGamesEnabled) await streamerGameService.ensureCatalog();
+        },
+        async stop() {}
+    });
     applicationLifecycle.registerComponent('socket-event-bus', {
         start: () => socketEventBus.start(),
         stop: () => socketEventBus.close()
@@ -3055,6 +3077,17 @@ registerLiveInteractionRoutes(app, {
     requireAuthorized,
     requireCSRF,
     security
+});
+
+registerStreamerGameRoutes(app, {
+    streamerGameService,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireCSRF,
+    security,
+    paidActionConcurrencyGuard
 });
 
 // 404 处理（必须在所有API路由之后）

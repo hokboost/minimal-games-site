@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/common.css">
+    <link rel="stylesheet" href="/streamer-games.css">
+</head>
+<body data-lang="<%= lang %>" data-csrf-token="<%= csrfToken %>" data-game-id="<%= gameId %>">
+    <header class="sg-header">
+        <a href="/" class="sg-back"><%= lang==='zh' ? '返回游戏大厅' : 'Back to games' %></a>
+        <div>
+            <p class="sg-kicker"><%= lang==='zh' ? '主播世界 · 免费技能玩法' : 'Streamer World · Free skill game' %></p>
+            <h1 id="sg-title"><%= title %></h1>
+        </div>
+        <a href="/live-room"><%= lang==='zh' ? '联络室' : 'Relay room' %></a>
+    </header>
+    <main class="sg-layout">
+        <section class="sg-panel" aria-labelledby="sg-setup-title">
+            <h2 id="sg-setup-title"><%= lang==='zh' ? '选择挑战' : 'Choose a challenge' %></h2>
+            <label><span><%= lang==='zh' ? '关卡' : 'Challenge' %></span><select id="sg-challenge"></select></label>
+            <label><span><%= lang==='zh' ? '难度' : 'Difficulty' %></span>
+                <select id="sg-difficulty">
+                    <option value="gentle"><%= lang==='zh' ? '温和' : 'Gentle' %></option>
+                    <option value="standard" selected><%= lang==='zh' ? '标准' : 'Standard' %></option>
+                    <option value="expert"><%= lang==='zh' ? '专家' : 'Expert' %></option>
+                </select>
+            </label>
+            <fieldset>
+                <legend><%= lang==='zh' ? '模式' : 'Mode' %></legend>
+                <label><input type="radio" name="sg-mode" value="solo" checked> <%= lang==='zh' ? '单人后备模式' : 'Solo fallback' %></label>
+                <label><input type="radio" name="sg-mode" value="coop"> <%= lang==='zh' ? '与站主协作' : 'Co-op with owner' %></label>
+            </fieldset>
+            <button id="sg-start" type="button"><%= lang==='zh' ? '开始新局' : 'Start run' %></button>
+            <p class="sg-help"><%= lang==='zh' ? '所有结果由服务器规则判定。协作模式要求双方已进入有效联络室。' : 'The server judges every result. Co-op requires an active relay room for both participants.' %></p>
+        </section>
+        <section class="sg-board" aria-live="polite">
+            <div id="sg-status" class="sg-status"></div>
+            <div id="sg-content"></div>
+            <div id="sg-actions" class="sg-actions"></div>
+            <p id="sg-message" role="status"></p>
+        </section>
+        <aside class="sg-panel">
+            <h2><%= lang==='zh' ? '教程与记录' : 'Tutorial and history' %></h2>
+            <ol id="sg-tutorial"></ol>
+            <h3><%= lang==='zh' ? '最近记录' : 'Recent runs' %></h3>
+            <ul id="sg-history"></ul>
+            <div id="sg-collection"></div>
+        </aside>
+    </main>
+    <script id="sg-bootstrap" type="application/json"><%- JSON.stringify({pack,state}).replace(/</g,'\\u003c') %></script>
+    <script src="/idempotency.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/streamer-game-ui-state.js"></script>
+    <script src="/js/streamer-game.js"></script>
+</body>
+</html>
