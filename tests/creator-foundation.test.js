@@ -572,10 +572,11 @@ test('creator UI is bilingual, accessible, mobile-ready, and uses safe DOM APIs'
     assert.match(source('public/creator-world.css'), /min-height: 48px/);
 });
 
-test('Creator Director is read-only and room binding stays outside creator modules', () => {
+test('Creator Director keeps room binding outside creator modules while Phase 4 adds isolated live mutations', () => {
     const adminRoute = source('routes/admin-creator-director.js');
     assert.match(adminRoute, /app\.get\('\/admin\/creator-director'/);
-    assert.doesNotMatch(adminRoute, /app\.(?:post|put|patch|delete)\(/);
+    assert.match(adminRoute, /app\.post\('\/api\/admin\/live\/send'/);
+    assert.match(adminRoute, /requireConfiguredOwner/);
     const combined = [
         source('routes/creators.js'),
         source('services/creator-profile-service.js'),

@@ -1,0 +1,11 @@
+<!DOCTYPE html><html lang="<%= lang==='zh'?'zh-CN':'en' %>"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title><%= title %></title>
+<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/redesign.css"><link rel="stylesheet" href="/live-interactions.css"></head>
+<body class="app-redesign live-world" data-csrf-token="<%= csrfToken %>" data-lang="<%= lang %>"><%- include('partials/language-switcher') %>
+<div class="site-layout"><%- include('partials/site-header',{active:'creator'}) %><main class="live-shell">
+<header class="live-hero"><div><p class="live-kicker"><%= lang==='zh'?'主播世界 · 可恢复实时协议':'Creator World · Replayable live protocol' %></p><h1><%= title %></h1><p><%= lang==='zh'?'邀请和回应先持久保存，再实时送达；掉线后会从最后确认的序号补拉。拒绝、静音和离开不会扣除任何关系进度。':'Invitations and replies are saved before live delivery. Reconnect resumes after your last acknowledged sequence. Declining, muting, or leaving never reduces relationship progress.' %></p></div><a href="/creator"><%= lang==='zh'?'返回主播世界':'Back to Creator World' %></a></header>
+<section class="live-grid"><article class="live-panel"><div class="live-panel-head"><h2><%= lang==='zh'?'联络状态':'Relay status' %></h2><span id="live-connection" role="status"><%= lang==='zh'?'正在连接…':'Connecting…' %></span></div><div id="live-room-state"></div><div class="live-actions" id="live-room-actions"></div></article>
+<article class="live-panel"><h2><%= lang==='zh'?'持久邀请与留言':'Durable invitations and notes' %></h2><div id="live-items" class="live-items"></div></article></section>
+<section class="live-panel"><h2><%= lang==='zh'?'已确认事件':'Acknowledged events' %></h2><ol id="live-events" class="live-event-list"></ol></section><p id="live-message" role="alert" aria-live="assertive"></p>
+</main><%- include('partials/app-footer') %></div>
+<script id="live-bootstrap" type="application/json"><%- JSON.stringify(state).replace(/</g,'\\u003c') %></script><script src="/socket.io/socket.io.js"></script><script src="/js/i18n-helpers.js"></script><script src="/js/live-replay.js"></script><script src="/js/live-room.js"></script></body></html>

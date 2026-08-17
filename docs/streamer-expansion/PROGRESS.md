@@ -2,7 +2,7 @@
 
 Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
-Last updated: `2026-08-17T00:22:31Z`
+Last updated: `2026-08-17T00:55:57Z`
 
 ## Pre-existing working-tree changes
 
@@ -104,14 +104,14 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ### Phase 4 — Live interaction platform
 
-- [ ] Complete.
-- Features:
-- Protocol version:
-- Migrations:
-- Routes/events:
-- Tests:
-- Credited added lines:
-- Risks or decisions:
+- [x] Complete.
+- Features: The Creator Director now opens consent-bound owner/creator relay rooms and sends only 24 allowlisted bilingual templates across nudge, clue, celebration, story letter, quest invitation, poll, game invitation, and pre-authored story intervention types. Creator controls cover availability, mute, accept/decline/vote, leave, report, and explicit post-moderation reconsent; declines, mute, leave, and reports never reduce relationship XP. Quiet hours and preferred windows suppress presence/realtime fanout while keeping the bounded persistent inbox readable. Quest/game invitations expose only server-resolved internal action paths and never auto-claim or submit. The Director preserves all Phase 1 relationship, Bilibili room/request, milestone, and pagination fields; non-owner administrators receive only the existing safe Phase 1 summary.
+- Protocol version: `1`. Every durable event has a UUID event ID, per-room monotonic sequence, state revision, bounded allowlisted type/payload, and a complete envelope capped at 6,000 bytes beneath the existing PostgreSQL bus limit. Socket commands revalidate the exact active session before service access, apply a 30-command/10-second bound, and support member-scoped subscribe/catch-up, monotonic ack, dedupe, reconnect replay, and cross-instance delivery through the existing `PostgresEventBus`. The browser treats the REST snapshot high-water sequence as authoritative and performs single-flight gap recovery without duplicate rendering.
+- Migrations: `migrations/add_live_interaction_platform.sql` adds rooms, members, immutable structured items, ordered events, semantic command responses, one-way moderation reports, and append-only audit history. Reported pairs remain blocked through moderation until the reporting creator explicitly reconsents. Published migration history was not edited, and no financial, gift inventory, outbox, provider receipt, or balance tables are referenced.
+- Routes/events: Creator UI `GET /live-room`; state/replay reads `GET /api/live/state` and `GET /api/live/events`; fixed mutations for accept, decline, poll vote, presence, mute, leave, report, reconsent, and ack. Exact configured-owner-only Director mutations open rooms, send structured interactions, and moderate reports. Events cover room open, all eight structured item types, item responses/expiry, availability/mute/leave, report resolution, and reconsent. All mutations commit event, command response, audit, and business state together before optional Socket.IO/PG-bus fanout.
+- Tests: 30 focused Phase 4 subtests cover strict flags; template uniqueness and real references; protocol/payload limits; state machines; SQL immutability and moderation lifecycle; semantic replay/collision; exact owner enforcement; privacy; quiet/mute presence; safe action paths; version-bound story targets; rollback and post-commit fanout failure; Promise concurrency and lock ordering; ack/catch-up/left-history contracts; expiry first-response/replay consistency; report→moderate→reconsent recovery; envelope limits; revoked Socket.IO sessions; flood bounds; cross-instance delivery; browser replay ordering; fixed route policy; feature-off behavior; Phase 1 Director compatibility; and provider isolation. The suite is included in `npm test`. `npm run test:all`, `npm run release:stage`, focused EJS compilation, and `git diff --check` all passed.
+- Credited added lines: 12,905 cumulative (backend 7,806; frontend 1,527; authored content 550; tests 2,850; docs 158; tooling 2; other 12), with nine meaningful deletions and 12,896 net growth. Backend + frontend + content is 9,883. Exact current totals are recorded below.
+- Risks or decisions: All live behavior remains default-off behind `STREAMER_WORLD_ENABLED=true`, `CREATOR_PROFILE_ENABLED=true`, and `LIVE_INTERACTIONS_ENABLED=true`; Quest and Story references additionally require their own feature gates. Durable REST state/catch-up is authoritative, so bus delivery failure cannot lose an interaction. Expired invitations transition once to a durable terminal event and return a replayable HTTP 200 state response. Live production modules import neither `BalanceLogger` nor any gift/provider sender. The disposable PostgreSQL migration suite was not run because it requires explicit database-create authorization; the migration still needs an operator-authorized disposable PostgreSQL execution before production. No production database or real gift send was touched.
 
 ### Phase 5 — New games batch one
 
@@ -170,39 +170,39 @@ Overall threshold result: FAIL (expected before expansion implementation)
 
 ## Current line report
 
-The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 3 is:
+The initial zero report above was captured before Phase 0 ADR creation. The latest report after Phase 4 is:
 
 ```text
 Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +5,210 / -7
-  frontend  +1,025 / -0
-  content   +419 / -0
-  tests     +1,334 / -0
+  backend   +7,806 / -7
+  frontend  +1,527 / -0
+  content   +550 / -0
+  tests     +2,850 / -0
   docs      +158 / -0
   tooling   +2 / -1
   other     +12 / -1
 
-Credited additions: 8,160
+Credited additions: 12,905
 Meaningful deletions: 9
-Credited net growth: 8,151
-Backend + frontend + content: 6,654
+Credited net growth: 12,896
+Backend + frontend + content: 9,883
 
 Acceptance gates:
-  [FAIL] total meaningful additions: 8,160 / 50,000
-  [FAIL] net growth: 8,151 / 40,000
-  [FAIL] backend additions: 5,210 / 12,000
-  [FAIL] frontend additions: 1,025 / 8,000
-  [FAIL] authored-content additions: 419 / 16,000
-  [FAIL] test additions: 1,334 / 10,000
-  [FAIL] backend + frontend + content: 6,654 / 36,000
+  [FAIL] total meaningful additions: 12,905 / 50,000
+  [FAIL] net growth: 12,896 / 40,000
+  [FAIL] backend additions: 7,806 / 12,000
+  [FAIL] frontend additions: 1,527 / 8,000
+  [FAIL] authored-content additions: 550 / 16,000
+  [FAIL] test additions: 2,850 / 10,000
+  [FAIL] backend + frontend + content: 9,883 / 36,000
 
 Overall: FAIL
 ```
 
-The overall threshold failure remains expected after Phase 3; later live, game, reward, hardening, frontend, test, and full-content phases supply the remaining volume.
+The overall threshold failure remains expected after Phase 4; later game, reward, hardening, frontend, test, and full-content phases supply the remaining volume.
 
 ## Current acceptance status
 

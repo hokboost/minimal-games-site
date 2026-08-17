@@ -103,11 +103,17 @@ const registerQuestV2Routes = require('./routes/quest-v2');
 const registerAdminQuestStudioRoutes = require('./routes/admin-quest-studio');
 const registerStoryWorldRoutes = require('./routes/story-world');
 const registerAdminStoryAuditRoutes = require('./routes/admin-story-audit');
+const registerLiveInteractionRoutes = require('./routes/live-interactions');
 const { CreatorRepository } = require('./repositories/creator-repository');
 const { CreatorProfileService } = require('./services/creator-profile-service');
 const { readStreamerWorldFlags } = require('./lib/streamer-world-flags');
 const { QuestV2Service } = require('./services/quest-v2-service');
 const { StoryWorldService } = require('./services/story-world-service');
+const { LiveInteractionRepository } = require('./repositories/live-interaction-repository');
+const { LiveInteractionService } = require('./services/live-interaction-service');
+const { LiveSocketGateway } = require('./services/live-socket-gateway');
+const { EVENT_TYPES: LIVE_EVENT_TYPES, MAX_EVENT_BYTES: LIVE_EVENT_MAX_BYTES } = require('./domain/live-interactions/protocol');
+const storySeasonOne = require('./content/streamer-world/story/season-one');
 const streamerWorldFlags = readStreamerWorldFlags();
 const questV2Service = new QuestV2Service({ pool, BalanceLogger });
 const storyWorldService = new StoryWorldService({
@@ -124,6 +130,8 @@ const creatorService = new CreatorProfileService({
     repository: creatorRepository,
     gameIds: gameRegistry.GAME_DEFINITIONS.map((game) => game.id)
 });
+let liveInteractionService;
+let liveSocketGateway;
 
 // 导入i18n国际化
 const { i18nMiddleware, setupLanguageRoutes } = require('./i18n');
@@ -267,6 +275,7 @@ io.on('connection', (socket) => {
     userSockets.get(username).add(socket.id);
     socket.username = username;
     socket.emit('recent_messages', danmaku.getRecentMessages(10));
+    liveSocketGateway?.attach(socket);
 
     // 处理断开连接
     socket.on('disconnect', () => {
@@ -329,6 +338,10 @@ function handleSocketBusEvent(type, payload) {
         danmaku.acceptRemoteMessage(payload?.message);
         return;
     }
+    if (type === 'live_interaction') {
+        emitLiveInteractionLocal(payload?.event, payload);
+        return;
+    }
     if (!validSocketUsername(username)) return;
     if (type === 'user_notification') {
         emitUserNotificationLocal(username, payload.notification);
@@ -355,6 +368,47 @@ function publishSocketEvent(type, payload) {
         return Promise.resolve(false);
     }
 }
+
+function emitLiveInteractionLocal(event, delivery = {}) {
+    if (!event || event.version !== 1 || !LIVE_EVENT_TYPES.includes(event.eventType)
+        || !Number.isSafeInteger(Number(event.interactionId))
+        || Number(event.subjectUserId) !== Number(delivery.creatorUserId)
+        || Buffer.byteLength(JSON.stringify(event), 'utf8') > LIVE_EVENT_MAX_BYTES) return false;
+    const rooms = [`live:interaction:${Number(event.interactionId)}`];
+    if (delivery.audience !== 'owner' && Number.isSafeInteger(Number(delivery.creatorUserId))) rooms.push(`live:user:${Number(delivery.creatorUserId)}`);
+    if (delivery.audience !== 'creator' && Number.isSafeInteger(Number(delivery.ownerUserId))) rooms.push(`live:user:${Number(delivery.ownerUserId)}`);
+    io.to(rooms).emit('live:event', event);
+    return true;
+}
+
+async function publishLiveInteraction(event, room, audience = 'both') {
+    const delivery = { event, audience, creatorUserId: room.creatorUserId, ownerUserId: room.ownerUserId };
+    emitLiveInteractionLocal(event, delivery);
+    return publishSocketEvent('live_interaction', delivery);
+}
+
+const liveInteractionRepository = new LiveInteractionRepository({ pool });
+liveInteractionService = new LiveInteractionService({
+    repository: liveInteractionRepository,
+    ownerUsername: streamerWorldFlags.ownerUsername,
+    publish: publishLiveInteraction,
+    games: gameRegistry.GAME_DEFINITIONS,
+    storyNodeIds: storySeasonOne.nodes.map((node) => node.id),
+    questEnabled: streamerWorldFlags.questEngineV2Enabled,
+    storyEnabled: streamerWorldFlags.storyWorldEnabled
+});
+async function authorizeLiveSocket(auth) {
+    if (!auth?.sessionId || !auth?.username || !auth?.userId) return false;
+    const result = await pool.query(`
+        SELECT 1 FROM active_sessions active
+        JOIN users account ON account.username=active.username AND account.id=$3
+        JOIN user_sessions stored ON stored.sid=active.session_id
+        WHERE active.session_id=$1 AND active.username=$2 AND active.is_active=TRUE
+          AND account.authorized=TRUE AND account.deactivated=FALSE AND stored.expire>NOW()
+    `, [auth.sessionId, auth.username, auth.userId]);
+    return result.rowCount === 1;
+}
+liveSocketGateway = new LiveSocketGateway({ service: liveInteractionService, enabled: streamerWorldFlags.liveInteractionsEnabled, authorize: authorizeLiveSocket });
 
 // 发送用户通知的辅助函数
 function notifyUser(username, notification) {
@@ -2946,10 +3000,12 @@ registerCreatorRoutes(app, {
 
 registerAdminCreatorDirectorRoutes(app, {
     creatorService,
+    liveInteractionService,
     streamerWorldFlags,
     generateCSRFToken,
     requireLogin,
     requireAdmin,
+    requireCSRF,
     security
 });
 
@@ -2988,6 +3044,16 @@ registerAdminStoryAuditRoutes(app, {
     streamerWorldFlags,
     requireLogin,
     requireAdmin,
+    security
+});
+
+registerLiveInteractionRoutes(app, {
+    liveInteractionService,
+    streamerWorldFlags,
+    generateCSRFToken,
+    requireLogin,
+    requireAuthorized,
+    requireCSRF,
     security
 });
 

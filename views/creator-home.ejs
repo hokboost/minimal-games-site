@@ -21,6 +21,7 @@
                 </div>
                 <a class="creator-button" href="/creator/profile"><%= lang === 'zh' ? '编辑互动偏好' : 'Edit preferences' %></a>
                 <% if (storyWorldEnabled) { %><a class="creator-button" href="/story"><%= lang === 'zh' ? '进入分支故事' : 'Enter Story World' %></a><% } %>
+                <% if (liveInteractionsEnabled) { %><a class="creator-button" href="/live-room"><%= lang === 'zh' ? '进入实时联络室' : 'Enter Live Relay' %></a><% } %>
                 <a class="creator-button" href="/api/creator/export"><%= lang === 'zh' ? '导出我的数据' : 'Export my data' %></a>
             </header>
 
