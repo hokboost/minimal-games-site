@@ -48,7 +48,10 @@ const dummyPasswordHash = bcrypt.hashSync('invalid-login-password-A1', 12);
 const { parseCookies, decodeSignedSessionCookie } = require('./lib/session-auth');
 const { createIdempotencyMiddleware } = require('./lib/idempotency');
 const { createAdminFailureAuditMiddleware } = require('./lib/admin-audit-failure');
-const { IDEMPOTENT_WRITE_PATHS } = require('./routes/manifest');
+const {
+    CAPACITY_IDEMPOTENT_WRITE_ROUTES,
+    IDEMPOTENT_WRITE_PATHS
+} = require('./routes/manifest');
 const { getClientIp, isTrustedProxyAddress } = require('./lib/client-ip');
 const { requestContextMiddleware, setRequestId } = require('./lib/request-context');
 const PostgresRateLimitStore = require('./lib/postgres-rate-limit-store');
@@ -1199,6 +1202,7 @@ app.use(createIdempotencyMiddleware({
     paths: idempotentWritePaths,
     validateExistingRequest: validateExistingIdempotentRequest,
     validateTransactionalRequest: validateTransactionalIdempotentRequest,
+    retryableCapacityRoutes: CAPACITY_IDEMPOTENT_WRITE_ROUTES,
     hashSecret: idempotencyHashSecret
 }));
 

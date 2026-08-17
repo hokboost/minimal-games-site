@@ -1060,23 +1060,32 @@ class QuestV2Service {
             const runtime = this.runtimeRepositoryFactory(client);
             const redacted = await runtime.redactExpiredEvidenceBatch(100);
             for (const item of redacted) {
+                let achievementSkippedReason = null;
+                if (item.username && this.achievementService?.recordTrustedEvent) {
+                    if (item.achievement_eligible === false) {
+                        achievementSkippedReason = 'account_unavailable';
+                    } else {
+                        await this.achievementService.recordTrustedEvent(client, item.username, {
+                            sourceType: 'quest',
+                            sourceEventId: `achievement-quest-evidence-redacted:${item.id}`,
+                            eventType: 'quest.evidence.redacted',
+                            occurredAt: new Date(this.clock()).toISOString(),
+                            payload: {
+                                assignmentId: Number(item.assignment_id),
+                                evidenceId: item.id
+                            }
+                        });
+                    }
+                }
                 await runtime.insertAudit({
                     assignmentId: item.assignment_id, actorType: 'system',
                     action: 'quest.evidence.retention_redacted',
-                    details: { evidenceId: item.id, tombstoneRetained: true }
+                    details: {
+                        evidenceId: item.id,
+                        tombstoneRetained: true,
+                        ...(achievementSkippedReason ? { achievementSkippedReason } : {})
+                    }
                 });
-                if (item.username && this.achievementService?.recordTrustedEvent) {
-                    await this.achievementService.recordTrustedEvent(client, item.username, {
-                        sourceType: 'quest',
-                        sourceEventId: `achievement-quest-evidence-redacted:${item.id}`,
-                        eventType: 'quest.evidence.redacted',
-                        occurredAt: new Date(this.clock()).toISOString(),
-                        payload: {
-                            assignmentId: Number(item.assignment_id),
-                            evidenceId: item.id
-                        }
-                    });
-                }
             }
             return redacted.length;
         });

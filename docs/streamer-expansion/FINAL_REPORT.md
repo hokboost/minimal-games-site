@@ -8,7 +8,7 @@ This report describes review-ready code. It does not claim that a real Bilibili 
 
 The expansion is modular work inside the existing Express/EJS/PostgreSQL/Socket.IO application. It preserves the current authorization, sessions, CSRF, rate limits, balance ledger, gift inventory, exchange, outbox, worker lease, provider receipt, and uncertain-reconciliation state machines.
 
-Quest, Story, games, achievements, Live Interaction, and rewards never call the gift provider. A provider-backed reward claim creates stored `wish_inventory`; only the creator's existing backpack action can enqueue it through the original delivery state machine. The complete 33-entry ledger has been verified on disposable PostgreSQL through fresh creation and two historical upgrade shapes. This report does not claim that migrations were applied to Render or any production database; no real gift send was used.
+Quest, Story, games, achievements, Live Interaction, and rewards never call the gift provider. A provider-backed reward claim creates stored `wish_inventory`; only the creator's existing backpack action can enqueue it through the original delivery state machine. The complete 33-entry ledger has been verified on disposable PostgreSQL through fresh creation and two historical upgrade shapes, then applied to the controlled production database and verified at 33 applied with zero failures. No production credential is stored in this report and no real gift send was used.
 
 ## Changed modules
 
@@ -133,6 +133,9 @@ The manifest enforces duplicate identity, CSRF, login/authorization, administrat
 - Load tests cover 120 concurrent Quest trusted events, 150 concurrent Story reads, presence durability/fan-out/revision races, 100 concurrent co-op catch-up pages, and repeated bounded repository pages.
 - Transaction tests cover commit, rollback, release, and mixed parallel failure for Creator, Live, game, and reward repositories.
 - Failure injection covers response loss, semantic collision, CAS, hook rollback, post-commit fan-out failure, retention audit failure, revoked sessions, and provider isolation.
+- Cross-domain multi-account writes lock authoritative users in one global ID order with `FOR NO KEY UPDATE`, then load mutable profile/relationship facts in a fresh statement. Real PostgreSQL barriers cover Live, games, moderation, rewards and Quest against audit-FK, opt-out and account-lock races.
+- Quest evidence cleanup locks users, then assignments, then evidence with bounded `SKIP LOCKED`; review and achievement production cannot recreate the former evidence-to-user deadlock, and producer failure still rolls the batch back.
+- Capacity rejection before a game mutation is explicitly distinguished from an uncertain business failure. Only the marked pre-business rejection removes its own new pending idempotency row and permits one bounded client retry with the same command ID; every established key replays before capacity admission and all business 5xx remain indeterminate.
 - Expired evidence clears text/checklist/PNG content only after retention while preserving hash, review, settlement, and audit tombstones.
 - Browser projections omit provider identifiers, semantic hashes, hidden solutions, future branches, partner-only clues, and arbitrary evidence HTML.
 - Flags accept only exact lowercase `true` and require root/Creator prerequisites. The production launcher does not synthesize defaults; missing product keys and explicit `false` both leave expansion routes disabled without altering stored state.
@@ -173,13 +176,13 @@ Focused Phase 9 suites cover accessibility browser behavior, game experience/nar
 The final security-remediation line enforcement snapshot passed:
 
 ```text
-backend: 17,928 / 12,000
-frontend: 8,344 / 8,000
+backend: 18,138 / 12,000
+frontend: 8,359 / 8,000
 content: 17,559 / 16,000
-tests: 20,671 / 10,000
-backend + frontend + content: 43,831 / 36,000
-total: 66,561 / 50,000
-net: 66,396 / 40,000
+tests: 22,410 / 10,000
+backend + frontend + content: 44,056 / 36,000
+total: 68,553 / 50,000
+net: 68,379 / 40,000
 overall: PASS
 ```
 
@@ -187,20 +190,20 @@ Generated, vendored, binary, minified, lock, build, coverage, empty, and comment
 
 ## Feature activation and rollback
 
-Apply migrations and validate before activation. Explicitly set only the intended keys to exact lowercase `true`: `STREAMER_WORLD_ENABLED`, `CREATOR_PROFILE_ENABLED`, `QUEST_ENGINE_V2_ENABLED`, `STORY_WORLD_ENABLED`, `LIVE_INTERACTIONS_ENABLED`, `STREAMER_NEW_GAMES_ENABLED`, `STREAMER_REWARD_CATALOG_ENABLED`, and `STREAMER_ACHIEVEMENTS_ENABLED`. Missing keys remain disabled and malformed values stop startup. Live interactions require one exact active, unlocked administrator in `STREAMER_WORLD_OWNER_USERNAME`; rewards require their active catalog and budgets. See `docs/STREAMER_WORLD_OPERATIONS.md` for activation and kill-switch procedures.
+The 33 migrations are applied and verified; recheck the ledger and readiness before activation. Explicitly set only the intended keys to exact lowercase `true`: `STREAMER_WORLD_ENABLED`, `CREATOR_PROFILE_ENABLED`, `QUEST_ENGINE_V2_ENABLED`, `STORY_WORLD_ENABLED`, `LIVE_INTERACTIONS_ENABLED`, `STREAMER_NEW_GAMES_ENABLED`, `STREAMER_REWARD_CATALOG_ENABLED`, and `STREAMER_ACHIEVEMENTS_ENABLED`. Missing keys remain disabled and malformed values stop startup. Live interactions require one exact active, unlocked administrator in `STREAMER_WORLD_OWNER_USERNAME`; rewards require their active catalog and budgets. See `docs/STREAMER_WORLD_OPERATIONS.md` for activation and kill-switch procedures.
 
 Application rollback sets the relevant product flag false and restarts instances. Stored immutable history remains intact. Database rollback is forward-fix only because audit/provenance records are intentionally append-only.
 
 ## External operator steps
 
-1. Apply the 33 tracked migrations with the controlled migration identity, then verify the production ledger and readiness before enabling any product flag.
+1. Recheck that the production ledger remains at 33 applied migrations with zero failures, then verify readiness before enabling any product flag.
 2. Verify and periodically exercise the production backup and restore procedure.
 3. Configure the exact owner, then observe latency, event bus, conflicts, retention, outbox lag, and uncertain reconciliation after activation.
 4. Independently reconcile provider receipts before resolving uncertain existing gift exchanges; never auto-retry or auto-refund uncertainty.
 
 ## Known limitations
 
-- Disposable PostgreSQL fresh and historical upgrades, two real Node instances, and isolated Chromium contexts were exercised locally. Production migration, backup/restore and hosting-network validation remain operator responsibilities.
+- Disposable PostgreSQL fresh and historical upgrades, two real Node instances, and isolated Chromium contexts were exercised locally. The production migration is complete; backup/restore and hosting-network validation remain operator responsibilities.
 - Desktop Chromium is covered; Safari/WebKit, Firefox and a real mobile device still merit staging smoke tests.
 - Director intentionally supports one configured owner, not arbitrary administrator impersonation.
 - Bingo currently has one owner-confirmed allowlist adapter; another provider needs a new trusted server adapter.

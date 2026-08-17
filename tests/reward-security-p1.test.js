@@ -28,6 +28,12 @@ const {
     validateProducerReferences
 } = require('../scripts/generate-achievement-producer-matrix');
 
+test('reward multi-account authority uses one global audit-compatible row order', () => {
+    const repositorySource = Function.prototype.toString.call(RewardCatalogRepository.prototype.lockAccounts);
+    assert.match(repositorySource, /ORDER BY u\.id\s+FOR NO KEY UPDATE OF u/i);
+    assert.doesNotMatch(repositorySource, /\bFOR UPDATE\b/i);
+});
+
 function item(overrides = {}) {
     return {
         id: 7,

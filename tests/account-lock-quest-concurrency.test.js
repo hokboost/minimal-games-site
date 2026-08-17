@@ -178,7 +178,8 @@ test('admin appeal resolution uses the same users-before-appeal lock order', asy
     assert.deepEqual(calls, ['read-subject', 'lock-users', 'lock-appeal']);
 });
 
-test('review actor repository locks eligible users in deterministic id order', async () => {
+test('review actor repository locks eligible users in deterministic id order without blocking audit foreign keys',
+async () => {
     const statements = [];
     const client = {
         async query(statement) {
@@ -189,5 +190,6 @@ test('review actor repository locks eligible users in deterministic id order', a
     const repository = new QuestV2RuntimeRepository(client);
     await repository.lockReviewerAndSubject('reviewer', 7);
     assert.match(statements[0], /COALESCE\(account_locked,\s*FALSE\)\s*=\s*FALSE/i);
-    assert.match(statements[0], /ORDER BY id\s+FOR UPDATE/i);
+    assert.match(statements[0], /ORDER BY id\s+FOR NO KEY UPDATE/i);
+    assert.doesNotMatch(statements[0], /\bFOR UPDATE\b/i);
 });

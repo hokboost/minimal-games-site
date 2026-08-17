@@ -237,6 +237,32 @@ test('Director recent history SQL exposes only owner and shared durable audience
         'Director history must never aggregate creator/system events before filtering');
 });
 
+test('live account authority lock remains compatible with sensitive-read audit foreign keys', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'repositories',
+        'live-interaction-repository.js'), 'utf8');
+    const lockAccounts = source.slice(source.indexOf('async lockAccounts('),
+        source.indexOf('async readAccount(', source.indexOf('async lockAccounts(')));
+    assert.match(lockAccounts, /ORDER BY u\.id\s+FOR NO KEY UPDATE OF u/i,
+        'live authority uses the platform-wide user ID order with a foreign-key-compatible lock');
+    assert.match(lockAccounts, /FOR NO KEY UPDATE OF u/i,
+        'account state needs a non-key update lock so audit foreign-key key-share locks cannot deadlock');
+    assert.doesNotMatch(lockAccounts, /FOR UPDATE OF u/i);
+    const moderationLocks = source.slice(source.indexOf('async lockModerationContext('),
+        source.indexOf('async resolveReport(', source.indexOf('async lockModerationContext(')));
+    const moderationAccountLocks = moderationLocks.slice(0, moderationLocks.indexOf('const locked'));
+    assert.match(moderationAccountLocks, /ORDER BY id FOR NO KEY UPDATE/i,
+        'moderation uses the platform-wide user ID order with a foreign-key-compatible lock');
+    assert.doesNotMatch(moderationAccountLocks, /\bFOR UPDATE\b/i);
+
+    const gameSource = fs.readFileSync(path.join(__dirname, '..', 'repositories',
+        'streamer-game-repository.js'), 'utf8');
+    const gameLocks = gameSource.slice(gameSource.indexOf('async lockAccounts('),
+        gameSource.indexOf('async findActiveLiveRoom(', gameSource.indexOf('async lockAccounts(')));
+    assert.match(gameLocks, /ORDER BY account\.id\s+FOR NO KEY UPDATE OF account/i,
+        'co-op authority uses the platform-wide user ID order with an audit-compatible lock');
+    assert.doesNotMatch(gameLocks, /FOR UPDATE OF account/i);
+});
+
 test('configured-owner Director route uses the one audited Live snapshot without a duplicate foundation read',
     async () => {
         const register = require('../routes/admin-creator-director');

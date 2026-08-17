@@ -524,6 +524,14 @@ test('Quest trusted history has a fixed ten-thousand event safety ceiling', asyn
 test('Quest retention batch uses skip-locked ordering and caller limit', async () => {
     const client = questClient([
         {
+            match: 'SELECT account.id,account.username',
+            reply: { rows: [{ id: 7, username: 'creator-a' }, { id: 8, username: 'creator-b' }] }
+        },
+        {
+            match: 'SELECT assignment.id',
+            reply: { rows: [{ id: 10 }, { id: 11 }] }
+        },
+        {
             match: 'WITH due AS',
             reply: {
                 rows: [
@@ -541,13 +549,17 @@ test('Quest retention batch uses skip-locked ordering and caller limit', async (
         { id: 2, assignment_id: 11 }
     ]);
     assert.deepEqual(client.calls[0].parameters, [100]);
-    assert.match(client.calls[0].sql, /redacted_at IS NULL/);
-    assert.match(client.calls[0].sql, /retention_until <= NOW\(\)/);
-    assert.match(client.calls[0].sql,
-        /ORDER BY evidence\.retention_until,evidence\.id LIMIT \$1 FOR UPDATE OF evidence SKIP LOCKED/);
-    assert.match(client.calls[0].sql, /content = '\{\}'::JSONB/);
-    assert.match(client.calls[0].sql, /media_bytes = NULL/);
-    assert.match(client.calls[0].sql, /redaction_reason = 'retention_expired'/);
+    assert.deepEqual(client.calls[1].parameters, [[7, 8], 100]);
+    assert.deepEqual(client.calls[2].parameters, [[10, 11], 100]);
+    assert.match(client.calls[0].sql, /ORDER BY account\.id[\s\S]*FOR NO KEY UPDATE OF account SKIP LOCKED/);
+    assert.match(client.calls[1].sql, /ORDER BY assignment\.id[\s\S]*FOR NO KEY UPDATE OF assignment SKIP LOCKED/);
+    assert.match(client.calls[2].sql, /redacted_at IS NULL/);
+    assert.match(client.calls[2].sql, /retention_until <= NOW\(\)/);
+    assert.match(client.calls[2].sql,
+        /ORDER BY evidence\.retention_until,evidence\.id LIMIT \$2 FOR UPDATE OF evidence SKIP LOCKED/);
+    assert.match(client.calls[2].sql, /content = '\{\}'::JSONB/);
+    assert.match(client.calls[2].sql, /media_bytes = NULL/);
+    assert.match(client.calls[2].sql, /redaction_reason = 'retention_expired'/);
 });
 
 test('Quest single evidence redaction cannot clear content before retention expiry', async () => {

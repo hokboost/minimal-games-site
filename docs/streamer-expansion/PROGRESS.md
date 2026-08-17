@@ -4,6 +4,9 @@ Base commit: `023d90d708a19ecbbb755c30fd098da99f379bf8`
 Started at: `2026-08-16T22:51:18Z`
 Last updated: `2026-08-17`
 
+Phase entries below are contemporaneous snapshots. The Phase 9/current sections supersede earlier
+statements about tests or production migration steps that had not yet occurred at those phases.
+
 ## Pre-existing working-tree changes
 
 The first expanded status inspection found only the installed Agent bootstrap files below. They predate Streamer World implementation work and must not be staged or altered accidentally except when the package itself explicitly requires maintaining `PROGRESS.md`.
@@ -161,12 +164,12 @@ Overall threshold result: FAIL (expected before expansion implementation)
 - [x] Complete.
 - Accessibility: A shared Creator shell, design tokens, responsive navigation, operation center, contextual help, accessible tables/explorers, and loading/error/empty/retry/offline states are mounted on Creator, Quest, Story, Live, reward, achievement, Director, Studio, and all ten game pages. Game UI now provides mechanism-specific help, real keyboard/touch paths, visible focus, `aria-live` state narration, reduced-motion/high-contrast/mobile styles, bounded history, terminal-state suppression, and authoritative reconnect/CAS recovery. Real VM/DOM behavior tests prove input, focus, disabled-role rules, network recovery, live refresh, and hidden-safe narration.
 - Performance/load: `migrations/add_streamer_phase9_hardening.sql` adds bounded-read indexes for creator inbox, Quest journal/review, Story recovery/archive, Live items/reports, reward/game histories, achievements, collections, and season archives. Repository behavior tests verify explicit limits/offsets, newest/latest lateral reads, privacy projections, and connection release. Load tests cover 120 concurrent Quest trusted events, 150 concurrent Story reads, presence persistence/fan-out/revision races, 100 concurrent co-op catch-up requests, parallel Creator/reward/achievement/audit pages, and mixed successful/failing repository transactions.
-- Migrations: The forward-only Phase 9 migration is registered after the achievement/archive migration. Static fresh/historical ledger, checksum drift, upgrade ordering, SQL binding, and EXPLAIN-friendly query contracts pass. No claim is made here that these migrations were applied to Render or another production database.
-- Security/failure injection: Eleven Phase 9 suites contain 488 behavior tests covering accessibility, UI state/recovery, ten-engine invalid input and immutability, route/flag/migration contracts, XSS/privacy/provider isolation, revoked sessions, semantic replay/collision, response loss, CAS, hook/audit rollback, retention boundaries, query caps, the four required load paths, and production activation/explicit-false rollback. The legacy game browser fixture was updated with the browser-native `CustomEvent`/`dispatchEvent` API required by the new narrator, without changing its assertions. All suites are included in default `npm test`.
+- Migrations: The forward-only Phase 9 migration is registered after the achievement/archive migration. Static and real PostgreSQL fresh/historical ledger, checksum drift, upgrade ordering, SQL binding, and EXPLAIN-friendly query contracts pass. The controlled production ledger is verified at 33 applied migrations with zero failures.
+- Security/failure injection: Phase 9 and post-audit suites cover accessibility, UI state/recovery, ten-engine invalid input and immutability, route/flag/migration contracts, XSS/privacy/provider isolation, revoked sessions, semantic replay/collision, response loss, CAS, hook/audit rollback, retention boundaries and lock order, fresh authority facts, cross-domain user locks, capacity/idempotency admission, query caps, the required load paths, and production activation/explicit-false rollback. The legacy game browser fixture was updated with the browser-native `CustomEvent`/`dispatchEvent` API required by the new narrator, without changing its assertions. All suites are included in default `npm test`.
 - Feature-flag rollback: All expansion flags accept only exact lowercase `true` and require the root plus Creator foundation. Production startup never supplies missing values; missing flags remain disabled and malformed values stop startup. Disabling the root switch removes all expansion behavior without deleting stored immutable state, and each product gate remains independently reversible by configuration and restart. Enabled modules fail startup/readiness when their tracked schema is absent; Live also requires one active, unlocked configured administrator and Rewards requires its active catalog and budgets.
 - Documentation: `docs/streamer-expansion/FINAL_REPORT.md` records architecture, changed modules, all tables/migrations, route families, content counts, accessibility/load/privacy work, verification commands, activation/rollback, external operator steps, and known limitations.
-- Final verification: the post-audit `npm run test:all` passed; syntax checked 346 JavaScript files and the secret/artifact scan checked 552 repository files. Disposable PostgreSQL fresh and two historical upgrades, resilience, three-context Chromium, and bounded load suites passed. `git diff --check` passed. The final line verifier passed every gate with more than 66,000 meaningful additions and 66,000 net growth.
-- Remaining external operator actions: Apply and verify the 33-entry ledger in production under the controlled migration identity; verify production backup/restore; configure the exact owner; and stage a deliberately small feature-flag rollout. Existing uncertain gift exchanges still require independent receipt reconciliation and must never be auto-retried/refunded.
+- Final verification: the post-audit `npm run test:all` passed; syntax checked 351 JavaScript files and the secret/artifact scan checked 557 repository files. Disposable PostgreSQL fresh and two historical upgrades, resilience, capacity/idempotency, three-context Chromium across all 21 games, and bounded load suites passed. `git diff --check` passed. The final line verifier passed every gate with more than 68,000 meaningful additions and 68,000 net growth.
+- Remaining external operator actions: Recheck the production ledger/readiness; verify production backup/restore; configure the exact owner; and stage a deliberately small feature-flag rollout. Existing uncertain gift exchanges still require independent receipt reconciliation and must never be auto-retried/refunded.
 
 ### Production-safety audit remediation
 
@@ -174,7 +177,7 @@ Overall threshold result: FAIL (expected before expansion implementation)
 - [x] Findings 8–20: centralized communication policy; real Quest expiry/postpone/DAG/review/rolling boards; per-game preference enforcement; unified reward authorization and durable quiet inbox; trusted reward outbox and complete achievement producers; five-season interventions; owner-only reads and independent moderation; per-room boundaries.
 - [x] Findings 21–25: exact Story checkpoint restore with progression provenance; creator-local Dream Maze calendar windows; repository-owned reward event sequencing; opaque hidden achievements; authoritative bounded Quest eligibility facts.
 - [x] Finding 26 implementation: Node 20 clean deterministic release, safe archive preflight, file/SHA manifest, 33-migration ledger, npm+Python CycloneDX SBOM, clean-unpack production install/migrate/boot/readiness/SIGTERM verification.
-- [x] Disposable PostgreSQL 16 fresh and two historical upgrades, real two-process Socket ACL, isolated creator/owner/moderator Chromium, bounded load/resilience, npm/Python dependency audits, and provider-isolation tests were executed without production credentials or real provider sends.
+- [x] Disposable PostgreSQL 16 fresh and two historical upgrades, real two-process Socket ACL, isolated creator/owner/moderator Chromium, bounded load/resilience, npm/Python dependency audits, and provider-isolation tests were executed with local disposable credentials and no real provider sends. The controlled production ledger was separately migrated and verified at 33 applied with zero failures.
 - Security migrations: `add_streamer_security_quest_windows.sql`, `add_streamer_security_live_acl.sql`, `add_streamer_security_quest_lifecycle.sql`, `add_streamer_reward_security_outbox.sql`, `add_streamer_achievement_producers.sql`, `add_streamer_security_communication_privacy.sql`, `add_streamer_story_progression_scopes.sql`, and `add_streamer_game_daily_calendar.sql`.
 - Evidence and residual risks: `docs/streamer-expansion/SECURITY_AUDIT_REMEDIATION_2026-08-17.md`.
 
@@ -204,27 +207,27 @@ Streamer World meaningful-line report
 Base commit: 023d90d708a19ecbbb755c30fd098da99f379bf8
 
 Credited additions by category:
-  backend   +17,928 / -32
-  frontend  +8,344 / -66
+  backend   +18,138 / -41
+  frontend  +8,359 / -66
   content   +17,559 / -0
-  tests     +20,671 / -12
-  docs      +964 / -4
+  tests     +22,410 / -12
+  docs      +990 / -4
   tooling   +1,025 / -39
-  other     +70 / -12
+  other     +72 / -12
 
-Credited additions: 66,561
-Meaningful deletions: 165
-Credited net growth: 66,396
-Backend + frontend + content: 43,831
+Credited additions: 68,553
+Meaningful deletions: 174
+Credited net growth: 68,379
+Backend + frontend + content: 44,056
 
 Acceptance gates:
-  [PASS] total meaningful additions: 66,561 / 50,000
-  [PASS] net growth: 66,396 / 40,000
-  [PASS] backend additions: 17,928 / 12,000
-  [PASS] frontend additions: 8,344 / 8,000
+  [PASS] total meaningful additions: 68,553 / 50,000
+  [PASS] net growth: 68,379 / 40,000
+  [PASS] backend additions: 18,138 / 12,000
+  [PASS] frontend additions: 8,359 / 8,000
   [PASS] authored-content additions: 17,559 / 16,000
-  [PASS] test additions: 20,671 / 10,000
-  [PASS] backend + frontend + content: 43,831 / 36,000
+  [PASS] test additions: 22,410 / 10,000
+  [PASS] backend + frontend + content: 44,056 / 36,000
 
 Overall: PASS
 ```

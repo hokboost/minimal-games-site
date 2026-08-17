@@ -204,11 +204,17 @@ const ROUTE_MANIFEST = Object.freeze(validateRouteManifest(applicationRoutes));
 const IDEMPOTENT_WRITE_PATHS = Object.freeze([...new Set(
     ROUTE_MANIFEST.filter((entry) => entry.policies.includes('idempotent')).map((entry) => entry.path)
 )]);
+const CAPACITY_IDEMPOTENT_WRITE_ROUTES = Object.freeze(
+    ROUTE_MANIFEST
+        .filter((entry) => entry.policies.includes('capacity') && entry.policies.includes('idempotent'))
+        .map((entry) => `${entry.method} ${entry.path}`)
+);
 const MUTATING_ADMIN_PATHS = new Set(
     ROUTE_MANIFEST.filter((entry) => entry.policies.includes('admin-audit')).map((entry) => entry.path)
 );
 
 module.exports = {
+    CAPACITY_IDEMPOTENT_WRITE_ROUTES,
     IDEMPOTENT_WRITE_PATHS,
     MUTATING_ADMIN_PATHS,
     POLICY_NAMES,

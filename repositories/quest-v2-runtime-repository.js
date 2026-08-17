@@ -9,17 +9,24 @@ class QuestV2RuntimeRepository {
     }
 
     async lockCreator(username) {
-        const result = await this.client.query(`
-            SELECT account.id, account.username, profile.timezone, profile.evidence_retention,
-                   relationship.level AS relationship_level
+        const accountResult = await this.client.query(`
+            SELECT account.id,account.username
             FROM users account
-            JOIN creator_profiles profile ON profile.user_id = account.id
-            JOIN relationship_profiles relationship ON relationship.user_id = account.id
             WHERE account.username = $1 AND account.authorized = TRUE AND account.deactivated = FALSE
               AND COALESCE(account.account_locked, FALSE) = FALSE
-            FOR UPDATE OF account
+            ORDER BY account.id
+            FOR NO KEY UPDATE OF account
         `, [username]);
-        return result.rows[0] || null;
+        const account = accountResult.rows[0];
+        if (!account) return null;
+        const facts = (await this.client.query(`
+            SELECT profile.timezone,profile.evidence_retention,
+                   relationship.level AS relationship_level
+            FROM creator_profiles profile
+            JOIN relationship_profiles relationship ON relationship.user_id=profile.user_id
+            WHERE profile.user_id=$1
+        `, [account.id])).rows[0];
+        return facts ? { ...account, ...facts } : null;
     }
 
     async loadEligibilityFacts(userId, requirements = {}) {
@@ -529,7 +536,7 @@ class QuestV2RuntimeRepository {
               AND authorized=TRUE AND deactivated=FALSE
               AND COALESCE(account_locked,FALSE)=FALSE
             ORDER BY id
-            FOR UPDATE
+            FOR NO KEY UPDATE
         `, [reviewerUsername, subjectUserId]);
         return {
             reviewer: result.rows.find((row) => row.username === reviewerUsername) || null,
@@ -864,22 +871,72 @@ class QuestV2RuntimeRepository {
     }
 
     async redactExpiredEvidenceBatch(limit = 100) {
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+            throw new RangeError('Quest evidence retention batch limit must be between 1 and 100');
+        }
+
+        // Every path that can later emit a creator-scoped audit/achievement
+        // first owns the creator account row. Selecting accounts rather than
+        // evidence here preserves the global users(id) order and lets a busy
+        // creator be skipped without starving unrelated creators.
+        const accounts = await this.client.query(`
+            SELECT account.id,account.username
+            FROM users account
+            WHERE EXISTS (
+                SELECT 1
+                FROM quest_v2_assignments assignment
+                JOIN quest_v2_evidence evidence ON evidence.assignment_id=assignment.id
+                WHERE assignment.user_id=account.id
+                  AND evidence.redacted_at IS NULL
+                  AND evidence.retention_until <= NOW()
+            )
+            ORDER BY account.id
+            LIMIT $1
+            FOR NO KEY UPDATE OF account SKIP LOCKED
+        `, [limit]);
+        if (accounts.rows.length === 0) return [];
+
+        const userIds = accounts.rows.map((row) => Number(row.id));
+        const assignments = await this.client.query(`
+            SELECT assignment.id
+            FROM quest_v2_assignments assignment
+            WHERE assignment.user_id = ANY($1::INTEGER[])
+              AND EXISTS (
+                  SELECT 1
+                  FROM quest_v2_evidence evidence
+                  WHERE evidence.assignment_id=assignment.id
+                    AND evidence.redacted_at IS NULL
+                    AND evidence.retention_until <= NOW()
+              )
+            ORDER BY assignment.id
+            LIMIT $2
+            FOR NO KEY UPDATE OF assignment SKIP LOCKED
+        `, [userIds, limit]);
+        if (assignments.rows.length === 0) return [];
+
+        const assignmentIds = assignments.rows.map((row) => Number(row.id));
         const result = await this.client.query(`
             WITH due AS (
-                SELECT evidence.id,assignment.user_id,account.username
+                SELECT evidence.id,assignment.user_id,account.username,
+                       (account.authorized=TRUE AND account.deactivated=FALSE
+                        AND COALESCE(account.account_locked,FALSE)=FALSE)
+                           AS achievement_eligible
                 FROM quest_v2_evidence evidence
                 JOIN quest_v2_assignments assignment ON assignment.id=evidence.assignment_id
                 JOIN users account ON account.id=assignment.user_id
-                WHERE evidence.redacted_at IS NULL AND evidence.retention_until <= NOW()
-                ORDER BY evidence.retention_until,evidence.id LIMIT $1
+                WHERE evidence.assignment_id = ANY($1::BIGINT[])
+                  AND evidence.redacted_at IS NULL
+                  AND evidence.retention_until <= NOW()
+                ORDER BY evidence.retention_until,evidence.id LIMIT $2
                 FOR UPDATE OF evidence SKIP LOCKED
             )
             UPDATE quest_v2_evidence evidence
             SET content = '{}'::JSONB, media_bytes = NULL,
                 redacted_at = NOW(), redaction_reason = 'retention_expired'
             FROM due WHERE evidence.id = due.id
-            RETURNING evidence.id,evidence.assignment_id,due.user_id,due.username
-        `, [limit]);
+            RETURNING evidence.id,evidence.assignment_id,due.user_id,due.username,
+                      due.achievement_eligible
+        `, [assignmentIds, limit]);
         return result.rows;
     }
 

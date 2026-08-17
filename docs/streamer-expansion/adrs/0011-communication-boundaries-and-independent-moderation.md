@@ -37,9 +37,12 @@ does not restore interaction: the creator must explicitly reconsent afterward.
 
 ## Concurrency and delivery
 
-Participant locks retain the creator-then-owner order defined by ADR 0007. Boundary-changing writes
-and owner actions therefore serialize: an action either commits before withdrawal and is followed
-by the same-transaction freeze, or waits and observes the new denial. Realtime recipients are
+Multi-account participant, moderator, Reward, and Quest authority locks use the ascending
+`users.id` order and `FOR NO KEY UPDATE` mode defined by ADR 0007. This prevents both cross-module
+inversions and audit-FK cycles without weakening account-state revocation. Boundary-changing writes
+and owner actions still serialize because every user row is locked before any room, run, assignment,
+or appeal: an action either commits before withdrawal and is followed by the same-transaction freeze,
+or waits and observes the new denial. Realtime recipients are
 reloaded from PostgreSQL at fanout time, including on another application instance. Quiet delivery
 is never dropped because its item, inbox entry, event, command response, and audit commit before
 fanout is considered.

@@ -36,15 +36,24 @@ closed reason code. Missing consent infrastructure fails co-op operations closed
 
 All participating write paths acquire locks in this order:
 
-1. the creator `users` row, then the configured owner row;
+1. every participating `users` row in ascending immutable `users.id` order, using
+   `FOR NO KEY UPDATE` for account-state authority checks;
 2. the live room and membership rows;
 3. affected game runs in stable run-ID order.
 
-This order serializes an owner action against creator opt-out or preference replacement. If the
-withdrawal transaction owns the user lock first, the waiting action observes the new boundary and
-cannot append a normal game action. If the action owns it first, that action commits before the
-withdrawal begins; the withdrawal then abandons the resulting active run. Deadlocks are retried by
-neither path and therefore surface rather than being hidden.
+The global user-ID order also applies to Reward and Quest multi-account authority checks, preventing
+cross-module and opposite-review lock inversions. `NO KEY UPDATE` still conflicts with account lock,
+deactivation, authorization, and balance updates, while remaining compatible with the `KEY SHARE`
+lock acquired by append-only audit foreign keys. A single-creator withdrawal still serializes with
+the same user row before either path reaches a room or run. The winner commits first; the waiter then
+observes the new boundary. Deadlocks are retried by neither path and therefore surface rather than
+being hidden.
+
+Dynamic authority facts stored outside `users` (including creator profile and relationship fields)
+must not be joined into the statement that waits for the user-row lock. PostgreSQL may retain that
+statement's earlier snapshot for the joined relation. The repository therefore locks only `users`
+first and loads those facts in a second statement after the barrier, so a waiter observes the
+withdrawal transaction's committed profile and relationship state.
 
 ## Terminal-read contract
 

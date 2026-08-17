@@ -225,14 +225,20 @@ class QuestV2CatalogRepository {
     }
 
     async lockCreator(username) {
-        const result = await this.client.query(`
-            SELECT account.id, account.username, profile.timezone
+        const accountResult = await this.client.query(`
+            SELECT account.id,account.username
             FROM users account
-            JOIN creator_profiles profile ON profile.user_id = account.id
             WHERE account.username = $1 AND account.authorized = TRUE AND account.deactivated = FALSE
-            FOR UPDATE OF account
+              AND COALESCE(account.account_locked,FALSE)=FALSE
+            ORDER BY account.id
+            FOR NO KEY UPDATE OF account
         `, [username]);
-        return result.rows[0] || null;
+        const account = accountResult.rows[0];
+        if (!account) return null;
+        const profile = (await this.client.query(`
+            SELECT timezone FROM creator_profiles WHERE user_id=$1
+        `, [account.id])).rows[0];
+        return profile ? { ...account, ...profile } : null;
     }
 
     async listBlockedCategories(userId) {

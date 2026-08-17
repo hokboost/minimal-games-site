@@ -558,7 +558,11 @@ test('Quest evidence cleanup is bounded and uses skip-locked ordering', () => {
     assert.match(repository, /redactExpiredEvidenceBatch\(limit = 100\)/);
     assert.match(repository, /retention_until <= NOW\(\)/);
     assert.match(repository,
-        /ORDER BY\s+(?:evidence\.)?retention_until\s*,\s*(?:evidence\.)?id\s+LIMIT\s+\$1\s+FOR UPDATE(?:\s+OF\s+evidence)?\s+SKIP LOCKED/);
+        /ORDER BY\s+account\.id\s+LIMIT\s+\$1\s+FOR NO KEY UPDATE OF account\s+SKIP LOCKED/);
+    assert.match(repository,
+        /ORDER BY\s+assignment\.id\s+LIMIT\s+\$2\s+FOR NO KEY UPDATE OF assignment\s+SKIP LOCKED/);
+    assert.match(repository,
+        /ORDER BY\s+evidence\.retention_until\s*,\s*evidence\.id\s+LIMIT\s+\$2\s+FOR UPDATE OF evidence\s+SKIP LOCKED/);
     assert.match(repository, /redacted_at = NOW\(\)/);
     assert.match(repository, /redaction_reason = 'retention_expired'/);
 });

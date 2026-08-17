@@ -6,8 +6,10 @@ Remediation date: 2026-08-17
 
 This is the repository-side completion record for the 26 findings in
 `streamer-world-security-audit-pack.zip`. It distinguishes tests executed against disposable
-infrastructure from production deployment. No production database was modified and no real
-Bilibili/provider send was performed.
+infrastructure from the separately controlled production migration. The production ledger was
+successfully advanced and verified at 33 applied migrations with zero failures. No database
+credential is stored in the repository or this report, and no real Bilibili/provider send was
+performed.
 
 ## 1. Threat model and trust boundaries
 
@@ -59,11 +61,15 @@ rewritten.
 | 25 | Quest eligibility runtime supplied relationship only; negated missing facts could become eligible. | Bounded closed fact collector loads referenced achievements, current non-replay Story flags, collection holdings and relationship under authoritative locks; draft/publish revalidate. | None | Positive/negative/NOT/mixed/conflict/budget/client-forgery and real PostgreSQL tests pass. |
 | 26 | Development ZIP lacked verifiable provenance and portable extraction/SBOM controls. | Node 20 release builder, Git-index-only allowlist, strict credential/path/collision policy, normalized safe tar preflight, deterministic archive, manifest/SHA, 33-migration ledger, npm+Python CycloneDX inventory, clean unpack/install/migrate/boot/SIGTERM verifier. | None | Formal release requires a clean Git tree; exact post-commit archive SHA is recorded in `build/artifacts/RELEASE-ARCHIVE.json`. |
 
-The final cross-review also closed three integration defects not explicit in the original 26 rows:
-Director summaries now exclude creator/system-only history; configured-owner sensitive reads are one
-locked/audited transaction; locked accounts are rejected again inside authoritative write
-transactions. Quest creator/reviewer/appeal paths use a consistent lock order to avoid PostgreSQL
-deadlocks.
+The final cross-review also closed integration defects not explicit in the original 26 rows.
+Director summaries exclude creator/system-only history; configured-owner sensitive reads are one
+locked/audited transaction; locked accounts are rejected again inside authoritative writes.
+Multi-account authority locks now use one global user-ID order and the weakest sufficient PostgreSQL
+row lock, with dynamic profile/relationship facts read in a fresh statement after the user barrier.
+Quest evidence retention follows users-to-assignments-to-evidence order. Finally, a pre-business
+capacity rejection can no longer poison a new idempotency key as indeterminate: only that precisely
+marked rejection deletes its own still-pending key and returns a bounded retryable 503, while
+completed/pending/indeterminate replay and all business 5xx retain their original safety semantics.
 
 ## 3. Migration, backfill, and rollback plan
 
@@ -111,8 +117,11 @@ stored `wish_inventory`; it never creates a delivery request or calls a provider
 
 Node 20 disposable PostgreSQL 16 tests execute the full 33-migration fresh path and two historical
 upgrade paths. They additionally exercise Live ACL/multi-instance races, Quest windows/lifecycle,
-reward ordering/outbox, Story progression scopes, Dream Maze calendars, rollback, response loss and
-restart. No production database credentials are used.
+reward ordering/outbox, Story progression scopes, Dream Maze calendars, authority-lock and
+statement-snapshot races, retention lock order, capacity admission, rollback, response loss and
+restart. These suites use disposable local credentials. Separately, the controlled production
+migration completed with 33 applied migrations and zero failures; its credentials were neither
+printed nor persisted.
 
 ## 8. Browser evidence
 
@@ -129,8 +138,10 @@ delivery is deduplicated and catch-up cursors remain bounded.
 
 ## 10. Load and resilience evidence
 
-The final five-second bounded load run produced 2,124 responses (2,080 HTTP 200 and 44 expected
-HTTP 409), no 5xx, p95 14 ms, p99 20 ms, an eight-connection application maximum, ten
+The final five-second bounded load run produced 2,049 responses: 2,002 HTTP 200 and 47 controlled
+pre-business HTTP 503 capacity responses carrying `Retry-After: 2`. Those rejections are explicitly
+retryable, create no game/idempotency side effect, and are distinct from indeterminate business
+failures. The run recorded p95 15 ms, p99 23 ms, an eight-connection application maximum, ten
 cross-instance rate-limit responses, and two-instance Socket fanout. Resilience suites cover
 response loss, semantic collision, CAS,
 transaction rollback, lease recovery, dead letters, account/consent revocation, graceful lifecycle
@@ -158,7 +169,8 @@ same commit.
 
 - These results are code/release-candidate evidence, not a production penetration test or proof of
   the hosting provider's backup/restore procedure.
-- Production migrations, environment values, owner identity and phased feature activation remain
+- The production ledger is at 33 applied migrations with zero failures. Backup/restore validation,
+  exact owner configuration, readiness review and deliberately phased feature activation remain
   operator actions. Keep all new feature flags false until those steps are completed.
 - Director intentionally supports one configured owner. Sensitive reports require an independent
   active moderator.

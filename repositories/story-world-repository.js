@@ -77,15 +77,29 @@ class StoryWorldRepository {
     }
 
     async lockCreator(username) {
-        const result = await this.client.query(`
-            SELECT account.id, account.username, profile.timezone, profile.story_tone,
-                   profile.communication_style, profile.live_interaction_opt_in
-            FROM users account LEFT JOIN creator_profiles profile ON profile.user_id = account.id
+        const accountResult = await this.client.query(`
+            SELECT account.id,account.username
+            FROM users account
             WHERE account.username = $1 AND account.authorized = TRUE AND account.deactivated = FALSE
               AND COALESCE(account.account_locked, FALSE) = FALSE
-            FOR UPDATE OF account
+            ORDER BY account.id
+            FOR NO KEY UPDATE OF account
         `, [username]);
-        return result.rows[0] || null;
+        const account = accountResult.rows[0];
+        if (!account) return null;
+        const profile = (await this.client.query(`
+            SELECT timezone,story_tone,communication_style,live_interaction_opt_in
+            FROM creator_profiles
+            WHERE user_id=$1
+        `, [account.id])).rows[0];
+        return {
+            ...account,
+            timezone: null,
+            story_tone: null,
+            communication_style: null,
+            live_interaction_opt_in: null,
+            ...(profile || {})
+        };
     }
 
     async readCreator(username) {

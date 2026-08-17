@@ -87,14 +87,29 @@ class StreamerGameRepository {
         const unique = [...new Set(usernames.filter(Boolean))];
         const result = await client.query(`
             SELECT account.id,account.username,account.is_admin,account.authorized,account.deactivated,
-                   account.account_locked,
-                   profile.live_interaction_opt_in,profile.timezone
-            FROM users account LEFT JOIN creator_profiles profile ON profile.user_id=account.id
+                   account.account_locked
+            FROM users account
             WHERE account.username=ANY($1::TEXT[])
-            ORDER BY array_position($1::TEXT[], account.username)
-            FOR UPDATE OF account
+            ORDER BY account.id
+            FOR NO KEY UPDATE OF account
         `, [unique]);
-        return new Map(result.rows.map(row => [row.username, row]));
+        const userIds = result.rows.map(row => Number(row.id));
+        const profileRows = userIds.length ? (await client.query(`
+            SELECT user_id,live_interaction_opt_in,timezone
+            FROM creator_profiles
+            WHERE user_id=ANY($1::INTEGER[])
+            ORDER BY user_id
+        `, [userIds])).rows : [];
+        const profiles = new Map(profileRows.map(row => {
+            const { user_id: userId, ...profile } = row;
+            return [Number(userId), profile];
+        }));
+        return new Map(result.rows.map(row => [row.username, {
+            ...row,
+            live_interaction_opt_in: null,
+            timezone: null,
+            ...(profiles.get(Number(row.id)) || {})
+        }]));
     }
 
     async findActiveLiveRoom(client, creatorUserId, ownerUserId) {

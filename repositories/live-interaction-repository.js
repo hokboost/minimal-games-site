@@ -85,28 +85,69 @@ class LiveInteractionRepository {
     }
 
     async lockAccounts(client, creatorUsername, ownerUsername) {
+        const usernames = [...new Set([creatorUsername, ownerUsername].filter(Boolean))];
         const result = await client.query(`
             SELECT u.id, u.username, u.is_admin, u.authorized, u.deactivated,
-                   COALESCE(u.account_locked,FALSE) account_locked, p.live_interaction_opt_in,
-                   p.timezone, p.profile_visibility, p.communication_style
+                   COALESCE(u.account_locked,FALSE) account_locked
             FROM users u
-            LEFT JOIN creator_profiles p ON p.user_id = u.id
             WHERE u.username = ANY($1::TEXT[])
               AND u.authorized = TRUE AND u.deactivated = FALSE
               AND COALESCE(u.account_locked, FALSE) = FALSE
-            ORDER BY array_position($1::TEXT[], u.username)
-            FOR UPDATE OF u
-        `, [
-            [creatorUsername, ownerUsername]
-        ]);
-        const byName = new Map(result.rows.map((row) => [row.username, row]));
+            ORDER BY u.id
+            FOR NO KEY UPDATE OF u
+        `, [usernames]);
+        const profiles = await this.readLockedAccountProfiles(client, result.rows.map(row => Number(row.id)));
+        const byName = new Map(result.rows.map((row) => [row.username, {
+            ...row,
+            live_interaction_opt_in: null,
+            timezone: null,
+            profile_visibility: null,
+            communication_style: null,
+            ...(profiles.get(Number(row.id)) || {})
+        }]));
         return {
             creator: byName.get(creatorUsername) || null,
             owner: byName.get(ownerUsername) || null
         };
     }
 
+    async readLockedAccountProfiles(queryable, userIds) {
+        if (!userIds.length) return new Map();
+        const result = await queryable.query(`
+            SELECT user_id,live_interaction_opt_in,timezone,profile_visibility,communication_style
+            FROM creator_profiles
+            WHERE user_id=ANY($1::INTEGER[])
+            ORDER BY user_id
+        `, [userIds]);
+        return new Map(result.rows.map(row => {
+            const { user_id: userId, ...profile } = row;
+            return [Number(userId), profile];
+        }));
+    }
+
     async readAccount(username, queryable = this.pool, { lock = false } = {}) {
+        if (lock) {
+            const locked = await queryable.query(`
+                SELECT u.id,u.username,u.is_admin,u.authorized,u.deactivated,
+                       COALESCE(u.account_locked,FALSE) account_locked
+                FROM users u
+                WHERE u.username=$1 AND u.authorized=TRUE AND u.deactivated=FALSE
+                  AND COALESCE(u.account_locked,FALSE)=FALSE
+                ORDER BY u.id
+                FOR NO KEY UPDATE OF u
+            `, [username]);
+            const account = locked.rows[0];
+            if (!account) return null;
+            const profiles = await this.readLockedAccountProfiles(queryable, [Number(account.id)]);
+            return {
+                ...account,
+                live_interaction_opt_in: null,
+                timezone: null,
+                profile_visibility: null,
+                communication_style: null,
+                ...(profiles.get(Number(account.id)) || {})
+            };
+        }
         const result = await queryable.query(`
             SELECT u.id, u.username, u.is_admin, u.authorized, u.deactivated,
                    COALESCE(u.account_locked,FALSE) account_locked, p.live_interaction_opt_in,
@@ -114,7 +155,6 @@ class LiveInteractionRepository {
             FROM users u LEFT JOIN creator_profiles p ON p.user_id = u.id
             WHERE u.username=$1 AND u.authorized=TRUE AND u.deactivated=FALSE
               AND COALESCE(u.account_locked, FALSE)=FALSE
-            ${lock ? 'FOR SHARE OF u' : ''}
         `, [username]);
         return result.rows[0] || null;
     }
@@ -228,7 +268,7 @@ class LiveInteractionRepository {
         const accounts = await client.query(`SELECT id,username,is_admin,authorized,deactivated,
             COALESCE(account_locked,FALSE) account_locked FROM users
             WHERE username=ANY($1::TEXT[])
-            ORDER BY array_position($1::TEXT[], username) FOR UPDATE`, [[
+            ORDER BY id FOR NO KEY UPDATE`, [[
             identity.creator_username, identity.owner_username, moderatorUsername
         ]]);
         const byName = new Map(accounts.rows.map(row => [row.username, row]));

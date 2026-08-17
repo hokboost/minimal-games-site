@@ -8,11 +8,93 @@ const { GAME_DEFINITIONS } = require('../domain/games/registry');
 const { publishedStoryInterventionRegistry } = require('../domain/story/published-content-registry');
 const { CreatorRepository } = require('../repositories/creator-repository');
 const { LiveInteractionRepository } = require('../repositories/live-interaction-repository');
+const { QuestV2RuntimeRepository } = require('../repositories/quest-v2-runtime-repository');
+const { RewardCatalogRepository } = require('../repositories/reward-catalog-repository');
+const { StreamerGameRepository } = require('../repositories/streamer-game-repository');
 const { CreatorProfileService } = require('../services/creator-profile-service');
 const { LiveInteractionService } = require('../services/live-interaction-service');
 const { DisposableDatabase, delay } = require('../tests/helpers/integration-environment');
 
 const uuid = () => crypto.randomUUID();
+
+async function waitForBackendLock(pool, backendPid, label) {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+        const state = (await pool.query(`SELECT wait_event_type,wait_event
+            FROM pg_stat_activity WHERE pid=$1`, [backendPid])).rows[0];
+        if (state?.wait_event_type === 'Lock') return state;
+        await delay(20);
+    }
+    throw new Error(`${label} did not reach a PostgreSQL lock wait`);
+}
+
+async function assertSensitiveAuditDoesNotDeadlockAccountAuthority(pool, repository, values) {
+    const directorClient = await pool.connect();
+    const ackClient = await pool.connect();
+    let directorOpen = false;
+    let ackOpen = false;
+    try {
+        await directorClient.query('BEGIN');
+        directorOpen = true;
+        await ackClient.query('BEGIN');
+        ackOpen = true;
+        await directorClient.query(`SELECT id FROM users WHERE id=$1 FOR SHARE`, [values.ownerId]);
+        const ackPid = Number((await ackClient.query('SELECT pg_backend_pid() pid')).rows[0].pid);
+        let ackSettled = false;
+        const authorityLabel = values.authorityLabel || 'live acknowledgement';
+        const lockAccountPair = values.lockAccountPair || (client => repository.lockAccounts(client,
+            values.creatorUsername, values.ownerUsername));
+        const ackAttempt = lockAccountPair(ackClient).then(value => ({ value }), error => ({ error }))
+            .finally(() => { ackSettled = true; });
+        await waitForBackendLock(pool, ackPid, `${authorityLabel} account lock`);
+        const lockProofClient = await pool.connect();
+        try {
+            await assert.rejects(lockProofClient.query(`SELECT id FROM users WHERE id=$1
+                FOR SHARE NOWAIT`, [values.creatorId]), error => error.code === '55P03',
+            `${authorityLabel} must hold the creator row before waiting on the owner row`);
+        } finally {
+            lockProofClient.release();
+        }
+
+        const auditAttempt = repository.appendSensitiveReadAudit(directorClient, {
+            actorUserId: values.ownerId,
+            actorUsername: values.ownerUsername,
+            targetUserId: values.creatorId,
+            accessKind: 'owner_profile',
+            decision: 'granted',
+            fields: ['display_name'],
+            requestId: 'audit-account-lock-compatibility',
+            metadata: { regression: 'director_account_authority_deadlock', authorityLabel }
+        }).then(() => ({ success: true }), error => ({ error }));
+        const auditOutcome = await Promise.race([
+            auditAttempt,
+            delay(3000).then(() => ({ timeout: true }))
+        ]);
+        assert.equal(auditOutcome.timeout, undefined,
+            'sensitive-read audit waited on the creator row held by live acknowledgement');
+        assert.equal(auditOutcome.error, undefined,
+            `sensitive-read audit failed while acknowledgement waited: ${auditOutcome.error?.code}`);
+        if (ackSettled) {
+            const prematureAck = await ackAttempt;
+            assert.equal(prematureAck.error, undefined,
+                `${authorityLabel} deadlocked with sensitive-read audit: ${prematureAck.error?.code}`);
+            assert.fail(`${authorityLabel} bypassed the owner authority lock before Director commit`);
+        }
+
+        await directorClient.query('COMMIT');
+        directorOpen = false;
+        const ackOutcome = await ackAttempt;
+        assert.equal(ackOutcome.error, undefined,
+            `${authorityLabel} account lock failed: ${ackOutcome.error?.code}`);
+        await ackClient.query('COMMIT');
+        ackOpen = false;
+    } finally {
+        if (directorOpen) await directorClient.query('ROLLBACK').catch(() => {});
+        if (ackOpen) await ackClient.query('ROLLBACK').catch(() => {});
+        directorClient.release();
+        ackClient.release();
+    }
+}
 
 async function insertProfile(pool, username, visibility = 'owner') {
     await pool.query(`INSERT INTO creator_profiles(
@@ -36,7 +118,10 @@ async function main() {
         const unauthorized = await database.createUser({ username: 'privacy_unauthorized_pg', isAdmin: true });
         const raceAdmin = await database.createUser({ username: 'privacy_race_admin_pg', isAdmin: true });
         const creator = await database.createUser({ username: 'privacy_creator_pg' });
+        const optoutCreator = await database.createUser({ username: 'privacy_optout_creator_pg' });
+        const lateAuthority = await database.createUser({ username: 'privacy_late_authority_pg', isAdmin: true });
         await insertProfile(database.pool, creator.username);
+        await insertProfile(database.pool, optoutCreator.username);
         await database.pool.query('UPDATE users SET deactivated=TRUE WHERE username=$1', [revoked.username]);
         await database.pool.query(`UPDATE users SET account_locked=TRUE,account_locked_at=NOW(),
             account_locked_by=$2,account_lock_reason='privacy integration test'
@@ -90,6 +175,44 @@ async function main() {
             clock: () => new Date('2026-08-17T12:00:00.000Z'),
             publish: async (event, room, audience) => fanout.push({ event, room, audience })
         });
+        const optoutCreatorId = Number((await database.pool.query(
+            'SELECT id FROM users WHERE username=$1', [optoutCreator.username])).rows[0].id);
+        const optoutWriter = await database.pool.connect();
+        let optoutWriterOpen = false;
+        let optoutOpenPromise;
+        try {
+            await optoutWriter.query('BEGIN');
+            optoutWriterOpen = true;
+            await optoutWriter.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [optoutCreatorId]);
+            await optoutWriter.query(`UPDATE creator_profiles SET live_interaction_opt_in=FALSE,
+                version=version+1 WHERE user_id=$1`, [optoutCreatorId]);
+            let optoutOpenSettled = false;
+            optoutOpenPromise = liveService.open(owner.username, {
+                commandId: uuid(), creatorUsername: optoutCreator.username
+            }).then(value => ({ value }), error => ({ error }))
+                .finally(() => { optoutOpenSettled = true; });
+            await delay(150);
+            assert.equal(optoutOpenSettled, false,
+                'Live open must wait for the creator profile authority barrier');
+            await optoutWriter.query('COMMIT');
+            optoutWriterOpen = false;
+        } finally {
+            if (optoutWriterOpen) await optoutWriter.query('ROLLBACK').catch(() => {});
+            optoutWriter.release();
+        }
+        const optoutOpen = await Promise.race([
+            optoutOpenPromise,
+            delay(5000).then(() => { throw new Error('Live opt-out/open authority race timed out'); })
+        ]);
+        assert.equal(optoutOpen.error?.code, 'LIVE_CONSENT_REQUIRED',
+            'a Live open waiting behind committed opt-out must observe the new profile fact');
+        const optoutSideEffects = await database.pool.query(`SELECT
+            (SELECT COUNT(*) FROM live_interactions WHERE creator_user_id=$1)::INTEGER rooms,
+            (SELECT COUNT(*) FROM live_interaction_events event JOIN live_interactions room
+                ON room.id=event.interaction_id WHERE room.creator_user_id=$1)::INTEGER events`,
+        [optoutCreatorId]);
+        assert.deepEqual(optoutSideEffects.rows[0], { rooms: 0, events: 0 },
+            'rejected post-opt-out Live open must not persist a room or event');
         const opened = await liveService.open(owner.username, {
             commandId: uuid(), creatorUsername: creator.username
         });
@@ -105,6 +228,46 @@ async function main() {
             [creator.username])).rows[0].id);
         const ownerId = Number((await database.pool.query('SELECT id FROM users WHERE username=$1',
             [owner.username])).rows[0].id);
+        const lateAuthorityId = Number((await database.pool.query('SELECT id FROM users WHERE username=$1',
+            [lateAuthority.username])).rows[0].id);
+        assert.ok(creatorId < lateAuthorityId,
+            'reward/Quest audit lock regression needs the target creator before the actor in global ID order');
+        await assertSensitiveAuditDoesNotDeadlockAccountAuthority(database.pool, liveRepository, {
+            ownerId: lateAuthorityId,
+            ownerUsername: lateAuthority.username,
+            creatorId,
+            creatorUsername: creator.username,
+            authorityLabel: 'live acknowledgement'
+        });
+        const streamerGameRepository = new StreamerGameRepository({ pool: database.pool });
+        await assertSensitiveAuditDoesNotDeadlockAccountAuthority(database.pool, liveRepository, {
+            ownerId: lateAuthorityId,
+            ownerUsername: lateAuthority.username,
+            creatorId,
+            creatorUsername: creator.username,
+            authorityLabel: 'streamer game co-op',
+            lockAccountPair: client => streamerGameRepository.lockAccounts(client,
+                [creator.username, lateAuthority.username])
+        });
+        const rewardRepository = new RewardCatalogRepository({ pool: database.pool });
+        await assertSensitiveAuditDoesNotDeadlockAccountAuthority(database.pool, liveRepository, {
+            ownerId: lateAuthorityId,
+            ownerUsername: lateAuthority.username,
+            creatorId,
+            creatorUsername: creator.username,
+            authorityLabel: 'reward owner grant',
+            lockAccountPair: client => rewardRepository.lockAccounts(client,
+                [lateAuthority.username, creator.username])
+        });
+        await assertSensitiveAuditDoesNotDeadlockAccountAuthority(database.pool, liveRepository, {
+            ownerId: lateAuthorityId,
+            ownerUsername: lateAuthority.username,
+            creatorId,
+            creatorUsername: creator.username,
+            authorityLabel: 'quest review',
+            lockAccountPair: client => new QuestV2RuntimeRepository(client)
+                .lockReviewerAndSubject(lateAuthority.username, creatorId)
+        });
         await database.pool.query(`INSERT INTO creator_preferences(
             user_id,preference_type,preference_key,preference_value,source
         ) VALUES($1,'game','quiz','block','creator')`, [creatorId]);
@@ -199,6 +362,24 @@ async function main() {
         const moderatorReports = await liveService.reportsForActor(moderator.username,
             { includeEvidence: true }, { requestId: 'moderator-evidence-read' });
         assert.equal(moderatorReports[0].detail, 'owner-only private evidence');
+        const lateRoomId = Number((await database.pool.query(`INSERT INTO live_interactions(
+            interaction_key,creator_user_id,owner_user_id,status
+        ) VALUES($1,$2,$3,'reported') RETURNING id`, [uuid(), creatorId, lateAuthorityId])).rows[0].id);
+        const lateReportId = Number((await database.pool.query(`INSERT INTO live_interaction_reports(
+            report_key,interaction_id,reporter_user_id,reason_code,status
+        ) VALUES($1,$2,$3,'privacy','open') RETURNING id`, [uuid(), lateRoomId, creatorId])).rows[0].id);
+        await assertSensitiveAuditDoesNotDeadlockAccountAuthority(database.pool, liveRepository, {
+            ownerId: lateAuthorityId,
+            ownerUsername: lateAuthority.username,
+            creatorId,
+            creatorUsername: creator.username,
+            authorityLabel: 'live report moderation',
+            lockAccountPair: client => liveRepository.lockModerationContext(client, {
+                interactionId: lateRoomId,
+                reportId: lateReportId,
+                moderatorUsername: moderator.username
+            })
+        });
         await assert.rejects(liveService.reportsForActor(revoked.username, { includeEvidence: true }),
             error => error.code === 'LIVE_INDEPENDENT_MODERATOR_REQUIRED');
         await assert.rejects(liveService.moderate(owner.username, {

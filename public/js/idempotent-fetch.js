@@ -48,30 +48,45 @@
         globalThis.crypto.getRandomValues(bytes);
         return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
     };
+    const retryAfterMilliseconds = response => {
+        const raw = String(response.headers?.get?.('Retry-After') || '').trim();
+        const parsed = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 2;
+        return Math.min(5, Math.max(1, parsed)) * 1000;
+    };
+    const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
     window.idempotentFetch = async (url, options = {}) => {
         const method = String(options.method || 'GET').toUpperCase();
         const signature = `${method}:${url}:${String(options.body || '')}`;
-        const existing = pendingIdempotencyKeys.get(signature);
-        const key = existing?.key || newIdempotencyKey();
-        pendingIdempotencyKeys.set(signature, { key, createdAt: Date.now() });
-        persistPendingKeys();
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const existing = pendingIdempotencyKeys.get(signature);
+            const key = existing?.key || newIdempotencyKey();
+            pendingIdempotencyKeys.set(signature, { key, createdAt: Date.now() });
+            persistPendingKeys();
 
-        const headers = new Headers(options.headers || {});
-        headers.set('Idempotency-Key', key);
-        try {
-            const response = await fetch(url, { ...options, headers });
-            const idempotencyStatus = String(
-                response.headers?.get?.('Idempotency-Status') || ''
-            ).trim().toLowerCase();
-            if (!['pending', 'indeterminate'].includes(idempotencyStatus)) {
-                pendingIdempotencyKeys.delete(signature);
-                persistPendingKeys();
+            const headers = new Headers(options.headers || {});
+            headers.set('Idempotency-Key', key);
+            try {
+                const response = await fetch(url, { ...options, headers });
+                const idempotencyStatus = String(
+                    response.headers?.get?.('Idempotency-Status') || ''
+                ).trim().toLowerCase();
+                const retryableCapacityRejection = response.status === 503
+                    && idempotencyStatus === 'retryable';
+                if (!['pending', 'indeterminate'].includes(idempotencyStatus)) {
+                    pendingIdempotencyKeys.delete(signature);
+                    persistPendingKeys();
+                }
+                if (retryableCapacityRejection && attempt === 0) {
+                    await wait(retryAfterMilliseconds(response));
+                    continue;
+                }
+                return response;
+            } catch (error) {
+                prunePendingKeys();
+                throw error;
             }
-            return response;
-        } catch (error) {
-            prunePendingKeys();
-            throw error;
         }
+        throw new Error('Retry loop exhausted without a response');
     };
 })();

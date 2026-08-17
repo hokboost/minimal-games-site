@@ -7,10 +7,12 @@ const crypto = require('node:crypto');
 
 const BalanceLogger = require('../balance-logger');
 const giftConfig = require('../gift-codes.json');
+const { GAME_DEFINITIONS } = require('../domain/games/registry');
 const { applyTrackedMigration } = require('../lib/database-migrations');
 const { AchievementService } = require('../services/achievement-service');
 const { CreatorProfileService } = require('../services/creator-profile-service');
 const { QuestV2Service } = require('../services/quest-v2-service');
+const { LiveInteractionService } = require('../services/live-interaction-service');
 const { RewardCatalogService } = require('../services/reward-catalog-service');
 const { RewardGrantDispatcher } = require('../services/reward-grant-dispatcher');
 const {
@@ -18,12 +20,13 @@ const {
     RewardGrantIntentWriter
 } = require('../services/reward-grant-intent-writer');
 const { CreatorRepository } = require('../repositories/creator-repository');
+const { LiveInteractionRepository } = require('../repositories/live-interaction-repository');
 const { RewardCatalogRepository } = require('../repositories/reward-catalog-repository');
 const { QuestV2RuntimeRepository } = require('../repositories/quest-v2-runtime-repository');
 const {
     RewardGrantIntentRepository
 } = require('../repositories/reward-grant-intent-repository');
-const { DisposableDatabase } = require('../tests/helpers/integration-environment');
+const { DisposableDatabase, delay } = require('../tests/helpers/integration-environment');
 
 if (process.env.ALLOW_DATABASE_CREATE_TEST !== 'true') {
     throw new Error('Set ALLOW_DATABASE_CREATE_TEST=true to run the disposable reward security test');
@@ -109,9 +112,13 @@ async function verifyHistoricalUpgrade(database) {
 async function verifyVisibilityAndQuietInbox(database) {
     const owner = await database.createUser({ username: 'reward_owner', isAdmin: true });
     const creator = await database.createUser({ username: 'reward_creator' });
+    const optoutCreator = await database.createUser({ username: 'reward_optout_creator' });
     const raceCreator = await database.createUser({ username: 'reward_unlock_race' });
     await createProfile(database.pool, creator.username);
+    await createProfile(database.pool, optoutCreator.username);
     const creatorId = await accountId(database.pool, creator.username);
+    const optoutCreatorId = await accountId(database.pool, optoutCreator.username);
+    const ownerId = await accountId(database.pool, owner.username);
     await database.pool.query(`INSERT INTO creator_quiet_hours(
         user_id,weekday,start_minute,end_minute,enabled
     ) VALUES($1,1,0,1439,TRUE)`, [creatorId]);
@@ -127,6 +134,15 @@ async function verifyVisibilityAndQuietInbox(database) {
         publishRewardNotification: value => realtime.push(value)
     });
     await quietService.initialize();
+    const liveService = new LiveInteractionService({
+        repository: new LiveInteractionRepository({ pool: database.pool }),
+        ownerUsername: owner.username,
+        games: GAME_DEFINITIONS,
+        clock: () => FIXED_NOW
+    });
+    const opened = await liveService.open(owner.username, {
+        commandId: uuid(), creatorUsername: creator.username
+    });
     const achievementService = new AchievementService({ pool: database.pool, clock: () => FIXED_NOW });
     await achievementService.initialize();
 
@@ -134,6 +150,44 @@ async function verifyVisibilityAndQuietInbox(database) {
         FROM reward_catalog_versions version
         JOIN reward_catalog_items item ON item.id=version.item_id`)).rows;
     const ids = new Map(rows.map(row => [row.slug, Number(row.id)]));
+    const optoutWriter = await database.pool.connect();
+    let optoutWriterOpen = false;
+    let optoutGrantPromise;
+    try {
+        await optoutWriter.query('BEGIN');
+        optoutWriterOpen = true;
+        await optoutWriter.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [optoutCreatorId]);
+        await optoutWriter.query(`UPDATE creator_profiles SET live_interaction_opt_in=FALSE,
+            version=version+1 WHERE user_id=$1`, [optoutCreatorId]);
+        let optoutGrantSettled = false;
+        optoutGrantPromise = quietService.ownerGrant(owner.username, {
+            commandId: uuid(), creatorUsername: optoutCreator.username,
+            catalogVersionId: ids.get('owner-milestone-fanlight'),
+            templateKey: 'quest-chain-celebration'
+        }).then(value => ({ value }), error => ({ error }))
+            .finally(() => { optoutGrantSettled = true; });
+        await delay(150);
+        assert.equal(optoutGrantSettled, false,
+            'owner grant must wait for the creator profile authority barrier');
+        await optoutWriter.query('COMMIT');
+        optoutWriterOpen = false;
+    } finally {
+        if (optoutWriterOpen) await optoutWriter.query('ROLLBACK').catch(() => {});
+        optoutWriter.release();
+    }
+    const optoutGrant = await Promise.race([
+        optoutGrantPromise,
+        delay(5000).then(() => { throw new Error('Reward opt-out/owner-grant authority race timed out'); })
+    ]);
+    assert.equal(optoutGrant.error?.code, 'REWARD_GRANT_CONSENT_REQUIRED',
+        'an owner grant waiting behind committed opt-out must observe the new profile fact');
+    const optoutSideEffects = await database.pool.query(`SELECT
+        (SELECT COUNT(*) FROM reward_orders WHERE user_id=$1)::INTEGER orders,
+        (SELECT COUNT(*) FROM reward_inventory_grants WHERE user_id=$1)::INTEGER grants,
+        (SELECT COUNT(*) FROM creator_inbox_messages
+            WHERE user_id=$1 AND message_type='reward_status')::INTEGER inbox`, [optoutCreatorId]);
+    assert.deepEqual(optoutSideEffects.rows[0], { orders: 0, grants: 0, inbox: 0 },
+        'rejected post-opt-out owner grant must not persist reward side effects');
     const before = await quietService.catalog(creator.username);
     assert.equal(before.items.some(item => item.slug === 'paper-star-frame'), false);
     assert.equal(before.items.some(item => item.slug === 'owner-milestone-fanlight'), false);
@@ -220,11 +274,53 @@ async function verifyVisibilityAndQuietInbox(database) {
     assert.equal(raced.order.slug, 'paper-star-frame',
         'redemption serialized behind the immutable unlock instead of observing a partial state');
 
-    const quietGrant = await quietService.ownerGrant(owner.username, {
-        commandId: uuid(), creatorUsername: creator.username,
-        catalogVersionId: ids.get('owner-milestone-fanlight'),
-        templateKey: 'quest-chain-celebration'
-    });
+    const ownerBarrier = await database.pool.connect();
+    let ownerBarrierOpen = false;
+    let quietGrantPromise;
+    let liveAckPromise;
+    try {
+        await ownerBarrier.query('BEGIN');
+        ownerBarrierOpen = true;
+        await ownerBarrier.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [ownerId]);
+        let quietGrantSettled = false;
+        quietGrantPromise = quietService.ownerGrant(owner.username, {
+            commandId: uuid(), creatorUsername: creator.username,
+            catalogVersionId: ids.get('owner-milestone-fanlight'),
+            templateKey: 'quest-chain-celebration'
+        }).then(value => ({ value }), error => ({ error }))
+            .finally(() => { quietGrantSettled = true; });
+        await delay(150);
+        assert.equal(quietGrantSettled, false,
+            'owner grant must queue behind the first global user-row barrier');
+        let liveAckSettled = false;
+        liveAckPromise = liveService.acknowledge(creator.username, {
+            interactionId: opened.interaction.id,
+            sequence: opened.event.sequence
+        }).then(value => ({ value }), error => ({ error }))
+            .finally(() => { liveAckSettled = true; });
+        await delay(150);
+        assert.equal(liveAckSettled, false,
+            'live acknowledgement must share the same global user-row barrier');
+        await ownerBarrier.query('COMMIT');
+        ownerBarrierOpen = false;
+    } finally {
+        if (ownerBarrierOpen) await ownerBarrier.query('ROLLBACK').catch(() => {});
+        ownerBarrier.release();
+    }
+    const [quietGrantOutcome, liveAckOutcome] = await Promise.race([
+        Promise.all([quietGrantPromise, liveAckPromise]),
+        delay(8000).then(() => { throw new Error('Live acknowledgement and owner grant deadlocked'); })
+    ]);
+    assert.equal(quietGrantOutcome.error, undefined,
+        `concurrent owner grant failed: ${quietGrantOutcome.error?.code}`);
+    assert.equal(liveAckOutcome.error, undefined,
+        `concurrent live acknowledgement failed: ${liveAckOutcome.error?.code}`);
+    const quietGrant = quietGrantOutcome.value;
+    assert.equal(liveAckOutcome.value.highestAckSequence, opened.event.sequence);
+    assert.equal(await count(database.pool, 'reward_orders', 'id=$1', [quietGrant.order.id]), 1,
+        'cross-module lock serialization must not duplicate the reward order');
+    assert.equal(await count(database.pool, 'reward_inventory_grants', 'order_id=$1', [quietGrant.order.id]), 1,
+        'cross-module lock serialization must settle one grant');
     assert.equal(quietGrant.order.notificationPolicy, 'quiet_suppressed');
     assert.equal(realtime.length, 0);
 
@@ -240,10 +336,9 @@ async function verifyVisibilityAndQuietInbox(database) {
     assert.equal(outsidePreferredGrant.order.notificationPolicy, 'quiet_suppressed');
     assert.equal(realtime.length, 0, 'outside preferred time must not fan out realtime');
 
-    const ownerId = await accountId(database.pool, owner.username);
-    const roomId = Number((await database.pool.query(`INSERT INTO live_interactions(
-        interaction_key,creator_user_id,owner_user_id,status
-    ) VALUES($1,$2,$3,'reported') RETURNING id`, [uuid(), creatorId, ownerId])).rows[0].id);
+    const roomId = opened.interaction.id;
+    await database.pool.query(`UPDATE live_interactions SET status='reported',revision=revision+1
+        WHERE id=$1`, [roomId]);
     await database.pool.query(`INSERT INTO live_interaction_reports(
         report_key,interaction_id,reporter_user_id,reason_code,status
     ) VALUES($1,$2,$3,'unwanted_contact','open')`, [uuid(), roomId, creatorId]);

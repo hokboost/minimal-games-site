@@ -85,10 +85,29 @@ class RewardCatalogRepository {
     async lockAccounts(client, usernames) {
         const names = [...new Set(usernames.filter(Boolean))];
         const result = await client.query(`SELECT u.id,u.username,u.balance,u.bilibili_room_id,u.is_admin,
-            u.authorized,u.deactivated,u.account_locked,p.live_interaction_opt_in,p.timezone,p.communication_style
-            FROM users u LEFT JOIN creator_profiles p ON p.user_id=u.id
-            WHERE u.username=ANY($1::TEXT[]) ORDER BY u.id FOR UPDATE OF u`, [names]);
-        return new Map(result.rows.map(row => [row.username, row]));
+            u.authorized,u.deactivated,u.account_locked
+            FROM users u
+            WHERE u.username=ANY($1::TEXT[])
+            ORDER BY u.id
+            FOR NO KEY UPDATE OF u`, [names]);
+        const userIds = result.rows.map(row => Number(row.id));
+        const profileRows = userIds.length ? (await client.query(`
+            SELECT user_id,live_interaction_opt_in,timezone,communication_style
+            FROM creator_profiles
+            WHERE user_id=ANY($1::INTEGER[])
+            ORDER BY user_id
+        `, [userIds])).rows : [];
+        const profiles = new Map(profileRows.map(row => {
+            const { user_id: userId, ...profile } = row;
+            return [Number(userId), profile];
+        }));
+        return new Map(result.rows.map(row => [row.username, {
+            ...row,
+            live_interaction_opt_in: null,
+            timezone: null,
+            communication_style: null,
+            ...(profiles.get(Number(row.id)) || {})
+        }]));
     }
 
     async accountIdentity(username) {
