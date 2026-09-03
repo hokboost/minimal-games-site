@@ -466,4 +466,14 @@ button:disabled {
 .admin-task-template { grid-template-columns: auto 1fr; align-items: center; }
 .admin-task-review-row { display: flex; justify-content: space-between; gap: 1rem; padding: .8rem; border-bottom: 1px solid rgba(255,255,255,.1); }
 .admin-task-review-row > div { display: flex; gap: .6rem; align-items: center; }
+.admin-songbook-link {
+    color: #e8f8ff !important;
+    background: linear-gradient(135deg, #14aaf5, #076da6);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    box-shadow: 0 8px 22px rgba(7, 109, 166, 0.25);
+}
+.admin-songbook-link:hover {
+    color: #fff !important;
+    background: linear-gradient(135deg, #0789d1, #07577f);
+}
 @media (max-width: 820px) { .admin-task-grid, .home-backpack-grid { grid-template-columns: 1fr; } .admin-task-review-row { flex-direction: column; } }

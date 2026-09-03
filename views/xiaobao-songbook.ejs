@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="theme-color" content="#dff5ff">
+  <title><%= title %></title>
+  <meta name="description" content="小饱直播间管理员专用在线歌单。">
+  <link rel="stylesheet" href="/xiaobao-songbook.css">
+</head>
+<body>
+<main id="top" class="songbook-main">
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <p class="eyebrow">XIAO BAO · SONGBOOK</p>
+      <h1 id="page-title">小饱的歌单</h1>
+      <p class="hero-note">挑一首喜欢的歌。点击歌名，点歌弹幕就会自动复制到剪贴板。</p>
+      <div class="hero-links" aria-label="主播与管理链接">
+        <a href="https://live.bilibili.com/1861300141" target="_blank" rel="noreferrer">进入直播间</a>
+        <a class="link-quiet" href="/admin">返回管理后台</a>
+      </div>
+    </div>
+    <aside class="sky-mark" aria-label="歌单共 <%= songTotal %> 首歌">
+      <div class="weather-line"><span aria-hidden="true"></span> 天晴，适合唱歌</div>
+      <strong><%= songTotal %></strong>
+      <p>首歌 · <%= songGroups.length %> 个分类</p>
+      <div class="category-summary" aria-hidden="true">
+        <% songGroups.forEach(group => { %>
+          <span><%= group.category %> <%= group.songs.length %></span>
+        <% }) %>
+      </div>
+    </aside>
+  </section>
+
+  <section class="song-panel" aria-labelledby="songs-title">
+    <header class="section-heading">
+      <div>
+        <p class="section-kicker">PICK A SONG</p>
+        <h2 id="songs-title">今天想听哪一首？</h2>
+      </div>
+      <p>点击任意歌曲，即可复制“点歌 + 歌名”</p>
+    </header>
+
+    <div class="song-tools">
+      <div class="search-wrap">
+        <label for="song-search">搜索歌曲</label>
+        <div class="search-control">
+          <span class="search-symbol" aria-hidden="true"></span>
+          <input id="song-search" type="search" placeholder="输入歌名，如：晴天" autocomplete="off">
+          <button id="clear-search" class="clear-search" type="button" hidden>清除</button>
+        </div>
+      </div>
+      <div class="category-tabs" aria-label="歌单分类">
+        <button type="button" class="is-active" aria-pressed="true" data-category="全部">全部<span><%= songTotal %></span></button>
+        <% songGroups.forEach(group => { %>
+          <button type="button" aria-pressed="false" data-category="<%= group.category %>"><%= group.category %><span><%= group.songs.length %></span></button>
+        <% }) %>
+      </div>
+    </div>
+
+    <p id="result-count" class="result-count" aria-live="polite">当前显示 <%= songTotal %> 首歌</p>
+
+    <div id="song-groups" class="song-groups">
+      <% songGroups.forEach(group => { %>
+        <section class="song-group" aria-labelledby="group-<%= group.category %>" data-song-group="<%= group.category %>">
+          <div class="group-heading">
+            <h3 id="group-<%= group.category %>"><%= group.category %></h3>
+            <span><span data-visible-count><%= group.songs.length %></span> 首</span>
+          </div>
+          <div class="song-grid">
+            <% group.songs.forEach((song, index) => { %>
+              <button class="song-card" type="button" data-song-name="<%= song %>" aria-label="点歌 <%= song %>，点击复制">
+                <span class="song-number"><%= String(index + 1).padStart(2, '0') %></span>
+                <span class="song-name"><%= song %></span>
+                <span class="copy-hint" aria-hidden="true">点歌</span>
+              </button>
+            <% }) %>
+          </div>
+        </section>
+      <% }) %>
+    </div>
+
+    <div id="empty-state" class="empty-state" role="status" hidden>
+      <p>没有找到这首歌</p>
+      <span>换个关键词试试，或清除搜索查看完整歌单。</span>
+      <button id="show-all-songs" type="button">查看全部歌曲</button>
+    </div>
+  </section>
+
+  <footer>
+    <p>小饱的管理员专用在线歌单 · 点击歌曲即可复制点歌弹幕</p>
+    <a href="#top">回到顶部</a>
+  </footer>
+
+  <div id="copy-dialog-backdrop" class="copy-dialog-backdrop" hidden>
+    <section class="copy-dialog" role="dialog" aria-modal="true" aria-labelledby="copy-dialog-title">
+      <div class="copy-dialog-heading">
+        <div>
+          <p class="section-kicker">COPY MANUALLY</p>
+          <h2 id="copy-dialog-title">浏览器拦截了自动复制</h2>
+        </div>
+        <button id="copy-dialog-close" type="button" class="copy-dialog-close">关闭</button>
+      </div>
+      <p class="copy-dialog-note">点歌内容已经选中。电脑按 Ctrl+C，手机长按下方文字后选择复制。</p>
+      <label for="manual-copy-value">点歌内容</label>
+      <input id="manual-copy-value" class="copy-dialog-value" type="text" readonly>
+      <button id="copy-dialog-action" type="button" class="copy-dialog-action">再次尝试自动复制</button>
+    </section>
+  </div>
+
+  <div id="copy-toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <span class="toast-dot" aria-hidden="true"></span>
+    <span id="copy-toast-message"></span>
+  </div>
+</main>
+
+  <script src="/xiaobao-songbook.js" defer></script>
+</body>
+</html>

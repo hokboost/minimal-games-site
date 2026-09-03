@@ -18,6 +18,7 @@
                 <% if (typeof streamerWorldFlags !== 'undefined' && streamerWorldFlags.creatorFoundationEnabled) { %>
                     <a href="/admin/creator-director"><%= lang === 'zh' ? '主播导演台' : 'Creator Director' %></a>
                 <% } %>
+                <a class="admin-songbook-link" href="/admin/xiaobao-songbook"><%= lang === 'zh' ? '♫ 小饱歌单' : '♫ Xiaobao songbook' %></a>
                 <a href="/">← <%= lang === 'zh' ? '游戏大厅' : 'Games' %></a>
                 <form method="POST" action="/logout" class="logout-form">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">

@@ -2,6 +2,7 @@ module.exports = function registerAdminRoutes(app, deps) {
     const crypto = require('crypto');
     const net = require('net');
     const requireFunction = require('../lib/require-function');
+    const { songGroups: xiaobaoSongGroups, songTotal: xiaobaoSongTotal } = require('../data/xiaobao-songs');
     const {
         pool,
         bcrypt,
@@ -50,6 +51,14 @@ module.exports = function registerAdminRoutes(app, deps) {
     const adminReadGuards = [requireLogin, requireAdmin, readHeavyRateLimit];
     const adminMutationGuards = [requireLogin, requireAdmin, adminRateLimit, adminStrictLimit];
     const highRiskAdminGuards = adminMutationGuards;
+    const xiaobaoSongbookPrivacy = (req, res, next) => {
+        res.set({
+            'Cache-Control': 'private, no-store, max-age=0',
+            Pragma: 'no-cache',
+            'X-Robots-Tag': 'noindex, nofollow, noarchive'
+        });
+        next();
+    };
 
     const runPostCommitEffect = (label, effect) => {
         Promise.resolve()
@@ -334,6 +343,14 @@ module.exports = function registerAdminRoutes(app, deps) {
     };
 
     // 管理员后台
+    app.get('/admin/xiaobao-songbook', xiaobaoSongbookPrivacy, ...adminReadGuards, (req, res) => {
+        res.render('xiaobao-songbook', {
+            title: '小饱的歌单（管理员专用）',
+            songGroups: xiaobaoSongGroups,
+            songTotal: xiaobaoSongTotal
+        });
+    });
+
     app.get('/admin', ...adminReadGuards, async (req, res) => {
         try {
             // 初始化session
