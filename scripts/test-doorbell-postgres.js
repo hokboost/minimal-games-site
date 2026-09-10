@@ -165,7 +165,12 @@ async function main() {
     assert.ok((await bell.buffer()).length > 100000, 'restricted audio sends one complete response');
     assert.equal((await pilotSession.request(listening.playback.url)).status, 409, 'reusing the media URL cannot replay it');
     await pilotSession.postJson('/api/doorbell/action', { commandId: randomUUID(), runId: listening.run.id, revision: listening.run.revision, type: 'cashout' }, protocol);
-    await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() }, protocol);
+    const browserRun = await (await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() }, protocol)).json();
+    // Pin the disposable browser fixture to the newly added second-door audio.
+    // Unit tests separately cover every random artist-pool combination.
+    await db.pool.query('UPDATE doorbell_runs SET song_ids=$1 WHERE id=$2', [
+        JSON.stringify(['bad-wings', 'love-song', 'black-keys', 'little-big-us', 'only-us', 'passing', 'light', 'roses']), browserRun.run.id
+    ]);
     assert.ok([302, 404].includes((await guest.request('/private/doorbell-audio/bad-wings-original.mp3')).status));
     console.log('PASS: real sessions, hidden catalog, CSRF, ownership checks, private single-use audio');
 
@@ -231,7 +236,7 @@ async function main() {
     await page.locator('#opening.is-failure').waitFor({ state: 'visible' });
     await page.screenshot({ path: path.join(artifacts, 'failure.png') });
     await page.locator('#result').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('#result-title').textContent(), '唯独我们');
+    assert.equal(await page.locator('#result-title').textContent(), '写一首情歌');
     assert.match(await page.locator('#result-credit').textContent(), /原唱：尧顺宇/);
     assert.match(await page.locator('#result-message').textContent(), /1,000 电币已结算到账/);
     await page.waitForFunction(() => { const a = document.getElementById('game-audio'); return a.src.endsWith('/2/chorus') && a.readyState >= 2 && !a.paused; });

@@ -444,5 +444,172 @@
     "bellSha256": "5fd6b79a65db744388412bd197b179e6b1cfc2db015bd842dd7411d57ee1ca83",
     "originalSha256": "be383fd7fcb194ed9fa1d60c1081ac492ff07b2ada01bc46c2642c23eaef0e5d",
     "chorusSha256": "21c8252fb992e75566803063050f076cb8a919a4375691823867ebd395c7a008"
+  },
+  {
+    "id": "love-song",
+    "source": "local:尧顺宇 - 写一首情歌.flac",
+    "startSeconds": 55.4,
+    "durationSeconds": 15,
+    "chorusEndSeconds": 97.0,
+    "chorusDurationSeconds": 41.6,
+    "melodyNotes": [
+      [
+        0.12,
+        0.5362,
+        56
+      ],
+      [
+        0.5612,
+        0.9774,
+        59
+      ],
+      [
+        1.0024,
+        1.0674,
+        64
+      ],
+      [
+        1.0774,
+        1.4185,
+        66
+      ],
+      [
+        1.4435,
+        2.0068,
+        66
+      ],
+      [
+        2.0318,
+        2.595,
+        64
+      ],
+      [
+        2.62,
+        3.1832,
+        59
+      ],
+      [
+        3.2082,
+        3.6244,
+        59
+      ],
+      [
+        3.6494,
+        4.0656,
+        56
+      ],
+      [
+        4.0906,
+        4.5068,
+        59
+      ],
+      [
+        4.5318,
+        4.5968,
+        64
+      ],
+      [
+        4.6068,
+        4.9479,
+        66
+      ],
+      [
+        4.9729,
+        5.5362,
+        66
+      ],
+      [
+        5.5612,
+        6.1244,
+        63
+      ],
+      [
+        6.1494,
+        7.1538,
+        60
+      ],
+      [
+        7.1788,
+        7.595,
+        56
+      ],
+      [
+        7.62,
+        7.8156,
+        61
+      ],
+      [
+        7.8406,
+        8.4774,
+        63
+      ],
+      [
+        8.5024,
+        8.5674,
+        63
+      ],
+      [
+        8.5774,
+        9.3597,
+        64
+      ],
+      [
+        10.0465,
+        10.2421,
+        64
+      ],
+      [
+        10.2671,
+        10.3321,
+        61
+      ],
+      [
+        10.3421,
+        10.6832,
+        63
+      ],
+      [
+        10.7082,
+        10.9038,
+        64
+      ],
+      [
+        10.9288,
+        11.345,
+        59
+      ],
+      [
+        11.37,
+        12.0068,
+        56
+      ],
+      [
+        12.0318,
+        12.0968,
+        59
+      ],
+      [
+        12.1068,
+        13.7715,
+        61
+      ],
+      [
+        14.2376,
+        14.6538,
+        56
+      ],
+      [
+        14.6788,
+        14.85,
+        59
+      ]
+    ],
+    "bellMethod": "Numbered chorus melody at 68 quarter-note BPM, sung octave; written triplets, chromatic note, ties, rests and grace notes retained; PN accompaniment excluded; accepted softened modal bell timbre.",
+    "sheetSource": "User-provided numbered score 写一首情歌谱子.png; chorus beginning 我陪你到永远; 1=E, 4/4.",
+    "sourceSha256": "15c1c491bc2136f8663afce2731b1dc1ea4cef196ad25efa272afafde1967a71",
+    "reviewStatus": "User supplied score melody and rhythm checked.",
+    "bellSha256": "efdfb92e73c4f2a984be16d5c16ac205e1f5b0ce5ab66fa2184773f32a3a0cc4",
+    "originalSha256": "a40e2a81b8d0f23fb9d805a3b8c1bdc6f1b2811318b7c6ee632790d3b2dcafc5",
+    "chorusSha256": "0d8836743a5861b310d140402317e1be0b8c6076efa42eede3600f6834208a0a"
   }
 ]

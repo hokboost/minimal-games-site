@@ -14,9 +14,11 @@ const SONGS = Object.freeze([
     { id: 'awakening', title: '梦醒时分', aliases: ['夢醒時分'], artist: '陈淑桦', credit: '原唱' },
     { id: 'past-love', title: '当爱已成往事', aliases: ['當愛已成往事'], artist: '林忆莲、李宗盛', credit: '原唱' },
     { id: 'black-keys', title: '黑键', aliases: ['黑鍵'], artist: '林俊杰', credit: '原唱' },
-    { id: 'little-big-us', title: '伟大的渺小', aliases: ['偉大的渺小'], artist: '林俊杰', credit: '原唱' }
+    { id: 'little-big-us', title: '伟大的渺小', aliases: ['偉大的渺小'], artist: '林俊杰', credit: '原唱' },
+    { id: 'love-song', title: '写一首情歌', aliases: ['寫一首情歌'], artist: '尧顺宇', credit: '原唱' }
 ].map(song => Object.freeze({ ...song, aliases: Object.freeze(song.aliases) })));
 const JJ_SONG_IDS = Object.freeze(['passing', 'black-keys', 'little-big-us']);
+const YAO_SONG_IDS = Object.freeze(['only-us', 'love-song']);
 
 function canPlayDoorbell(user) {
     return Boolean(user && user.authorized === true && user.deactivated !== true
@@ -24,7 +26,7 @@ function canPlayDoorbell(user) {
 }
 
 function selectSongs(rng = randomInt) {
-    const first = ['bad-wings', 'only-us', JJ_SONG_IDS[rng(JJ_SONG_IDS.length)]];
+    const first = ['bad-wings', YAO_SONG_IDS[rng(YAO_SONG_IDS.length)], JJ_SONG_IDS[rng(JJ_SONG_IDS.length)]];
     const rest = SONGS.map(song => song.id).filter(id => !first.includes(id));
     for (let i = rest.length - 1; i > 0; i--) {
         const j = rng(i + 1);
@@ -50,4 +52,4 @@ function songById(id) {
 
 function prize(completed) { return completed === 0 ? 0 : PRIZES[completed - 1]; }
 
-module.exports = { PILOT_USER_ID, PRIZES, SONGS, JJ_SONG_IDS, canPlayDoorbell, selectSongs, normalizeAnswer, isCorrect, songById, prize };
+module.exports = { PILOT_USER_ID, PRIZES, SONGS, JJ_SONG_IDS, YAO_SONG_IDS, canPlayDoorbell, selectSongs, normalizeAnswer, isCorrect, songById, prize };
