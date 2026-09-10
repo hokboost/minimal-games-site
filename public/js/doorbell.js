@@ -152,7 +152,10 @@
         if (busy) return;
         busy = true;
         savePending(command);
-        message(''); stopAudio(); render();
+        message('');
+        // A text hint updates the question without consuming the remaining listen time.
+        if (command.body.type !== 'hint') stopAudio();
+        render();
         const answer = command.body.type === 'answer';
         let suspense;
         if (answer) {

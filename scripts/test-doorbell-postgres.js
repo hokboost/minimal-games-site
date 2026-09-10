@@ -198,13 +198,22 @@ async function main() {
     assert.equal(await page.locator('#game-audio').evaluate(a => a.controls), false);
     assert.ok(await page.locator('#play-bell').isDisabled());
     await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
-    await page.reload();
-    assert.ok(await page.locator('#play-bell').isDisabled(), 'refresh cannot replay the bell');
+    const beforeHint = await page.locator('#game-audio').evaluate(a => {
+        window.hintAudioEvents = [];
+        for (const type of ['pause', 'loadstart', 'seeking']) a.addEventListener(type, () => window.hintAudioEvents.push(type));
+        return { src: a.src, time: a.currentTime };
+    });
     await page.locator('#help-hint').click();
     await page.locator('#hint').waitFor({ state: 'visible' });
+    await page.waitForFunction(before => {
+        const a = document.getElementById('game-audio');
+        return a.src === before.src && !a.paused && a.currentTime > before.time + 0.3;
+    }, beforeHint, { timeout: 5000 });
+    assert.deepEqual(await page.evaluate(() => window.hintAudioEvents), [], 'text hint must not pause, reload or seek the playing bell');
     assert.equal(await page.locator('#hint b').count(), 3);
     assert.ok(await page.locator('#help-hint').isDisabled());
     await page.reload();
+    assert.ok(await page.locator('#play-bell').isDisabled(), 'refresh cannot replay the bell');
     assert.ok(await page.locator('#help-hint').isDisabled());
     await page.locator('#help-original').click();
     await page.waitForFunction(() => { const a = document.getElementById('game-audio'); return a.src.includes('/1/original/') && a.readyState >= 2; });
