@@ -4,7 +4,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const ejs = require('ejs');
-const { SONGS, PRIZES, PILOT_USER_ID, canPlayDoorbell, selectSongs, isCorrect } = require('../domain/games/doorbell');
+const { SONGS, PRIZES, PILOT_USER_ID, JJ_SONG_IDS, canPlayDoorbell, selectSongs, isCorrect } = require('../domain/games/doorbell');
 const { project, validate } = require('../services/doorbell-service');
 const { randomUUID, createHash } = require('node:crypto');
 
@@ -17,15 +17,23 @@ test('pilot access uses database identity and current account eligibility', () =
     assert.equal(canPlayDoorbell(null), false);
 });
 
-test('eight unique doors preserve the first three and shuffle only remaining songs', () => {
+test('eight unique doors fix the first two and draw door three from all three JJ songs', () => {
     const tails = new Set();
     for (let i = 0; i < 100; i++) {
         const songs = selectSongs();
         assert.equal(songs.length, 8); assert.equal(new Set(songs).size, 8);
-        assert.deepEqual(songs.slice(0, 3), ['bad-wings', 'only-us', 'passing']);
+        assert.deepEqual(songs.slice(0, 2), ['bad-wings', 'only-us']);
+        assert.ok(JJ_SONG_IDS.includes(songs[2]));
         tails.add(songs.slice(3).join(','));
     }
     assert.ok(tails.size > 1);
+    JJ_SONG_IDS.forEach((id, index) => {
+        let firstCall = true;
+        const songs = selectSongs(max => { if (firstCall) { firstCall = false; assert.equal(max, 3); return index; } return max - 1; });
+        assert.equal(songs[2], id);
+        assert.equal(new Set(songs).size, 8);
+        assert.ok(!songs.slice(3).includes(id));
+    });
     assert.deepEqual(PRIZES, [1000, 2000, 3000, 5000, 10000, 15000, 20000, 30000]);
 });
 

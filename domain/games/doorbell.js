@@ -12,8 +12,11 @@ const SONGS = Object.freeze([
     { id: 'nothing', title: '是否我真的一无所有', aliases: ['是否我真的一無所有'], artist: '王杰', credit: '原唱' },
     { id: 'love-you', title: '他一定很爱你', aliases: ['他一定很愛你'], artist: '阿杜', credit: '原唱' },
     { id: 'awakening', title: '梦醒时分', aliases: ['夢醒時分'], artist: '陈淑桦', credit: '原唱' },
-    { id: 'past-love', title: '当爱已成往事', aliases: ['當愛已成往事'], artist: '林忆莲、李宗盛', credit: '原唱' }
+    { id: 'past-love', title: '当爱已成往事', aliases: ['當愛已成往事'], artist: '林忆莲、李宗盛', credit: '原唱' },
+    { id: 'black-keys', title: '黑键', aliases: ['黑鍵'], artist: '林俊杰', credit: '原唱' },
+    { id: 'little-big-us', title: '伟大的渺小', aliases: ['偉大的渺小'], artist: '林俊杰', credit: '原唱' }
 ].map(song => Object.freeze({ ...song, aliases: Object.freeze(song.aliases) })));
+const JJ_SONG_IDS = Object.freeze(['passing', 'black-keys', 'little-big-us']);
 
 function canPlayDoorbell(user) {
     return Boolean(user && user.authorized === true && user.deactivated !== true
@@ -21,12 +24,13 @@ function canPlayDoorbell(user) {
 }
 
 function selectSongs(rng = randomInt) {
-    const rest = SONGS.slice(3).map(song => song.id);
+    const first = ['bad-wings', 'only-us', JJ_SONG_IDS[rng(JJ_SONG_IDS.length)]];
+    const rest = SONGS.map(song => song.id).filter(id => !first.includes(id));
     for (let i = rest.length - 1; i > 0; i--) {
         const j = rng(i + 1);
         [rest[i], rest[j]] = [rest[j], rest[i]];
     }
-    return [...SONGS.slice(0, 3).map(song => song.id), ...rest.slice(0, 5)];
+    return [...first, ...rest.slice(0, 5)];
 }
 
 function normalizeAnswer(text) {
@@ -46,4 +50,4 @@ function songById(id) {
 
 function prize(completed) { return completed === 0 ? 0 : PRIZES[completed - 1]; }
 
-module.exports = { PILOT_USER_ID, PRIZES, SONGS, canPlayDoorbell, selectSongs, normalizeAnswer, isCorrect, songById, prize };
+module.exports = { PILOT_USER_ID, PRIZES, SONGS, JJ_SONG_IDS, canPlayDoorbell, selectSongs, normalizeAnswer, isCorrect, songById, prize };
