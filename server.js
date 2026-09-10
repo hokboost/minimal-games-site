@@ -96,6 +96,8 @@ const registerAdminRoutes = require('./routes/admin');
 const registerGiftRoutes = require('./routes/gifts');
 const registerWishRoutes = require('./routes/wish');
 const registerGameRoutes = require('./routes/games');
+const registerDoorbellRoutes = require('./routes/doorbell');
+const { canPlayDoorbell } = require('./domain/games/doorbell');
 const registerDoudizhuRoutes = require('./routes/doudizhu');
 const registerAdventureRoutes = require('./routes/adventure');
 const registerTaskRoutes = require('./routes/tasks');
@@ -210,6 +212,7 @@ const applicationLifecycle = new ApplicationLifecycle({
 
 const app = express();
 app.locals.gameCatalog = visibleGameDefinitions;
+app.locals.doorbellVisible = false;
 app.locals.gameCatalogGroups = gameRegistry.GAME_GROUPS;
 app.locals.gameRecordViews = gameRegistry.presentation.RECORD_VIEWS;
 app.locals.gamePublicWishConfigs = gameRegistry.getPublicWishConfigs();
@@ -1107,6 +1110,20 @@ const accountLockGate = async (req, res, next) => {
 };
 
 app.use(accountLockGate);
+
+// Keep the private pilot entry out of every other visitor's HTML.
+app.use(async (req, res, next) => {
+    if (req.method !== 'GET' || !['/', '/games'].includes(req.path) || !req.session?.user?.username) return next();
+    res.set('Cache-Control', 'private, no-store');
+    try {
+        const result = await pool.query(`SELECT id,authorized,is_admin,deactivated,account_locked
+            FROM users WHERE username=$1`, [req.session.user.username]);
+        res.locals.doorbellVisible = canPlayDoorbell(result.rows[0]);
+    } catch {
+        res.locals.doorbellVisible = false;
+    }
+    return next();
+});
 
 const requireAdmin = (req, res, next) => {
     if (!req.session.user || !req.session.user.is_admin) {
@@ -3099,6 +3116,11 @@ registerWishRoutes(app, {
     broadcastDanmaku,
     enqueueWishInventorySend,
     paidActionConcurrencyGuard
+});
+
+registerDoorbellRoutes(app, {
+    pool, BalanceLogger, requireLogin, requireAuthorized, requireCSRF,
+    generateCSRFToken, security, paidActionConcurrencyGuard
 });
 
 registerGameRoutes(app, {

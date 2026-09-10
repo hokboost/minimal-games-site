@@ -1,0 +1,50 @@
+.page-doorbell{background:#f3f1eb;color:#252738}
+.doorbell-main{max-width:1220px;margin:0 auto;padding:24px 30px 70px}
+.doorbell-main [hidden]{display:none!important}
+.doorbell-back{color:#62636d;text-decoration:none;font-size:13px}
+.doorbell-heading{display:flex;justify-content:space-between;align-items:center;gap:24px;margin:28px 0 24px}
+.doorbell-kicker{font-size:10px;font-weight:800;letter-spacing:2.4px;color:#777988}
+.doorbell-heading h1{font-size:46px;letter-spacing:3px;line-height:1.3;margin:10px 0}
+.doorbell-heading h1 span{display:block;font-size:14px;font-weight:400;letter-spacing:0;color:#72717b;margin-top:12px}
+.doorbell-jackpot{text-align:right;display:grid;gap:3px;color:#5e604e}
+.doorbell-jackpot small{font-size:12px}.doorbell-jackpot strong{font-size:38px;font-variant-numeric:tabular-nums;line-height:1.15;color:#30372b}.doorbell-jackpot span{font-size:11px}
+.doorbell-banner{padding:15px 20px;background:#e4e9d9;border:1px solid #d7ddcb;border-radius:10px;font-size:13px;font-weight:700;display:flex;gap:14px;align-items:center;margin-bottom:24px}
+.doorbell-banner-note{font-size:12px;font-weight:400;color:#67705c;margin-left:auto}
+.doorbell-layout{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:24px;align-items:start}
+.doorbell-stage{background:#181d30;border-radius:20px;overflow:hidden;box-shadow:0 16px 34px #19203412}
+.doorbell-stage-top{display:flex;justify-content:space-between;gap:12px;padding:24px 25px 8px;color:#c0c3d1;font-size:11px;letter-spacing:1px}
+.doorbell-stage-top span:first-child{color:#eac987}
+.doorbell-doors{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:19px 20px;padding:20px 28px 30px;list-style:none;margin:0;background:radial-gradient(ellipse at 50% 0,#363b57 0,transparent 65%)}
+.doorbell-door{text-align:center;position:relative;min-width:0;color:#8790ad;padding-top:3px}
+.doorbell-door-number{position:absolute;top:13px;left:16px;font-size:12px;font-weight:700;color:#9fa6bb;z-index:1}
+.doorbell-door-face{height:110px;border:1px solid #566079;border-radius:44px 44px 5px 5px;background:linear-gradient(110deg,#343c56,#252c43 55%,#20273a);display:flex;align-items:center;justify-content:center;font-size:28px;color:#525b74;box-shadow:inset 0 0 0 6px #252c42,inset 0 0 0 7px #465069;margin-bottom:9px;position:relative;transition:all .5s}
+.doorbell-door-face:after{content:'';width:4px;height:14px;border-radius:3px;background:#9ba6b4;position:absolute;right:15px;top:59%}
+.doorbell-door strong{font-size:15px;display:block;font-variant-numeric:tabular-nums;color:#cbd0df}.doorbell-door small{font-size:10px}
+.doorbell-door.is-current .doorbell-door-face{border-color:#e6c88b;box-shadow:inset 0 0 0 6px #3b3540,inset 0 0 0 7px #bd9f6e,0 0 22px #e7bf5220;color:#e8c57f;background:linear-gradient(125deg,#59505a,#33304a)}
+.doorbell-door.is-current .doorbell-door-number,.doorbell-door.is-current strong{color:#edcb86}
+.doorbell-door.is-open .doorbell-door-face{background:radial-gradient(ellipse at center,#8a8862,#39483f);box-shadow:inset 0 0 0 6px #36473e,inset 0 0 0 7px #9eac85;border-color:#b9c793;color:#f4ecc6}.doorbell-door.is-open small{color:#bbcea4}
+.doorbell-door.is-failed .doorbell-door-face{color:#e6b2a2;border-color:#8a5e63}.doorbell-door.is-failed small{color:#d2a09a}
+.doorbell-console{background:#fffdf8;padding:24px 26px 20px;min-height:292px}
+.doorbell-score{display:flex;justify-content:space-between;gap:12px;padding-bottom:17px;margin-bottom:22px;border-bottom:1px solid #e9e5dc;color:#7c7b79;font-size:11px}.doorbell-score strong{color:#464e39;font-size:17px;margin:0 4px;font-variant-numeric:tabular-nums}
+.doorbell-main button{font:inherit;font-size:13px;cursor:pointer;border-radius:8px;min-height:42px;border:1px solid #ddd9cf;background:#f8f6ef;color:#343746;padding:10px 16px;transition:background .15s,transform .15s}
+.doorbell-main button:hover:not(:disabled){background:#eeeade;transform:translateY(-1px)}
+.doorbell-main button:disabled{opacity:.48;cursor:not-allowed}
+.doorbell-main button:focus-visible,.doorbell-main a:focus-visible,.doorbell-main input:focus-visible{outline:3px solid #a78140;outline-offset:3px}
+.doorbell-main .doorbell-primary{background:#303c33;border-color:#303c33;color:#fff}.doorbell-main .doorbell-primary:hover:not(:disabled){background:#465646}
+#welcome h2{font-size:22px;margin:0 0 10px}#welcome p{font-size:13px;color:#74746e;line-height:1.8;margin:0 0 21px}
+.doorbell-listen-row{display:flex;align-items:center;gap:14px;margin-bottom:20px}.doorbell-main .doorbell-play{border-radius:24px;background:#e9eddf;border-color:#d6ddc9;color:#3c503d;font-weight:700}.doorbell-listen-row span{font-size:11px;color:#86867f}
+#answer-form label{display:block;font-size:13px;font-weight:700;margin:0 0 9px}.doorbell-answer-row{display:flex;gap:9px}.doorbell-answer-row input{font:inherit;min-width:0;flex:1;border:1px solid #d8d6cb;border-radius:8px;padding:12px;background:white;color:#252738;font-size:16px}
+.doorbell-help{display:flex;gap:10px;margin-top:16px}.doorbell-help button{flex:1;text-align:left;display:flex;justify-content:space-between;gap:5px;align-items:center}.doorbell-help small{font-size:10px;color:#827e70}
+.doorbell-hint{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:15px;color:#787664;font-size:12px}.doorbell-hint b{padding:6px;background:#ede8d7;border-radius:4px;color:#464b39}
+.doorbell-main .doorbell-text-button{border:0;background:transparent;font-size:11px;text-decoration:underline;color:#7b786f;padding:12px 0;min-height:40px}
+.doorbell-audio-player{margin-top:14px}.doorbell-audio-player audio{width:100%;height:38px}
+.doorbell-notice{font-size:12px;line-height:1.8;color:#a0402d}.doorbell-notice button{margin:8px 8px 0 0;min-height:34px;font-size:12px}
+.doorbell-result-badge{font-size:11px;letter-spacing:1px;color:#698254;font-weight:700}.doorbell-result h2{font-size:28px;margin:10px 0 5px}.doorbell-result p{font-size:12px;color:#7d7c77;margin:8px 0}.doorbell-result-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.doorbell-rules{padding:26px 20px;border:1px solid #dedcd3;border-radius:15px;background:#eceae2}.doorbell-rules h2{font-size:23px;line-height:1.5;margin:14px 0 28px}.doorbell-rules ol{margin:0;padding-left:22px}.doorbell-rules li{padding-left:4px;margin-bottom:23px;color:#7c7d70;font-size:12px}.doorbell-rules strong{font-size:13px;color:#434838}.doorbell-rules p{font-size:12px;line-height:1.9;color:#797b70;margin:7px 0}.doorbell-rules .doorbell-rules-note{border-top:1px solid #d8d8ca;padding-top:17px;margin-top:25px;font-size:11px}
+.doorbell-history{margin-top:30px}.doorbell-history h2{font-size:17px}.doorbell-history-item{display:flex;gap:20px;align-items:center;padding:12px 0;border-bottom:1px solid #dddad0;font-size:13px}.doorbell-history-item small{color:#7d7a70;flex:1}.doorbell-history-item button{font-size:11px;min-height:34px}
+.doorbell-opening{position:fixed;inset:0;z-index:10000;background:#101525f5;display:flex;align-items:center;justify-content:center;color:#f5db9b;text-align:center;backdrop-filter:blur(9px)}
+.doorbell-opening-inner p{font-size:18px;letter-spacing:9px;margin:0 0 16px}.doorbell-opening-inner strong{font-size:clamp(38px,8vw,64px);letter-spacing:12px;text-shadow:0 0 40px #e0bd714d}.doorbell-opening-door{position:relative;width:150px;height:185px;margin:34px auto 0;border:2px solid #d5b679;border-radius:72px 72px 5px 5px;overflow:hidden;background:#dccc88;box-shadow:0 0 55px #e2b75940;display:flex;align-items:center;justify-content:center}.doorbell-opening-door span{color:#706844;font-size:54px}.doorbell-opening-door i{position:absolute;top:0;width:50%;height:100%;background:#31344b;z-index:1;border:1px solid #b3935d}.doorbell-opening-door i:first-child{left:0}.doorbell-opening-door i:nth-child(2){right:0}.is-opening .doorbell-opening-door i:first-child{animation:door-left 1.1s 1.1s both}.is-opening .doorbell-opening-door i:nth-child(2){animation:door-right 1.1s 1.1s both}
+@keyframes door-left{to{transform:translateX(-100%)}}@keyframes door-right{to{transform:translateX(100%)}}
+@media(max-width:950px){.doorbell-layout{grid-template-columns:minmax(0,1fr) 220px;gap:16px}.doorbell-main{padding:20px}.doorbell-banner-note{display:none}.doorbell-doors{gap:16px;padding:20px}.doorbell-rules{padding:23px 16px}}
+@media(max-width:720px){.doorbell-main{padding:15px 14px 45px}.doorbell-heading{margin:22px 0 20px;gap:10px}.doorbell-heading h1{font-size:34px}.doorbell-heading h1 span{font-size:11px;line-height:1.7;max-width:210px}.doorbell-jackpot strong{font-size:27px}.doorbell-kicker{font-size:9px;letter-spacing:1.8px}.doorbell-banner{padding:13px 12px;font-size:12px;gap:8px}.doorbell-layout{grid-template-columns:1fr}.doorbell-stage-top{padding:20px 17px 6px;font-size:10px;letter-spacing:0}.doorbell-doors{gap:17px 12px;padding:18px 18px 25px}.doorbell-door-face{height:92px;border-radius:35px 35px 4px 4px;font-size:25px}.doorbell-door-number{font-size:10px;left:13px}.doorbell-door strong{font-size:13px}.doorbell-console{padding:21px 17px}.doorbell-score{gap:8px;font-size:10px}.doorbell-score strong{font-size:15px}.doorbell-main button{padding:10px 12px;font-size:12px}.doorbell-help button{font-size:12px}.doorbell-help small{font-size:9px}.doorbell-listen-row{gap:10px}.doorbell-rules h2 br{display:none}.doorbell-rules h2{font-size:20px;margin:10px 0 20px}.doorbell-rules li{margin-bottom:16px}.doorbell-history-item{gap:8px;flex-wrap:wrap}.doorbell-history-item>span{flex-basis:100%}}
+@media(prefers-reduced-motion:reduce){.doorbell-main *{animation:none!important;transition:none!important}}

@@ -3118,3 +3118,11 @@ html body.page-doudizhu .ddz-fairness-note {
         min-width: 0;
     }
 }
+
+/* Private music challenge entry, rendered only for pilot accounts. */
+.doorbell-entry{grid-column:1/-1;display:flex;align-items:center;gap:20px;padding:24px;border-radius:14px;background:#20263b;color:#eee8d5;text-decoration:none;margin-bottom:12px}
+.doorbell-entry:hover{background:#2c344b;color:#fff4d8}.doorbell-entry:focus-visible{outline:3px solid #aa8750;outline-offset:3px}
+.doorbell-entry-icon{width:52px;height:65px;display:grid;place-items:center;border:1px solid #bea571;border-radius:28px 28px 4px 4px;font-size:25px;color:#eac988;flex-shrink:0}
+.doorbell-entry>span:nth-child(2){display:grid;gap:6px}.doorbell-entry small{font-size:10px;letter-spacing:2px;color:#bfb28f}.doorbell-entry strong{font-size:24px;letter-spacing:3px}.doorbell-entry>span:nth-child(2)>span{font-size:12px;color:#bbbcc7}
+.doorbell-entry-reward{margin-left:auto;font-size:12px;color:#e1c58c}.doorbell-entry-reward b{font-size:21px;margin-left:14px}
+@media(max-width:700px){.doorbell-entry{gap:14px;padding:19px;flex-wrap:wrap}.doorbell-entry-reward{margin-left:66px;font-size:11px}.doorbell-entry strong{font-size:22px}.doorbell-entry>span:nth-child(2)>span{font-size:10px}}

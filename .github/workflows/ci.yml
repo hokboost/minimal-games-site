@@ -58,6 +58,7 @@ jobs:
       - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:migrations
       - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:resilience
       - run: npx playwright install --with-deps chromium
+      - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:doorbell:postgres
       - run: ALLOW_DATABASE_CREATE_TEST=true npm run test:e2e
       - run: ALLOW_DATABASE_CREATE_TEST=true LOAD_TEST_DURATION_MS=5000 npm run test:load
       - run: npm audit --audit-level=high

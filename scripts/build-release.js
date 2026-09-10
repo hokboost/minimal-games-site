@@ -17,10 +17,10 @@ const allowlist = Object.freeze([
     'session-manager.js', 'ip-manager.js', 'balance-logger.js', 'gift-codes.json',
     'bilibili_gift_sender.py', 'windows-gift-listener.js', 'bilibili-cookie-manager.js',
     'README.md', 'SECURITY.md', 'render.yaml',
-    'docs/ARCHITECTURE.md', 'docs/DATABASE_ROLES.md', 'docs/GAME_ECONOMICS.md',
+    'docs/ARCHITECTURE.md', 'docs/DATABASE_ROLES.md', 'docs/GAME_ECONOMICS.md', 'docs/DOORBELL_GAME.md',
     'docs/STREAMER_WORLD_OPERATIONS.md', 'docs/THIRD_PARTY_NOTICES.md',
     'app', 'data', 'domain', 'content', 'lib', 'middleware', 'migrations', 'public', 'repositories',
-    'routes', 'services', 'views', 'workers', 'private/dictation-audio',
+    'routes', 'services', 'views', 'workers', 'private/dictation-audio', 'private/doorbell-audio',
     'scripts/run-migrations.js', 'scripts/check-secrets.js',
     'scripts/bilibili-cookie-dpapi.ps1'
 ]);

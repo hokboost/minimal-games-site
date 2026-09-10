@@ -1,0 +1,74 @@
+[
+  {
+    "id": "bad-wings",
+    "source": "https://www.youtube.com/watch?v=j8rc7DMo6uw",
+    "startSeconds": 163.2,
+    "durationSeconds": 15,
+    "bellSha256": "1959d4a84158acfc7cc0c3e1e681f651e27a50e845b80abbbc42bdf3e2523dcc",
+    "originalSha256": "e367696814d682331128704a758f56a5c7049c5824ba83e527ff0ec27b11a82e"
+  },
+  {
+    "id": "only-us",
+    "source": "本地原唱音频：尧顺宇 - 唯独我们.flac",
+    "startSeconds": 63.566,
+    "durationSeconds": 15,
+    "bellSha256": "fe48e5a8b4983dd086f18816bc86caecbfcad58e00183fc8ee57b23b504e1e59",
+    "originalSha256": "ff319d959cbd3b9627d73e47952e832d2557ac2696879365453afecee814c150"
+  },
+  {
+    "id": "passing",
+    "source": "https://www.youtube.com/watch?v=ICBRr8rECQ8",
+    "startSeconds": 72.4,
+    "durationSeconds": 15,
+    "bellSha256": "f8a23cf63fcb6d4af01525190dfa3483400e8eb179307f733b536d3485b9ae41",
+    "originalSha256": "f1099a02804eb635cb13b424c18accda21b2cad1a0d9efcb972b240195f711cc"
+  },
+  {
+    "id": "light",
+    "source": "https://www.youtube.com/watch?v=s_V3pM6l8vQ",
+    "startSeconds": 94.24,
+    "durationSeconds": 15,
+    "bellSha256": "f79a206534cddd44c7779c9ef769463a2b65114b87588d668abbf6600e10e9c2",
+    "originalSha256": "e6d82a45028fe292fafad5e3c0916876189eee433692d388b0a744888a37110b"
+  },
+  {
+    "id": "roses",
+    "source": "https://www.youtube.com/watch?v=HhxlPwBfmho",
+    "startSeconds": 82.75,
+    "durationSeconds": 15,
+    "bellSha256": "37f78fc59c7f1f37d84d69191ea13d73c2f4adefe917a7ab12b54209ccccc41f",
+    "originalSha256": "763d9a153b6b78c642722e7c05eb6e075b334756a2a59ae5bde7361d76efff7a"
+  },
+  {
+    "id": "nothing",
+    "source": "https://www.youtube.com/watch?v=bDgWkgQ1oXA",
+    "startSeconds": 71.12,
+    "durationSeconds": 15,
+    "bellSha256": "d19a7936ea687525f9ad2ec21f97c042632cb570262749d7788032c0ea9c31ba",
+    "originalSha256": "46df724712e6dcb38b6b4bffe43e38e497661dfad19335f3bdddd6e8c415633f"
+  },
+  {
+    "id": "love-you",
+    "source": "https://www.youtube.com/watch?v=ixhXTAptf-g",
+    "startSeconds": 75.75,
+    "durationSeconds": 15,
+    "bellSha256": "26024388f974e040bc2cd6fadcd0b95a3a1569522d83de990b7163a49f738a9b",
+    "originalSha256": "b966d69d85942f26a11782db63a94cc9ad273596b95b371df9ff8377e0fdb9c0"
+  },
+  {
+    "id": "awakening",
+    "source": "https://www.youtube.com/watch?v=nku5zFMZAdU",
+    "startSeconds": 62.68,
+    "durationSeconds": 15,
+    "bellSha256": "5d053d9d63fd313852c5dc1badeece18ffbccf68ff5ff211dd02140414f2522f",
+    "originalSha256": "362d1950556be5a9c25d43a9af12809fc3af3e87521f786aed43cb6c2fc48be3"
+  },
+  {
+    "id": "past-love",
+    "source": "https://www.youtube.com/watch?v=bc7kojBSZuk",
+    "startSeconds": 120.76,
+    "durationSeconds": 15,
+    "bellSha256": "9abe7850a0fd694dcb9ae599c8e862bfbf67f5d871039aa55eff16f303d2c3ba",
+    "originalSha256": "6fee8386b171713e7cac836311626904f4a0ec60356e7ee0ccc86bad8b7cc3ec"
+  }
+]

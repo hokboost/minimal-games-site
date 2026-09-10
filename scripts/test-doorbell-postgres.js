@@ -1,0 +1,185 @@
+'use strict';
+// Real PostgreSQL, real routes and real browser; all data lives in a disposable local database.
+const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { chromium } = require('playwright');
+const { DisposableDatabase, BrowserSession, startApp, reservePort } = require('../tests/helpers/integration-environment');
+const { DoorbellService } = require('../services/doorbell-service');
+const { PRIZES, PILOT_USER_ID, songById } = require('../domain/games/doorbell');
+const BalanceLogger = require('../balance-logger');
+const { assertDatabaseSchemaCurrent, applyDatabaseMigrations } = require('../lib/database-migrations');
+if (!['localhost', '127.0.0.1', '::1'].includes(process.env.DB_HOST)) throw new Error('Doorbell integration tests require a local disposable database');
+const db = new DisposableDatabase('doorbell');
+let app, browser;
+const artifacts = process.env.DOORBELL_TEST_ARTIFACTS || path.join(__dirname, '../build/doorbell-check');
+const code = value => error => error.code === value;
+async function main() {
+    await db.create();
+    await applyDatabaseMigrations(db.pool); // Rerun: no duplicated tables or changed historical migration checksums.
+    await assertDatabaseSchemaCurrent(db.pool);
+    const pilot = await db.createUser({ username: '一个乌龟酱', balance: 100 });
+    await db.pool.query('UPDATE users SET id=$1 WHERE username=$2', [PILOT_USER_ID, pilot.username]);
+    const admin = await db.createUser({ username: 'doorbell_admin', isAdmin: true, balance: 500 });
+    const ordinary = await db.createUser({ username: 'doorbell_ordinary', balance: 700 });
+    const service = new DoorbellService({ pool: db.pool, balanceLogger: BalanceLogger });
+    const user = pilot.username;
+    const start = () => service.command(user, { commandId: randomUUID() }, true);
+    const act = (s, type, answer, commandId = randomUUID()) => service.command(user,
+        { commandId, runId: s.run.id, revision: s.run.revision, type, ...(answer === undefined ? {} : { answer }) });
+    const answerFor = async s => songById((await db.pool.query('SELECT song_ids FROM doorbell_runs WHERE id=$1', [s.run.id])).rows[0].song_ids[s.run.door - 1]).title;
+    await assert.rejects(service.state(ordinary.username), code('NOT_FOUND'));
+    assert.equal((await service.state(admin.username)).run, null);
+    let total = 100;
+    for (let pass = 0; pass <= 8; pass++) {
+        let s = await start();
+        const startId = s.run.id;
+        const resumed = await start(); assert.equal(resumed.run.id, startId);
+        assert.equal(s.run.current.originalUrl, null);
+        await assert.rejects(service.audio(user, s.run.id, 1, 'original'), code('NOT_FOUND'));
+        await assert.rejects(service.audio(user, s.run.id, 2, 'bell'), code('NOT_FOUND'));
+        await assert.rejects(service.audio(admin.username, s.run.id, 1, 'bell'), code('NOT_FOUND'));
+        for (let i = 0; i < pass; i++) {
+            s = await act(s, 'answer', await answerFor(s));
+            if (i < 7) {
+                assert.equal(s.balance, total, 'pot must not be paid before settlement');
+                assert.equal(s.run.pot, PRIZES[i]);
+                s = await act(s, 'next');
+            }
+        }
+        if (pass < 8) {
+            const commandId = randomUUID();
+            const prior = s;
+            const pair = await Promise.all([act(prior, 'answer', '猜错了', commandId), act(prior, 'answer', '猜错了', commandId)]);
+            assert.deepEqual(pair[0], pair[1], 'concurrent replay must return the same receipt');
+            s = pair[0];
+            await assert.rejects(act(prior, 'answer', '换个答案', commandId), code('COMMAND_CONFLICT'));
+            await assert.rejects(act(prior, 'answer', '猜错了'), code('STALE_STATE'));
+            assert.equal(s.run.status, 'failed');
+        } else assert.equal(s.run.status, 'won');
+        const expected = pass ? PRIZES[pass - 1] : 0;
+        total += expected;
+        assert.equal(s.run.settledAmount, expected);
+        assert.equal(s.balance, total);
+        const ledger = (await db.pool.query("SELECT amount FROM balance_logs WHERE operation_type='doorbell_reward' AND game_data->>'runId'=$1", [s.run.id])).rows;
+        assert.equal(ledger.length, pass ? 1 : 0);
+        if (pass) assert.equal(Number(ledger[0].amount), expected);
+        assert.equal((await service.command(user, { commandId: startId }, true)).run.id, startId, 'old start replay cannot create a new run');
+    }
+    console.log('PASS: all eight success tiers, failure at each door, final 30,000, exact-once settlement and no cross-user media');
+
+    let s = await start();
+    s = await act(s, 'hint');
+    assert.equal(s.run.current.hint.length, 3); assert.equal(s.run.help.hintUsed, true);
+    await assert.rejects(act(s, 'hint'), code('HELP_USED'));
+    const hint = s.run.current.hint;
+    assert.deepEqual((await new DoorbellService({ pool: db.pool, balanceLogger: BalanceLogger }).state(user)).run.current.hint, hint);
+    s = await act(s, 'original');
+    assert.ok(s.run.current.originalUrl);
+    assert.equal(await service.audio(user, s.run.id, 1, 'original'), 'bad-wings-original.mp3');
+    await assert.rejects(act(s, 'original'), code('HELP_USED'));
+    s = await act(s, 'answer', '坏翅膀'); s = await act(s, 'next');
+    assert.equal(s.run.current.originalUrl, null); assert.equal(s.run.current.hint, null);
+    await assert.rejects(act(s, 'hint'), code('HELP_USED'));
+    await assert.rejects(act(s, 'original'), code('HELP_USED'));
+    const broken = new DoorbellService({ pool: db.pool, balanceLogger: { log: async () => { throw new Error('injected ledger failure'); } } });
+    await assert.rejects(broken.command(user, { commandId: randomUUID(), runId: s.run.id, revision: s.run.revision, type: 'cashout' }), /injected ledger failure/);
+    assert.equal((await service.state(user)).balance, total);
+    assert.equal((await service.state(user)).run.status, 'playing');
+    const prior = s;
+    const race = await Promise.allSettled([act(prior, 'cashout'), act(prior, 'answer', '错')]);
+    assert.equal(race.filter(item => item.status === 'fulfilled').length, 1);
+    total += 1000;
+    assert.equal((await service.state(user)).balance, total);
+    await db.pool.query("UPDATE users SET account_locked=true,account_locked_at=NOW(),account_locked_by='local-test',account_lock_reason='local test' WHERE id=$1", [PILOT_USER_ID]);
+    await assert.rejects(service.state(user), code('NOT_FOUND'));
+    await db.pool.query('UPDATE users SET account_locked=false,account_locked_at=NULL,account_locked_by=NULL,account_lock_reason=NULL WHERE id=$1', [PILOT_USER_ID]);
+    console.log('PASS: help limits across reloads/doors, account locking, ledger rollback, concurrent cashout versus answer');
+
+    app = await startApp({ databaseName: db.name, port: await reservePort(), label: 'doorbell', startupTimeoutMs: 60000 });
+    const pilotSession = await new BrowserSession(app.baseUrl).login(pilot);
+    const adminSession = await new BrowserSession(app.baseUrl).login(admin);
+    const ordinarySession = await new BrowserSession(app.baseUrl).login(ordinary);
+    const guest = new BrowserSession(app.baseUrl);
+    for (const pathname of ['/', '/games']) {
+        assert.ok((await (await pilotSession.request(pathname)).text()).includes('href="/doorbell"'));
+        assert.ok((await (await adminSession.request(pathname)).text()).includes('href="/doorbell"'));
+        assert.ok(!(await (await ordinarySession.request(pathname)).text()).includes('href="/doorbell"'));
+        assert.ok(!(await (await guest.request(pathname)).text()).includes('href="/doorbell"'));
+    }
+    assert.equal((await guest.request('/api/doorbell/state')).status, 401);
+    assert.equal((await ordinarySession.request('/doorbell')).status, 404);
+    assert.equal((await ordinarySession.postJson('/api/doorbell/start', { commandId: randomUUID() })).status, 404);
+    assert.equal((await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() }, { headers: { 'x-csrf-token': 'wrong' } })).status, 403);
+    const started = await (await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() })).json();
+    assert.ok(started.success);
+    assert.equal((await ordinarySession.request(started.run.current.bellUrl)).status, 404);
+    assert.equal((await adminSession.request(started.run.current.bellUrl)).status, 404);
+    const bell = await pilotSession.request(started.run.current.bellUrl, { headers: { Range: 'bytes=0-511' } });
+    assert.equal(bell.status, 206); assert.match(bell.headers.get('cache-control'), /private.*no-store/);
+    assert.equal((await bell.buffer()).length, 512);
+    assert.ok([302, 404].includes((await guest.request('/private/doorbell-audio/bad-wings-original.mp3')).status));
+    console.log('PASS: real sessions, hidden catalog, CSRF, ownership checks, private range audio');
+
+    fs.mkdirSync(artifacts, { recursive: true });
+    browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN' });
+    await context.addCookies([...pilotSession.cookies].map(([name, value]) => ({ name, value, url: app.baseUrl })));
+    const page = await context.newPage();
+    const failures = [];
+    page.on('pageerror', error => failures.push(error.message));
+    page.on('console', msg => { if (msg.type() === 'error' && /Content Security Policy|Refused to/.test(msg.text())) failures.push(msg.text()); });
+    await page.goto(`${app.baseUrl}/doorbell`);
+    const consent = page.getByRole('button', { name: '仅必要功能', exact: true });
+    if (await consent.isVisible()) await consent.click();
+    await page.locator('#question').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.doorbell-door').count(), 8);
+    await page.locator('#play-bell').click();
+    await page.waitForFunction(() => { const a = document.getElementById('game-audio'); return a.readyState >= 2 && !a.paused; });
+    const duration = await page.locator('#game-audio').evaluate(a => a.duration);
+    assert.ok(duration >= 14.9 && duration <= 15.1);
+    await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
+    await page.locator('#help-hint').click();
+    await page.locator('#hint').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#hint b').count(), 3);
+    assert.ok(await page.locator('#help-hint').isDisabled());
+    await page.reload();
+    assert.ok(await page.locator('#help-hint').isDisabled());
+    await page.locator('#help-original').click();
+    await page.locator('#replay-help').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.getElementById('game-audio').src.endsWith('/1/original'));
+    await page.locator('#song-answer').fill('坏翅膀');
+    await page.locator('#submit-answer').click();
+    await page.locator('#opening').waitFor({ state: 'visible' });
+    await page.screenshot({ path: path.join(artifacts, 'opening.png') });
+    await page.locator('#opening').waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('#result-title').textContent(), '坏翅膀');
+    assert.equal(await page.locator('#result-credit').textContent(), '翻唱：周菲戈');
+    await page.waitForFunction(() => document.getElementById('game-audio').src.endsWith('/1/original'));
+    await page.locator('#next').click();
+    await page.locator('#question').waitFor({ state: 'visible' });
+    assert.ok(await page.locator('#help-original').isDisabled());
+    assert.ok(await page.locator('#help-hint').isDisabled());
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(artifacts, 'mobile.png'), fullPage: true });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'mobile overflow');
+    await page.locator('#song-answer').fill('错误答案');
+    await page.locator('#submit-answer').click();
+    await page.locator('#result').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#result-title').textContent(), '唯独我们');
+    assert.match(await page.locator('#result-credit').textContent(), /原唱：尧顺宇/);
+    assert.match(await page.locator('#result-message').textContent(), /1,000 电币已结算到账/);
+    await page.waitForFunction(() => { const a = document.getElementById('game-audio'); return a.src.endsWith('/2/original') && a.readyState >= 2 && !a.paused; });
+    await page.screenshot({ path: path.join(artifacts, 'mobile-result.png'), fullPage: true });
+    const before = (await service.state(user)).balance;
+    await page.reload();
+    assert.equal((await service.state(user)).balance, before);
+    assert.ok(await page.locator('#restart').isVisible());
+    assert.deepEqual(failures, []);
+    await context.close();
+    console.log('PASS: desktop/mobile, actual MP3 playback, opening animation, correct/wrong answer reveal, refresh recovery, no JS/CSP errors');
+}
+main().then(() => console.log('All doorbell PostgreSQL + browser checks passed.'))
+    .catch(error => { process.stderr.write(String(error.stack || error) + '\n'); process.exitCode = 1; })
+    .finally(async () => { await browser?.close(); await app?.stop(); await db.close(); await require('../db').end(); });

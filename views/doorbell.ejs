@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#15192b">
+    <meta name="csrf-token" content="<%= csrfToken %>">
+    <title>开门大吉 · Minimal Games</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/doorbell.css">
+</head>
+<body class="app-redesign page-doorbell">
+    <%- include('partials/language-switcher', { suppressFeaturedMusic: true }) %>
+    <div class="site-layout">
+        <%- include('partials/site-header', { active: 'home' }) %>
+        <main class="doorbell-main" id="doorbell-app">
+            <a href="/games" class="doorbell-back">← 返回小游戏</a>
+            <header class="doorbell-heading">
+                <div><span class="doorbell-kicker">MUSIC CHALLENGE / 限量试玩</span><h1>开门大吉<span>听见熟悉的旋律，打开下一扇门。</span></h1></div>
+                <div class="doorbell-jackpot"><small>八门全开</small><strong>30,000</strong><span>电币</span></div>
+            </header>
+            <div class="doorbell-banner"><span aria-hidden="true">✦</span> 保证前三首歌是直播间唱过的 <span class="doorbell-banner-note">答错不清零，已闯过的奖励照样带走。</span></div>
+            <section class="doorbell-layout">
+                <div class="doorbell-stage">
+                    <div class="doorbell-stage-top"><span id="stage-label">准备登场</span><span>15 秒门铃 · 猜歌名</span></div>
+                    <ol id="doors" class="doorbell-doors" aria-label="八扇门和奖励档位"></ol>
+                    <div class="doorbell-console">
+                        <div class="doorbell-score"><span>本轮已锁定 <strong id="pot">0</strong> 电币</span><span>账户余额 <strong id="account-balance"><%= balance %></strong></span></div>
+                        <div id="welcome"><h2>八扇门，一起听见答案。</h2><p>每扇门有一段门铃旋律。输入歌名，看看门后是不是你想到的那首歌。</p><button id="start" class="doorbell-primary" type="button">开始闯关 <span aria-hidden="true">→</span></button></div>
+                        <div id="question" hidden>
+                            <div class="doorbell-listen-row"><button id="play-bell" type="button" class="doorbell-play">▶ 播放门铃</button><span id="audio-status" role="status">先听一听，再写下歌名</span></div>
+                            <form id="answer-form" autocomplete="off"><label for="song-answer">这首歌叫什么名字？</label><div class="doorbell-answer-row"><input id="song-answer" name="answer" type="text" maxlength="100" placeholder="请输入歌名" required spellcheck="false" enterkeyhint="send"><button id="submit-answer" class="doorbell-primary" type="submit">提交，开门！</button></div></form>
+                            <div class="doorbell-help"><button id="help-original" type="button">♫ 原音重现 <small>本轮 1 次</small></button><button id="help-hint" type="button">字 提示一个字 <small>本轮 1 次</small></button></div>
+                            <div id="hint" class="doorbell-hint" role="status" hidden></div>
+                            <button id="replay-help" class="doorbell-text-button" type="button" hidden>重播本题原唱副歌</button>
+                        </div>
+                        <section id="result" class="doorbell-result" aria-live="polite" hidden>
+                            <span id="result-badge" class="doorbell-result-badge"></span>
+                            <h2 id="result-title"></h2><p id="result-credit"></p><p id="result-message"></p>
+                            <div class="doorbell-result-actions"><button id="replay-result" type="button">♫ 重播 15 秒副歌</button><button id="next" class="doorbell-primary" type="button">下一扇门 →</button><button id="restart" class="doorbell-primary" type="button">再闯一轮</button></div>
+                        </section>
+                        <button id="cashout" type="button" class="doorbell-text-button" hidden>收下电币，结束本轮</button>
+                        <div class="doorbell-audio-player" id="audio-player" hidden><audio id="game-audio" controls preload="none" aria-label="当前歌曲片段"></audio></div>
+                        <div class="doorbell-notice" role="alert"><span id="notice"></span><button id="retry" type="button" hidden>重试刚才的操作</button><button id="refresh" type="button" hidden>刷新本轮进度</button></div>
+                    </div>
+                </div>
+                <aside class="doorbell-rules">
+                    <span class="doorbell-kicker">HOW TO PLAY</span><h2>把好歌和好运<br>一起带走。</h2>
+                    <ol><li><strong>听门铃，填歌名</strong><p>前三扇门固定，后五扇门随机且不重复。门铃可以重播。</p></li><li><strong>两次求助，好好把握</strong><p>原音重现：听 15 秒演唱副歌。提示一个字：展示歌名字数，随机亮出一个字。每种每轮限用一次。</p></li><li><strong>答错，奖励也留下</strong><p>奖金按最后成功关数对应的档位结算，不逐关相加。答错、主动收下或八门全开时，一次性存入账户。</p></li></ol>
+                    <p class="doorbell-rules-note">答题后揭晓歌名与演唱者，并播放演唱版副歌。刷新或离开后，本轮进度会保留。</p>
+                </aside>
+            </section>
+            <section id="history" class="doorbell-history" hidden><h2>本轮歌单</h2><div id="history-list"></div></section>
+            <div id="opening" class="doorbell-opening" role="status" aria-live="assertive" hidden><div class="doorbell-opening-inner"><p>让我们期待</p><strong>开门大吉</strong><div class="doorbell-opening-door" aria-hidden="true"><i></i><i></i><span>♫</span></div></div></div>
+        </main>
+    </div>
+    <script nonce="<%= cspNonce %>" id="doorbell-state" type="application/json"><%- JSON.stringify(state).replace(/</g, '\\u003c') %></script>
+    <script src="/js/doorbell.js" defer></script>
+</body>
+</html>
