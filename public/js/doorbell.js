@@ -70,7 +70,7 @@
         $('account-balance').textContent = fmt(state.balance);
         const headerBalance = document.querySelector('.balance-chip strong');
         if (headerBalance) headerBalance.textContent = fmt(state.balance);
-        $('stage-label').textContent = !run ? '准备登场' : terminal(run) ? `本轮结束 · 成功 ${run.completed} 扇门` : `第 ${run.door} 扇门 / 8${run.door === 2 ? ' · 尧顺宇专场' : run.door === 3 ? ' · 林俊杰专场' : ''}`;
+        $('stage-label').textContent = !run ? '准备登场' : terminal(run) ? `本轮结束 · 成功 ${run.completed} 扇门` : `第 ${run.door} 扇门 / 8`;
         $('doors').replaceChildren();
         state.prizes.forEach((amount, i) => {
             const result = run?.results.find(item => item.door === i + 1);
