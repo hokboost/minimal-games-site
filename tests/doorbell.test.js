@@ -43,6 +43,15 @@ test('eight unique doors fix door one and cover every Yao/JJ combination', () =>
         assert.ok(!songs.slice(3).includes(jj));
     }));
     assert.deepEqual(PRIZES, [1000, 2000, 3000, 5000, 10000, 15000, 20000, 30000]);
+    const tailPool = new Set();
+    for (let seed = 0; seed < 32; seed++) {
+        const songs = selectSongs(max => seed % max);
+        assert.ok(!songs.slice(0, 3).includes('autumn-tree'));
+        assert.ok(!songs.slice(0, 3).includes('duplicity'));
+        songs.slice(3).forEach(id => tailPool.add(id));
+    }
+    assert.ok(tailPool.has('autumn-tree'));
+    assert.ok(tailPool.has('duplicity'));
 });
 
 test('accept title punctuation, fullwidth digits and explicit traditional aliases, reject near misses', () => {

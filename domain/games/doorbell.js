@@ -15,7 +15,9 @@ const SONGS = Object.freeze([
     { id: 'past-love', title: '当爱已成往事', aliases: ['當愛已成往事'], artist: '林忆莲、李宗盛', credit: '原唱' },
     { id: 'black-keys', title: '黑键', aliases: ['黑鍵'], artist: '林俊杰', credit: '原唱' },
     { id: 'little-big-us', title: '伟大的渺小', aliases: ['偉大的渺小'], artist: '林俊杰', credit: '原唱' },
-    { id: 'love-song', title: '写一首情歌', aliases: ['寫一首情歌'], artist: '尧顺宇', credit: '原唱' }
+    { id: 'love-song', title: '写一首情歌', aliases: ['寫一首情歌'], artist: '尧顺宇', credit: '原唱' },
+    { id: 'autumn-tree', title: '我是一棵秋天的树', aliases: ['我是一棵秋天的樹'], artist: '张雨生', credit: '原唱' },
+    { id: 'duplicity', title: '口是心非', aliases: [], artist: '张雨生', credit: '原唱' }
 ].map(song => Object.freeze({ ...song, aliases: Object.freeze(song.aliases) })));
 const JJ_SONG_IDS = Object.freeze(['passing', 'black-keys', 'little-big-us']);
 const YAO_SONG_IDS = Object.freeze(['only-us', 'love-song']);

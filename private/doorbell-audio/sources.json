@@ -611,5 +611,306 @@
     "bellSha256": "efdfb92e73c4f2a984be16d5c16ac205e1f5b0ce5ab66fa2184773f32a3a0cc4",
     "originalSha256": "a40e2a81b8d0f23fb9d805a3b8c1bdc6f1b2811318b7c6ee632790d3b2dcafc5",
     "chorusSha256": "0d8836743a5861b310d140402317e1be0b8c6076efa42eede3600f6834208a0a"
+  },
+  {
+    "id": "autumn-tree",
+    "source": "https://www.youtube.com/watch?v=hh8Krfg2qmc",
+    "startSeconds": 99.0,
+    "durationSeconds": 15,
+    "chorusEndSeconds": 154.5,
+    "chorusDurationSeconds": 55.5,
+    "melodyNotes": [
+      [
+        0.12,
+        0.7568,
+        66
+      ],
+      [
+        0.7818,
+        1.4185,
+        66
+      ],
+      [
+        1.4435,
+        1.8597,
+        71
+      ],
+      [
+        1.8847,
+        2.3009,
+        69
+      ],
+      [
+        2.3259,
+        2.7421,
+        69
+      ],
+      [
+        2.7671,
+        3.4038,
+        69
+      ],
+      [
+        3.4288,
+        3.6244,
+        61
+      ],
+      [
+        3.6494,
+        5.3891,
+        64
+      ],
+      [
+        6.7376,
+        6.9332,
+        64
+      ],
+      [
+        6.9582,
+        7.1538,
+        64
+      ],
+      [
+        7.1788,
+        7.595,
+        66
+      ],
+      [
+        7.62,
+        8.0362,
+        64
+      ],
+      [
+        8.0612,
+        8.9185,
+        66
+      ],
+      [
+        9.3847,
+        9.5803,
+        57
+      ],
+      [
+        9.6053,
+        9.8009,
+        57
+      ],
+      [
+        9.8259,
+        10.2421,
+        57
+      ],
+      [
+        10.2671,
+        10.6832,
+        66
+      ],
+      [
+        10.7082,
+        11.1244,
+        64
+      ],
+      [
+        11.1494,
+        12.4479,
+        61
+      ],
+      [
+        13.7965,
+        13.9921,
+        61
+      ],
+      [
+        14.0171,
+        14.2126,
+        59
+      ],
+      [
+        14.2376,
+        14.4332,
+        61
+      ],
+      [
+        14.4582,
+        14.8,
+        59
+      ]
+    ],
+    "bellMethod": "Numbered score melody, dotted values, ties and rests retained; accompaniment excluded; accepted softened modal bell timbre. Original vocal used to verify key and excerpt alignment.",
+    "sheetSource": "https://www.ccguitar.cn/cchtml/18056446.htm",
+    "scoreKey": "A",
+    "tempoBpm": 68,
+    "reviewStatus": "Published numbered notation read and chorus rhythm transcribed.",
+    "bellSha256": "5f1bfef21efd6c4f05f9f0bcff59b080d33bee138cbf47d054b79ca81ddb16b6",
+    "originalSha256": "de93f86a94861edd2e2428c300846870509c9467a1909b747bf743edf8f51d26",
+    "chorusSha256": "c12e4fe3109cf28d77112cfd95bc887d841a573f7660611b491dcb7ba02c0543"
+  },
+  {
+    "id": "duplicity",
+    "source": "https://www.youtube.com/watch?v=QAmsnJQEb20",
+    "startSeconds": 102.8,
+    "durationSeconds": 15,
+    "chorusEndSeconds": 141.0,
+    "chorusDurationSeconds": 38.2,
+    "melodyNotes": [
+      [
+        0.12,
+        0.395,
+        62
+      ],
+      [
+        0.42,
+        0.695,
+        64
+      ],
+      [
+        0.72,
+        1.295,
+        66
+      ],
+      [
+        1.32,
+        1.895,
+        71
+      ],
+      [
+        1.92,
+        2.495,
+        66
+      ],
+      [
+        2.52,
+        3.095,
+        64
+      ],
+      [
+        3.12,
+        3.695,
+        66
+      ],
+      [
+        3.72,
+        3.785,
+        71
+      ],
+      [
+        3.795,
+        4.295,
+        73
+      ],
+      [
+        4.32,
+        4.895,
+        69
+      ],
+      [
+        4.92,
+        5.195,
+        66
+      ],
+      [
+        5.22,
+        5.495,
+        64
+      ],
+      [
+        5.52,
+        6.095,
+        62
+      ],
+      [
+        6.12,
+        6.395,
+        62
+      ],
+      [
+        6.42,
+        6.695,
+        66
+      ],
+      [
+        6.72,
+        7.295,
+        64
+      ],
+      [
+        7.32,
+        7.595,
+        62
+      ],
+      [
+        7.62,
+        7.895,
+        64
+      ],
+      [
+        7.92,
+        9.695,
+        66
+      ],
+      [
+        9.72,
+        9.995,
+        62
+      ],
+      [
+        10.02,
+        10.295,
+        64
+      ],
+      [
+        10.32,
+        10.895,
+        66
+      ],
+      [
+        10.92,
+        11.495,
+        71
+      ],
+      [
+        11.52,
+        12.095,
+        66
+      ],
+      [
+        12.12,
+        12.695,
+        64
+      ],
+      [
+        12.72,
+        13.295,
+        66
+      ],
+      [
+        13.32,
+        13.385,
+        71
+      ],
+      [
+        13.395,
+        13.895,
+        73
+      ],
+      [
+        13.92,
+        14.495,
+        69
+      ],
+      [
+        14.52,
+        14.795,
+        66
+      ]
+    ],
+    "bellMethod": "Numbered score melody, dotted values, ties and rests retained; accompaniment excluded; accepted softened modal bell timbre. Original vocal used to verify key and excerpt alignment.",
+    "sheetSource": "https://www.qupu123.com/tongsu/sizi/koushixinfei.html",
+    "scoreKey": "Eb (transposed to original D)",
+    "tempoBpm": 100,
+    "reviewStatus": "Published numbered notation read and chorus rhythm transcribed.",
+    "bellSha256": "83cdc4ea62876648ab21f11d74850bb23ab89e5a04cb0cef7976906f580d876e",
+    "originalSha256": "0ca1edf2fa2c2b1de8ab1f58d20af2879dd1dd21d75e0110d2d31faa7352fdd0",
+    "chorusSha256": "75684434f1c614ec8ff26a766ef2b1ebb80a2fb4af2a639578da350f94cdb3fd"
   }
 ]
