@@ -138,7 +138,7 @@
         const timeout = setTimeout(() => controller.abort(), 15000);
         try {
             const response = await fetch(path, { method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
-                signal: controller.signal, headers: body ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {},
+                signal: controller.signal, headers: body ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Doorbell-Protocol': '2' } : {},
                 ...(body ? { body: JSON.stringify(body) } : {}) });
             const result = await response.json();
             if (!response.ok || !result.success) {

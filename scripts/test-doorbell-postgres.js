@@ -145,9 +145,17 @@ async function main() {
     assert.equal((await pilotSession.postJson('/api/admin/doorbell/attempts', { commandId: randomUUID(), delta: 1 })).status, 403);
     assert.equal((await ordinarySession.postJson('/api/doorbell/start', { commandId: randomUUID() })).status, 404);
     assert.equal((await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() }, { headers: { 'x-csrf-token': 'wrong' } })).status, 403);
-    const started = await (await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() })).json();
+    const protocol = { headers: { 'X-Doorbell-Protocol': '2' } };
+    const beforeOldStart = await service.state(user);
+    assert.equal((await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() })).status, 409);
+    assert.deepEqual(await service.state(user), beforeOldStart, 'old page cannot consume a run');
+    const started = await (await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() }, protocol)).json();
     assert.ok(started.success);
-    const listening = await (await pilotSession.postJson('/api/doorbell/action', { commandId: randomUUID(), runId: started.run.id, revision: started.run.revision, type: 'listen' })).json();
+    const oldHelp = await pilotSession.postJson('/api/doorbell/action', { commandId: randomUUID(), runId: started.run.id, revision: started.run.revision, type: 'original' });
+    assert.equal(oldHelp.status, 409);
+    assert.equal((await oldHelp.json()).code, 'CLIENT_OUTDATED');
+    assert.deepEqual(await service.state(user), started, 'old page cannot waste original help without requesting audio');
+    const listening = await (await pilotSession.postJson('/api/doorbell/action', { commandId: randomUUID(), runId: started.run.id, revision: started.run.revision, type: 'listen' }, protocol)).json();
     assert.ok(listening.playback);
     assert.equal((await ordinarySession.request(listening.playback.url)).status, 404);
     assert.equal((await adminSession.request(listening.playback.url)).status, 404);
@@ -156,8 +164,8 @@ async function main() {
     assert.equal(bell.status, 200); assert.match(bell.headers.get('cache-control'), /private.*no-store/);
     assert.ok((await bell.buffer()).length > 100000, 'restricted audio sends one complete response');
     assert.equal((await pilotSession.request(listening.playback.url)).status, 409, 'reusing the media URL cannot replay it');
-    await pilotSession.postJson('/api/doorbell/action', { commandId: randomUUID(), runId: listening.run.id, revision: listening.run.revision, type: 'cashout' });
-    await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() });
+    await pilotSession.postJson('/api/doorbell/action', { commandId: randomUUID(), runId: listening.run.id, revision: listening.run.revision, type: 'cashout' }, protocol);
+    await pilotSession.postJson('/api/doorbell/start', { commandId: randomUUID() }, protocol);
     assert.ok([302, 404].includes((await guest.request('/private/doorbell-audio/bad-wings-original.mp3')).status));
     console.log('PASS: real sessions, hidden catalog, CSRF, ownership checks, private single-use audio');
 
@@ -170,6 +178,10 @@ async function main() {
     page.on('pageerror', error => failures.push(error.message));
     page.on('console', msg => { if (msg.type() === 'error' && /Content Security Policy|Refused to/.test(msg.text())) failures.push(msg.text()); });
     await page.goto(`${app.baseUrl}/doorbell`);
+    const scriptUrl = await page.locator('script[src*="/js/doorbell.js"]').getAttribute('src');
+    assert.match(scriptUrl, /\?v=[0-9a-f]{16}$/);
+    const scriptResponse = await pilotSession.request(scriptUrl);
+    assert.equal(await scriptResponse.text(), fs.readFileSync(path.join(__dirname, '../public/js/doorbell.js'), 'utf8'));
     const consent = page.getByRole('button', { name: '仅必要功能', exact: true });
     if (await consent.isVisible()) await consent.click();
     await page.locator('#question').waitFor({ state: 'visible' });
@@ -205,6 +217,10 @@ async function main() {
     assert.ok(await page.locator('#game-audio').evaluate(a => a.duration > 20), 'correct answer plays a complete chorus');
     await page.locator('#next').click();
     await page.locator('#question').waitFor({ state: 'visible' });
+    assert.ok(await page.locator('#play-bell').isEnabled(), 'second door has its own bell play');
+    await page.locator('#play-bell').click();
+    await page.waitForFunction(() => { const a = document.getElementById('game-audio'); return a.src.includes('/2/bell/') && a.readyState >= 2 && !a.paused && a.currentTime > 0.2; });
+    assert.ok(await page.locator('#play-bell').isDisabled(), 'second door bell also plays only once');
     assert.ok(await page.locator('#help-original').isDisabled());
     assert.ok(await page.locator('#help-hint').isDisabled());
     await page.setViewportSize({ width: 390, height: 844 });

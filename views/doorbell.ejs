@@ -7,7 +7,7 @@
     <meta name="csrf-token" content="<%= csrfToken %>">
     <title>开门大吉 · Minimal Games</title>
     <link rel="stylesheet" href="/styles.css">
-    <link rel="stylesheet" href="/doorbell.css">
+    <link rel="stylesheet" href="<%= assets['doorbell.css'] %>">
 </head>
 <body class="app-redesign page-doorbell">
     <%- include('partials/language-switcher', { suppressFeaturedMusic: true }) %>
@@ -57,6 +57,6 @@
         </main>
     </div>
     <script nonce="<%= cspNonce %>" id="doorbell-state" type="application/json"><%- JSON.stringify(state).replace(/</g, '\\u003c') %></script>
-    <script src="/js/doorbell.js" defer></script>
+    <script src="<%= assets['js/doorbell.js'] %>" defer></script>
 </body>
 </html>

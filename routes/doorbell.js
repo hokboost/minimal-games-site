@@ -1,6 +1,8 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const { canPlayDoorbell } = require('../domain/games/doorbell');
 const { DoorbellService, DoorbellError } = require('../services/doorbell-service');
 
@@ -12,6 +14,13 @@ module.exports = function registerDoorbellRoutes(app, {
     const { basicRateLimit, userActionRateLimit } = security;
     const csrfProtection = requireCSRF;
     const rejectWhenOverloaded = paidActionConcurrencyGuard;
+    const assets = Object.fromEntries(['doorbell.css', 'js/doorbell.js', 'js/doorbell-admin.js'].map(file => [file,
+        `/${file}?v=${createHash('sha256').update(fs.readFileSync(path.join(__dirname, '../public', file))).digest('hex').slice(0, 16)}`]));
+    const currentClient = (req, res, next) => {
+        if (req.get('X-Doorbell-Protocol') !== '2') return res.status(409).json({ success: false, code: 'CLIENT_OUTDATED',
+            message: '游戏页面已更新，请刷新整个网页后继续当前闯关，不会重复扣除次数。' });
+        return next();
+    };
     const privateAccess = (req, res, next) => {
         res.set('Cache-Control', 'private, no-store');
         if (!canPlayDoorbell(req.session.user)) return res.status(404).json({ success: false, message: '游戏尚未开放' });
@@ -27,7 +36,7 @@ module.exports = function registerDoorbellRoutes(app, {
         try {
             res.set('Cache-Control', 'private, no-store');
             return res.render('doorbell-admin', { user: req.session.user, balance: null,
-                csrfToken: generateCSRFToken(req), summary: await service.attemptSummary(req.session.user.username) });
+                csrfToken: generateCSRFToken(req), assets, summary: await service.attemptSummary(req.session.user.username) });
         } catch (error) { return errorResponse(error, res); }
     });
     app.get('/api/admin/doorbell/attempts', requireLogin, requireAuthorized, requireAdmin, basicRateLimit, async (req, res) => {
@@ -42,7 +51,7 @@ module.exports = function registerDoorbellRoutes(app, {
         try {
             const state = await service.state(req.session.user.username);
             return res.render('doorbell', { title: '开门大吉', user: req.session.user, balance: state.balance,
-                csrfToken: generateCSRFToken(req), state });
+                csrfToken: generateCSRFToken(req), assets, state });
         } catch (error) { return errorResponse(error, res); }
     });
     app.get('/api/doorbell/state', ...reads, async (req, res) => {
@@ -61,11 +70,11 @@ module.exports = function registerDoorbellRoutes(app, {
                 });
         } catch (error) { return errorResponse(error, res); }
     });
-    app.post('/api/doorbell/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, privateAccess, async (req, res) => {
+    app.post('/api/doorbell/start', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, privateAccess, currentClient, async (req, res) => {
         try { return res.json(await service.command(req.session.user.username, req.body, true)); }
         catch (error) { return errorResponse(error, res); }
     });
-    app.post('/api/doorbell/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, privateAccess, async (req, res) => {
+    app.post('/api/doorbell/action', rejectWhenOverloaded, requireLogin, requireAuthorized, basicRateLimit, userActionRateLimit, csrfProtection, privateAccess, currentClient, async (req, res) => {
         try { return res.json(await service.command(req.session.user.username, req.body, false,
             { ipAddress: req.ip, userAgent: req.get('user-agent') })); }
         catch (error) { return errorResponse(error, res); }
