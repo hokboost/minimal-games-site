@@ -117,6 +117,7 @@ const applicationRoutes = [
     route('DELETE', '/api/bilibili/room', ['login', 'admin', 'csrf', 'admin-audit']),
     ...gameRoutes,
     // Command receipts implement game-level idempotency inside the balance transaction.
+    route('POST', '/api/admin/doorbell/attempts', ['login', 'admin', 'authorized', 'basic-rate-limit', 'action-rate-limit', 'capacity', 'csrf', 'admin-audit']),
     route('POST', '/api/doorbell/start', ['login', 'authorized', 'basic-rate-limit', 'action-rate-limit', 'capacity', 'csrf']),
     route('POST', '/api/doorbell/action', ['login', 'authorized', 'basic-rate-limit', 'action-rate-limit', 'capacity', 'csrf']),
     route('POST', '/api/wish/simulate', ['login', 'authorized', 'csrf', 'admin-only']),

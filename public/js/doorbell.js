@@ -5,6 +5,8 @@
     let state = JSON.parse($('doorbell-state').textContent);
     let busy = false;
     let pending = null;
+    let restrictedAudio = false;
+    let lastPlaybackTime = 0;
     const storageKey = 'minimal-games:doorbell:pending';
     const audio = $('game-audio');
     const fmt = value => Number(value).toLocaleString('zh-CN');
@@ -23,23 +25,46 @@
         $('refresh').hidden = !refresh;
     }
     function stopAudio() { audio.pause(); }
-    async function play(url, label = '演唱副歌') {
+    async function play(url, label = '完整副歌', restricted = false) {
         if (!url) return;
         // Keep the same audio element so browsers can retain the user's playback permission.
         document.querySelectorAll('audio').forEach(other => { if (other !== audio) other.pause(); });
+        restrictedAudio = restricted;
+        lastPlaybackTime = 0;
+        audio.controls = !restricted;
+        audio.hidden = restricted;
+        $('resume-audio').hidden = true;
         audio.src = url;
         audio.currentTime = 0;
         $('audio-player').hidden = false;
         $('audio-status').textContent = `正在播放${label}`;
         try { await audio.play(); }
-        catch { message('浏览器暂停了自动播放，请点击播放器或“重播副歌”。'); }
+        catch { $('resume-audio').hidden = false; message('请点击“开始播放”继续。'); }
     }
-    audio.addEventListener('error', () => message('音频未加载成功，请点击播放按钮重试；本轮进度已保留。'));
-    audio.addEventListener('ended', () => { $('audio-status').textContent = '播放完毕，可以重播'; });
+    audio.addEventListener('error', () => message(restrictedAudio ? '本次音频未能播放完成；播放次数和闯关进度已保存。' : '副歌未加载成功，请点击重播。'));
+    audio.addEventListener('timeupdate', () => {
+        if (restrictedAudio && !audio.seeking) {
+            lastPlaybackTime = audio.currentTime;
+            $('audio-status').textContent = `正在播放 · 剩余 ${Math.max(0, Math.ceil(15 - audio.currentTime))} 秒`;
+        }
+    });
+    audio.addEventListener('seeking', () => {
+        if (restrictedAudio && Math.abs(audio.currentTime - lastPlaybackTime) > 0.5) audio.currentTime = lastPlaybackTime;
+    });
+    audio.addEventListener('ended', () => {
+        $('resume-audio').hidden = true;
+        $('audio-status').textContent = restrictedAudio ? '本次播放结束，请填写歌名' : '完整副歌播放完毕';
+    });
+    $('resume-audio').addEventListener('click', async () => {
+        if (audio.ended) return;
+        try { await audio.play(); $('resume-audio').hidden = true; message(''); }
+        catch { message('暂时无法开始播放。'); }
+    });
 
     function render() {
         const run = state.run;
         const playing = run?.status === 'playing';
+        $('attempts-note').textContent = state.remainingAttempts === null ? '管理员 · 闯关次数不限' : `剩余开局次数：${state.remainingAttempts} 次${state.remainingAttempts === 0 ? (run && !terminal(run) ? ' · 当前这轮可以继续' : ' · 请联系管理员增加次数后刷新页面') : ''}`;
         const revealed = run?.status === 'revealed';
         $('pot').textContent = fmt(run?.pot || 0);
         $('account-balance').textContent = fmt(state.balance);
@@ -69,7 +94,8 @@
             $('help-hint').disabled = busy || Boolean(pending) || run.help.hintUsed;
             $('help-original').querySelector('small').textContent = run.help.originalUsed ? '本轮已用' : '本轮 1 次';
             $('help-hint').querySelector('small').textContent = run.help.hintUsed ? '本轮已用' : '本轮 1 次';
-            $('replay-help').hidden = !run.current.originalUrl;
+            $('play-bell').disabled = busy || Boolean(pending) || run.current.bellPlayed;
+            $('play-bell').textContent = run.current.bellPlayed ? '本扇门已播放' : '▶ 播放门铃（仅一次）';
             $('hint').hidden = !run.current.hint;
             $('hint').replaceChildren();
             if (run.current.hint) {
@@ -104,6 +130,7 @@
         });
         for (const id of ['start', 'restart', 'submit-answer', 'next', 'cashout']) $(id).disabled = busy || Boolean(pending);
         $('song-answer').disabled = busy || Boolean(pending);
+        if (state.remainingAttempts === 0) { $('start').disabled = true; $('restart').disabled = true; }
     }
 
     async function request(path, body) {
@@ -130,14 +157,27 @@
         let suspense;
         if (answer) {
             $('opening').hidden = false;
-            $('opening').classList.remove('is-opening');
-            void $('opening').offsetWidth;
-            $('opening').classList.add('is-opening');
-            suspense = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 400 : 2400));
+            $('opening').classList.remove('is-success', 'is-failure', 'is-jackpot');
+            $('opening-caption').textContent = '让我们期待';
+            $('opening-title').textContent = '开门大吉';
+            $('opening-symbol').textContent = '♫';
+            $('opening-outcome').textContent = '答案即将揭晓';
+            suspense = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 200 : 1100));
         }
         try {
             const result = await request(command.path, command.body);
-            if (suspense) await suspense;
+            if (suspense) {
+                await suspense;
+                const correct = result.run.results.at(-1).correct;
+                const jackpot = result.run.status === 'won';
+                $('opening').classList.add(correct ? 'is-success' : 'is-failure');
+                if (jackpot) $('opening').classList.add('is-jackpot');
+                $('opening-caption').textContent = correct ? (jackpot ? '八门全开，好运满载' : '这段旋律，你猜中了') : '这一次，与答案擦肩';
+                $('opening-title').textContent = correct ? (jackpot ? '全场通关' : '开门大吉') : '再接再厉';
+                $('opening-symbol').textContent = correct ? '♫' : '×';
+                $('opening-outcome').textContent = correct ? `已锁定 ${fmt(result.run.pot)} 电币` : `${fmt(result.run.pot)} 电币保留，照样带走`;
+                await new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 400 : 1800));
+            }
             state = result;
             savePending(null);
             if (answer || command.path.endsWith('/start') || command.body.type === 'next') $('song-answer').value = '';
@@ -146,10 +186,11 @@
             if (answer) {
                 $('result-title').tabIndex = -1; $('result-title').focus();
                 await play(state.run.results.at(-1).originalUrl);
-            } else if (command.body.type === 'original') await play(state.run.current.originalUrl);
+            } else if (result.playback) await play(result.playback.url, result.playback.kind === 'bell' ? '门铃' : '原音重现', true);
             else if (state.run?.status === 'playing' && (command.path.endsWith('/start') || command.body.type === 'next')) {
                 $('song-answer').focus();
-                await play(state.run.current.bellUrl, '门铃');
+                $('audio-status').textContent = state.run.current.bellPlayed ? '本扇门的播放次数已使用' : '准备好再播放，每扇门只能听一次';
+                $('audio-player').hidden = true;
             }
         } catch (error) {
             if (suspense) await suspense;
@@ -169,13 +210,12 @@
     const start = () => { if (!busy && !pending) execute({ path: '/api/doorbell/start', body: { commandId: uuid() } }); };
     $('start').addEventListener('click', start);
     $('restart').addEventListener('click', start);
-    $('play-bell').addEventListener('click', () => play(state.run.current.bellUrl, '门铃'));
+    $('play-bell').addEventListener('click', () => action('listen'));
     $('answer-form').addEventListener('submit', event => { event.preventDefault(); if ($('answer-form').reportValidity()) action('answer', $('song-answer').value); });
     $('help-original').addEventListener('click', () => action('original'));
     $('help-hint').addEventListener('click', () => action('hint'));
     $('next').addEventListener('click', () => action('next'));
     $('cashout').addEventListener('click', () => action('cashout'));
-    $('replay-help').addEventListener('click', () => play(state.run.current.originalUrl));
     $('replay-result').addEventListener('click', () => play(state.run.results.at(-1)?.originalUrl));
     $('retry').addEventListener('click', () => { if (pending) execute(pending); });
     $('refresh').addEventListener('click', async () => {

@@ -3119,7 +3119,7 @@ registerWishRoutes(app, {
 });
 
 registerDoorbellRoutes(app, {
-    pool, BalanceLogger, requireLogin, requireAuthorized, requireCSRF,
+    pool, BalanceLogger, requireLogin, requireAuthorized, requireAdmin, requireCSRF,
     generateCSRFToken, security, paidActionConcurrencyGuard
 });
 

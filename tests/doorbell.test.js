@@ -43,17 +43,20 @@ test('state exposes neither answers nor original media before reveal or help', (
     const result = project(raw, 500);
     const text = JSON.stringify(result);
     for (const song of SONGS) { assert.ok(!text.includes(song.title)); assert.ok(!text.includes(song.id)); }
-    assert.equal(result.run.current.originalUrl, null);
+    assert.equal(result.run.current.bellPlayed, false);
+    assert.equal(result.run.current.originalUrl, undefined);
+    assert.equal(result.run.current.bellUrl, undefined);
     raw.hint_door = 1; raw.hint = { length: 3, index: 2, character: '膀' };
     assert.deepEqual(project(raw, 500).run.current.hint, raw.hint);
     raw.status = 'revealed'; raw.completed = 1; raw.results = [{ door: 1, correct: true }];
     assert.equal(project(raw, 500).run.results[0].credit, '翻唱');
     assert.equal(project(raw, 500).run.results[0].artist, '周菲戈');
+    assert.ok(project(raw, 500).run.results[0].originalUrl.endsWith('/1/chorus'));
 });
 
-test('all private audio pairs are packaged and never stored under public/', () => {
+test('all private audio variants are packaged and never stored under public/', () => {
     const sources = require('../private/doorbell-audio/sources.json');
-    for (const song of SONGS) for (const kind of ['bell', 'original']) {
+    for (const song of SONGS) for (const kind of ['bell', 'original', 'chorus']) {
         const file = `${song.id}-${kind}.mp3`;
         assert.ok(fs.statSync(path.join(__dirname, '../private/doorbell-audio', file)).size > 100000);
         assert.equal(fs.existsSync(path.join(__dirname, '../public', file)), false);

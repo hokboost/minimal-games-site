@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="<%= csrfToken %>">
+    <title>开门大吉次数管理 · Minimal Games</title>
+    <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/doorbell.css">
+</head>
+<body class="app-redesign page-doorbell">
+    <%- include('partials/language-switcher', { suppressFeaturedMusic: true }) %>
+    <div class="site-layout">
+        <%- include('partials/site-header', { active: 'home' }) %>
+        <main class="doorbell-main" id="doorbell-admin">
+            <a class="doorbell-back" href="/admin">← 返回管理后台</a>
+            <header class="doorbell-heading"><div><span class="doorbell-kicker">ADMIN / 次数管理</span><h1>开门大吉<span>管理一个乌龟酱的闯关机会。管理员自己不限次数。</span></h1></div><a href="/doorbell">进入游戏 →</a></header>
+            <section class="doorbell-admin-card">
+                <h2 id="attempt-user"><%= summary.username %></h2>
+                <p>剩余闯关次数 <strong id="attempt-count"><%= summary.remaining %></strong> 次</p>
+                <p class="doorbell-attempts-note">初始 1 次；每开始新一轮扣 1 次。未结束的闯关可继续，刷新和重试不重复扣除。</p>
+                <form id="attempt-form">
+                    <label for="attempt-amount">调整数量</label><input id="attempt-amount" type="number" min="1" max="100000" step="1" value="1" required>
+                    <label for="attempt-reason">备注（可选）</label><input id="attempt-reason" type="text" maxlength="200" placeholder="例如：补发一次试玩机会">
+                    <div class="doorbell-result-actions"><button id="attempt-add" class="doorbell-primary" type="submit" data-direction="1">增加次数</button><button id="attempt-remove" type="submit" data-direction="-1">扣减次数</button></div>
+                </form>
+                <p id="attempt-status" role="status"></p><button id="attempt-retry" type="button" hidden>重试刚才的调整</button><button id="attempt-refresh" type="button">刷新次数</button>
+            </section>
+            <section class="doorbell-history"><h2>最近次数记录</h2><div id="attempt-history"></div></section>
+        </main>
+    </div>
+    <script nonce="<%= cspNonce %>" type="application/json" id="attempt-state"><%- JSON.stringify(summary).replace(/</g, '\\u003c') %></script>
+    <script src="/js/doorbell-admin.js" defer></script>
+</body>
+</html>

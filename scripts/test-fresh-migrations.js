@@ -236,6 +236,17 @@ async function verifyQuestAndInvitationSecurity(pool, databaseName) {
     const userRow = await pool.query('SELECT id FROM users WHERE username=$1', [username]);
     const userId = Number(userRow.rows[0].id);
 
+    // The built-in weekly rotation need not feature this invitation quest today.
+    // Schedule the fixture explicitly so this security test is independent of the calendar.
+    const invitationVersion = (await pool.query(`
+        SELECT version.id FROM quest_v2_versions version
+        JOIN quest_v2_definitions definition ON definition.id=version.definition_id
+        WHERE definition.slug='welcome-map-reading' AND version.lifecycle='active'
+        ORDER BY version.version DESC LIMIT 1
+    `)).rows[0];
+    assert.ok(invitationVersion, 'Built-in invitation quest must be seeded');
+    await createScheduledBoard(pool, 'security-invitation-fixture', invitationVersion.id);
+
     // Execute the audited invitation query through the real service and its
     // production route handler. PostgreSQL itself must resolve version.category.
     const liveRepository = new LiveInteractionRepository({ pool });
@@ -304,7 +315,7 @@ async function verifyQuestAndInvitationSecurity(pool, databaseName) {
             expiresInMinutes: 60
         }
     }, response);
-    assert.equal(response.statusCode, 201);
+    assert.equal(response.statusCode, 201, JSON.stringify(response.body));
     assert.equal(response.body.item.payload.referenceId, 'welcome-map-reading');
     assert.equal(response.body.item.payload.actionPath, '/quests');
 
